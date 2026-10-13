@@ -27,7 +27,7 @@ def test_command_runs_one_verb_under_thirty_lines(verb):
     assert "allowed-tools: [Bash(agentik-session *)]" in head
     runs = re.findall(r"agentik-session (\S+) \$ARGUMENTS", text)
     assert runs == [verb]
-    assert f"!`agentik session {verb} $ARGUMENTS`" in lines
+    assert f"!`agentik-session {verb} $ARGUMENTS`" in lines
 
 
 def test_every_command_verb_is_a_cli_verb():

@@ -34,7 +34,7 @@ def test_c1_auto_is_blocked_with_one_line():
     # Fix round N2: plain words, no portfolio cite, and the command in the form the CLI takes.
     assert "restarts a sitting rather than compacting it" in out["reason"]
     assert "entry 17" not in out["reason"] and "portfolio" not in out["reason"]
-    assert "`agentik session checkpoint --respawn --charter <" in out["reason"]
+    assert "`agentik-session checkpoint --respawn --charter <" in out["reason"]
 
 
 def test_c1_the_reasons_command_passes_checkpoints_flag_checks(tmp_path, monkeypatch):
