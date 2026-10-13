@@ -14,7 +14,8 @@
 - [x] act 3, the tool: pyproject, `prog`/start lines `agentik session`, `--version`, install (ruling 2: launcher, relative link, front door, new share), alias note (ruling 3), messages; tests renamed, pty test for the note
 - [x] act 4, the plugin: commands `Bash(agentik-session *)`, skill, `hooks/run` and `session.ts` (c11: new name, else old); 48 TS tests pass
 - [x] act 5, docs: RUNBOOK, README + source renamed in step, sidecar re-hashed; test_readme's tokens (§3); `.hygiene-allow` rows; hygiene exit 0, `renamed` outside 0
-- [ ] acceptance + charter close
+- [x] verify: `make check` run once (102 s): 3 byte-count asserts red (the clause is one byte longer under the new name); fixed after it and rerun targeted (149 pass), lint, doclint, hygiene 0; the gate reruns `make check`
+- [x] acceptance + charter close
 
 ## Rulings beyond the packet
 - R15: `tests/test_hygiene.py` is commons' own suite copied verbatim (30 pass on the vendored copy), since the canonical JSON gained `outside_*` keys and `renamed`, which an exit swap alone cannot meet (ruling 11 amended).
@@ -22,11 +23,14 @@
 - R17: doctor's relay sibling row is named `relay-plugin`, since `relay` is the binaries' row; the c4/c6 warn rows (`config-dir`, `config-key`) come after `measure`.
 - R19: the local lane's error and the `sessionconfig` notes name `agentik-agents local`; the chain test runs the printed start line through the vendored front door.
 - R20: `session.ts` tries `agentik-session` and reruns under the old name only when the run rejects as not found (the engine has no PATH probe).
+- R21: the S21 clause's byte asserts move 265 to 266 and 319 to 320 (still at the 320 bound), and RUNBOOK names `agentik-session rules`, the line a model runs.
 - R18: a user `profiles.yaml`'s old key is renamed per body before the merge, so it still overrides the shipped `relay`.
 
 ## Handover
 - decide, owner: the coordinator (consumer: the next `make readme`): the README was renamed by hand beside its source and `rendered.sha256` re-hashed by `shasum`, since `make readme` runs `claude -p` (the wall: no `claude` beyond `make check`'s, no network); re-render once at the next readme pass.
 - decide, owner: the coordinator (consumer: the gate): acceptance line 2 sums `files` by group, a key the canonical `--json` no longer has per file in that shape; read `groups.renamed.outside_files` instead.
 
-## Exit
-- open
+## Next act
+None: the coordinator gates `agentik-r1-session` and merges it without installing (§8.1 step 2).
+
+Exit: acts 1-5 committed on `agentik-r1-session`; acceptance lines 2-10 run after the last commit; `make check` once (red on 3 byte counts, fixed after); nothing pushed or installed.

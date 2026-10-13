@@ -196,4 +196,4 @@ def test_s21_bytes_at_the_bound(tmp_path):
     block = ctx.split(at, 1)[1][:-len(S21_REMINDER)]
     assert block.startswith("; priority: S1 " + "y" * 24 + ", S2 ")      # the control
     assert "3600s+" in block and "WAITING 9 stops" in block
-    assert len(block.encode()) == 319 <= 320
+    assert len(block.encode()) == 320 <= 320    # agentik-r1: one byte longer, at the bound

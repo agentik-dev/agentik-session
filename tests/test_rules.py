@@ -84,13 +84,13 @@ def test_s21_clause(sess, want):
 
 def test_s21_clause_bound_at_320_bytes():
     r = rules()
-    assert len(BLOCK.encode()) == 265
+    assert len(BLOCK.encode()) == 266          # agentik-r1: the tool's name is one byte longer
     levels = {n: "x" * 30 + ": t" for n in r.LEVELS}          # labels cut to 24
     big = session({"levels": levels}, {"fallback": 3600, "waiting": 9})
     line = r.clause(big)
     assert "S1 " + "x" * 24 + ", S2" in line and "x" * 25 not in line
     assert "3600s+" in line and "WAITING 9 " in line
-    assert len(line.encode()) == 319 <= 320
+    assert len(line.encode()) == 320 <= 320      # agentik-r1: one byte longer, at the bound
     odd = session({"levels": {**levels, "S1": "a;bé: t", "S2": ": no label"}})
     line = r.clause(odd)
     assert line.startswith("; priority: S1 a, S2, S3 ") and "é" not in line

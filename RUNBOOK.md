@@ -270,7 +270,7 @@ tfstate. Untracked files are named on stderr so you can add them yourself.
 SessionStart's line carries one block of at most 320 bytes after `resolved
 config at <path>`: the four level labels, that the Next act takes the highest
 ready, and the pacing. Each label is its level's text to the first colon, at
-most 24 characters. `agentik session rules` prints both whole, as resolved:
+most 24 characters. `agentik-session rules` prints both whole, as resolved:
 the levels, the rules for filing and for bugs, and the pacing four.
 
 - Priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest. A
