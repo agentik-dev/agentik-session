@@ -31,7 +31,7 @@ def test_writes_the_resolved_file_and_one_line(tmp_path):
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "\n" not in ctx and "'frontier'" in ctx and "180000 context / 400 turns" in ctx
-    path = tmp_path / "state/claude-code-session/sessions/test-session/resolved.json"
+    path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     assert str(path) in ctx
     doc = json.loads(path.read_text())
     assert list(doc)[0] == "provider"
@@ -71,7 +71,7 @@ def test_cwd_falls_back_to_the_project_dir(tmp_path):
     p = payload()
     env = env_for(tmp_path, CLAUDE_PROJECT_DIR=p.pop("cwd"))
     hooks.session_start(p, env)
-    doc = json.loads((tmp_path / "state/claude-code-session/sessions/test-session/"
+    doc = json.loads((tmp_path / "state/agentik-session/sessions/test-session/"
                       "resolved.json").read_text())
     assert doc["session"]["verify"] == "make check"
 
@@ -102,7 +102,7 @@ def test_cli_is_byte_stable_and_exits_0(tmp_path):
                            cwd=ROOT, env=env)
         assert r.returncode == 0
         assert json.loads(r.stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-        hashes.append((tmp_path / "state/claude-code-session/sessions/test-session/"
+        hashes.append((tmp_path / "state/agentik-session/sessions/test-session/"
                        "resolved.json").read_bytes())
     assert hashes[0] == hashes[1]
 
@@ -121,9 +121,9 @@ def test_set_rewrites_the_resolved_file(tmp_path, monkeypatch):
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
     monkeypatch.delenv("CLAUDE_SESSION_PROFILE", raising=False)
-    monkeypatch.setattr(config, "STATE_DIR", tmp_path / "state/claude-code-session")
+    monkeypatch.setattr(config, "STATE_DIR", tmp_path / "state/agentik-session")
     hooks.session_start(payload(), env)
-    path = tmp_path / "state/claude-code-session/sessions/test-session/resolved.json"
+    path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     assert json.loads(path.read_text())["session"]["posture"] == "signal"
     assert cli.main(["set", "posture", "ask"]) == 0
     assert json.loads(path.read_text())["session"]["posture"] == "ask"
@@ -147,8 +147,8 @@ def test_no_charter_reminder_when_one_is_open_today(tmp_path):
 
 def test_no_charter_reminder_when_not_required(tmp_path):
     repo = tmp_path / "repo"
-    (repo / ".claude" / "claude-code-session").mkdir(parents=True)
-    (repo / ".claude" / "claude-code-session" / "config.yaml").write_text(
+    (repo / ".claude" / "agentik").mkdir(parents=True)
+    (repo / ".claude" / "agentik" / "config.yaml").write_text(
         "session: {profile: scratch}\n")
     p = dict(payload(), cwd=str(repo))
     ctx = hooks.session_start(p, env_for(tmp_path))["hookSpecificOutput"]["additionalContext"]
@@ -166,11 +166,11 @@ S21_REMINDER = '; charter: none open today under history/sittings, run claude-se
 
 def _s21_ctx(tmp_path, config=None):
     repo = tmp_path / "repo"
-    (repo / ".claude" / "claude-code-session").mkdir(parents=True, exist_ok=True)
+    (repo / ".claude" / "agentik").mkdir(parents=True, exist_ok=True)
     if config is not None:
-        (repo / ".claude" / "claude-code-session" / "config.yaml").write_text(config)
+        (repo / ".claude" / "agentik" / "config.yaml").write_text(config)
     out = hooks.session_start(dict(payload(), cwd=str(repo)), env_for(tmp_path))
-    path = tmp_path / "state/claude-code-session/sessions/test-session/resolved.json"
+    path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     return out["hookSpecificOutput"]["additionalContext"], f"resolved config at {path}"
 
 

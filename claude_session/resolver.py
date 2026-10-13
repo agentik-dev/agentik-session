@@ -4,11 +4,11 @@ Layers, lowest first (D7):
 
   1. the plugin's profiles.yaml (shipped beside this module; read once, at import,
      and a missing one is an error, never an empty layer: F8)
-  2. the user's ~/.claude/claude-code-session/profiles.yaml
-  3. the repo's .claude/claude-code-session/config.yaml
-  4. the repo's .claude/claude-code-session/config.local.yaml (gitignored)
-  5. the launch profile, when one was named (`claude-session start <profile>`)
-  6. the session overlay (`claude-session set`, this session only)
+  2. the user's ~/.claude/agentik/profiles.yaml (c5: else the pre-rename folder's)
+  3. the repo's .claude/agentik/config.yaml (c4: else the pre-rename folder's)
+  4. the repo's .claude/agentik/config.local.yaml (gitignored)
+  5. the launch profile, when one was named (`agentik session start <profile>`)
+  6. the session overlay (`agentik session set`, this session only)
 
 The invocation flag sits above all of them and belongs to whoever reads the
 file. The profile *name* is taken from the highest layer that names one
@@ -49,8 +49,12 @@ from . import models, rules
 from .yamlsubset import dump, load
 
 PLUGIN = "session"
-SECTIONS = ("session", "respeak", "decisions", "agent-relay")
-DEPENDENT = ("respeak", "decisions", "agent-relay")
+SECTIONS = ("session", "respeak", "decisions", "relay")
+DEPENDENT = ("respeak", "decisions", "relay")
+# agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
+# `relay`, and `relay` wins over it in one layer, with a warning; the resolved file carries
+# a copy under the old key until r2 (§8.6), for a relay that still reads it.
+OLD_RELAY = "agent-relay"
 # `window` is not an input: the model decides it (a layer that sets it is reported).
 SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools",
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
@@ -60,7 +64,9 @@ SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools
 RESPAWN_KEYS = ("cap", "floor", "settle")
 POSTURES = ("off", "signal", "ask", "deny")
 SHIPPED = Path(__file__).with_name("profiles.yaml")
-REPO_DIR = Path(".claude") / "claude-code-session"
+REPO_DIR = Path(".claude") / "agentik"
+# agentik-r1 §6.3 c4, c5: the repo's and the user's folders before the rename.
+OLD_REPO_DIR = Path(".claude") / "claude-code-session"
 DEFAULT_PROFILE = "frontier"
 
 # The overlay keeps its pre-profile knob names; these are the ones that differ.
@@ -97,9 +103,30 @@ class Resolved:
     provider: dict
     inputs: list = field(default_factory=list)       # [(path, sha256 | None)]
     unknown: list = field(default_factory=list)      # "layer: key", for doctor
+    renamed: list = field(default_factory=list)      # "layer: agent-relay ...", for doctor
 
     def as_dict(self) -> dict:
-        return {"provider": self.provider, **self.sections}
+        return {"provider": self.provider, **self.sections,
+                OLD_RELAY: copy.deepcopy(self.sections.get("relay") or {})}
+
+
+def repo_dir(cwd) -> Path:
+    """The repo's config folder (c4): `.claude/agentik/`, else the old one when only it exists."""
+    return cfgmod.pick(Path(cwd) / REPO_DIR, Path(cwd) / OLD_REPO_DIR)
+
+
+def _relay_key(doc: dict, layer: str, renamed: list) -> dict:
+    """c6: a layer's `agent-relay` read as `relay`; with both, `relay` wins."""
+    if not isinstance(doc, dict) or OLD_RELAY not in doc:
+        return doc
+    out = {k: v for k, v in doc.items() if k != OLD_RELAY}
+    if "relay" in doc:
+        renamed.append(f"{layer}: {OLD_RELAY} and relay both set; relay wins, "
+                       f"remove {OLD_RELAY}")
+    else:
+        out["relay"] = doc[OLD_RELAY]
+        renamed.append(f"{layer}: {OLD_RELAY} is read as relay; rename the key")
+    return out
 
 
 def state_dir(env) -> Path:
@@ -153,6 +180,10 @@ def _split(flat: dict, layer: str, unknown: list) -> dict:
     """A profile's flat fields into sections: plugin-named keys go to that plugin."""
     out: dict = {"session": {}}
     for k, v in flat.items():
+        if k == OLD_RELAY:                       # c6: read as `relay`, which wins
+            if "relay" in flat:
+                continue
+            k = "relay"
         if k in DEPENDENT:
             if v is not None and not isinstance(v, dict):
                 raise ResolveError(f"{layer}: {k} must be a mapping")
@@ -180,6 +211,20 @@ def _repo_sections(doc: dict, layer: str, unknown: list) -> dict:
                     unknown.append(f"{layer}: session.{sk}")
             v = {sk: sv for sk, sv in v.items() if sk in SESSION_KEYS}
         out[k] = v
+    return out
+
+
+def _user_relay_keys(user: dict, renamed: list) -> dict:
+    """c6 in the user's profiles.yaml: each `defaults` and profile body read by _relay_key,
+    before the merge, so the user's old key still overrides the shipped `relay`."""
+    if not isinstance(user, dict):
+        return user
+    out = dict(user)
+    if isinstance(out.get("defaults"), dict):
+        out["defaults"] = _relay_key(out["defaults"], "profiles.yaml: defaults", renamed)
+    if isinstance(out.get("profiles"), dict):
+        out["profiles"] = {n: _relay_key(b, f"profiles.yaml: {n}", renamed)
+                           for n, b in out["profiles"].items()}
     return out
 
 
@@ -233,12 +278,14 @@ def _window_ceilings(shipped: dict, user: dict, name: str, explicit: list) -> di
 def load_profiles(env) -> tuple[dict, dict]:
     """(defaults, profiles) from the shipped and the user's files; for doctor and `profile`."""
     inputs: list = []
-    return _profiles(_read_shipped(inputs), _read(_user_file(env), inputs))
+    return _profiles(_read_shipped(inputs),
+                     _user_relay_keys(_read(_user_file(env), inputs), []))
 
 
 def _user_file(env) -> Path:
     home = Path(env.get("HOME") or Path.home())
-    return home / ".claude" / "claude-code-session" / "profiles.yaml"
+    return cfgmod.pick(home / ".claude" / "agentik" / "profiles.yaml",
+                       home / OLD_REPO_DIR / "profiles.yaml")
 
 
 def _validate(s: dict) -> None:
@@ -310,11 +357,14 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     cwd = Path(cwd)
     inputs: list = []
     unknown: list = []
+    renamed: list = []
 
     shipped = _read_shipped(inputs)
-    user = _read(_user_file(env), inputs)
-    repo = _read(cwd / REPO_DIR / "config.yaml", inputs)
-    local = _read(cwd / REPO_DIR / "config.local.yaml", inputs)
+    user = _user_relay_keys(_read(_user_file(env), inputs), renamed)
+    rdir = repo_dir(cwd)
+    repo = _relay_key(_read(rdir / "config.yaml", inputs), "config.yaml", renamed)
+    local = _relay_key(_read(rdir / "config.local.yaml", inputs), "config.local.yaml",
+                       renamed)
 
     ov_path = state_dir(env) / "overlays" / f"{session_id}.json"
     if overlay is None:
@@ -409,7 +459,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
                 "resolved_at": _iso(mtime),
                 "inputs": [{"path": p, "sha256": h} for p, h in inputs]}
     return Resolved(session_id=str(session_id), sections=sections,
-                    provider=provider, inputs=inputs, unknown=unknown)
+                    provider=provider, inputs=inputs, unknown=unknown, renamed=renamed)
 
 
 def session_dir(state: Path, session_id: str) -> Path:

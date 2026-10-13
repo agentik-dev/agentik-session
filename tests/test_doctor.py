@@ -54,11 +54,11 @@ def machine(tmp_path, monkeypatch):
         "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "SessionEnd": [],
         "PreCompact": []}}))
     plugins = [
-        {"id": "session@claude-code-session", "version": "2.0.0", "enabled": True,
+        {"id": "session@agentik", "version": "2.0.0", "enabled": True,
          "installPath": str(install)},
-        {"id": "decisions@claude-code-decisions", "version": "0.4.0", "enabled": True},
-        {"id": "respeak@claude-code-respeak", "version": "0.6.0", "enabled": True},
-        {"id": "agent-relay@agent-relay", "version": "0.1.0", "enabled": True},
+        {"id": "decisions@agentik", "version": "0.4.0", "enabled": True},
+        {"id": "respeak@agentik", "version": "0.6.0", "enabled": True},
+        {"id": "relay@agentik", "version": "0.1.0", "enabled": True},
     ]
     (tmp_path / "plugins.json").write_text(json.dumps(plugins))
     _exe(bin_ / "claude", f'if [ "$1" = plugin ]; then /bin/cat {tmp_path}/plugins.json; exit 0; fi\n'
@@ -93,7 +93,7 @@ def test_green_machine_in_order(machine):
     rep = doctor.run(machine.env, machine.repo)
     assert failing(rep) == [] and rep.ok
     assert [c.name for c in rep.checks] == [
-        "claude", "python", "state-dir", "plugin", "decisions", "respeak", "agent-relay",
+        "claude", "python", "state-dir", "plugin", "decisions", "respeak", "relay-plugin",
         "profiles", "resolved", "meter", "meter-hook", "config", "git", "relay", "mod",
         "measure"]
 
@@ -162,10 +162,10 @@ def test_c1_a_sibling_at_any_version_is_fine(machine):
     rep = doctor.run(machine.env, machine.repo)
     assert failing(rep) == [] and rep.ok
     sib = {c.name: c.detail for c in rep.checks if c.name in ("decisions", "respeak",
-                                                             "agent-relay")}
-    assert sib == {"decisions": "decisions@claude-code-decisions 0.5.0 installed",
-                   "respeak": "respeak@claude-code-respeak 0.7.0 installed",
-                   "agent-relay": "agent-relay@agent-relay 1.0.0 installed"}
+                                                             "relay-plugin")}
+    assert sib == {"decisions": "decisions@agentik 0.5.0 installed",
+                   "respeak": "respeak@agentik 0.7.0 installed",
+                   "relay-plugin": "relay@agentik 1.0.0 installed"}
 
 
 def test_c1_no_sibling_is_a_note_and_doctor_stays_green(machine, monkeypatch, capsys):
@@ -176,11 +176,11 @@ def test_c1_no_sibling_is_a_note_and_doctor_stays_green(machine, monkeypatch, ca
     rep = doctor.run(machine.env, machine.repo)
     assert failing(rep) == [] and rep.ok
     notes = {c.name: c.detail for c in rep.checks if c.note}
-    assert list(notes) == ["decisions", "respeak", "agent-relay", "relay"]
-    for name in ("decisions", "respeak", "agent-relay"):
+    assert list(notes) == ["decisions", "respeak", "relay-plugin", "relay"]
+    for name in ("decisions", "respeak", "relay-plugin"):
         assert notes[name].startswith(f"not installed, optional: ")
         assert "^" not in notes[name]
-    assert "agent-relay not installed" in notes["relay"]
+    assert "the relay plugin not installed" in notes["relay"]
     text = doctor.render(rep)
     assert "\nnote decisions " in text and text.endswith("doctor: green")
     for k, v in machine.env.items():
@@ -194,9 +194,9 @@ def test_c1_relay_on_without_the_binaries_is_red(machine):
     # `enabled: on` asks for the relay; only `auto` follows the sibling's presence.
     machine.set_plugins(machine.plugins[:1])
     (machine.bin / "relay").unlink()
-    cfg = machine.repo / ".claude/claude-code-session/config.yaml"
+    cfg = machine.repo / ".claude/agentik/config.yaml"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text('agent-relay: {enabled: "on"}\n')
+    cfg.write_text('relay: {enabled: "on"}\n')
     assert failing(doctor.run(machine.env, machine.repo)) == ["relay"]
 
 
@@ -247,15 +247,15 @@ def test_newest_session_when_the_variable_is_absent(machine):
 def test_relay_absent_and_relay_off(machine):
     (machine.bin / "relay").unlink()
     assert failing(doctor.run(machine.env, machine.repo)) == ["relay"]
-    cfg = machine.repo / ".claude/claude-code-session/config.yaml"
+    cfg = machine.repo / ".claude/agentik/config.yaml"
     cfg.parent.mkdir(parents=True)
-    cfg.write_text('agent-relay: {enabled: "off"}\n')
+    cfg.write_text('relay: {enabled: "off"}\n')
     rep = doctor.run(machine.env, machine.repo)
     assert rep.ok and "relay" not in [c.name for c in rep.checks]
 
 
 def test_config_unknown_keys_reported_not_fatal(machine):
-    cfg = machine.repo / ".claude/claude-code-session/config.yaml"
+    cfg = machine.repo / ".claude/agentik/config.yaml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text("session: {colour: blue}\n")
     rep = doctor.run(machine.env, machine.repo)
@@ -263,7 +263,7 @@ def test_config_unknown_keys_reported_not_fatal(machine):
 
 
 def test_config_unknown_profile_fails(machine):
-    cfg = machine.repo / ".claude/claude-code-session/config.yaml"
+    cfg = machine.repo / ".claude/agentik/config.yaml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text("session: {profile: nope}\n")
     assert failing(doctor.run(machine.env, machine.repo)) == ["config"]
@@ -289,8 +289,9 @@ def test_c1_manifest_declares_no_hard_dependency():
     # holds a version range a sibling's release can break.
     manifest = json.loads((PLUGIN / ".claude-plugin/plugin.json").read_text())
     assert "dependencies" not in manifest
-    assert [s["name"] for s in doctor.SIBLINGS] == ["decisions", "respeak", "agent-relay"]
-    assert all(set(s) == {"name", "marketplace", "adds"} for s in doctor.SIBLINGS)
+    assert [s["name"] for s in doctor.SIBLINGS] == ["decisions", "respeak", "relay"]
+    assert all({"name", "marketplace", "old", "adds"} <= set(s)
+               <= {"name", "marketplace", "old", "adds", "row"} for s in doctor.SIBLINGS)
 
 
 # --- the plugin subtree ----------------------------------------------------------
@@ -477,7 +478,7 @@ def test_s20b_doctor_names_the_plugin_update_when_a_hook_is_missing(machine):
     assert failing(rep) == ["plugin"]
     detail = next(c for c in rep.checks if c.name == "plugin").detail
     assert "PostToolUseFailure" in detail, detail
-    assert "claude plugin update session@claude-code-session" in detail, detail
+    assert "claude plugin update session@agentik" in detail, detail
 
 
 def test_s20b_doctor_flag_is_whole(machine):
@@ -516,3 +517,43 @@ def test_s22_shim_drops_post_tool_batch(tmp_path):
     assert (r.returncode, r.stdout) == (0, "")
     r = shim("PostToolUse")                                  # the positive control
     assert (r.returncode, r.stdout) == (2, "{}\n")
+
+
+# --- agentik-r1 §6.3: the renamed IDs, folder and key ------------------------------
+
+
+def test_c7_old_ids_alone_are_warns_naming_the_switch(machine):
+    # packet ruling 6: an old ID alone is a warn naming the switch, never a FAIL
+    old = ["session@claude-code-session", "decisions@claude-code-decisions",
+           "respeak@claude-code-respeak", "agent-relay@agent-relay"]
+    ps = [dict(p, id=i) for p, i in zip(machine.plugins, old)]
+    machine.set_plugins(ps)
+    rep = doctor.run(machine.env, machine.repo)
+    assert failing(rep) == [] and rep.ok
+    warns = {c.name: c.detail for c in rep.checks if c.warn}
+    for row, pid, new in (("plugin", old[0], "session@agentik"),
+                          ("decisions", old[1], "decisions@agentik"),
+                          ("respeak", old[2], "respeak@agentik"),
+                          ("relay-plugin", old[3], "relay@agentik")):
+        assert pid in warns[row] and f"install {new}, then disable {pid}" in warns[row]
+    # both installed, the old disabled (the switch, §8.3 step 3): the new ID, no warn
+    machine.set_plugins(machine.plugins + [dict(p, enabled=False) for p in ps])
+    rep = doctor.run(machine.env, machine.repo)
+    assert not [c for c in rep.checks if c.warn and c.name != "mod"]
+
+
+def test_c4_c6_old_folder_and_key_are_warn_rows(machine):
+    old = machine.repo / ".claude/claude-code-session"
+    old.mkdir(parents=True)
+    (old / "config.yaml").write_text('agent-relay: {enabled: "off"}\n')
+    rep = doctor.run(machine.env, machine.repo)
+    assert failing(rep) == [] and "relay" not in [c.name for c in rep.checks]
+    rows = {c.name: c.detail for c in rep.checks if c.warn}
+    assert "(read): `git mv` it to" in rows["config-dir"]
+    assert rows["config-key"].startswith("config.yaml: agent-relay is read as relay")
+    assert [c.name for c in rep.checks][-2:] == ["config-dir", "config-key"]
+    new = machine.repo / ".claude/agentik"
+    new.mkdir()
+    (new / "config.yaml").write_text("relay: {enabled: auto}\n")
+    rows = {c.name: c.detail for c in doctor.run(machine.env, machine.repo).checks if c.warn}
+    assert "unread" in rows["config-dir"] and "config-key" not in rows

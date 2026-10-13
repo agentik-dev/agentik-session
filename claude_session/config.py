@@ -10,19 +10,34 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-APP = "claude-code-session"
+APP = "agentik-session"
+# agentik-r1 §6.3 c1: the state folder's name before the rename, read until r2 removes it.
+OLD_APP = "claude-code-session"
+
+
+def pick(new: Path, old: Path) -> Path:
+    """agentik-r1 §6.3's fallback for a renamed path (c1 c4 c5 c8): the new path when it
+    exists, else the old when it exists, else the new. A writer writes where this resolved,
+    so old and new code share the old folder until the cold window moves it."""
+    if new.exists():
+        return new
+    if old.exists():
+        return old
+    return new
 
 
 def state_dir(env) -> Path:
     """The one state root, the contract path (D9): `${XDG_STATE_HOME:-~/.local/state}/`
-    plus APP, `~` read from `env`'s HOME. Every dependent finds the resolved file here,
-    and everything this tool keeps (overlays, configs, sessions, the ledger) lives under it.
-    `CLAUDE_SESSION_STATE_DIR` is retired (ADV6-6): it moved half the state."""
+    plus APP (or OLD_APP, by `pick`), `~` read from `env`'s HOME. Every dependent finds the
+    resolved file here, and everything this tool keeps (overlays, configs, sessions, the
+    ledger) lives under it. `CLAUDE_SESSION_STATE_DIR` is retired (ADV6-6)."""
     xdg = env.get("XDG_STATE_HOME")
     if xdg:
-        return Path(xdg).expanduser() / APP
-    home = env.get("HOME")
-    return (Path(home) if home else Path.home()) / ".local" / "state" / APP
+        base = Path(xdg).expanduser()
+    else:
+        home = env.get("HOME")
+        base = (Path(home) if home else Path.home()) / ".local" / "state"
+    return pick(base / APP, base / OLD_APP)
 
 
 STATE_DIR = state_dir(os.environ)

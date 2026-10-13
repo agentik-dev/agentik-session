@@ -394,14 +394,21 @@ def _num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+# The checkpoint's spellings _confirm accepts (agentik-r1 packet ruling 9): the tool, the
+# front door, and the pre-rename alias, which r2 drops.
+RESPAWN_CMDS = ("agentik-session checkpoint", "agentik session checkpoint",
+                "claude-session checkpoint")
+
+
 def _confirm(payload: dict, sdir: Path) -> None:
-    """respawn-r1 §3.2 step 5: a main-thread Bash call that ran `claude-session checkpoint
-    --respawn` writes `respawn-main.json` {at, marker_sha256} when the marker was written at
+    """respawn-r1 §3.2 step 5: a main-thread Bash call that ran `agentik-session checkpoint
+    --respawn` (or `agentik session checkpoint`, or the pre-rename spelling: RESPAWN_CMDS)
+    writes `respawn-main.json` {at, marker_sha256} when the marker was written at
     or after this call's own PreToolUse stamp; none without `activity.json`. Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
         if (payload.get("tool_name") != "Bash" or not isinstance(cmd, str)
-                or "claude-session checkpoint" not in cmd or "--respawn" not in cmd):
+                or not any(c in cmd for c in RESPAWN_CMDS) or "--respawn" not in cmd):
             return
         at = _load_json(sdir / ACTIVITY).get("at")
         raw = (sdir / MARKER).read_bytes()

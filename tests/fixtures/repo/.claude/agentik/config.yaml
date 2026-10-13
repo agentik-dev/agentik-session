@@ -1,3 +1,3 @@
 # A repo's file (overhaul-r1 §3): every key optional.
 session: {profile: frontier, verify: make check}
-agent-relay: {enabled: auto}
+relay: {enabled: auto}

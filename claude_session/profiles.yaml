@@ -35,7 +35,7 @@ defaults:
   charter: {dir: history/sittings, required: true}
   verify: null
   respawn: {cap: 12, floor: 600, settle: 60}
-  # The priority and pacing every sitting meets (rules.py, `claude-session rules`).
+  # The priority and pacing every sitting meets (rules.py, `agentik session rules`).
   # Each level text is quoted: it holds ": ". A layer replaces one level's text;
   # the names S1 to S4 and their count are fixed.
   priority:
@@ -48,7 +48,7 @@ defaults:
   pacing: {enabled: true, fallback: 1800, waiting: 3}
   respeak: {narrative: tech}
   decisions: {dir: decisions}
-  agent-relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
+  relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
 
 profiles:
   frontier:
@@ -69,13 +69,13 @@ profiles:
     verify: null
     respeak: {narrative: tech}
     decisions: {dir: decisions}
-    agent-relay: {enabled: auto}
+    relay: {enabled: auto}
   balanced:
     description: Opus main thread, Sonnet subagents. The everyday default.
     effort: high
     subagents: sonnet
   local:
-    description: Seat main thread, local subagents (serialised) via claude-local.
+    description: Seat main thread, local subagents (serialised) via `agentik-agents local`.
     effort: high
     subagents: null
   local-only:

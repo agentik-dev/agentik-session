@@ -51,8 +51,16 @@ def test_seat_lane_sets_the_subagent_env_var(fake_bins):
 
 def test_local_lane_without_claude_local_fails_clearly(monkeypatch):
     monkeypatch.setattr(launch.shutil, "which", lambda n: None)
-    with pytest.raises(launch.LaunchError, match="claude-local"):
+    with pytest.raises(launch.LaunchError, match="agentik-agents"):
         launch.build(SessionConfig(name="l", lane="local"))
+
+
+def test_c13_local_lane_runs_agentik_agents_local_first(fake_bins, tmp_path):
+    # agentik-r1 §6.3 c13 (packet ruling 8): the dispatcher's `local` verb when on PATH.
+    fake_bins["agentik-agents"] = str(tmp_path / "agentik-agents")
+    l = launch.build(SessionConfig(name="l", lane="local", model="local/default"))
+    assert l.program == fake_bins["agentik-agents"]
+    assert l.argv[0] == "local" and l.argv[1:3] == ["--model", "local/default"]
 
 
 def test_local_only_without_a_model_warns(fake_bins):
@@ -64,12 +72,16 @@ def test_local_only_without_a_model_warns(fake_bins):
 
 
 def test_plugins_resolve_to_plugin_dir(tmp_path, monkeypatch, fake_bins):
-    repo = tmp_path / "code" / "claude-code-respeak"
-    repo.mkdir(parents=True)
+    old = tmp_path / "code" / "claude-code-respeak"
+    old.mkdir(parents=True)
     monkeypatch.setattr(launch, "PLUGIN_SEARCH", [tmp_path / "code"])
     l = launch.build(SessionConfig(name="f", plugins=["respeak"]))
     assert "--plugin-dir" in l.argv
-    assert str(repo) in l.argv
+    assert str(old) in l.argv
+    # agentik-r1 c13: the agentik-* folder first, once it exists
+    new = tmp_path / "code" / "agentik-respeak"
+    new.mkdir()
+    assert launch.resolve_plugin("respeak") == new
 
 
 def test_missing_plugin_warns_but_still_launches(monkeypatch, fake_bins):

@@ -5,8 +5,8 @@ per-session flag or environment variable, so a configured session is exactly as
 disposable as an unconfigured one -- which is what makes "adjust it for this
 session only" the default rather than a feature.
 
-For the local lanes this delegates to the user's own `claude-local`, which
-already owns the router preflight, the credential rules (never replace the seat
+For the local lanes this delegates to the user's own `agentik-agents local` (its
+pre-rename script `claude-local` when only that is on PATH), which already owns the router preflight, the credential rules (never replace the seat
 OAuth) and a measured subagent default. Reimplementing that contract here would
 mean maintaining two copies of it.
 """
@@ -26,10 +26,14 @@ PLUGIN_SEARCH = [
     Path.home() / "code",
     Path.home() / ".claude" / "plugins",
 ]
+# agentik-r1 §6.3 c13: a plugin's checkout folder, the agentik-* name first, then the
+# pre-rename one (r2 drops it).
 PLUGIN_ALIASES = {
-    "respeak": "claude-code-respeak",
-    "agents": "claude-code-agents",
+    "respeak": ("agentik-respeak", "claude-code-respeak"),
+    "agents": ("agentik-agents", "claude-code-agents"),
 }
+# The local lane's program (c13): agents' dispatcher and its verb, else the old script.
+LOCAL_LANE = (("agentik-agents", ["local"]), ("claude-local", []))
 
 
 class LaunchError(RuntimeError):
@@ -86,7 +90,7 @@ class Launch:
 
 
 def resolve_plugin(name: str) -> Path | None:
-    candidates = [name, PLUGIN_ALIASES.get(name, name)]
+    candidates = [name, *PLUGIN_ALIASES.get(name, ())]
     for base in PLUGIN_SEARCH:
         for cand in candidates:
             p = base / cand
@@ -104,12 +108,18 @@ def build(cfg: SessionConfig, extra: list[str] | None = None,
     env: dict[str, str] = {}
 
     local_lane = cfg.lane in ("local", "local-only")
-    claude_local = shutil.which("claude-local")
+    claude_local, lane_verb = None, []
+    for exe, verb in LOCAL_LANE:
+        claude_local = shutil.which(exe)
+        if claude_local:
+            lane_verb = verb
+            break
     if local_lane and not claude_local:
         raise LaunchError(
             f"config {cfg.name!r} uses the {cfg.lane!r} lane, which needs "
-            "`claude-local` on PATH (from claude-code-agents). Install it with "
-            "`make install` in that repo, or switch the lane to 'seat'."
+            "`agentik-agents` on PATH (from agentik-agents; its older `claude-local` "
+            "serves too). Install it with `make install` in that repo, or switch the "
+            "lane to 'seat'."
         )
 
     if cfg.model:
@@ -174,7 +184,7 @@ def build(cfg: SessionConfig, extra: list[str] | None = None,
         env["CLAUDE_CODE_SUBAGENT_MODEL"] = cfg.subagent_model
 
     if local_lane:
-        # claude-local owns ANTHROPIC_BASE_URL, the router preflight and the
+        # The local lane owns ANTHROPIC_BASE_URL, the router preflight and the
         # credential rules; it forwards every extra argument to claude verbatim.
         if cfg.subagent_model:
             env["CLAUDE_LOCAL_SUBAGENT"] = cfg.subagent_model
@@ -183,6 +193,7 @@ def build(cfg: SessionConfig, extra: list[str] | None = None,
                 "lane 'local-only' without an explicit model leaves the main "
                 "thread on the seat; set model to something like local/default")
         program = claude_local
+        argv = lane_verb + argv
     else:
         program = shutil.which("claude")
         if not program:
