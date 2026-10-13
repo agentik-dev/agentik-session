@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-code-session"
+version = "2.0.0a14"
+description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+# Runtime dependencies are deliberately empty. This code runs unattended from a
+# scheduler hours after it was installed; every dependency is another way for
+# that invocation to fail with nobody watching.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+readme = ["pyyaml"]
+
+[project.scripts]
+claude-session = "claude_session.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["claude_session*"]
+
+[tool.setuptools.package-data]
+claude_session = ["profiles.yaml"]

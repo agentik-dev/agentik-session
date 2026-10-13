@@ -1,0 +1,172 @@
+---
+name: session
+description: Session profiles, session-only settings, the sitting's budget (the meter, the zones, CHECKPOINT and EXIT) and the charter (open, check, close).
+allowed-tools:
+  - Bash(claude-session *)
+  - Read
+---
+
+# session
+
+## Profiles
+
+The user starts sessions from named profiles (`frontier`, `balanced`, `local`,
+`local-only`, `scratch`, `review`, `packets`, `builder`). At SessionStart the
+plugin resolves every layer (the shipped profiles, the user's, the repo's
+`.claude/claude-code-session/config.yaml` and `config.local.yaml`, the launch
+profile, this session's overlay) into one file. Read it before assuming the
+model, subagents, ceilings, posture or tool access:
+
+```bash
+claude-session config show --resolved   # this session's resolved file, provider block first
+claude-session profile                  # the profiles; `profile <name>` shows one resolved here
+```
+
+A profile is chosen at launch (`claude-session start <profile>`); in a session,
+`/session:profile` only shows them.
+
+## Set
+
+When the user asks to change something for the current session ("drop to
+sonnet subagents", "stop nagging me about budget", "ask before spawning"), use:
+
+```bash
+claude-session set <knob> <value>            # this session only; rewrites the resolved file
+claude-session set <knob> <value> --save     # only when they say to keep it
+```
+
+**Default to session-only. Add `--save` only when the user says to keep it.**
+If the knob is launch-time (model, effort, tools, plugins, lane), a
+session-only `set` is informational only: it is NOT applied by the next
+`start`. The command prints the in-session equivalent (`/model`, `/effort`);
+run that if they want it now, and use `--save` if they want the next `start`
+to change. `posture` (`off`, `signal`, `ask`, `deny`) takes effect at once:
+the spawn gate reads it from the resolved file.
+
+## Budget
+
+A sitting has two ceilings, context and turns. The model decides the window and
+the profile (the role) the ceilings within it: 180k context and 400 turns on
+either window for every role but the orchestrators, which get 400k and 400 on a
+1M window (`orchestrator` on Fable, `orchestrator-opus` on `opus[1m]`). A helper
+(`CLAUDE_SESSION_HELPER=1`) resolves as `builder` whatever role it inherits.
+`meter.json` names the source (`limits_source`, e.g.
+`role:orchestrator window:1000000`). The **meter** is the PostToolUse hook: it reads the
+transcript's new lines after every tool and writes `meter.json`, the used share
+of each ceiling. `claude-session status` prints it in one line
+(`/session:status`); `claude-session report` lists ended sessions from the
+ledger (`/session:report`).
+
+The used share, the larger of the two, sets the **zone**:
+
+| zone | from | meaning |
+|---|---|---|
+| clear | 0% | work |
+| notice | 80% | the checkpoint point: bring the charter current |
+| wind-down | 90% | stop starting what you cannot finish |
+| reserve | 92% | the wrap-up reserve: finish, commit, hand off |
+| exhausted | 100% | exit |
+
+Two lines arrive as hook context; act on them, do not argue with them:
+
+- **`CHECKPOINT: ...`** at the profile's `checkpoint_at` (80% by default), then
+  every tenth tool: bring the charter current, commit, and run
+  `claude-session checkpoint`. The session must be handed off at any moment
+  from here.
+- **`EXIT: ...`** at or past 100%: land the act in flight at a checkpoint, then
+  exit; respawn, never compact. A RESPAWN close (the charter's Next act opens on
+  `RESPAWN`) is marked as the sitting's last act: once the charter is current and
+  committed, the loop is deleted, and every helper and background job has finished,
+  run `claude-session checkpoint --respawn --charter <file>` through Bash, then end
+  the turn. Its last line says whether a launcher restarts the sitting; without one,
+  print your start line and stop.
+
+The **posture** decides how loud the budget is. `off` says nothing (`scratch`,
+`local-only`); `signal` (the default) speaks on the prompt and after tools and
+never blocks; `ask` asks before an Agent, Task or Workflow spawn from the
+wind-down zone on; `deny` also refuses such a spawn in the reserve (the
+`builder` profile).
+
+**When a `PreToolUse` hook blocks or questions a spawn with a budget reason, do
+not retry it or work around it.** The remainder is reserved so that you can
+finish cleanly: stop starting new work, commit what is in flight, and write the
+handoff.
+
+## The charter
+
+The charter is the sitting's live head: one file per sitting under the
+profile's `charter.dir` (default `history/sittings`), named `<date>-<n>.md` (`<date>-<n>-$RELAY_ROW.md` when a relay row sets it).
+When `charter.required` is true and none is open today, SessionStart says so:
+open one before the first act.
+
+```bash
+claude-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
+claude-session charter check <file>...        # exit 2 names the part that fails
+claude-session charter close --exit "<text>"  # appends the exit line to today's newest
+```
+
+The shape, and nothing else:
+
+1. the title line `# Sitting <date>-<n>: <repo>, <component>`;
+2. the table, with the rows goal, budget, pin, window, agents;
+3. `## Done-ness`, a checklist whose first item is the charter itself;
+4. `## Handover`, each decision for the owner in plain language with its
+   consumer;
+5. `## Next act`, one line.
+
+The file stays under 4,096 bytes: move text out, never widen the ceiling.
+Bring it current at every commit and at every CHECKPOINT line. `close` appends
+exactly one line under Handover, `- exit taken: <text>; about <context>
+context, <turns> turns` from the meter, and refuses a charter that fails
+`check` or would pass the ceiling.
+The order at the end is close, commit the charter (`close` prints the line to
+run as is, `next: git -C <dir> add -- <name> && git -C <dir> commit -m "charter:
+the exit taken" -- <name>`, `<dir>` the charter's absolute directory), then, on
+a RESPAWN close, the `then:` line it prints, `claude-session checkpoint
+--respawn --charter <file>`, which refuses (exit 2) a charter git reads as not
+committed.
+
+## Priority and pacing
+
+Two session keys every sitting meets, both on in every shipped profile.
+SessionStart prints one line of them; `claude-session rules` prints both
+whole, as resolved.
+
+- `session.priority`: S1 harm, S2 blocks the goal, S3 the build order, S4 the
+  rest. An item gets its level when filed, and the Next act is the highest
+  level ready. A bug ranks by harm and what it blocks, never by how sure or
+  cheap its fix is. Each Handover lists the open items by level, highest
+  first: `charter open` writes `- open by level: none yet`.
+- `session.pacing`: the fallback wakeup rides the act's last tool call. A
+  pending helper, Monitor or background task is the wake, with one fallback
+  of `fallback` seconds (1800). Waiting on an outside party, the Next act
+  opens `WAITING <n>: <what>; <how to tell>`, and the loop stops at
+  n = `waiting` (3).
+- A packet or brief bounds both: a builder files what lies outside it and
+  takes none. No hook enforces them. `charter check` and `close` warn when
+  the Handover line is missing or a WAITING is misshapen or at the stop, and
+  their exit is unchanged.
+- Any layer overrides them, never `set`: `priority: {enabled: false}`, one
+  level's quoted text under `priority.levels`, `pacing: {fallback: 2400}`.
+
+## Other verbs
+
+```bash
+claude-session doctor          # the setup, the plugin, its dependencies; exit 2 names the failing check
+claude-session budget          # the zone and checkpoint cadence
+claude-session checkpoint      # mark a handoff-ready point (`-m`, `--commit` stages tracked files only)
+claude-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, through Bash
+```
+
+The band: the plugin's hooks module draws `session: ctx <c>% · turns <t>% · <zone>` above the prompt and, at session start, runs `claude-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
+
+Admission, in `observe` (it records and never refuses): the same module hands each session's start, rate-limit readings, helper spawns, SendMessage resumes, helper turns and end to `claude-session admission record --session <id>` (one JSON object on stdin; exit 0, 2 refused, 3 the lock held past 2 s), one line each in the machine's `<state>/admission/ledger.jsonl` (rotated past 29 h to `ledger.1.jsonl`). An `end` marks that session's open spawns done (`swept`). No prompt or message text is sent; a failed record is one debug-log line.
+
+Before each spawn and each SendMessage resume the module also runs `claude-session admission admit --session <id>`, which projects the five-hour window's peak, appends one `verdict` line and prints `{verdict, mode, text, peak}`. In `observe` (the only mode built; `session.admission` sets `ceiling`, `margin`, `ceiling_7d` and `seeds`) the answer is one debug-log line and the spawn always goes ahead.
+
+The window: `record` and `admit` rewrite `<state>/admission/band.json`, and the band draws it as a second line, `5h <P>% → <peak>% · ceiling <c> · resets <HH:MM> (<h>h<mm>) · <n> helpers, room for <r> · <d> deferred · 7d <P7>%` (then `observe`); the prompt hook adds the same line to the budget context. `Room for N` means N more helpers fit under the ceiling: pull work forward. `claude-session report` ends with each five-hour window `held` or `idle`, `under 90` marked.
+
+The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `claude-session measure record --session <id>` (exit 0, 1 no session, 2 refused), which writes `measure.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. The budget never reads it.
+
+Each has a command: `/session:status`, `/session:profile`, `/session:set`,
+`/session:checkpoint`, `/session:doctor`, `/session:report`.

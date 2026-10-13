@@ -1,0 +1,32 @@
+{
+  "modules": ["./session.ts"],
+  "hooks": {
+    "SessionStart": [
+      {"matcher": "", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run SessionStart", "timeout": 10}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run PreToolUse", "timeout": 5}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run PostToolUse", "timeout": 5}]}
+    ],
+    "PostToolUseFailure": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run PostToolUseFailure", "timeout": 5}]}
+    ],
+    "PostToolBatch": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run PostToolBatch", "timeout": 5}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run UserPromptSubmit", "timeout": 5}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run Stop", "timeout": 5}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run SessionEnd", "timeout": 15}]}
+    ],
+    "PreCompact": [
+      {"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run PreCompact", "timeout": 5}]}
+    ]
+  }
+}

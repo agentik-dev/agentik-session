@@ -1,0 +1,14 @@
+This render is a prose pass over a finished public README, not a rewrite.
+
+Structure is byte-identical to the source:
+- Keep every heading, in order, with its exact text and level.
+- Keep every block: each paragraph, list, list item, table, table row and fenced code block, in order. Do not merge, split, add, drop or reorder any of them.
+- Keep the first three lines exactly: the title, a blank line, the <img> line. Keep every HTML tag as written.
+- Keep every inline code span, number, date, version, path, command, URL and link target byte-identical, and the whole `Status:` line exactly as written.
+- Add no backticks and remove none: the multiset of inline code spans is checked, so a reworded sentence may not mention a command, path or name in backticks that its source sentence did not (for example, no second `make install`).
+- Keep every table cell that is code as it is; table layout, pipes and separator rows unchanged.
+
+Prose only:
+- You may reword the plain prose inside a paragraph, a list item or a non-code table cell so that a stranger reads it easily: short sentences, active voice, no internal shorthand.
+- Do not add facts, claims, examples or sections the source does not carry, and do not drop any.
+- Do not name any person, project, path or place the source does not name.

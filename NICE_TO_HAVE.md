@@ -1,0 +1,159 @@
+---
+status: current
+updated: 2026-10-04
+owner: owner
+audience: owner, agent
+---
+# claude-code-session: what a review left open, none of it blocking
+
+## A helper call no batch resolves (2026-10-11, the stale-call fix)
+- PostToolBatch now closes a helper's call that another PreToolUse hook blocked. Unverified with a real `claude`: a helper call whose batch never resolves, such as an owner's denial that aborts the helper or an interrupt before the batch ends, may still leave `calls/<id>` open. A backstop is SubagentStop closing every call of its `agent_id`, which needs the call file to record the id. Claude Code's live calls are the measure: of 2026-10-11's sessions, 13 held call files older than 30 minutes.
+
+Nothing here blocks a review or a merge. An item leaves when it lands, or when a ledger entry retires it. The labels are the model-ceilings refuters' (2026-09-28): r1 is round 1 and r2 is round 2. Their r1 F1, r1 F2, r2 F1 and r2 F2 landed in the fix rounds.
+
+- S18, 2026-10-04: `README.md:143` says `make check` "holds off when the load rises above 4 x cores" (the source's line 143 likewise); `scripts/bounded` now holds only while the CPU's idle share confirms that load (25% or under, `BOUNDED_IDLE_FLOOR`). Add the clause at the next render; S18's ruling 5 kept the README untouched.
+- The observer, 2026-10-01: `charter open` cuts the goal in the title line at 60 characters, in the middle of a word (`claude_session/charter.py:117`, `_one_line(goal, 60)`); two charters' titles end "keeps its umbrell". Cut at the last whole word. The goal row of the table holds the whole text, so nothing is lost. (confirmed in the source and in both charters) Fixed 2026-10-11 at 4aeeec9 (merged 94869be).
+- The observer, 2026-09-30: the ledger holds more than one row for a session that was resumed, against "one line per ended session" (`ledger.py:1`). Five of 174 sessions have two or three rows; `2b00cb4a` (example-app) has three with the same 56 turns, so `report` counts its tokens three times. Replace the session's earlier row at SessionEnd, or have `report` keep the last row per session. (confirmed in `ledger.jsonl`)
+- The observer, 2026-09-30: fresh evidence for the `--resume` item below. Session `9b6e8f33` ended as `orchestrator`, 400k, zone notice; its resumed row reads `frontier`, 180k, 358k used, zone exhausted.
+- The observer, 2026-09-30: the ledger's `max_context` is the total's, helpers included (`ledger.py:94`), and `report` sets it against the main thread's ceiling. Session `8c6fe6f0` (example-app) reads 369k of 400k in the ledger; its main thread peaked at 301,760. Write the main thread's own maximum beside it. (confirmed against the transcript's usage records)
+
+- The relay should export CLAUDE_SESSION_PROFILE=builder to the children it spawns (the depth >= 1 fallback was not built).
+- r2 obs: a child session with no helper mark, such as a Workflow script's child, inherits the role the README's start steps export; in an `orchestrator-opus` repo with no payload model it reads 400k on a 200k window (not reproduced).
+- r2 obs: the plugin takes a helper only when `CLAUDE_SESSION_HELPER` is `1`, while the relay's hook takes any value that is not empty; agree on one rule.
+- r2 F3: `design/readme/source.md:75` says `claude-session start <profile>` launches Claude Code with that profile, but `start` knows only the legacy configurations and exits 1 on both new roles (the refusal predates the branch); write `start <configuration>`, name the legacy ones and point to the `CLAUDE_SESSION_PROFILE` steps.
+- r1 obs, r2 obs: the SessionStart payload carries no `model` under `claude -p`, an interactive `--continue` or `--resume` start, or `/clear`; the declared model then decides, so `orchestrator-opus` on plain Opus reads 1M and 400k. `models.py` and the README read as if the payload always carried it, and `save_request` writes null over the startup model on resume.
+- r2 obs: `claude --resume` from a shell without `CLAUDE_SESSION_PROFILE` resolves as `frontier` again (180k on 1M); the README gives no warning, and the `config.local.yaml` route avoids it.
+- r1 obs, r2 obs: a `/model` switch between `opus` and `opus[1m]` without `set` stays unseen until the next SessionStart, because the transcript's id is the same; this is inherent, and the docs state it.
+- The README (source line 78) does not yet say that `claude-session set model` drops the payload's model until the next SessionStart (the r2 F1 fix); say so at the next `make readme`.
+- r1 obs: a flow map `session: {profile: orchestrator-opus, model: opus[1m]}` is refused as a nested flow collection; the docs do not say to quote `opus[1m]` there or to use the block form.
+- r1 obs, r2 obs: `sonnet[1m]` and `fable[1m]` are Claude Code aliases, and the table has no `sonnet-1m`, so a `sonnet[1m]` session reads 200k and gets 180k (the safe direction); `opusplan` and `best` name no family.
+- r1 obs, r2 obs: family matching splits an id on characters that are not letters or digits and lowercases it, so a user table key with a hyphen or capitals (`gpt-5:`, `Opus:`) never matches and gives no warning, a key such as `claude` matches every id, and `qwen3-opus-distill` matches opus.
+- r1 obs: `models.configured` reads the settings files from the payload's cwd, not the project root, and those files are not in `provider.inputs` with a sha256.
+- r1 obs, r2 obs: a user `defaults.ceilings` that only restates 180k and 400 removes the orchestrators' 400k on 1M, and doctor gives no warning; a user `defaults.ceilings` outranks a role's ceilings while a user `defaults.model` does not outrank a role's model, which the README could state in one sentence.
+- r2 obs: `_WSRC` in `hooks.py` strips `/`, so `declared:local/default` prints as `declared:localdefault` in the SessionStart line (cosmetic).
+- r2 obs: the marketplace is a directory source at the main checkout, so `claude plugin update` reaches alpha.2 only after the merge; `make install` alone carries the function (not reproduced).
+- r1 obs: `claude plugin validate` warns five times that `${CLAUDE_PLUGIN_ROOT}` is unquoted in `hooks.json` (predates the branch).
+- sitting 2026-09-28-6: a relay child's meter should take its ceilings from its row. The relay strips `CLAUDE*` variables from its children, so a Fable child resolves the default role and is told to checkpoint at 144k (180k on 1M), while its row allows 400k (an example-app row, 2026-09-29). Read `RELAY_ROW` and the row's budget, or resolve a relay child as a builder with the row's context.
+
+S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
+
+- `make readme` re-renders the whole README for a one-number source change (584 to 586 reworded 43 lines), and its prose-only verifier passed a changed fact (F1 below). Render only the changed paragraphs, or have the verifier compare zone and verb lists.
+- F1: `README.md:102` says `deny` refuses a spawn "during the reserve zone"; the source says "in the reserve", and `hooks.py:122` refuses in reserve and exhausted. Re-render, or say "from the reserve on".
+- F2: `README.md:9` orders the source's "four things" as "First … Then …" and drops "one" from "one resolved configuration".
+- F3: `test_s17_profiles_never_compact` forbids two exact phrases; "the first checkpoint compacts, the second respawns" passes. Assert ruling 2's exact description text.
+- No test pins the new rule's text in `SKILL.md` or `design/overhaul-r1.md`; `design/packets/s4-meter.md:23` (closed) still quotes the old rule.
+- S17's `SKILL.md` bullet has not reached the installed plugin: `claude plugin update` compares versions only and S17 kept 2.0.0-alpha.2. The CLI (`make install`, tree a90a0217) carries the new EXIT line, so the hook is right; the skill text lands with the next version bump.
+
+## S18's review round (2026-10-04): two adversaries, nothing blocking
+- The two-polls test passes when three polls are needed, because `BOUNDED_IDLE=10,60,60` repeats its last value; end the series with a low share (`10,60,60,10`). (adversary 1, mutant `three_polls`, `tests/test_bounded.py:299`)
+- No case puts the idle share exactly at the floor, so `idle >= floor` passes the suite. (adversary 1, mutant `ge_floor`, `tests/test_bounded.py:327`)
+- Four ported behaviours have no test here, only in the relay plugin's Go tests: `kill_reader` on TERM, the read capped by the wait's limit, the sliced sleep, and the guard on a poll that is not positive (`scripts/bounded:498`, `:341`, `:356`, `:321`). Each mutant passes this suite. (adversary 1)
+- `scripts/bounded:59-60` names the relay's `night.DefaultIdleFloor`; only the relay's tests pin the two floors together. (adversary 2)
+- `-B` covers the guardian only, not its command: `make check` left `.pyc` files in `claude_session/__pycache__` (03:50). The Makefile's python lines are the place, as the relay's AR52 did. (adversary 1)
+- respawn-r1 left open (the refuter's verify round, 2026-10-10, nothing blocking): (a) `activity.json` is overwritten by every main-thread PreToolUse, so with parallel tool calls the stamp can belong to a sibling call and a true marker stays unconfirmed (fails safe; §3.2 step 5). (b) Widening the PreToolUse matcher to `*` adds a hook process with a 5 s timeout to every tool call. (c) A flag value that begins with `-` (`--append-system-prompt "- x"`) is refused as an unknown flag by the §3.1 allowlist.
+- respawn-r1, from the P4 measurement (the observer, 2026-10-10): the main thread's Stop fires while an Agent helper still runs. The PostToolUse hook already sees the helper's `agent_id` payloads, so it could stamp `helper-activity.json` instead of returning at once, and the ready condition could also want that stamp quiet for `settle`. That narrows §3.9's blind spot to a helper that makes no tool call.
+- respawn-r1, for the packet (the observer, 2026-10-10): a `/loop` of 60 minutes or more answers the loop skill's cloud-or-session question (AskUserQuestion) before it arms, so a successor started on such a line waits at that dialog unattended. A `/loop` with no interval asks nothing. P2's measurement uses the real start line. The launcher's start-line guidance names the case, and the observer's `3h` line changes with §8's start lines.
+- respawn-r1, for S20 (S19's review, 2026-10-10): a helper's PreToolUse and PostToolUse stamp `helper-activity.json` (ruling 6), but one long helper call (a 9 to 12 min gate) still leaves the stamp older than `settle`. The ready condition needs an open-call record: PreToolUse opens it, PostToolUse or PostToolUseFailure closes it.
+- respawn-r1, S19's review notes (2026-10-10), for S20: (a) `restarts_in` counts at most one per unparsable line, so a torn restart line glued to a whole one counts once; S20's own tally covers it. (b) `append_chain` accepts a non-string `at`, which `restarts_in` then counts forever (fails closed); S20 leaves `at` out or passes ISO. (c) RUNBOOK.md still says PreToolUse on `Agent|Task|Workflow` and omits Stop; RUNBOOK is S20's. (d) Cost: PreToolUse on every tool adds about 58 ms per tool call (median of 20), and Stop about 58 ms per turn end.
+- respawn-r1, S20a's review (2026-10-10): a helper's tool call that never gets a Post event (a denied tool, say) leaves its `calls/<id>` open and may hold its sitting open until the owner exits; S20b's PostToolUseFailure registration narrows it; unverified without a real `claude`.
+- respawn-r1, S20a's round-two review (2026-10-10): (N3) `/loop check every 2 hours.` with a trailing period gets no long-loop warning; (N4) a ledger tail torn inside a UTF-8 character makes `read()` raise UnicodeDecodeError and keeps the cap closed until the file is repaired (predates the round); (N5) `run --cap ' 5'` now exits 2 (it was accepted).
+- respawn-r1, S20b (2026-10-10): (a) the doctor's older-CLI check reads its own `hooks.HANDLERS`, so it judges the CLI that runs it; an older installed CLI's own doctor cannot see the gap, and the shim and the install order (CLI first) carry that case. (b) S19's note (c) is done: RUNBOOK §1 step 2 names every tool, Stop and PostToolUseFailure. (c) A BSD tty sets PENDIN when canonical mode comes back, so the terminal test compares attributes without it.
+- S21 (2026-10-10), S4: a ScheduleWakeup nudge (a hook that names a wakeup taking its own turn, or one re-armed while a helper is pending) is not built; `claude-session rules` states the pacing and no hook enforces it (the packet's ruling 4).
+
+## s21 round one, 2026-10-10: one adversary, F1 fixed, these notes left
+- N1: `fallback` is capped at 3600 and `waiting` at 9, stricter than ruling 2 ("60 and 1 or more"); `waiting: 10` or `fallback: 3601` fails the whole resolve, so SessionStart writes nothing. The cap keeps the block at or under 320 bytes; RUNBOOK §3 and `rules.py` state it.
+- N2: `rules` reads this session's resolved.json, while `charter check` and `close` resolve fresh from cwd; with a resolved.json that lacks the keys (alpha.4's, or a config changed mid-session) `rules` prints "priority: on" while `check` reads it as off.
+- N3: a level text ending in "\n" passes as one line and `rules` prints a blank line; ESC and TAB pass too and reach the terminal through `rules`. The SessionStart block is safe, since labels keep to the label alphabet.
+- N4: launched with a profile, that profile's unknown field is listed twice in `unknown`, under "profiles.yaml:" and "launch:".
+- N5: the packet's flow shape `priority: {levels: {S4: "..."}}` is refused as a nested flow collection; the RUNBOOK's block form resolves.
+- N7: a Next act opening `RESPAWN: WAITING 3: x; y` is not read as WAITING (`warnings()` returns []), so neither the stop warning nor a respawn sees a waiting sitting that closes at 80%; a design question.
+- N8: an alpha.4 CLI under this plugin prints no block, and its `claude-session rules` exits 2 ("invalid choice"); the skill names the verb without a version, and RUNBOOK §4 gives the install order.
+- N9: `rules.check` names the key but not the layer ("pacing.waiting must be an integer from 1 to 9"); a bad value drops the whole SessionStart line and resolved.json, as respawn's keys do (ruling 2), and `claude-session run` refuses too.
+
+## admission-r1 verify round (2026-10-10): notes, no block
+- A nested helper's spawn gets the wake promise, but the wake goes to the main thread without the deferred prompt.
+- "by 14:06 at the latest" fails when the sitting is busy at the reset or was restarted by hand; say "at the next idle turn after 14:06".
+- Notes 1 and 5 of the refuter's round were folded but are not listed in the record's fold notes.
+- `session.end` hooks get 1.5 s in total, less than the 2 s lock wait: the end hook's clearing of a session's admitted helpers can be cut. Bound the end hook's wait under 1 s, or clear stale entries at the next start.
+- The owner questions carry no Proposed line because this repo has no ledger (`decisions render --lint` on a scratch copy says so); by the observer's brief, a plugin repo writes the four parts by hand.
+
+## Observer, 2026-10-11
+- `charter open` clips the title's goal at 60 characters and the goal row at 300 with a bare slice (`charter.py` `_one_line`), so both can end mid-word; orient 2026-10-11-1 opened with "…2026-10-1" and "…in stack order w" and fixed them by hand. Clip at a word boundary and mark the cut, or keep the goal whole and clip only the title. Fixed on branch f3-charter-clip: `_one_line` now cuts after the last whole word that fits and marks the cut "…" within the limit, cutting hard only when the window holds no space.
+- Idle compaction (Claude Code 2.1.296, setting `idleCompaction`, default on; it fires after about 54 idle minutes above 200k tokens) compacted two sittings overnight, against portfolio entry 17. `doctor` could warn when neither `idleCompaction: false` nor `autoCompactEnabled: false` is set. A PreCompact hook cannot tell the idle pass from a normal auto-compact (both carry `trigger: "auto"`), so a hook block would block both.
+
+## `make readme` fails three times running (2026-10-11, the observer)
+- After F3 (94869be) the suite holds 783 tests and the README says 781, so `test_status_line_matches_manifest_and_suite` fails until `make readme` renders. On 2026-10-11, three runs on main all failed: at 13:13 respeak-verify-edit.py refused the render; at 13:23 and 13:36 `scripts/bounded --wall 600` cut it at the wall (load 5 to 9, exit 124). The render prints no progress, so it cannot show which round ran long. It rendered on 2026-10-10. Ideas: print each round's time; give the wall room for the verifier's rounds; let a count-only change to the Status line skip the render.
+- The cause (F5, from the runner's transcripts): one round of this 23 KB prompt took 523 s, 529 s and 566 s, nearly all of it the model's thinking, so the 600 s wall left about 30 s; the 13:15 and 13:26 runs were still thinking at the wall. Fixed on branch f5-readme-render: `scripts/readme-render` passes `--max-rounds 2` and `RESPEAK_RENDER_WALL=900` and prints the renderer's time, and `make readme`'s wall is 2000 s, the budget (`test_readme_wall_covers_the_renderer_budget`).
+- Left open, respeak's side: the 13:05 round dropped the sentence holding "320" (`numeric tokens: lost {'320': 1}`), and F5's 13:38 round turned the Precedence bullet into a paragraph and added two code spans; the contract forbids both, and respeak-render.sh's rounds retry only its style gate, never the invariants its own verifier checks, so such a round is final. Of the 13 rounds since 2026-09-24 that finished, 10 passed the verifier. A render could retry with the verifier's lines appended to the contract, or a Status-line-only change could skip the render.
+
+## F7 and F8 round one (2026-10-11, the observer): notes, S4
+- F7: a call that ends by an interrupt (`aborted_tools`) or a PreToolUse `continue:false` returns before PostToolBatch fires (read from claude 2.1.296), so its `calls/<id>` can still stick and hold RESPAWN. The user's deny hook uses `permissionDecision`, so it is closed. Entries already stuck (example-app orient 543a8b2e) need clearing by hand.
+- F8: Makefile:40's "every old tree kept" would be false if prune-trees died partway (not reproduced). A launcher run from the live checkout no longer re-reads an edited shipped profiles.yaml (the snapshot is at import).
+- The plugin version must move with any change under plugin/ (hooks.json here): `claude plugin update` caches by version. A check that ties the two would keep a merged hook from never reaching a session (agent-relay's F6 was the same).
+- S4, unconfirmed source: at the observer's close of 2026-10-11 18:15 (session cbfe3c4f), two `calls/` entries (toolu_01FZrM… opened 16:17:33, toolu_01S2M3… 17:13:33) appeared in none of that session's transcripts, neither as a tool_use nor as a result. They were removed by hand once nothing could still run. Something opens a call entry for an id the transcript never records; a `calls/` entry could carry its opener (event, agent_id, tool name) so a stuck one can be traced.
+
+## mod-r1 refuter round one (2026-10-11, the observer): PASS, notes S4
+- N1, for the slice's packet: in C1's wiring, a CLI older than the plugin blocks every compaction, an owner-typed one too. hooks/run passes the exit code through, and the CLI exits 2 ("invalid choice") on `hook PreCompact`, reproduced at dc8d4d9 and on design-mod. Fix in the shim: map any non-zero exit for PreCompact to 0 and keep its stdout. Done by C1 (`c1-precompact`): hooks/run's `PreCompact) ...; exit 0`.
+- N2: §8's question is settled by portfolio entry 17 (a sitting never compacts; a compaction needs the owner's hand), and option (c) contradicts it: mark (a) decided and drop "once §8 is answered". Done by C1: §8 marks (a) decided.
+- N3: §9 says "Not decided here", but the owner's word of 2026-10-11 18:10 settles it: no plugin forces its siblings on other users, so the hard `dependencies` go. Done by C1: plugin.json has none, and doctor reports the siblings as optional, with no range.
+- N4: S1 "writes nothing", yet `mod start` writes mod.json.
+- N5: claude 2.1.296 refuses `$.state.set` during `ui.render`; AC2's grep does not catch `state.set`.
+- N6: classic hooks also skip an untrusted folder, so that case is not mod-only.
+- N7: the band's "41/60 s" needs the launcher's `settle` value, which none of the three files it reads holds.
+- N8, unchecked: no "three crashes" count was found, only a crashed module being unloaded; `userConfig` being machine-wide and the classic-through-mod routing were not resolved (P1 covers the latter).
+
+## `record`'s over-cap refusal says "summed" twice (2026-10-11, the observer; S4)
+- `plugin/scripts/record:199` reads `the request's sections sum to {human(total)} summed, over --max-bytes ...`, and `human()` already appends "bytes", so the refusal prints "sum to 8,554 bytes summed". Reproduced by the observer at 20:19 (`--section '3-9'` on the observer prompt) and seen by check-in 97's helper ("sum to 11,615 bytes summed"). Fix: drop the trailing "summed"; a test on the refusal's text.
+
+## Prompt-cache audit (2026-10-12, the observer; S4)
+- Idle wakes miss the 1h cache. `rules.py`'s pacing says "a long delay" with no cap, and ScheduleWakeup turns 3600 s into 3636 to 3648 s, so the wake lands past the main loop's 1h TTL and rewrites the whole context: 26 such misses over three days wrote about 4.8M tokens (about 235k to 265k each, at the 1h write price of 2x). Fix: pacing caps an idle wake at 3300 s, so it reads a warm cache at 0.1x. The repro is the audit script below.
+- Nine top-level calls after short gaps (0.1 to 29 min) reread only the system-plus-tools prefix (25,387 or 30,622 tokens) and rewrote the rest: 1.17M tokens, cause unknown. The status line's `prompt_cache.last_miss_cause` (statusline docs) names it, so the meter could log that field into the ledger on a miss.
+- The source is the audit (usage fields only, 649 transcripts, 10-09 to 10-12). Read shares were 98% for launcher sittings, 97.6% for relay `-p` children (1h TTL, no gap misses) and 97% for subagents (5m TTL; 14M tokens of misses after 5 to 60 min pauses, kept on 5m since 1h writes would cost more than they save).
+
+## S22, a close names its commit (2026-10-12, the builder): notes, S4
+
+- S4, for the README's next render (`make readme`, a respeak run): its status line reads `v2.0.0-alpha.7` and 838 tests, and it says nothing of close's `next:`/`then:` lines or the respawn's refusal of an uncommitted charter. Repro: `pytest tests/test_readme.py -k status_line` reads `assert 838 == 848`.
+- S4: the Stop hook does not see a sitting that closes on RESPAWN and ends its turn without `checkpoint --respawn` (F13, the example-ops orchestrator at 2026-10-12 04:28); close's printed `then:` line is S22's answer. Repro: close a charter whose Next act opens on RESPAWN and end the turn: no `respawn.json`, no hook line.
+- S4: `checkpoint -c --respawn` passes a tracked, modified charter that lies in a repo other than the cwd's, whose `add -u` does not take it, so the marker names a charter left uncommitted. Repro: cwd in repo A, `--charter` a modified tracked file of repo B, `-c`: exit 0, B still dirty.
+- S4, F4 (fix round, the coordinator's p3.sh): a gitignored charter never committed reads clean, so close prints no `next:` line and `checkpoint --respawn` passes. Fix: `git status --porcelain --ignored`, and treat `!!` as untracked.
+- S4, F5 (fix round, the coordinator's p5.sh): a renamed charter (`git mv`): running close's `next:` line commits the new path only and leaves `D <old>` staged, so main stays dirty.
+- S4, S22's verify (2026-10-12, the observer's p6.sh): the printed `git -C <dir> add -- <name>` drops the `:(literal)` pathspec that `path_state` reads with, so a charter whose name holds a glob character (`c*.md`) also adds and commits an untracked `c1.md` beside it. Fix: print `add -- ':(literal)<name>'` and the same in the commit's pathspec.
+- S4, M1's fix round (the coordinator, 2026-10-12): the band's module never reads turn-ended.json, which packet M1's ruling 1 names "when present"; its line uses nothing from it. Repro: `grep -c turn-ended plugin/hooks/session.ts` reads 0.
+- S4, M1's verify (2026-10-12, the observer): a session's first PostToolUse can run before its transcript holds the assistant line, so `meter.json` reads ctx 0% and the band draws `ctx 0%` until the next tool call, where `status --transcript` gives 31.1% (`meter.py`, unchanged by M1; evidence in the verify's m1ver run).
+
+## A floor-held respawn is silent (2026-10-12, the observer, check-in 100; S4)
+- The cloudflare chain's sitting fc8126c4 (pid 52461, started 06:45:35) marked RESPAWN at 06:54:51, 9 min 16 s in, so `_checks` returned `floor` and `_watch` holds it for good (respawn-r1 §3.5, by design: "holds such a sitting rather than delaying it"). Nothing says so while the child runs, and the sitting idled at its prompt 47 minutes until the owner's hand. `status` (and the band) could print `respawn held: floor; end this sitting, the chain stops` beside the mark.
+
+## `admission record` on undecodable stdin (2026-10-12, the S25 fix round; S4)
+- Stdin that is not UTF-8 raises UnicodeDecodeError in `sys.stdin.read()` (`cli.cmd_admission`), a traceback and exit 1, outside the 0/2/3 interface that F4 closed for OSError; a refusal (exit 2, nothing written) is the matching class. Only `session.ts` writes that stdin, always as `JSON.stringify`, so it is not reachable from the module. Fixed on branch m2-measure (M2's fix round, F2): `cli._stdin` refuses stdin that is not UTF-8 with exit 2 for both record verbs, and `admission.decode` refuses a lone surrogate (`test_f4_stdin_that_is_not_utf8_exits_2_and_writes_nothing`).
+
+## S25's verify notes (2026-10-12, the observer; S4)
+- A refused `$.clock` with a usage read that never answers leaves `agent.spawn` pending past 2 s (verify probe P7), as before the fix round: `within` races `$.clock.sleep`, so with no clock nothing bounds the read. Not reachable while the engine grants the clock.
+- An undecodable ledger line makes an `end` record raise UnicodeDecodeError in `_rows` (`admission.py` ~131), exit 1 with a traceback; stdin `"x\ud83d"` (UnicodeEncodeError) and stdin nested 20000 deep (RecursionError) do the same. Each should refuse (exit 2) or retry (exit 3), nothing written; the module never sends such input. The two stdin cases are fixed on branch m2-measure (M2's fix round): both refuse with exit 2, nothing written (`test_f4_each_kind_checks_its_values_by_type_and_writes_nothing`); the ledger line in `_rows` stands.
+- A ledger whose `ts` values carry no timezone never rotates. The verb always stamps UTC with an offset, so only a hand-written ledger reaches it.
+
+## M2's verify notes (2026-10-12, the observer; S4)
+- `done`'s `usage.model` is capped at 64 characters, so an ARN-like model id (a gateway's) is refused and the `done` line lost; d289279 took it. Not seen on this Mac's subscription; S26, which settles `usage`'s keys, should raise it to `NAME_CAP` or clip it as `description` is.
+- A list inside `usage` (e.g. `iterations: []`) is refused; 2.1.296's types name none, so a later engine that adds one loses the `done` line until the check learns it.
+
+## S26 fix round 1 notes (2026-10-12)
+- A foreground spawn's `next` returns when its helper is done, so its `spawn` line lands after its run (and after its `done`, which `runs` then never pairs with it): its stale verdict drops after GRACE (2 min) while the helper still works. S27a, which refuses, should pair a late spawn line with its done.
+- `record` still keeps a `resetsAt` that is unparseable or at datetime's end (S25's contract: refusing it would lose a `spawn` line); the reader reads it as no reading, and only `admit` refuses it.
+
+## S26's verify notes (2026-10-12, the observer; S4)
+- A stale-admitted resume whose `to` names no helper on record (a teammate's name) matches the run `runs()` makes for it, which never ends, so `wait` holds for 300 minutes (`admission.py` ~697-713; the verify's p_f2.py: `wait` from +1 to +299 min, `stale` at +301). Observe mode only records it; S27a, which acts on `wait`, should give such a run the two-minute grace F2 gave a verdict with no run.
+- An `admit` answer that lands after the module's 3 s cut logs a second line (`session.ts` ~134): `admission: admit: no answer in 3000 ms`, then `admission: admit admitted (observe, peak 1)`. Drop a late answer once the cut has logged.
+
+## S27b's notes (2026-10-12, the builder)
+- The band leaves out core's own `engine` ref that `next` gives on `AbovePrompt` (M1 left it out too): if core ever draws in the band without a survey, the two lines would hide it. Keep it as a third child once 2.1.296's renderer is shown to accept a nested ref.
+- band.json's figures are those of the last `record` or `admit`: the peak, the room and the helpers in flight do not age between writes (only the countdown and the `<n>s old` do). A quiet machine shows a peak as old as its last reading.
+
+## S27b fix round 1 notes (2026-10-12, the refuter's p2 and round 1; S4)
+- F3: the Python `band_line` and its `session.ts` twin disagree on band.json files the writer never makes: a `resetsAt` of `T24:00:00Z`, Feb 31, the years 0001 and 9999, `room` 1e21, `ceiling` 1e-7, NaN (the refuter's p2.py over cases.json). The writer emits none of them; if a hand-written band.json ever matters, both twins should refuse the same set.
+- band.json is one file per machine, but each write uses the recording session's config (its ceiling, margin, mode and seeds), so two sessions with different settings rewrite it in turn with different figures.
+- `report --since` does not filter the admission section: it prints every window the two ledgers hold.
+- The fix round capped `room` at 99 (`ROOM_CAP`): past that the band reads `room for 99`, a pull forward rather than a count, and under a minute to the reset it reads no room at all.
+
+## S27b's verify note (2026-10-12, the observer; S4)
+- With half-open windows (fix round F5), a `deferred` or `wait` verdict exactly at a `resetsAt` with no window opening then falls in no window, so `report` shows it nowhere; before the fix it was held. The verify's p10.py gives `[('14:00:00', False)]`. A verdict at the reset could open the next window's row.
+- The observer, check-in 107 (2026-10-13), S4, seen once: a sitting under the launcher wrote `RESPAWN` into its charter's Next act and stopped its loop, but never ran `claude-session checkpoint --respawn`, so the chain stalled with its claude idle until the owner looked. Evidence: the example-ops chain's session 25e324fe stopped at 09:28:58Z near its 80% checkpoint (309k of a 400k ceiling); its transcript holds no `checkpoint --respawn` call; `respawn/example-ops/` holds only `lock`; claude pid 76145 sat idle under launcher pid 85935. The brief and `plugin/skills/session/SKILL.md:80` both name the step. The launcher then did as designed: when that claude exited, it logged `{"kind":"stop","chain":"example-ops","reason":"no-marker","restarts":5}` at 11:58:20Z, and the owner started a new launcher by hand. A guard could close it: under a launcher, a Stop past the checkpoint zone with no respawn marked and no wakeup armed prints the one command to run.

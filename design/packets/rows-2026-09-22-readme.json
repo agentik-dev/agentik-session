@@ -1,0 +1,3 @@
+[
+  {"id": "s6-readme", "repo": "~/code/claude-code-session", "prompt": "design/packets/s6-readme.md", "depends_on": ["packets-5", "s5-commands"], "base": "s5-commands", "worktree": true, "model": "claude-opus-5-5", "max_turns": 50, "plan_row": 14, "why": "the README via respeak (source, make readme, freshness by content); the respeak marketplace key (D11); the env python3 shebang and the new hygiene sha; the resolved file's shape in conventions §3; cut off s5-commands, the owner merges in order"}
+]

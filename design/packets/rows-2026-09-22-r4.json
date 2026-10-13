@@ -1,0 +1,3 @@
+[
+  {"id": "s7-conventions-and-doctor", "repo": "~/code/claude-code-session", "prompt": "design/packets/s7-conventions-and-doctor.md", "depends_on": ["packets-8"], "worktree": true, "model": "claude-opus-5-5", "max_turns": 80, "plan_row": 19, "why": "the conventions amendments the owner ruled 16:30 (items 23 to 27: packet authoring, the sidecar by shasum -c, the session variable, both scripts' shas, the resolved path) and the small session follow-ups (41 checkpoint help text, 42 RUNBOOK pruned, 43 doctor off Apple's python with pyenv's offline list); optional 21; cut off main, one Opus row"}
+]

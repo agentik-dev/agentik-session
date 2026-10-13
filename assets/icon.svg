@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="session: a gauge over the budget, the needle at the checkpoint">
+<title>session</title>
+<g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M16.44 48.56A22 22 0 1 1 47.56 48.56"/>
+<path d="M19.07 27.64L15.37 26.11M26.64 20.07L25.11 16.37M37.36 20.07L38.89 16.37M44.93 27.64L48.63 26.11"/>
+<path d="M32 33L42.61 22.39"/>
+<circle cx="32" cy="33" r="3.5" fill="#fff"/>
+</g>
+<rect x="14" y="52" width="36" height="3" rx="1.5" fill="currentColor"/>
+</svg>

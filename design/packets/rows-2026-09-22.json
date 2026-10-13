@@ -1,0 +1,5 @@
+[
+  {"id": "s4-meter", "repo": "~/code/claude-code-session", "prompt": "design/packets/s4-meter.md", "depends_on": ["packets-1"], "worktree": true, "model": "claude-opus-5-5", "max_turns": 100, "plan_row": 5, "why": "the meter (PostToolUse, UserPromptSubmit) and the ledger (SessionEnd); status, report"},
+  {"id": "ar1-relay-hooks", "repo": "~/code/agent-relay", "prompt": "claude-code-session/design/packets/ar1-relay-hooks.md", "depends_on": ["packets-1"], "worktree": true, "model": "claude-opus-5-5", "max_turns": 80, "plan_row": 9, "why": "the relay's deny guards, Stop guard and packet injection, usable in hand-run sittings; -race in check"},
+  {"id": "s5-commands", "repo": "~/code/claude-code-session", "prompt": "design/packets/s5-commands.md", "depends_on": ["packets-1", "s4-meter"], "base": "s4-meter", "worktree": true, "model": "claude-opus-5-5", "max_turns": 100, "plan_row": 12, "why": "commands and skill (/session:*), the spawn gate, charter {open,check,close} (D10); cut off s4-meter, the owner merges in order"}
+]

@@ -1,0 +1,85 @@
+# .hygiene-allow: <path-glob>: <group>[,<group>]; `*` stays inside one path segment.
+# No row allows a private group: the owner's own terms are rewritten (public-r1),
+# never excepted. `sibling` is the public plugin names; `person` keeps the name
+# only where the packet keeps it.
+# LICENSE's copyright line and plugin.json's author field carry the owner's name.
+LICENSE: person
+plugin/.claude-plugin/plugin.json: sibling,person
+# The repo's own name (pyproject's project name, the Makefile's install paths).
+pyproject.toml: sibling
+Makefile: sibling
+# The design records name the sibling plugins they read and write.
+design/*.md: sibling
+bugs/*.md: sibling
+# ADV6-1's reproduction names a generic mDNS host name and an RFC 1918 address.
+design/review-adv6.md: lan
+# The tool's own state path (its name) and the plugins it loads by id.
+claude_session/config.py: sibling
+claude_session/launch.py: sibling
+claude_session/sessionconfig.py: sibling
+tests/test_launch.py: sibling
+# The launcher's one-time marker lives under the tool's state path (ADV10-5).
+install-wrapper.sh: sibling
+tests/test_install.py: sibling
+# The manifests: the repo's name and the dependency names.
+.claude-plugin/marketplace.json: sibling
+claude_session/profiles.yaml: sibling
+claude_session/resolver.py: sibling
+claude_session/doctor.py: sibling
+tests/test_resolver.py: sibling
+tests/test_doctor.py: sibling
+tests/test_hook_session_start.py: sibling
+tests/test_hook_meter.py: sibling
+tests/test_hooks.py: sibling
+tests/fixtures/repo/.claude/*/config.yaml: sibling
+# The fixture's path names the tool's own config directory (paths scan since ADV6-1).
+tests/fixtures/repo-deny/.claude/*/config.yaml: sibling
+plugin/skills/session/SKILL.md: sibling
+# The README and its source: the dependency ids and the marketplace name.
+README.md: sibling
+design/readme/source.md: sibling
+RUNBOOK.md: sibling
+# The render script names the renderer it calls; the README test names the repo's tokens.
+scripts/readme-render: sibling
+tests/test_readme.py: sibling
+# The respeak config's path names the plugin; this file names it on the line above.
+.claude/respeak/config.yaml: sibling
+.hygiene-allow: sibling
+# The review's open items name the repo in the title.
+NICE_TO_HAVE.md: sibling
+# The owner's question file keeps the shared heading "Decisions for the owner".
+OPEN-QUESTIONS.md: sibling
+# The rows files' `repo` is a ~-rooted path to a public plugin repo; no user name.
+design/packets/rows-2026-09-22-r4.json: home,sibling
+design/packets/rows-2026-09-22-readme.json: home,sibling
+design/packets/rows-2026-09-22.json: home,sibling
+design/packets/rows-2026-09-23-r2.json: home,sibling
+design/packets/rows-2026-09-23-r5.json: home,sibling
+design/packets/rows-2026-09-23-r6.json: home,sibling
+design/packets/rows-2026-09-23-r7.json: home,sibling
+design/packets/rows-2026-09-23.json: home,sibling
+design/packets/rows-2026-09-24-r11.json: sibling
+design/packets/rows-2026-09-24-r16.json: sibling
+design/packets/rows-2026-09-24.json: sibling
+# Each packet names the sibling plugins it reads, writes or waits on (one row per file, no blanket).
+design/packets/a1-relay-birth.md: sibling
+design/packets/ar1-relay-hooks.md: sibling
+design/packets/m1-band.md: sibling
+design/packets/s1-hygiene.md: sibling
+design/packets/s10-fixes-r6.md: sibling
+design/packets/s11-readme-r7.md: sibling
+design/packets/s13-conventions-r10.md: sibling
+design/packets/s14-fixes-adv11.md: sibling
+design/packets/s15-resync.md: sibling
+design/packets/s16-resync.md: sibling
+design/packets/s17-exit-rule-respawns.md: sibling
+design/packets/s2-retire-chain.md: sibling
+design/packets/s22-close-commit.md: sibling
+design/packets/s25-admission-observe.md: sibling
+design/packets/s3-plugin-skeleton.md: sibling
+design/packets/s4-meter.md: sibling
+design/packets/s5-commands.md: sibling
+design/packets/s6-readme.md: sibling
+design/packets/s7-conventions-and-doctor.md: sibling
+design/packets/s8-conventions-plugins.md: sibling
+design/packets/s9-hygiene-and-charters.md: sibling

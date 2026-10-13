@@ -1,0 +1,120 @@
+#!/bin/bash
+# Render README.md from design/readme/source.md through respeak's technical mode.
+#
+# Usage: scripts/readme-render [--repo DIR]
+#
+#   1. Writes the status line into the source: plugin.json's version, today's
+#      date, and the suite's collected count (`pytest --collect-only -q`).
+#   2. respeak-render.sh --mode technical --contract design/readme/contract.txt
+#      --max-rounds ROUNDS into a temp file inside the repo, each round's runner
+#      under RESPEAK_RENDER_WALL=ROUND_WALL (the rounds bound the spend).
+#   3. respeak-verify-edit.py source out: structure, code spans and numbers
+#      byte-identical, prose only.
+#   4. Moves the output over README.md and writes the sidecar's two lines.
+#
+# `make readme` runs this under scripts/bounded (held off above load 4 x cores,
+# ADV10-6) with a 2000 s wall, the budget: the collection's own 120 s timeout,
+# ROUNDS rounds of ROUND_WALL s plus respeak-deadline.sh's 2 s grace each, and
+# 60 s for the style gate, the verifier and the move. One round of this README
+# took 524 s and 530 s, nearly all of it the model's thinking, and two more ran
+# past 600 s (F5), so a round gets 900 s. It prints the renderer's time.
+#
+# A failed render leaves README.md untouched and `make check` stale by design:
+# commit the source and report; never hand-edit the README.
+#
+# Reads RESPEAK_RENDER (the renderer script) and RESPEAK_PYTHON (a python with
+# PyYAML); the Makefile passes both. The renderer runs as a marked helper one
+# level below CLAUDE_SESSION_DEPTH (unset or empty: 0), refused past depth 2.
+# Exit codes: 0 written and stamped; 1 the style gate failed after the
+# renderer's rounds; 2 setup (a refused depth included), the verifier or the
+# status step.
+#
+# bash 3.2 compatible (macOS default).
+set -u
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo) REPO="$(cd "$2" && pwd)" || exit 2; shift 2 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "readme-render: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+cd "$REPO" || exit 2
+
+# The helper's depth, before any write: d plain, d + 1 at most 2.
+d="${CLAUDE_SESSION_DEPTH:-0}"
+case "$d" in
+  *[!0-9]*|0?*) echo "readme: CLAUDE_SESSION_DEPTH='$d' is not a plain non-negative integer; nothing written" >&2; exit 2 ;;
+esac
+if [ ${#d} -gt 1 ] || [ "$d" -ge 2 ]; then
+  echo "readme: CLAUDE_SESSION_DEPTH=$d: the renderer, a helper, is refused past depth 2 (relay-r1 §10); nothing written" >&2; exit 2
+fi
+MAX_TURNS=20  # the renderer's own turn cap, per round (its claude -p's --max-turns)
+ROUNDS=2         # the renderer's rounds (--max-rounds): a style-gate failure gets one retry
+ROUND_WALL=900   # each round's wall clock (RESPEAK_RENDER_WALL); the Makefile's wall holds them all
+
+RENDER="${RESPEAK_RENDER:-}"
+PY="${RESPEAK_PYTHON:-$REPO/.venv/bin/python}"
+SOURCE=design/readme/source.md
+CONTRACT=design/readme/contract.txt
+
+[ -n "$RENDER" ] && [ -x "$RENDER" ] || {
+  echo "readme: no respeak renderer, run: claude plugin install respeak@claude-code-respeak" >&2; exit 2; }
+"$PY" -c 'import yaml' 2>/dev/null || {
+  echo "readme: no PyYAML in $PY, run: .venv/bin/python -m pip install -e '.[readme]'" >&2; exit 2; }
+VERIFY="$(dirname "$RENDER")/respeak-verify-edit.py"
+[ -f "$VERIFY" ] || { echo "readme: the renderer ships no respeak-verify-edit.py" >&2; exit 2; }
+[ -f "$SOURCE" ] && [ -f "$CONTRACT" ] || { echo "readme: missing $SOURCE or $CONTRACT" >&2; exit 2; }
+
+# 1. The status line, from the manifest, the date and the suite.
+"$REPO/.venv/bin/python" - "$SOURCE" <<'PY' || { echo "readme: the status step failed" >&2; exit 2; }
+import datetime, json, re, subprocess, sys
+source = sys.argv[1]
+version = json.load(open("plugin/.claude-plugin/plugin.json"))["version"]
+out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+                     capture_output=True, text=True, timeout=120).stdout.strip().splitlines()
+m = re.match(r"(\d+) tests? collected", out[-1] if out else "")
+if not m:
+    sys.exit("readme: no collected count from pytest")
+line = "Status: version `v%s`, rendered `%s`, `%s` tests in the suite." % (
+    version, datetime.date.today().isoformat(), m.group(1))
+text = open(source).read()
+new, n = re.subn(r"^Status: version .*$", lambda _: line, text, flags=re.M)
+if n != 1:
+    sys.exit("readme: the source holds %d status lines, not 1" % n)
+open(source, "w").write(new)
+print(line)
+PY
+
+# 2. The render, into a temp file inside the repo (the renderer resolves config by --out's folders).
+OUT="$(mktemp "$REPO/.readme-render.XXXXXX")" || exit 2
+RUNNER_DIR="$(mktemp -d)" || { rm -f "$OUT"; exit 2; }
+trap 'rm -f "$OUT"; rm -rf "$RUNNER_DIR"' EXIT
+# The helper rule, relay-r1 §10 at agent-relay b8d789b (row s16-resync, overhaul-r1 §2.5):
+# a helper a sitting spawns keeps `RELAY_ROW` and `CLAUDE_SESSION_MAX_TURNS`, runs in the foreground as `CLAUDE_SESSION_DEPTH=$((d+1)) CLAUDE_SESSION_HELPER=1 claude -p … --max-turns N`, and is refused past depth 2; Stop and `start.json` skip it; `DropSitting` is the relay's own helpers' alone
+# respeak-render.sh has no turn cap of its own: its runner (RESPEAK_RENDER_CMD, default
+# claude) goes through a wrapper outside the repo that adds --max-turns to its `claude -p`.
+printf '#!/bin/sh\nexec "$README_RUNNER" --max-turns %s "$@"\n' "$MAX_TURNS" > "$RUNNER_DIR/runner" &&
+  chmod 755 "$RUNNER_DIR/runner" || exit 2
+echo "readme: rendering, up to $ROUNDS rounds of at most $ROUND_WALL s each"
+started=$SECONDS
+README_RUNNER="${RESPEAK_RENDER_CMD:-claude}" RESPEAK_RENDER_CMD="$RUNNER_DIR/runner" RESPEAK_PYTHON="$PY" \
+  RESPEAK_RENDER_WALL="$ROUND_WALL" CLAUDE_SESSION_DEPTH=$((d + 1)) CLAUDE_SESSION_HELPER=1 \
+  "$RENDER" --mode technical --source "$SOURCE" --out "$OUT" --contract "$CONTRACT" --max-rounds "$ROUNDS"
+rc=$?
+echo "readme: the renderer took $((SECONDS - started)) s"
+if [ $rc -ne 0 ]; then
+  echo "readme: the renderer exited $rc; README.md untouched" >&2
+  [ $rc -eq 1 ] && exit 1
+  exit 2
+fi
+
+# 3. The verifier: structure and code spans byte-identical, prose only.
+"$PY" "$VERIFY" --type md "$SOURCE" "$OUT" || {
+  echo "readme: respeak-verify-edit.py refused the render; README.md untouched" >&2; exit 2; }
+
+# 4. Move over README.md and stamp the sidecar.
+chmod 644 "$OUT" && mv -f "$OUT" README.md || exit 2
+shasum -a 256 design/readme/source.md README.md > design/readme/rendered.sha256
+echo "readme: rendered, sidecar written"

@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""record: serve a markdown record by sections, never whole.
+
+A section is an ATX heading (`#` to `######`, outside fenced code) with its
+body up to the next heading of the same or a higher level. The map row is
+(index from 1, level, heading text, first line, bytes).
+
+Usage:
+  record FILE --sections [--json]
+  record FILE --section SPEC [--max-bytes B] [--force] [--json]
+
+SPEC is a comma list of items: an index `24`, a range `3-5`, or a heading-text
+prefix `'§24'`. A prefix matches at a word boundary (`§2` never matches `§24`);
+when it matches several headings the first wins if the others are its own
+subsections, otherwise the ambiguity is refused with the candidates named.
+
+Exit 0; 2 on usage, no section named, no match or ambiguity, or a --max-bytes
+over the default (8192) without --force; 3 when a section, or the request's
+summed bytes, is over --max-bytes and --force is absent: the refusal names the
+size and the subsections to ask for instead. Read-only, stdlib, one file,
+imported by nothing.
+"""
+import argparse
+import json
+import re
+import sys
+
+MAX_BYTES = 8192
+HEADING = re.compile(rb"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+FENCE = re.compile(rb"^ {0,3}(`{3,}|~{3,})")
+
+
+class Refusal(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def parse(data):
+    """Return (lines, sections); a section is a dict with 0-based `start` and
+    exclusive `end` line offsets into `lines`."""
+    lines = data.splitlines(keepends=True)
+    heads, fence = [], None
+    for i, raw in enumerate(lines):
+        line = raw.rstrip(b"\r\n")
+        m = FENCE.match(line)
+        if fence:
+            if m and m.group(1)[:1] == fence[:1] and len(m.group(1)) >= len(fence) \
+                    and not line.strip().lstrip(fence[:1]):
+                fence = None
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        m = HEADING.match(line)
+        if m:
+            text = re.sub(rb"[ \t]+#+$", b"", m.group(2) or b"").strip()
+            if text == b"#" * len(text):
+                text = b""
+            heads.append((i, len(m.group(1)), text.decode("utf-8", "replace")))
+    sections = []
+    for n, (start, level, text) in enumerate(heads):
+        end = len(lines)
+        for later, lvl, _ in heads[n + 1:]:
+            if lvl <= level:
+                end = later
+                break
+        sections.append({"index": n + 1, "level": level, "heading": text,
+                         "line": start + 1, "start": start, "end": end,
+                         "bytes": sum(len(x) for x in lines[start:end])})
+    return lines, sections
+
+
+def row(s):
+    return {k: s[k] for k in ("index", "level", "heading", "line", "bytes")}
+
+
+def children(sections, s):
+    """The direct subsections of `s`: the split a refusal offers."""
+    inner = [t for t in sections if s["start"] < t["start"] < s["end"]]
+    top = min((t["level"] for t in inner), default=None)
+    return [t for t in inner if t["level"] == top]
+
+
+def by_prefix(sections, prefix):
+    hits = [s for s in sections if s["heading"].startswith(prefix)
+            and not s["heading"][len(prefix):len(prefix) + 1].isalnum()]
+    if not hits:
+        raise Refusal(2, f"no section matches {prefix!r}")
+    first = hits[0]
+    if all(first["start"] < t["start"] < first["end"] for t in hits[1:]):
+        return first
+    names = "; ".join(f"{t['index']} {t['heading']!r} (line {t['line']})" for t in hits)
+    raise Refusal(2, f"{prefix!r} is ambiguous: {names}")
+
+
+def select(sections, spec):
+    count, picked = len(sections), []
+
+    def index(n):
+        if not 1 <= n <= count:
+            raise Refusal(2, f"no section {n}: the record has {count}")
+        return sections[n - 1]
+
+    for item in (x.strip() for x in spec.split(",")):
+        if not item:
+            raise Refusal(2, f"empty item in section spec {spec!r}")
+        rng = re.fullmatch(r"(\d+)-(\d+)", item)
+        if item.isdigit():
+            found = [index(int(item))]
+        elif rng:
+            a, b = int(rng.group(1)), int(rng.group(2))
+            if a > b:
+                raise Refusal(2, f"backwards range {item!r}")
+            found = [index(n) for n in range(a, b + 1)]
+        else:
+            found = [by_prefix(sections, item)]
+        picked += [s for s in found if s not in picked]
+    return picked
+
+
+def human(n):
+    return f"{n:,} bytes"
+
+
+def show_map(path, sections, as_json, total):
+    if as_json:
+        json.dump({"file": path, "bytes": total, "sections": [row(s) for s in sections]},
+                  sys.stdout, ensure_ascii=False, indent=1)
+        sys.stdout.write("\n")
+        return
+    print(f"{path}: {len(sections)} sections, {human(total)}")
+    print(f"{'index':>5} {'level':>5} {'line':>7} {'bytes':>8}  heading")
+    for s in sections:
+        print(f"{s['index']:>5} {s['level']:>5} {s['line']:>7} {s['bytes']:>8}  {s['heading']}")
+
+
+def show_sections(path, lines, picked, as_json):
+    if as_json:
+        out = []
+        for s in picked:
+            r = row(s)
+            r["text"] = b"".join(lines[s["start"]:s["end"]]).decode("utf-8", "replace")
+            out.append(r)
+        json.dump({"file": path, "sections": out}, sys.stdout, ensure_ascii=False, indent=1)
+        sys.stdout.write("\n")
+        return
+    buf = sys.stdout.buffer
+    for s in picked:
+        header = (f"==> {path} section {s['index']} {s['heading']!r}, lines "
+                  f"{s['line']}-{s['end']}, {human(s['bytes'])} <==\n")
+        body = b"".join(lines[s["start"]:s["end"]])
+        buf.write(header.encode("utf-8") + body)
+        if body and not body.endswith(b"\n"):
+            buf.write(b"\n")
+    buf.flush()
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="record", description="Serve a markdown record by sections.")
+    ap.add_argument("file")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--sections", action="store_true", help="print the section map")
+    mode.add_argument("--section", metavar="SPEC", help="print these sections: 24, 3,5, 3-5, '§24'")
+    ap.add_argument("--max-bytes", type=int, default=MAX_BYTES, metavar="B",
+                    help=f"refuse a section, or a request's sum, over B bytes (default "
+                         f"{MAX_BYTES}; above it needs --force)")
+    ap.add_argument("--force", action="store_true", help="serve a section over --max-bytes")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    args = ap.parse_args(argv)
+    try:
+        if args.max_bytes > MAX_BYTES and not args.force:
+            raise Refusal(2, f"--max-bytes {args.max_bytes:,} is over the default "
+                             f"{MAX_BYTES:,}: pass --force to read past the cap")
+        if not (args.sections or args.section is not None):
+            raise Refusal(2, "name a section: --sections for the map, --section SPEC to read")
+        try:
+            with open(args.file, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            raise Refusal(2, f"cannot read {args.file}: {e.strerror}")
+        lines, sections = parse(data)
+        if args.sections:
+            show_map(args.file, sections, args.json, len(data))
+            return 0
+        if not sections:
+            raise Refusal(2, f"{args.file} has no headings")
+        picked = select(sections, args.section)
+        for s in picked:
+            if s["bytes"] > args.max_bytes and not args.force:
+                split = children(sections, s)
+                hint = (", ".join(f"{t['index']} {t['heading']!r} ({human(t['bytes'])})" for t in split)
+                        if split else "none: pass --force to read it whole")
+                raise Refusal(3, f"section {s['index']} {s['heading']!r} is {human(s['bytes'])}, "
+                                 f"over --max-bytes {args.max_bytes:,}; its subsections: {hint}")
+        total = sum(s["bytes"] for s in picked)
+        if total > args.max_bytes and not args.force:
+            sizes = ", ".join(f"{s['index']} ({human(s['bytes'])})" for s in picked)
+            raise Refusal(3, f"the request's sections sum to {human(total)} summed, over "
+                             f"--max-bytes {args.max_bytes:,}; ask for fewer: {sizes}")
+        show_sections(args.file, lines, picked, args.json)
+        return 0
+    except Refusal as r:
+        print(f"record: {r}", file=sys.stderr)
+        return r.code
+    except BrokenPipeError:
+        sys.stderr.close()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

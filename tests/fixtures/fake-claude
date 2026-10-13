@@ -1,0 +1,125 @@
+#!/usr/bin/python3
+"""The fake `claude` (respawn-r1 §6): a sitting the launcher can start, watch and end.
+
+It reads its plan from `$FAKE_CLAUDE_PLAN` (a JSON list, one list of steps per start;
+the last list serves every later start) and appends one record per start to
+`$FAKE_CLAUDE_LOG`: its argv, its environment, its signal dispositions and the
+ledger's line count when it started. A SIGTERM it receives is recorded in
+`$FAKE_CLAUDE_LOG.signals`. It drives the hooks as a sitting would, by running
+`<this interpreter> -B -m claude_session hook <event>` with a stdin payload, never
+PATH's `claude-session`.
+
+Steps: ["hook", event, {payload}], ["verb", charter], ["respawn", charter] (PreToolUse,
+the verb, PostToolUse and Stop, as a sitting's close), ["write", path, text],
+["ignore_term"], ["trap_int"] (a SIGINT recorded and survived, then
+`$FAKE_CLAUDE_LOG.trapped` written), ["wait_int", seconds], ["raw"] (fd 0 to raw
+mode, the attributes it set appended to `$FAKE_CLAUDE_LOG.tty`), ["idle", seconds],
+["exit", status]. After the last step it exits 0. Without `trap_int` a SIGINT ends it
+at the default disposition, after it is recorded (S20b).
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def _disposition(sig):
+    # Python puts default_int_handler in place of an inherited SIG_DFL on SIGINT (and of
+    # nothing else), so it reads as the default; an inherited SIG_IGN stays ignored.
+    h = signal.getsignal(sig)
+    if h is signal.default_int_handler:
+        return "default"
+    return {signal.SIG_DFL: "default", signal.SIG_IGN: "ignore"}.get(h, "handler")
+
+
+def _run(argv, payload=None, extra=None):
+    env = dict(os.environ, **(extra or {}))
+    return subprocess.run([sys.executable, "-B", "-m", "claude_session", *argv], env=env,
+                          input=json.dumps(payload) if payload is not None else "",
+                          capture_output=True, text=True, timeout=60).returncode
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    log = Path(os.environ["FAKE_CLAUDE_LOG"])
+    plan = json.loads(Path(os.environ["FAKE_CLAUDE_PLAN"]).read_text())
+    n = len(log.read_text().splitlines()) if log.exists() else 0
+    sid = argv[argv.index("--session-id") + 1] if "--session-id" in argv else None
+    from claude_session.config import state_dir         # the contract path, as the CLI reads it
+    lp = state_dir(os.environ) / "ledger.jsonl"
+    rec = {"n": n, "argv": argv, "env": dict(os.environ), "pid": os.getpid(),
+           "sigint": _disposition(signal.SIGINT), "sigquit": _disposition(signal.SIGQUIT),
+           "ledger_lines": len(lp.read_text().splitlines()) if lp.exists() else 0,
+           "at": time.time()}
+    state = {"ignore": False, "n": n, "int": False}
+
+    def on_term(signum, frame):
+        with open(str(log) + ".signals", "a") as f:
+            f.write(json.dumps({"n": n, "sig": signum}) + "\n")
+        if not state["ignore"]:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    try:                                         # from the start record on: a Ctrl-C the
+        with log.open("a") as f:                 # launcher's test sends once it reads the
+            f.write(json.dumps(rec) + "\n")      # record is never a bare traceback
+        signal.signal(signal.SIGTERM, on_term)
+        return _play(plan[min(n, len(plan) - 1)], sid, log, state)
+    except KeyboardInterrupt:                    # Ctrl-C: recorded, then the default death
+        with open(str(log) + ".signals", "a") as f:
+            f.write(json.dumps({"n": n, "sig": int(signal.SIGINT)}) + "\n")
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGINT)
+        return 130
+
+
+def _play(steps, sid, log, state):
+    for step in steps:
+        op, args = step[0], step[1:]
+        if op == "hook":
+            _run(["hook", args[0]], {"session_id": sid, **(args[1] if len(args) > 1 else {})})
+        elif op in ("verb", "respawn"):
+            cmd = f"claude-session checkpoint --respawn --charter {args[0]}"
+            bash = {"tool_name": "Bash", "tool_input": {"command": cmd}}
+            if op == "respawn":
+                _run(["hook", "PreToolUse"], {"session_id": sid, **bash})
+            _run(["checkpoint", "--respawn", "--charter", args[0]], None,
+                 {"CLAUDE_CODE_SESSION_ID": sid})
+            if op == "respawn":
+                _run(["hook", "PostToolUse"], {"session_id": sid, **bash})
+                _run(["hook", "Stop"], {"session_id": sid})
+        elif op == "write":
+            Path(args[0]).write_text(args[1])
+        elif op == "ignore_term":
+            state["ignore"] = True
+        elif op == "trap_int":                   # a sitting that takes Ctrl-C and goes on
+            def on_int(signum, frame):
+                with open(str(log) + ".signals", "a") as f:
+                    f.write(json.dumps({"n": state["n"], "sig": signum}) + "\n")
+                state["int"] = True
+            signal.signal(signal.SIGINT, on_int)
+            Path(str(log) + ".trapped").write_text(str(state["n"]))
+        elif op == "wait_int":                   # idle until a SIGINT, at most N seconds
+            end = time.time() + float(args[0])
+            while not state["int"] and time.time() < end:
+                time.sleep(0.02)
+        elif op == "raw":
+            import termios
+            import tty
+            tty.setraw(0)
+            with open(str(log) + ".tty", "a") as f:
+                f.write(json.dumps(repr(termios.tcgetattr(0))) + "\n")
+        elif op == "idle":
+            end = time.time() + float(args[0])
+            while time.time() < end:
+                time.sleep(0.02)
+        elif op == "exit":
+            return int(args[0])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

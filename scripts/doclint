@@ -1,0 +1,624 @@
+#!/usr/bin/env python3
+"""doclint: the doc gate (conventions section 5).
+
+Rules, each a function returning `path: rule: detail` lines:
+  charter     history/sittings/*.md under 4,096 bytes, in the five-part shape:
+              `# Sitting <date>-<n>: <repo>, <component>`, the table (goal,
+              budget, pin, window, agents), `## Done-ness`, `## Handover`,
+              `## Next act`
+  packet      design/packets/*.md under 9,216 bytes, the header table's six
+              rows (from, pin, wall, may touch, acceptance, budget) and the six
+              sections `## 1.` to `## 6.`; a `verify` row (the gate's line) on
+              every packet outside GRANDFATHERED (`verify row missing`); outside
+              GRANDFATHERED and SPENT no acceptance line runs a whole suite. It
+              refuses a command word that is not a literal word (`$m`, `$(...)`,
+              a glob or brace, after wrappers strip: assignments, env, nice,
+              nohup, time, command, exec, timeout N, uv run, bounded ... --) and
+              a shell fed from stdin (no operand, -s, a lone -c, `<`, a
+              here-string, a pipe's last stage); a `sh|bash|zsh -c` body is
+              tested before quotes blank. Then it fails closed (ADV11-4): a
+              command holding a runner word (make, gmake, pytest, py.test, go,
+              tox, nox, claude, relay, or python* with `-m pytest|unittest`
+              after it) is read from that word on and passes only as: pytest
+              with a `-k` that is non-empty and not `not ...`, or every path a
+              `::` node or a `.py` below tests/ (no glob, no `..`); unittest of
+              dotted modules; `go test` of named packages (no `...`, all, `$`)
+              with a `-run` holding a 3+ character identifier; `make -n`, or make whose every goal is in
+              MAKE_TARGETED (quoted text is not a command unless a double quote
+              expands; `$(...)` is read in place and inside; the cell's code
+              spans are its lines, else the cell is one line)
+  size        design/research*.md under 6,144 bytes, design/conventions*.md
+              under 9,216, design/review-*.md under 9,216
+  plugin      every plugin/commands/*.md under 31 lines with `description` and
+              `allowed-tools` in its frontmatter; every plugin/agents/*.md with
+              `name`, `description`, `model` and `tools`; every
+              plugin/skills/*/SKILL.md with `name`, `description` (under 201
+              chars, a `>` or `|` block joined by spaces) and `allowed-tools`,
+              its body under 501 lines; a plugin's verb set is its own
+  link        every relative markdown link in a .md file resolves
+  next        no file named NEXT, except history/sessions/NEXT (the relay's safe
+              next phase, tracked or not), whose every `.md` path exists (ADV11-6)
+
+Files are the repo's tracked and untracked-not-ignored ones.
+Usage: doclint [--repo DIR]. Exit 0 when clean, 2 on a refusal, 1 on usage or
+when git fails.
+"""
+import fnmatch
+import os
+import re
+import subprocess
+import sys
+
+CHARTER_CEILING = 4096
+PACKET_CEILING = 9216
+RECORD_CEILING = 6144
+CONVENTIONS_CEILING = 9216
+CHARTER_ROWS = ("goal", "budget", "pin", "window", "agents")
+CHARTER_PARTS = ("## Done-ness", "## Handover", "## Next act")
+CHARTER_TITLE = re.compile(r"^# Sitting \d{4}-\d{2}-\d{2}-\d+: .+, .+$")
+COMMAND_CEILING = 31
+COMMAND_KEYS = ("description", "allowed-tools")
+AGENT_KEYS = ("name", "description", "model", "tools")
+SKILL_KEYS = ("name", "description", "allowed-tools")
+SKILL_DESCRIPTION_CEILING = 201
+SKILL_BODY_CEILING = 501
+PACKET_ROWS = ("from", "pin", "wall", "may touch", "acceptance", "budget")
+# the packets with no `verify` row, parsed as written: this repo's at ac529ab and
+# agent-relay's seventeen pre-AR10 stems (packet.go `legacy`); every later one has one
+GRANDFATHERED = ("a1-relay-birth.md", "ar1-relay-hooks.md", "s1-hygiene.md",
+                 "s2-retire-chain.md", "s3-plugin-skeleton.md", "s4-meter.md",
+                 "s5-commands.md", "s6-readme.md", "s7-conventions-and-doctor.md",
+                 "s8-conventions-plugins.md", "s9-hygiene-and-charters.md",
+                 "a3-machine.md", "a4-schemas.md", "a5-effects-plan.md",
+                 "a6-stage-gate.md", "a7-spawn-stream.md", "a8-night.md",
+                 "a9-tmux-notify.md", "ap1-plugin.md", "ux1-review.md",
+                 "ar2-adversarial.md", "ar3-readme.md", "ar4-fixes.md", "ar5-ux.md",
+                 "ar6-sync-and-readme.md", "ar7-fixes.md", "ar8-resync.md",
+                 "ar9-queue-and-resync.md")
+# records cut after AR10 whose acceptance ran a suite target before the rule went by
+# shape (packet.go `spent`, in its order): the verify row is required, the suite rule
+# skipped. ar21 is the session's only: its `grep -rl ... cmd/relay` names a directory
+# with a runner's basename, refused here (S14 ruling 5); the rule stays, the record
+# stands, and a later packet writes such a directory with a trailing slash
+SPENT = ("ar11-tla-night.md", "ar12-e2e-night.md", "ar10-bounded-night.md",
+         "ar13-fixes-r6.md", "ar14-resync.md", "ar15-readme-r7.md", "ar17a-gate-r10.md",
+         "ar17b-guards-r10.md", "ar17c-bounds-r10.md", "ar17d-rulings-r10.md",
+         "ar18-resync.md", "ar19-resync.md", "ar20-fixes-adv11.md", "ar21-fixes-adv12.md")
+PACKET_SECTIONS = ("What the source says", "Rulings", "Interfaces",
+                   "Findings that name this row", "Forbidden reads", "Report")
+LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+FENCE = re.compile(r"^\s*(```|~~~)")
+CODE_SPAN = re.compile(r"`[^`]*`")
+CELL_SPLIT = re.compile(r"(?<!\\)\|")
+QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
+COMMAND_SPLIT = re.compile(r"&&|\|\||(?<![<>&])&(?![>&])|[;|()`\n]|\$\(")
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# pytest options that take a value, so the value is not a path
+PYTEST_VALUED = {"-k", "-m", "-p", "-c", "-o", "-W", "--rootdir", "--confcutdir",
+                 "--deselect", "--ignore", "--ignore-glob", "--basetemp", "--maxfail",
+                 "--tb", "-r", "--durations", "--junitxml", "--log-level"}
+# wrapper word to its options that take a value
+WRAPPERS = {"env": {"-u", "-C", "-S"}, "nice": {"-n"}, "nohup": set(), "time": set(),
+            "command": set(), "exec": {"-a"}, "timeout": {"-s", "-k"}}
+UV_VALUED = {"--with", "--python", "-p", "--project", "--directory", "--extra",
+             "--group", "--package", "--env-file", "--with-requirements"}
+# make's options that take the next word as a value (packet.go `makeValued`)
+MAKE_VALUED = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile",
+               "--include-dir", "--old-file", "--assume-old", "--what-if", "--new-file",
+               "--assume-new"}
+# fail closed (ADV11-4): a simple command holding one of these words (by basename),
+# or a python word with `-m pytest|unittest` after it, is a runner; it is read from
+# that word on, so any wrapper before it is seen through, and passes only targeted
+RUNNERS = {"make", "gmake", "pytest", "py.test", "go", "tox", "nox", "claude", "relay"}
+# the make goals that are not a suite: a make runner passes when every goal is one
+MAKE_TARGETED = ("doclint", "hygiene", "lint", "validate", "build", "tree-note")
+MAKE_DRY = {"-n", "--dry-run", "--just-print", "--recon"}
+# go flags that take the next word as a value (a flag not here reads as a boolean)
+GO_VALUED = {"run", "skip", "count", "timeout", "p", "tags", "cpu", "bench", "benchtime",
+             "coverprofile", "covermode", "coverpkg", "o", "parallel", "shuffle", "exec",
+             "ldflags", "gcflags", "asmflags", "mod", "C", "list", "fuzz", "fuzztime",
+             "blockprofile", "cpuprofile", "memprofile", "mutexprofile", "outputdir",
+             "trace", "vet", "pkgdir", "toolexec", "overlay", "modfile", "buildmode"}
+GO_META = {"all", "std", "cmd"}
+DOTTED = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+REDIRECT = re.compile(r"^[0-9]*[<>]")
+# a blanked quote is `Q` (or `$Q`) plus this mark and its index, so a `-k` or `-run`
+# value reads the quote's text; the mark and index leave the reported line
+QUOTE_MARK = "\x02"
+QUOTE_TOKEN = re.compile(r"(\$?)Q\x02(\d+)")
+QUOTE_INDEX = re.compile(r"\x02\d+")
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+NOT_LITERAL = set("$`*?[{<>")
+SUBSTITUTION = re.compile(r"\$\([^()]*\)")
+SHELL_BODY = re.compile(r"\b(?:sh|bash|zsh)\s+-c\s+(?:'([^']*)'|\"((?:[^\"\\]|\\.)*)\")")
+SUITE = "acceptance runs a whole suite"
+NEXT_EXEMPT = "history/sessions/NEXT"
+NEXT_PROMPT = re.compile(r"[^\s`'\"]+\.md\b")
+
+
+class UsageError(Exception):
+    pass
+
+
+def files(repo):
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo, "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"], capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise UsageError("git ls-files failed in %s: %s" % (repo, exc))
+    paths = {p for p in out.decode("utf-8", "surrogateescape").split("\0") if p}
+    return sorted(p for p in paths if os.path.isfile(os.path.join(repo, p)))
+
+
+def match(path, glob):
+    parts, pats = path.split("/"), glob.split("/")
+    return len(parts) == len(pats) and all(
+        fnmatch.fnmatchcase(p, g) for p, g in zip(parts, pats))
+
+
+def read(repo, path):
+    with open(os.path.join(repo, path), "rb") as fh:
+        return fh.read()
+
+
+def table_rows(lines):
+    """The first-column keys of the first markdown table, header excluded."""
+    rows, seen = [], False
+    for line in lines:
+        if line.startswith("|"):
+            seen = True
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            rows.append(cells[0])
+        elif seen:
+            break
+    return [r for r in rows[1:] if not set(r) <= set("-: ")]
+
+
+def table_cells(lines):
+    """First-column key to second cell, over the first markdown table (`\\|` kept)."""
+    cells, seen = {}, False
+    for line in lines:
+        if line.startswith("|"):
+            seen = True
+            parts = [c.strip() for c in CELL_SPLIT.split(line.strip().strip("|"))]
+            cells.setdefault(parts[0], parts[1] if len(parts) > 1 else "")
+        elif seen:
+            break
+    return cells
+
+
+def strip_wrappers(words):
+    """Drop wrapper words (assignments, env, nice, nohup, time, command, exec,
+    timeout, uv run, bounded ... --) from the head until none is left."""
+    while True:
+        before = list(words)
+        while words and ASSIGNMENT.match(words[0]):
+            words = words[1:]
+        head = os.path.basename(words[0]) if words else ""
+        if head in WRAPPERS:
+            words, valued = words[1:], WRAPPERS[head]
+            while words and (words[0].startswith("-") or ASSIGNMENT.match(words[0])):
+                words = words[2:] if words[0] in valued else words[1:]
+            if head == "timeout" and words:
+                words = words[1:]  # the duration
+        elif head == "uv" and words[1:2] == ["run"]:
+            words = words[2:]
+            while words and words[0].startswith("-"):
+                words = words[2:] if words[0] in UV_VALUED else words[1:]
+        elif head == "bounded" and "--" in words:
+            words = words[words.index("--") + 1:]
+        if words == before:
+            return words
+
+
+def stdin_shell(words):
+    """A shell reading its commands from stdin (packet.go `stdinShell`): no
+    operand, -s, a lone -c, or a redirection or here-string."""
+    if os.path.basename(words[0]) not in SHELLS:
+        return False
+    args = words[1:]
+    for j, a in enumerate(args):
+        if a.startswith("<"):
+            return True
+        if a == "--":
+            return j + 1 == len(args)
+        if a in ("-o", "+o") or a.startswith("--"):
+            continue
+        if a.startswith(("-", "+")):
+            if "s" in a:
+                return True
+            if "c" in a:
+                return j + 1 == len(args)
+            continue
+        if j > 0 and args[j - 1] in ("-o", "+o"):
+            continue
+        return False
+    return True
+
+
+def make_targeted(args):
+    """True when `make <args>` is a dry run (-n) or names only MAKE_TARGETED goals;
+    no goal (the default one) refuses. An option's value is not a goal."""
+    targets, skip = [], False
+    for k, a in enumerate(args):
+        if skip:
+            skip = False
+        elif a in MAKE_DRY:
+            return True
+        elif a in MAKE_VALUED or (a in ("-j", "-l") and args[k + 1:k + 2]
+                                  and args[k + 1].isdigit()):
+            skip = True
+        elif REDIRECT.match(a):
+            skip = not a.lstrip("0123456789<>&")  # `>` alone: its target is the next word
+        elif not a.startswith("-") and "=" not in a:
+            targets.append(a)
+    return bool(targets) and all(t in MAKE_TARGETED for t in targets)
+
+
+def quote_value(word, quotes):
+    """A word's text before quotes blanked: a blank gives its quote's contents, an
+    expanding double quote (`$Q`) gives None, its value is not known."""
+    m = QUOTE_TOKEN.fullmatch(word)
+    if not m:
+        return word
+    return None if m.group(1) else quotes[int(m.group(2))]
+
+
+def literal(word):
+    return not (NOT_LITERAL & set(word)) and not QUOTE_TOKEN.search(word)
+
+
+def selects(value):
+    """A `-k` value that selects: non-empty and not a `not ...` (which keeps the rest)."""
+    return bool(value and value.strip()) and not value.strip().startswith("not")
+
+
+def targeted_path(word):
+    """A pytest path argument that names a `::` node, or a `.py` file below tests/,
+    with no glob character and no `..` component."""
+    path = word.split("::", 1)[0]
+    parts = path.split("/")
+    if not literal(word) or ".." in parts:
+        return False
+    if "::" in word:
+        return bool(path)
+    while parts[:1] == ["."]:
+        parts = parts[1:]
+    return len(parts) > 1 and parts[0] == "tests" and path.endswith(".py")
+
+
+def pytest_targeted(args, quotes):
+    """pytest is targeted by a selecting `-k`, else only when it has path arguments
+    and every one is a targeted_path (a stricter reading than "has one": a `.py`
+    beside the bare root would still run the whole root)."""
+    paths, k = [], 0
+    while k < len(args):
+        w = args[k]
+        if w in ("-k", "-k="):
+            return selects(quote_value(args[k + 1], quotes) if k + 1 < len(args) else "")
+        if w.startswith("-k") and not w.startswith("--"):
+            return selects(quote_value(w[2:].lstrip("="), quotes))
+        if w in PYTEST_VALUED or w in ("<", ">", ">>", "2>", "2>>", "1>"):
+            k += 2
+            continue
+        if not w.startswith("-") and not REDIRECT.match(w):
+            paths.append(w)
+        k += 1
+    return bool(paths) and all(targeted_path(p) for p in paths)
+
+
+def unittest_targeted(args):
+    """`python -m unittest` only with dotted module arguments (tests.test_x[.T.t])."""
+    mods, k = [], 0
+    while k < len(args):
+        w = args[k]
+        if w in ("-k", "--durations", "<", ">", ">>", "2>", "2>>", "1>"):
+            k += 2
+            continue
+        if not w.startswith("-") and not REDIRECT.match(w):
+            mods.append(w)
+        k += 1
+    return bool(mods) and all(DOTTED.fullmatch(m) for m in mods)
+
+
+def go_targeted(args, quotes):
+    """`go test` with named packages (no `...`, not all/std/cmd, literal) and a
+    `-run` whose value holds a literal identifier of 3+ characters; every other go
+    verb (build, vet, run, list, ...) refuses, `go run <pkg>/relay --rows` too."""
+    verb, rest = (args[0], args[1:]) if args else ("", [])
+    if verb != "test":
+        return False
+    pkgs, run, k = [], None, 0
+    while k < len(rest):
+        w = rest[k]
+        if w == "-args":
+            break
+        if w.startswith("-"):
+            name, value = w.lstrip("-"), ""
+            if "=" in name:
+                name, value = name.split("=", 1)
+            elif name in GO_VALUED and k + 1 < len(rest):
+                value, k = rest[k + 1], k + 1
+            if name == "run":
+                run = quote_value(value, quotes)
+        elif w in ("<", ">", ">>", "2>", "2>>", "1>"):
+            k += 1  # a redirection's target
+        elif not REDIRECT.match(w):
+            pkgs.append(w)
+        k += 1
+    named = bool(pkgs) and all(literal(p) and "..." not in p and p not in GO_META
+                               for p in pkgs)
+    return named and bool(run) and bool(re.search(r"[A-Za-z_][A-Za-z0-9_]{2,}", run))
+
+
+def runner(words):
+    """The first runner word as (name, the words after it), else None; a `python*`
+    word is a runner only with `-m pytest|unittest` after it (name: the module)."""
+    for i, w in enumerate(words):
+        base = os.path.basename(w)
+        if base in RUNNERS:
+            return base, words[i + 1:]
+        if base.startswith("python"):
+            for j in range(i + 1, len(words)):
+                if words[j] in ("-mpytest", "-munittest"):
+                    return words[j][2:], words[j + 1:]
+                if words[j] == "-m" and words[j + 1:j + 2] in (["pytest"], ["unittest"]):
+                    return words[j + 1], words[j + 2:]
+    return None
+
+
+def runs_suite(command, quotes=()):
+    """True when one shell command (quotes already blanked, `quotes` their text)
+    runs a whole suite. Fail closed: a command holding a runner word is read from
+    that word on, whatever wraps it, and passes only in a targeted shape."""
+    words = strip_wrappers(command.split())
+    if not words:
+        return False
+    if words[0] not in ("[", "[[") and NOT_LITERAL & set(words[0]):
+        return True  # a command word that is not a literal word can spell any command
+    if stdin_shell(words):
+        return True
+    head = os.path.basename(words[0])
+    if head in SHELLS and words[1:2] == ["-c"]:
+        return runs_suite(" ".join(words[2:3]), quotes)  # a quoted body was tested before blanking
+    found = runner(command.split())
+    if found is None:
+        return False
+    name, args = found
+    if name in ("pytest", "py.test"):
+        return not pytest_targeted(args, quotes)
+    if name == "unittest":
+        return not unittest_targeted(args)
+    if name == "go":
+        return not go_targeted(args, quotes)
+    if name in ("make", "gmake"):
+        return not make_targeted(args)
+    return True  # claude (a sitting), relay, tox, nox: never a targeted check
+
+
+def suite_lines(cell):
+    """The acceptance cell's commands that run a whole suite."""
+    spans = re.findall(r"`([^`]*)`", cell) or [cell]
+    out = []
+    for span in spans:
+        span = span.replace("\\|", "|")
+        for m in SHELL_BODY.finditer(span):
+            body = m.group(1) if m.group(1) is not None else m.group(2).replace('\\"', '"')
+            out.extend(suite_lines("`%s`" % body.replace("`", "")))
+        # a quote is not a command, but a double quote that expands keeps its `$`
+        quotes = []
+
+        def blank(m):
+            quotes.append(m.group(0)[1:-1])
+            expands = m.group(0)[0] == '"' and set(m.group(0)) & set("$`")
+            return " %sQ%s%d " % ("$" if expands else "", QUOTE_MARK, len(quotes) - 1)
+        span = QUOTED.sub(blank, span)
+        collapsed, before = span, None
+        while collapsed != before:  # `$(...)` in place, so its command word shows
+            before, collapsed = collapsed, SUBSTITUTION.sub("$S", collapsed)
+        commands = COMMAND_SPLIT.split(span)
+        commands += [c for c in COMMAND_SPLIT.split(collapsed) if c not in commands]
+        for command in commands:
+            command = command.strip()
+            if runs_suite(command, quotes):
+                out.append(QUOTE_INDEX.sub("", command))
+    return out
+
+
+def check_charters(repo, paths):
+    out = []
+    for path in paths:
+        if not match(path, "history/sittings/*.md"):
+            continue
+        data = read(repo, path)
+        if len(data) >= CHARTER_CEILING:
+            out.append("%s: charter: %d bytes, ceiling %d" % (path, len(data), CHARTER_CEILING))
+        lines = data.decode("utf-8", "replace").splitlines()
+        if not lines or not CHARTER_TITLE.match(lines[0]):
+            out.append("%s: charter: title is not `# Sitting <date>-<n>: <repo>, <component>`" % path)
+        rows = table_rows(lines)
+        for row in CHARTER_ROWS:
+            if row not in rows:
+                out.append("%s: charter: table row missing: %s" % (path, row))
+        heads = [l.rstrip() for l in lines]
+        for part in CHARTER_PARTS:
+            if part not in heads:
+                out.append("%s: charter: part missing: %s" % (path, part))
+    return out
+
+
+def check_packets(repo, paths):
+    out = []
+    for path in paths:
+        if not match(path, "design/packets/*.md"):
+            continue
+        data = read(repo, path)
+        if len(data) >= PACKET_CEILING:
+            out.append("%s: packet: %d bytes, ceiling %d" % (path, len(data), PACKET_CEILING))
+        lines = data.decode("utf-8", "replace").splitlines()
+        rows = table_rows(lines)
+        for row in PACKET_ROWS:
+            if row not in rows:
+                out.append("%s: packet: header row missing: %s" % (path, row))
+        cells = table_cells(lines)
+        if "verify" not in cells and os.path.basename(path) not in GRANDFATHERED:
+            out.append("%s: packet: verify row missing" % path)
+        if "verify" in cells and os.path.basename(path) not in GRANDFATHERED + SPENT:
+            for command in suite_lines(cells.get("acceptance", "")):
+                out.append("%s: packet: %s: %s" % (path, SUITE, command))
+        for n, title in enumerate(PACKET_SECTIONS, 1):
+            prefix = "## %d. %s" % (n, title)
+            if not any(l.startswith(prefix) for l in lines):
+                out.append("%s: packet: section missing: %s" % (path, prefix))
+    return out
+
+
+def check_sizes(repo, paths):
+    out = []
+    for path in paths:
+        if match(path, "design/conventions*.md"):
+            ceiling = CONVENTIONS_CEILING
+        elif match(path, "design/research*.md"):
+            ceiling = RECORD_CEILING
+        elif match(path, "design/review-*.md"):
+            ceiling = PACKET_CEILING
+        else:
+            continue
+        size = len(read(repo, path))
+        if size >= ceiling:
+            out.append("%s: size: %d bytes, ceiling %d" % (path, size, ceiling))
+    return out
+
+
+def split_frontmatter(text):
+    """(frontmatter lines, body lines), or (None, all lines) when unfenced."""
+    lines = text.splitlines()
+    if lines and lines[0] == "---":
+        for i, line in enumerate(lines[1:], 1):
+            if line == "---":
+                return lines[1:i], lines[i + 1:]
+    return None, lines
+
+
+def frontmatter(text):
+    """Key to value; a `>` or `|` block's indented lines joined by a space."""
+    head, _ = split_frontmatter(text)
+    fields, block = {}, None
+    for line in head or ():
+        m = re.match(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$", line)
+        if m:
+            key, value = m.group(1), m.group(2).strip()
+            block = key if re.match(r"^[>|][-+]?$", value) else None
+            if block or len(value) < 2 or value[0] != value[-1] or value[0] not in "'\"":
+                fields[key] = "" if block else value
+            else:
+                fields[key] = value[1:-1]
+        elif block and line[:1] in (" ", "\t") and line.strip():
+            fields[block] = (fields[block] + " " + line.strip()).lstrip()
+    return fields
+
+
+def check_plugin(repo, paths):
+    out = []
+    for path in paths:
+        if match(path, "plugin/commands/*.md"):
+            text = read(repo, path).decode("utf-8", "replace")
+            n = len(text.splitlines())
+            if n >= COMMAND_CEILING:
+                out.append("%s: plugin: %d lines, ceiling %d" % (path, n, COMMAND_CEILING))
+            keys = frontmatter(text)
+            for key in COMMAND_KEYS:
+                if key not in keys:
+                    out.append("%s: plugin: frontmatter lacks %s" % (path, key))
+        elif match(path, "plugin/agents/*.md"):
+            keys = frontmatter(read(repo, path).decode("utf-8", "replace"))
+            for key in AGENT_KEYS:
+                if key not in keys:
+                    out.append("%s: plugin: frontmatter lacks %s" % (path, key))
+        elif match(path, "plugin/skills/*/SKILL.md"):
+            text = read(repo, path).decode("utf-8", "replace")
+            fields = frontmatter(text)
+            for key in SKILL_KEYS:
+                if key not in fields:
+                    out.append("%s: plugin: frontmatter lacks %s" % (path, key))
+            n = len(fields.get("description", ""))
+            if n >= SKILL_DESCRIPTION_CEILING:
+                out.append("%s: plugin: description %d chars, ceiling %d"
+                           % (path, n, SKILL_DESCRIPTION_CEILING - 1))
+            n = len(split_frontmatter(text)[1])
+            if n >= SKILL_BODY_CEILING:
+                out.append("%s: plugin: %d body lines, ceiling %d"
+                           % (path, n, SKILL_BODY_CEILING - 1))
+    return out
+
+
+def check_links(repo, paths):
+    out = []
+    for path in paths:
+        if not path.endswith(".md"):
+            continue
+        fenced = False
+        text = read(repo, path).decode("utf-8", "replace")
+        for n, line in enumerate(text.splitlines(), 1):
+            if FENCE.match(line):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            for target in LINK.findall(CODE_SPAN.sub("", line)):
+                target = target.strip("<>")
+                if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith("#"):
+                    continue
+                target = target.split("#", 1)[0].split("?", 1)[0]
+                base = repo if target.startswith("/") else os.path.join(repo, os.path.dirname(path))
+                if not os.path.exists(os.path.join(base, target.lstrip("/"))):
+                    out.append("%s: link: line %d does not resolve: %s" % (path, n, target))
+    return out
+
+
+def check_next(repo, paths):
+    out = ["%s: next: a NEXT file is present" % p for p in paths
+           if os.path.basename(p) == "NEXT" and p != NEXT_EXEMPT]
+    try:
+        with open(os.path.join(repo, NEXT_EXEMPT), encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return out
+    named = [m.strip("`'\"") for line in text.splitlines() for m in NEXT_PROMPT.findall(line)]
+    if any(not os.path.isfile(os.path.join(repo, p)) for p in named):
+        out.append("%s: next: NEXT names a missing prompt" % NEXT_EXEMPT)
+    return out
+
+
+RULES = (check_charters, check_packets, check_sizes, check_plugin, check_links,
+         check_next)
+
+
+def lint(repo):
+    paths = files(repo)
+    out = []
+    for rule in RULES:
+        out.extend(rule(repo, paths))
+    return out
+
+
+def main(argv):
+    args = argv[1:]
+    repo = "."
+    try:
+        if args[:1] == ["--repo"] and len(args) == 2:
+            repo = args[1]
+        elif args:
+            raise UsageError("unknown arguments: %s" % " ".join(args))
+        refusals = lint(repo)
+    except UsageError as exc:
+        sys.stderr.write("doclint: %s\nusage: doclint [--repo DIR]\n" % exc)
+        return 1
+    for line in refusals:
+        print(line)
+    return 2 if refusals else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

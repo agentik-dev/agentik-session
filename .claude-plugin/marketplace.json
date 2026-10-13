@@ -1,0 +1,15 @@
+{
+  "name": "claude-code-session",
+  "description": "The session plugin: profiles and one resolved configuration per Claude Code session.",
+  "owner": {
+    "name": "agentik-dev"
+  },
+  "plugins": [
+    {
+      "name": "session",
+      "source": "./plugin",
+      "description": "Profiles for Claude Code sittings: one resolved configuration per session, offered to the plugins that depend on it.",
+      "version": "2.0.0-alpha.14"
+    }
+  ]
+}

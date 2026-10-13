@@ -1,0 +1,129 @@
+# The shipped profiles: the lowest layer of the resolution (overhaul-r1 §2.1).
+# A profile is a role. The model decides the window (the `models:` table); the
+# role decides the ceilings within it: `ceilings` on a 200k window, `ceilings_1m`
+# on a 1M window. A user or project layer that sets `ceilings` sets them on both
+# windows and wins over the role (models.py, resolver.py).
+# `defaults` carries every field; a profile names only what it changes, except
+# frontier, which states every field so the whole shape is readable in one place.
+# Strict YAML subset (D12): mappings, scalars, flat lists, one-level flow maps.
+
+# The window each model family runs on. A model string names its family
+# (`claude-opus-5-5` is opus); `<family>-1m` is the family under Claude Code's
+# 1M marker (`opus[1m]`), spelled so because a key holds no brackets.
+models:
+  fable: 1000000
+  mythos: 1000000
+  opus: 200000
+  opus-1m: 1000000
+  sonnet: 200000
+  haiku: 200000
+
+defaults:
+  description: ""
+  model: opus
+  effort: xhigh
+  subagents: opus
+  tools: null
+  permission_mode: auto
+  posture: signal
+  ceilings: {context: 180000, turns: 400}
+  ceilings_1m: {context: 180000, turns: 400}
+  checkpoint_at: 0.8
+  builders: {model: opus, max_concurrent: 3}
+  push: never
+  device: never
+  charter: {dir: history/sittings, required: true}
+  verify: null
+  respawn: {cap: 12, floor: 600, settle: 60}
+  # The priority and pacing every sitting meets (rules.py, `claude-session rules`).
+  # Each level text is quoted: it holds ": ". A layer replaces one level's text;
+  # the names S1 to S4 and their count are fixed.
+  priority:
+    enabled: true
+    levels:
+      S1: "harm: a reproduced bug that can do harm (a wrong write, data loss, a leaked secret, a safety path) or the repo's own gate red on main; it goes first, ahead of the current goal"
+      S2: "blocks the goal: an unmet acceptance criterion of the current goal, a defect in a new user's first run, or a dependency that holds the goal"
+      S3: "the build order: the goal's next slice, then the repo's pending list"
+      S4: "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its level, taken only when S1 to S3 have nothing ready or on an S3 slice's path; never ahead of S3"
+  pacing: {enabled: true, fallback: 1800, waiting: 3}
+  respeak: {narrative: tech}
+  decisions: {dir: decisions}
+  agent-relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
+
+profiles:
+  frontier:
+    description: Everything on the seat, full effort. For work that matters.
+    model: opus
+    effort: xhigh
+    subagents: opus
+    tools: null
+    permission_mode: auto
+    posture: signal
+    ceilings: {context: 180000, turns: 400}
+    ceilings_1m: {context: 180000, turns: 400}
+    checkpoint_at: 0.8
+    builders: {model: opus, max_concurrent: 3}
+    push: never
+    device: never
+    charter: {dir: history/sittings, required: true}
+    verify: null
+    respeak: {narrative: tech}
+    decisions: {dir: decisions}
+    agent-relay: {enabled: auto}
+  balanced:
+    description: Opus main thread, Sonnet subagents. The everyday default.
+    effort: high
+    subagents: sonnet
+  local:
+    description: Seat main thread, local subagents (serialised) via claude-local.
+    effort: high
+    subagents: null
+  local-only:
+    description: Main thread and subagents on the local model. Zero seat spend.
+    model: local/default
+    effort: medium
+    subagents: local/default
+    posture: "off"
+  scratch:
+    description: A test project. Local, low ceremony, nothing enforced.
+    model: local/default
+    effort: low
+    subagents: local/default
+    posture: "off"
+    charter: {required: false}
+  review:
+    description: Read-only review posture. Investigates, never edits.
+    tools: [Read, Glob, Grep]
+    permission_mode: plan
+  packets:
+    description: Writes packets and designs, never builds.
+    model: fable
+    effort: xhigh
+    subagents: opus
+    posture: signal
+  builder:
+    description: What the relay spawns.
+    model: opus
+    effort: high
+    subagents: opus
+    posture: deny
+  orchestrator:
+    description: The orchestrator for large, complex work, Fable 5.1 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
+    model: fable
+    effort: xhigh
+    subagents: opus
+    builders: {model: opus, max_concurrent: 3}
+    posture: signal
+    charter: {required: true}
+    ceilings: {context: 180000, turns: 400}
+    ceilings_1m: {context: 400000, turns: 400}
+  orchestrator-opus:
+    description: The orchestrator for small and medium projects, Opus 5.5 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
+    model: opus[1m]
+    effort: xhigh
+    subagents: opus
+    builders: {model: opus, max_concurrent: 3}
+    posture: signal
+    charter: {required: true}
+    ceilings: {context: 180000, turns: 400}
+    ceilings_1m: {context: 400000, turns: 400}

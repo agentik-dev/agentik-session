@@ -1,0 +1,2 @@
+# A repo that denies spawns in the reserve (the gate test).
+session: {posture: deny}

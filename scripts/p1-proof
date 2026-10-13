@@ -1,0 +1,334 @@
+#!/usr/bin/python3 -B
+"""p1-proof: rerun proof P1 of design/mod-r1.md (§6): one hooks.json holds `modules` beside
+the classic events, and the classic hooks still write their files when the module fails.
+
+Usage: scripts/p1-proof OUT [--tty] [--cwd DIR] CASE...
+
+For each CASE it copies plugin/ to OUT/<mode>-<case>/plugin and adds one minimal hooks
+module under `modules` in its hooks.json; the classic events, commands and timeouts are
+left as they are. It makes a fresh git repo OUT/<mode>-<case>/repo (one empty commit) and
+runs one real claude child there, with XDG_STATE_HOME=OUT/<mode>-<case>/state, the copy as
+`--plugin-dir`, the installed session plugin switched off for that run only (`--settings`),
+and `--debug-file` in the case's folder. The prompt reads one file before it answers,
+since only PostToolUse writes meter.json; a fresh repo gets an untracked README.md for it.
+Then it prints what the classic hooks wrote under
+state/<the tool's state dir>/, what the module wrote under state/p1-module/, the child's
+output, and the debug log's lines about the modules; report.json holds the same.
+
+Cases:
+  load-throw  the module's register() throws
+  crash       it loads, and every hook it adds throws
+  unload      its engine.create step replaces a core noun, which the API says unloads it
+  control     it loads cleanly and writes state/p1-module/session.<event>.json
+  refused     control, beside a sibling plugin (p1-refuser, loaded first) whose
+              plugin.register hook refuses the module of `session`
+
+Modes: by default `claude -p "<the prompt>" --max-turns 2`. With --tty, an
+interactive child in a private tmux server (`tmux -L p1proof`, never the relay's), one
+prompt, then /exit; the pane is captured to pane-*.txt and the server is killed. A fresh
+scratch repo is an untrusted folder: the script never accepts the trust dialog (that
+writes ~/.claude.json), it records the dialog and leaves; give --cwd a trusted checkout.
+
+Each case is one claude child and spends a little quota. The script makes no network call
+of its own and writes only under OUT (tmux keeps its socket in its own directory). The
+child's environment drops every CLAUDE* and RELAY_* variable, so a parent sitting's chain,
+profile and session id do not leak in. Exit 0 when every case ran, 2 on a usage error;
+the verdict is read off the report, never the exit code.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+PROMPT = "Read the file README.md, then reply with the word ok"
+# The installed plugin's id and the tool's state dir, read off the repo so a rename follows.
+PLUGIN = json.loads((REPO / "plugin" / ".claude-plugin" / "plugin.json").read_text())["name"]
+MARKET = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())["name"]
+APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "claude_session" / "config.py").read_text())[1]
+SETTINGS = json.dumps({"enabledPlugins": {f"{PLUGIN}@{MARKET}": False}})
+SOCK = "p1proof"
+CASES = ("load-throw", "crash", "unload", "control", "refused")
+
+MARK = '''
+async function mark($: EngineInterface, what: string): Promise<void> {
+  const root = await $.env.get("XDG_STATE_HOME")
+  if (root) await $.fs.write(`${root}/p1-module/${$.plugin.name}.${what}.json`,
+    JSON.stringify({ at: Date.now() }))
+}
+'''
+HEAD = "import type { Register, EngineInterface } from 'claude-code'\n"
+MARKING = '''
+  on('session.start', async ($, e, next) => { const r = await next(e); await mark($, 'session.start'); return r })
+  on('turn.complete', async ($, e, next) => { const r = await next(e); await mark($, 'turn.complete'); return r })
+'''
+MODULES = {
+    "load-throw": HEAD + '''
+export const register: Register = () => {
+  throw new Error('p1-proof: register throws at load')
+}
+''',
+    "crash": HEAD + '''
+const boom = (where: string): never => { throw new Error(`p1-proof: ${where} throws`) }
+
+export const register: Register = on => {
+  on('session.start', () => boom('session.start'))
+  on('prompt.submit', () => boom('prompt.submit'))
+  on('prompt.compose', () => boom('prompt.compose'))
+  on('turn.start', () => boom('turn.start'))
+  on('turn.complete', () => boom('turn.complete'))
+  on('session.append', () => boom('session.append'))
+  on('tool.describe', () => boom('tool.describe'))
+  on('ui.render', { component: 'AbovePrompt' }, () => boom('ui.render'))
+  on('session.end', () => boom('session.end'))
+}
+''',
+    "unload": HEAD + MARK + '''
+export const register: Register = on => {
+  on('engine.create', async ($, e, next) => {
+    const built = await next(e)
+    return { ...built, clock: {} as never }
+  })''' + MARKING + '}\n',
+    "control": HEAD + MARK + '''
+export const register: Register = on => {''' + MARKING + '}\n',
+}
+REFUSER = HEAD + MARK + '''
+export const register: Register = on => {
+  on('plugin.register', ($, e, next) =>
+    e.name === 'session' ? { refuse: 'p1-proof: the session module is refused' } : next(e))''' + MARKING + '}\n'
+MODULES["refused"] = MODULES["control"]
+
+DEBUG_RE = re.compile(r"p1-proof|p1-refuser|hooks module|session@inline|unload|refuse|did not load",
+                      re.I)
+
+
+def die(msg):
+    sys.stderr.write(f"p1-proof: {msg}\n")
+    sys.exit(2)
+
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def lay_plugin(case, dest):
+    """plugin/ copied, `modules` added, the classic `hooks` block untouched."""
+    shutil.copytree(REPO / "plugin", dest, ignore=shutil.ignore_patterns("types", "__pycache__"))
+    hj = dest / "hooks" / "hooks.json"
+    doc = json.loads(hj.read_text())
+    before = json.dumps(doc["hooks"], sort_keys=True)
+    doc = {"modules": ["./p1.ts"], **doc}
+    assert json.dumps(doc["hooks"], sort_keys=True) == before
+    write(hj, json.dumps(doc, indent=2) + "\n")
+    write(dest / "hooks" / "p1.ts", MODULES[case])
+    return sorted(doc["hooks"])
+
+
+def lay_refuser(dest):
+    write(dest / ".claude-plugin" / "plugin.json", json.dumps(
+        {"name": "p1-refuser", "version": "0.1.0",
+         "description": "P1 proof: refuses the session plugin's hooks module"}) + "\n")
+    write(dest / "hooks" / "hooks.json", '{ "modules": ["./p1.ts"] }\n')
+    write(dest / "hooks" / "p1.ts", REFUSER)
+
+
+def fresh_repo(dest):
+    dest.mkdir(parents=True)
+    git = ["git", "-c", "user.name=p1-proof", "-c", "user.email=p1-proof@invalid",
+           "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
+    subprocess.run(git + ["init", "-q"], cwd=dest, check=True)
+    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "p1-proof"], cwd=dest,
+                   check=True)
+    write(dest / "README.md", "p1-proof scratch repo\n")
+
+
+def child_env(state):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("CLAUDE", "RELAY_")) and k not in ("TMUX", "TMUX_PANE")}
+    env["XDG_STATE_HOME"] = str(state)
+    return env
+
+
+def claude_argv(case, base, tty):
+    argv = ["claude"]
+    if not tty:
+        argv += ["-p", PROMPT]
+    if case == "refused":
+        argv += ["--plugin-dir", str(base / "refuser")]
+    argv += ["--plugin-dir", str(base / "plugin"), "--settings", SETTINGS,
+             "--max-turns", "2", "--debug-file", str(base / "debug.log")]
+    return argv
+
+
+def run_print(case, base, cwd, env):
+    try:
+        p = subprocess.run(claude_argv(case, base, False), cwd=cwd, env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=300)
+        out = {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
+    except subprocess.TimeoutExpired as e:
+        out = {"rc": "timeout", "stdout": e.stdout or "", "stderr": e.stderr or ""}
+    write(base / "stdout.txt", str(out["stdout"]))
+    write(base / "stderr.txt", str(out["stderr"]))
+    return out
+
+
+def tmux(env, *args):
+    return subprocess.run(["tmux", "-L", SOCK, "-f", "/dev/null", *args], env=env,
+                          capture_output=True, text=True)
+
+
+def pane(env, scroll=False):
+    args = ["capture-pane", "-p", "-t", "p1"] + (["-S", "-400"] if scroll else [])
+    return tmux(env, *args).stdout
+
+
+def settle(env, until, wall, quiet=3.0):
+    """Poll the pane once a second until `until(text)` holds and it has not changed for
+    `quiet` seconds, or `wall` seconds pass. Returns (text, held)."""
+    t0, last, since = time.time(), None, time.time()
+    while time.time() - t0 < wall:
+        time.sleep(1)
+        text = pane(env)
+        if text != last:
+            last, since = text, time.time()
+        elif until(text) and time.time() - since >= quiet:
+            return text, True
+    return last or "", False
+
+
+def dialog(text):
+    """A menu (the trust dialog, a permission or setup question): never answered here."""
+    return bool(re.search(r"(?m)^[\s│❯>]*\d+\.\s+(Yes|No)\b", text)) or bool(
+        re.search(r"(?i)do you trust|trust this folder|trust the files", text))
+
+
+def prompt_ready(text):
+    """The input box: a `❯`/`>` line that is no menu item, under a rule of `─`."""
+    lines = text.splitlines()
+    box = any(re.match(r"^[│ ]*[>❯](\s|$)(?!\s*\d+\.)", ln) for ln in lines)
+    return box and any("────" in ln for ln in lines) and not dialog(text)
+
+
+def run_tty(case, base, cwd, env):
+    if tmux(env, "has-session").returncode == 0:
+        die(f"a tmux server on -L {SOCK} is already running; not touching it")
+    line = " ".join("'" + a.replace("'", "'\\''") + "'" for a in claude_argv(case, base, True))
+    body = f"{line}; echo \"[p1-proof: claude exited $?]\"; sleep 120"
+    out = {"stages": []}
+    try:
+        r = tmux(env, "new-session", "-d", "-s", "p1", "-x", "200", "-y", "50", "-c", str(cwd),
+                 "sh", "-c", body)
+        if r.returncode:
+            out["error"] = r.stderr
+            return out
+        text, ok = settle(env, lambda t: prompt_ready(t) or dialog(t), 90)
+        write(base / "pane-0-start.txt", text)
+        out["stages"].append(("start", ok and prompt_ready(text)))
+        if dialog(text):
+            out["dialog"] = True                      # left unanswered; the server dies below
+        elif ok:
+            tmux(env, "send-keys", "-t", "p1", "-l", PROMPT)
+            time.sleep(1)
+            tmux(env, "send-keys", "-t", "p1", "Enter")
+            text, ok = settle(
+                env, lambda t: re.search(r"(?im)^\W*ok\W*$", t.split(PROMPT, 1)[-1]) is not None,
+                150, quiet=5.0)
+            write(base / "pane-1-answer.txt", text)
+            out["stages"].append(("answer", ok))
+            tmux(env, "send-keys", "-t", "p1", "-l", "/exit")
+            time.sleep(1)
+            tmux(env, "send-keys", "-t", "p1", "Enter")
+            text, ok = settle(env, lambda t: "[p1-proof: claude exited" in t, 40, quiet=1.0)
+            if not ok:
+                tmux(env, "send-keys", "-t", "p1", "Enter")
+                text, ok = settle(env, lambda t: "[p1-proof: claude exited" in t, 20, quiet=1.0)
+            out["stages"].append(("exit", ok))
+        write(base / "pane.txt", pane(env, scroll=True))
+    finally:
+        tmux(env, "kill-server")
+    return out
+
+
+def survey(base):
+    root = base / "state" / APP
+    sessions = {}
+    for d in sorted((root / "sessions").glob("*")) if (root / "sessions").is_dir() else []:
+        sessions[d.name] = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
+    other = sorted(str(p.relative_to(root)) for p in root.rglob("*")
+                   if p.is_file() and "sessions" not in p.relative_to(root).parts) \
+        if root.is_dir() else []
+    marks = sorted(p.name for p in (base / "state" / "p1-module").glob("*"))
+    debug = []
+    log = base / "debug.log"
+    if log.is_file():
+        with open(log, errors="replace") as f:
+            for ln in f:
+                if DEBUG_RE.search(ln):
+                    debug.append(ln.rstrip()[:300])
+    held = any({"resolved.json", "meter.json"} <= set(files) and
+               ({"activity.json", "turn-ended.json"} & set(files))
+               for files in sessions.values())
+    return {"sessions": sessions, "state_other": other, "module_marks": marks,
+            "debug": debug[:40], "debug_lines": len(debug), "classic_held": held}
+
+
+def main(argv):
+    tty, cwd, cases, out = False, None, [], None
+    it = iter(argv)
+    for a in it:
+        if a == "--tty":
+            tty = True
+        elif a == "--cwd":
+            cwd = Path(next(it, "")).resolve()
+        elif a in CASES:
+            cases.append(a)
+        elif out is None and not a.startswith("-"):
+            out = Path(a).resolve()
+        else:
+            die(f"unknown argument {a!r}; usage: p1-proof OUT [--tty] [--cwd DIR] CASE...")
+    if out is None or not cases:
+        die("usage: p1-proof OUT [--tty] [--cwd DIR] CASE...  (cases: " + ", ".join(CASES) + ")")
+    for case in cases:
+        base = out / f"{'tty' if tty else 'p'}-{case}"
+        if base.exists():
+            die(f"{base} exists; give a fresh OUT")
+        events = lay_plugin(case, base / "plugin")
+        if case == "refused":
+            lay_refuser(base / "refuser")
+        state = base / "state"
+        state.mkdir(parents=True)
+        where = cwd
+        if where is None:
+            fresh_repo(base / "repo")
+            where = base / "repo"
+        env = child_env(state)
+        ran = run_tty(case, base, where, env) if tty else run_print(case, base, where, env)
+        rep = {"case": case, "mode": "tty" if tty else "print", "cwd": str(where),
+               "classic_events": events, "child": ran, **survey(base)}
+        write(base / "report.json", json.dumps(rep, indent=2) + "\n")
+        print(f"== {rep['mode']} {case} (cwd {where})")
+        print(f"   classic held: {rep['classic_held']}")
+        for sid, files in rep["sessions"].items():
+            print(f"   sessions/{sid}/: {', '.join(files)}")
+        print(f"   other state: {', '.join(rep['state_other']) or '-'}")
+        print(f"   module marks: {', '.join(rep['module_marks']) or '-'}")
+        if not tty:
+            print(f"   child rc {ran['rc']}; stdout {ran['stdout'].strip()[:200]!r}")
+            print(f"   stderr {ran['stderr'].strip()[:600]!r}")
+        else:
+            print(f"   stages {ran.get('stages')} dialog={ran.get('dialog', False)}"
+                  f" error={ran.get('error', '')!r}")
+        print(f"   debug lines about modules ({rep['debug_lines']}):")
+        for ln in rep["debug"][:15]:
+            print(f"     {ln}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
