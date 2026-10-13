@@ -1,10 +1,10 @@
 ---
 description: "This session's meter: context, turns and the budget zone"
 argument-hint: "[--json]"
-allowed-tools: [Bash(claude-session *)]
+allowed-tools: [Bash(agentik-session *)]
 ---
 
-!`claude-session status $ARGUMENTS`
+!`agentik-session status $ARGUMENTS`
 
 The line above is this session's meter, from the PostToolUse hook's `meter.json`:
 context used against the context ceiling, turns against the turn ceiling, and

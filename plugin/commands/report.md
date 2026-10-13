@@ -1,10 +1,10 @@
 ---
 description: "The ledger: one row per ended session"
 argument-hint: "[--since YYYY-MM-DD] [--json]"
-allowed-tools: [Bash(claude-session *)]
+allowed-tools: [Bash(agentik-session *)]
 ---
 
-!`claude-session report $ARGUMENTS`
+!`agentik-session report $ARGUMENTS`
 
 The output is a table, one row per session that ended, from the ledger the
 SessionEnd hook appends: when it ended, the session, the project, turns,
