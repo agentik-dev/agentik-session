@@ -7,7 +7,7 @@ the last list serves every later start) and appends one record per start to
 ledger's line count when it started. A SIGTERM it receives is recorded in
 `$FAKE_CLAUDE_LOG.signals`. It drives the hooks as a sitting would, by running
 `<this interpreter> -B -m claude_session hook <event>` with a stdin payload, never
-PATH's `claude-session`.
+PATH's `agentik-session`.
 
 Steps: ["hook", event, {payload}], ["verb", charter], ["respawn", charter] (PreToolUse,
 the verb, PostToolUse and Stop, as a sitting's close), ["write", path, text],
@@ -82,7 +82,7 @@ def _play(steps, sid, log, state):
         if op == "hook":
             _run(["hook", args[0]], {"session_id": sid, **(args[1] if len(args) > 1 else {})})
         elif op in ("verb", "respawn"):
-            cmd = f"claude-session checkpoint --respawn --charter {args[0]}"
+            cmd = f"agentik-session checkpoint --respawn --charter {args[0]}"
             bash = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             if op == "respawn":
                 _run(["hook", "PreToolUse"], {"session_id": sid, **bash})

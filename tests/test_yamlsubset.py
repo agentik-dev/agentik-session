@@ -21,7 +21,7 @@ ACCEPTED = [
     ("a: [Read, Glob, \"x, y\"]\n", {"a": ["Read", "Glob", "x, y"]}),
     ("a: []\nb: {}\n", {"a": [], "b": {}}),
     ("c: {context: 180000, turns: 400}\n", {"c": {"context": 180000, "turns": 400}}),
-    ("agent-relay: {enabled: auto}\n", {"agent-relay": {"enabled": "auto"}}),
+    ("relay: {enabled: auto}\n", {"relay": {"enabled": "auto"}}),
     ("i:\n  - {path: /a, sha256: null}\n", {"i": [{"path": "/a", "sha256": None}]}),
 ]
 

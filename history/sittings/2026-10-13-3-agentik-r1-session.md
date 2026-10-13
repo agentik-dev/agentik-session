@@ -13,7 +13,7 @@
 - [x] act 2, paths (c1 c4 c5 c6 c7 c13, ruling 9): `config.pick`, resolver, doctor warn rows, profiles `relay:`, launch, hooks; fixtures moved; suite green but test_readme's count (act 5)
 - [x] act 3, the tool: pyproject, `prog`/start lines `agentik session`, `--version`, install (ruling 2: launcher, relative link, front door, new share), alias note (ruling 3), messages; tests renamed, pty test for the note
 - [x] act 4, the plugin: commands `Bash(agentik-session *)`, skill, `hooks/run` and `session.ts` (c11: new name, else old); 48 TS tests pass
-- [ ] act 5, docs: RUNBOOK, readme source + render, test_readme; `.hygiene-allow`; `renamed` 0
+- [x] act 5, docs: RUNBOOK, README + source renamed in step, sidecar re-hashed; test_readme's tokens (§3); `.hygiene-allow` rows; hygiene exit 0, `renamed` outside 0
 - [ ] acceptance + charter close
 
 ## Rulings beyond the packet
@@ -25,7 +25,8 @@
 - R18: a user `profiles.yaml`'s old key is renamed per body before the merge, so it still overrides the shipped `relay`.
 
 ## Handover
-- (none yet)
+- decide, owner: the coordinator (consumer: the next `make readme`): the README was renamed by hand beside its source and `rendered.sha256` re-hashed by `shasum`, since `make readme` runs `claude -p` (the wall: no `claude` beyond `make check`'s, no network); re-render once at the next readme pass.
+- decide, owner: the coordinator (consumer: the gate): acceptance line 2 sums `files` by group, a key the canonical `--json` no longer has per file in that shape; read `groups.renamed.outside_files` instead.
 
 ## Exit
 - open

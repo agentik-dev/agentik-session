@@ -1,4 +1,4 @@
-# claude-code-session Runbook
+# agentik-session Runbook
 
 What the README does not say: setup detail, choosing a profile, what
 `local-only` measured on this machine, adjusting a session, and the budget
@@ -12,10 +12,10 @@ resolves to deny, even though Claude Code still reports success. Read section
 
 1. Install the launcher: `make install` from the repo root, with
    `claude_session/` committed (a dirty package exits 2). It copies the
-   committed package to `~/.local/share/claude-session/<tree>/` (`<tree>` is
+   committed package to `~/.local/share/agentik-session/<tree>/` (`<tree>` is
    `git rev-parse HEAD:claude_session`; an older copy is pruned unless a
    running process names it or it is among the newest three) and writes
-   `~/.local/bin/claude-session`, which runs that copy with `python -P`, so
+   `~/.local/bin/agentik-session`, which runs that copy with `python -P`, so
    neither the directory a hook fires in nor the live checkout can change a
    hook. The interpreter is baked in: the repo's `.venv/bin/python` by
    realpath, else homebrew's `python3`, else `python3`; python 3.11 or newer.
@@ -25,14 +25,14 @@ resolves to deny, even though Claude Code still reports success. Read section
    instead: the hooks spawn with Claude Code's PATH, not your shell's, and a
    venv-only binary leaves every hook silently dead.
 2. Install the plugin: `claude plugin marketplace add <clone>`, then
-   `claude plugin install session@claude-code-session`. The plugin wires its
+   `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
    `Stop`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
-   `claude-session hook <event>` and exits 0 silently when the CLI is not on
+   `agentik-session hook <event>` and exits 0 silently when the CLI is not on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the CLI installs
    first: `make install`, then `claude plugin update
-   session@claude-code-session`, then restart Claude Code. That order is
+   session@agentik`, then restart Claude Code. That order is
    what keeps the CLI current with its plugin's hooks. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
    on `Stop`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
@@ -40,24 +40,24 @@ resolves to deny, even though Claude Code still reports success. Read section
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
    fails its `plugin` line and names an event its CLI does not handle.
-3. Run `claude-session doctor`. It checks the CLI, the python it runs under
+3. Run `agentik session doctor`. It checks the CLI, the python it runs under
    (and the newest known release), the plugin and its dependencies; a failing
    check exits 2 and names itself.
 
-Until the hooks fire, `claude-session status` and `budget` have no samples
+Until the hooks fire, `agentik session status` and `budget` have no samples
 and say so.
 
 ## 2. Choosing a profile
 
 Four constraints apply before you pick a lane, not after:
 
-- `local`, `local-only`, and `scratch` run through your own `claude-local`,
+- `local`, `local-only`, and `scratch` run through your own `agentik-agents local`,
   which points `ANTHROPIC_BASE_URL` at the router. That disables Remote
   Control and voice dictation for the whole session. Use a seat profile
   (`frontier`, `balanced`, `review`) if you need either.
 - The local-agent design names a local model on the main thread as an
   explicit non-goal. `local-only` and `scratch` do exactly that.
-- agentroute's local policy caps local subagent concurrency at 1. Local
+- `agentik agents route`'s local policy caps local subagent concurrency at 1. Local
   subagents run one at a time: ten of them is ten sequential runs, not a
   parallel sweep. Local is cheaper, not faster.
 - A bare `Bash` allow in a `tools` list is not a sandbox. File tools take
@@ -67,13 +67,13 @@ Four constraints apply before you pick a lane, not after:
 `local-only` is the outlier: it is the only profile that can leave the seat
 completely idle end to end, but the measured cost runs about 65 seconds per
 turn (see below), and its own design guidance argues against using it as a
-default. `claude-session config list` shows every profile; the shipped ones:
+default. `agentik session config list` shows every profile; the shipped ones:
 
 | config | lane | main thread | subagents | effort | tools | posture |
 |---|---|---|---|---|---|---|
 | `frontier` | seat | opus | opus | xhigh | default | signal |
 | `balanced` | seat | opus | sonnet | high | default | signal |
-| `local` | local | seat | claude-local routing | high | default | signal |
+| `local` | local | seat | agentik-agents local routing | high | default | signal |
 | `local-only` | local-only | local default (27B) | local default | medium | default | off |
 | `scratch` | local-only | local default | local default | low | default | off |
 | `review` | seat | opus | opus | xhigh | Read, Glob, Grep + plan mode | signal |
@@ -81,19 +81,19 @@ default. `claude-session config list` shows every profile; the shipped ones:
 `frontier`, `balanced`, and `review` also load the respeak plugin, via
 `--plugin-dir`.
 
-- `claude-session start frontier`: full-effort seat work, opus on both
+- `agentik session start frontier`: full-effort seat work, opus on both
   threads. Pick it when the task needs the strongest model everywhere. Cost:
   full seat billing at `xhigh` effort.
-- `claude-session start balanced`: opus main thread, sonnet subagents. Pick
+- `agentik session start balanced`: opus main thread, sonnet subagents. Pick
   it as the default seat config when subagent work does not need opus-grade
   reasoning. Cost: seat billing, lighter than `frontier` on the subagent
   side.
-- `claude-session start local`: seat main thread; subagents go through
-  `claude-local`'s own agentroute preflight and credential rules, which
+- `agentik session start local`: seat main thread; subagents go through
+  `agentik-agents local`'s own router preflight and credential rules, which
   never replace your seat OAuth. Pick it when opus should drive but
   subagent work should stay off the seat. Cost: subagents serialize (see
   above), plus routing overhead per call.
-- `claude-session start local-only`: local model on both threads at
+- `agentik session start local-only`: local model on both threads at
   `medium` effort. Pick it only for the mechanical, bounded work the design
   doc scopes to rung 0 (retrieval, summaries, inventories, first-pass
   review, run-the-tests, bulk edits with a test as the contract), entered
@@ -101,11 +101,11 @@ default. `claude-session config list` shows every profile; the shipped ones:
   agent belongs on rung 1 instead. Cost: about 65 seconds per turn measured
   (see below). With no permission mode set, an edit is declined outright.
   Not a daily driver.
-- `claude-session start scratch`: same local-only lane, `low` effort. Pick
+- `agentik session start scratch`: same local-only lane, `low` effort. Pick
   it for throwaway exploration you would not run unattended. Cost:
   same serialization and reasoning-speed limits as `local-only`, at a lower
   effort ceiling.
-- `claude-session start review`: opus, `xhigh` effort, tools restricted to
+- `agentik session start review`: opus, `xhigh` effort, tools restricted to
   `Read`, `Glob`, `Grep` plus plan mode. Pick it for an audit that cannot
   edit anything by construction. Cost: full seat billing at `xhigh`, same as
   `frontier`.
@@ -114,7 +114,7 @@ default. `claude-session config list` shows every profile; the shipped ones:
 
 - `qwen3.8:27b-mtp-q8_0` is what `local/default` resolves to: 29 GB, already
   pulled.
-- `agentroute --check`: 8 ok, 0 warn, 0 FAIL.
+- `agentik agents route --check`: 8 ok, 0 warn, 0 FAIL.
 - Cold start evicts whatever model is resident and loads the 27B: about 25
   seconds.
 - 155 s: local-only, tools limited to `Read`, `Glob`, `Grep` (3 tools), 2
@@ -127,12 +127,12 @@ default. `claude-session config list` shows every profile; the shipped ones:
   ruled out the irrelevant file, and wrote the right guard. The `Edit` call
   itself was declined. Nobody was there to answer the prompt, and an
   unanswered ask resolves to deny. Claude Code still reported
-  `subtype=success` / `is_error=false`. `claude-session` classified the run
+  `subtype=success` / `is_error=false`. `agentik session` classified the run
   `PARTIAL`, because it reads `permission_denials` in the transcript rather
   than the process exit code.
 - Router ledger for both local-only runs above: every request routed
   `local`, zero non-local. The seat stayed untouched on both.
-- agentroute's local policy: effort default `low`, max `medium`;
+- `agentik agents route`'s local policy: effort default `low`, max `medium`;
   `max_tokens<=8192`; concurrency 1.
 - `[claude-code:unrecognized_model]` on stderr for `local/default` is
   expected and benign; the agents plugin's own end-to-end rigs grep it out.
@@ -146,7 +146,7 @@ knob becomes a per-session CLI flag: `--model`, `--effort`, `--tools`,
 `--permission-mode`, `--plugin-dir`, `--setting-sources`, `--settings`,
 `--append-system-prompt`, `--add-dir`, `--name`. A configured session is
 exactly as disposable as an unconfigured one. Run
-`claude-session start <profile> --dry-run` to see the literal command before
+`agentik session start <profile> --dry-run` to see the literal command before
 it runs anything.
 
 `set` writes to an overlay keyed by `$CLAUDE_CODE_SESSION_ID`. The
@@ -176,7 +176,7 @@ Two kinds of key behave differently:
 - Live keys (`posture`, `reserve_pct`, `checkpoint`, `notes`) take effect
   immediately, no restart needed.
 
-`claude-session config show [name] [--stored]` marks whatever the overlay
+`agentik session config show [name] [--stored]` marks whatever the overlay
 is shadowing:
 
 ```
@@ -190,10 +190,10 @@ accepts; `setting_sources` must include `user`, since dropping it removes
 these hooks. `env` refuses `PATH`, `PYTHONPATH`, `DYLD_*`, `ANTHROPIC_*` and
 the credential variables outright. `name` and `description` are not settable.
 
-Commands: `claude-session set <key> <value> [--save] [--config NAME]`,
-`claude-session config list`, `claude-session config show [name] [--stored]`,
-`claude-session config new <name> --from <base> --description "..."`,
-`claude-session config delete <name>`.
+Commands: `agentik session set <key> <value> [--save] [--config NAME]`,
+`agentik session config list`, `agentik session config show [name] [--stored]`,
+`agentik session config new <name> --from <base> --description "..."`,
+`agentik session config delete <name>`.
 
 An overlay set with `set` is confirmed gone once the `SessionEnd` hook
 fires: this is covered by test, not just by design. It depends on the plugin's
@@ -222,15 +222,15 @@ and listed for the doctor as `<layer>: session.<key>.<field>`.
 
 ## 4. Budget and checkpoints as a signal
 
-The band above the prompt (`session: ctx <c>% · turns <t>% · <zone>`) is the plugin's hooks module; at session start it runs `claude-session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
+The band above the prompt (`session: ctx <c>% · turns <t>% · <zone>`) is the plugin's hooks module; at session start it runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
 
-The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `claude-session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/claude-code-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent.
+The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `agentik session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent.
 
-Before each spawn, and each SendMessage resume, the module asks `claude-session admission admit --session <id>` for a verdict (one JSON object on stdin: the spawn's type, model, parent model, background, fork, its `tool_use_id`, the window readings and `resume`). Inside the same lock the verb reads the ledger, projects the five-hour window's peak at its reset (the burn of each active main thread, each running helper's life left and the new spawn's, fit from the ledger once it holds 20 ten-minute intervals, seeded before), appends one `verdict` line and prints `{verdict, mode, text, peak}`: `admitted`, `unread` (no five-hour reading), `stale` or `wait` (the reading's reset has passed), `denied` (the seven-day window at its ceiling), `deferred` (interactive) or `not-started` (`-p`), the last three with the text the Agent tool will show once refusals are built. `session.admission` sets `ceiling` (97), `margin` (3), `ceiling_7d` (97) and the `seeds`; `mode` is `observe` only, so nothing is refused yet: each answer is one `admission: admit …` line in the debug log, and the spawn goes ahead whatever it says.
+Before each spawn, and each SendMessage resume, the module asks `agentik session admission admit --session <id>` for a verdict (one JSON object on stdin: the spawn's type, model, parent model, background, fork, its `tool_use_id`, the window readings and `resume`). Inside the same lock the verb reads the ledger, projects the five-hour window's peak at its reset (the burn of each active main thread, each running helper's life left and the new spawn's, fit from the ledger once it holds 20 ten-minute intervals, seeded before), appends one `verdict` line and prints `{verdict, mode, text, peak}`: `admitted`, `unread` (no five-hour reading), `stale` or `wait` (the reading's reset has passed), `denied` (the seven-day window at its ceiling), `deferred` (interactive) or `not-started` (`-p`), the last three with the text the Agent tool will show once refusals are built. `session.admission` sets `ceiling` (97), `margin` (3), `ceiling_7d` (97) and the `seeds`; `mode` is `observe` only, so nothing is refused yet: each answer is one `admission: admit …` line in the debug log, and the spawn goes ahead whatever it says.
 
-The band shows the window: at every `record` and `admit` the verb rewrites `admission/band.json` (0600, inside the same lock) with the newest five-hour reading, its projected peak with no new spawn, the helpers in flight, the room left for spawns of the parent's family under `ceiling` less `margin`, the `deferred` and `wait` verdicts since the window began and the seven-day reading. The module draws it as a second line under the session's, cut to the band's width, for example `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe` (`5h no reading` before the first reading; `· <n>s old` past 120 s). While a survey holds the band it draws neither line; another plugin's line stays under the two. The UserPromptSubmit hook adds the same line to the budget context; nothing that decides reads the file. `claude-session report` ends with `admission: five-hour windows`, one row per window in the ledger: its reset, its last reading, `held` when a spawn waited in it (in observe: would have) or `idle`, and `under 90` when the last reading is below 90, the use the target asks for; `admission: no ledger` without one.
+The band shows the window: at every `record` and `admit` the verb rewrites `admission/band.json` (0600, inside the same lock) with the newest five-hour reading, its projected peak with no new spawn, the helpers in flight, the room left for spawns of the parent's family under `ceiling` less `margin`, the `deferred` and `wait` verdicts since the window began and the seven-day reading. The module draws it as a second line under the session's, cut to the band's width, for example `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe` (`5h no reading` before the first reading; `· <n>s old` past 120 s). While a survey holds the band it draws neither line; another plugin's line stays under the two. The UserPromptSubmit hook adds the same line to the budget context; nothing that decides reads the file. `agentik session report` ends with `admission: five-hour windows`, one row per window in the ledger: its reset, its last reading, `held` when a spawn waited in it (in observe: would have) or `idle`, and `under 90` when the last reading is below 90, the use the target asks for; `admission: no ledger` without one.
 
-The same module records the engine's own measure beside the meter: every `session.measure` runs `claude-session measure record --session <id>` with `{context, rateLimits, cost, changed}` on stdin, which writes `measure.json` (0600) in the session's directory; it exits 2 on a refused key, number, id or JSON and 1 when the session's directory is absent, writing nothing then. `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>% (<age>s apart)` when the two were written within 120 s, `measure: not comparable (…)` otherwise, and `measure: none` without the file; `doctor`'s `measure` row warns at a drift of 10% or more and never fails. A drift means the meter may parse the transcript wrong: the budget still reads only the meter.
+The same module records the engine's own measure beside the meter: every `session.measure` runs `agentik session measure record --session <id>` with `{context, rateLimits, cost, changed}` on stdin, which writes `measure.json` (0600) in the session's directory; it exits 2 on a refused key, number, id or JSON and 1 when the session's directory is absent, writing nothing then. `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>% (<age>s apart)` when the two were written within 120 s, `measure: not comparable (…)` otherwise, and `measure: none` without the file; `doctor`'s `measure` row warns at a drift of 10% or more and never fails. A drift means the meter may parse the transcript wrong: the budget still reads only the meter.
 
 Budget is a signal, not a gate. The sitting's two ceilings (context, turns)
 drive the meter; the used share, the larger of the two, sets the zone, as the
@@ -245,8 +245,8 @@ drive the meter; the used share, the larger of the two, sets the zone, as the
 | exhausted | 100% | exit |
 
 `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80% by default),
-then every tenth tool; `EXIT: ...` arrives at 100%. `claude-session status`
-prints the meter; `claude-session budget` the zone and checkpoint cadence.
+then every tenth tool; `EXIT: ...` arrives at 100%. `agentik session status`
+prints the meter; `agentik session budget` the zone and checkpoint cadence.
 
 Postures, least to most restrictive, all confirmed by test:
 
@@ -259,7 +259,7 @@ Postures, least to most restrictive, all confirmed by test:
   just asks.
 
 A checkpoint is a commit or a durable record: run one and the session is
-handoff-ready at that moment. `claude-session checkpoint [-m MSG] [-c]`,
+handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
 where `-c` runs `git add -u` (tracked files only) and commits. It never
 stages untracked files: the wind-down nudge makes an autonomous agent the
 likeliest caller, and `add -A` would sweep up a plaintext `.env` or a
@@ -270,7 +270,7 @@ tfstate. Untracked files are named on stderr so you can add them yourself.
 SessionStart's line carries one block of at most 320 bytes after `resolved
 config at <path>`: the four level labels, that the Next act takes the highest
 ready, and the pacing. Each label is its level's text to the first colon, at
-most 24 characters. `claude-session rules` prints both whole, as resolved:
+most 24 characters. `agentik session rules` prints both whole, as resolved:
 the levels, the rules for filing and for bugs, and the pacing four.
 
 - Priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest. A
@@ -292,14 +292,14 @@ the levels, the rules for filing and for bugs, and the pacing four.
 - Upgrade the CLI first (`make install`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
-### Restarting a sitting: `claude-session run`
+### Restarting a sitting: `agentik session run`
 
-`claude-session run` starts Claude Code and starts it again each time a
+`agentik session run` starts Claude Code and starts it again each time a
 sitting closes on RESPAWN, so a sitting near its ceilings restarts rather
 than compacts. Run it at a terminal, outside any Claude Code session:
 
 ```sh
-CLAUDE_SESSION_PROFILE=orchestrator-opus claude-session run --chain night -- \
+CLAUDE_SESSION_PROFILE=orchestrator-opus agentik session run --chain night -- \
     --model 'opus[1m]' "/loop 30m check in, then RESPAWN at 80%"
 ```
 
@@ -307,7 +307,7 @@ Everything after `--` goes to `claude` unchanged at every start, behind a
 fresh `--session-id`. Flags that resume, fork, detach or print are refused,
 and so is `/compact`. A value that begins with `-` is refused after its
 flag; write it as `--flag=value`. A sitting restarts only when its charter's
-`## Next act` opens on `RESPAWN`, the main thread ran `claude-session
+`## Next act` opens on `RESPAWN`, the main thread ran `agentik session
 checkpoint --respawn --charter <file>`, and the turn has ended and stood
 `settle` seconds with no helper call open. The launcher then ends the
 sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
@@ -316,11 +316,11 @@ RESPAWN stops the chain, and a crash (a nonzero exit) is never restarted.
 Every stop but a hang-up prints a start line that runs as printed (after a
 hang-up the launcher writes nothing more to the terminal).
 
-- A RESPAWN close runs in one order: `claude-session charter close --exit
+- A RESPAWN close runs in one order: `agentik session charter close --exit
   "<text>" <file>`, then commit the charter (close prints the line, which
   runs as is from any cwd: `next: git -C <dir> add -- <name> && git -C <dir>
   commit -m "charter: the exit taken" -- <name>`, `<dir>` the charter's
-  absolute directory), then `claude-session
+  absolute directory), then `agentik session
   checkpoint --respawn --charter <file>` (close prints it as its `then:`
   line). The checkpoint refuses, exit 2 and nothing written, a charter that
   `git status --porcelain` reads as modified, staged or untracked: `<file> is
@@ -333,7 +333,7 @@ hang-up the launcher writes nothing more to the terminal).
   `--floor` and `--settle` override them for one chain.
 - Two STOP files hold the chain: `respawn/<chain>/STOP` and
   `respawn/STOP` under the state root (the `state-dir` line of
-  `claude-session doctor`). Touch one and the running sitting finishes
+  `agentik session doctor`). Touch one and the running sitting finishes
   without a restart; a STOP older than the chain's start is ignored, and the
   launcher never deletes one.
 - Give a `/loop` an interval under 60m, or none. A `/loop` of 60 minutes or
@@ -343,4 +343,4 @@ hang-up the launcher writes nothing more to the terminal).
   `PostToolBatch` hooks: install the CLI before the plugin update (section 1,
   step 2). Until both are current a helper's failed call, or one another
   PreToolUse hook blocked, stays open and holds the sitting.
-- `claude-session report --chains` lists the chain's restart and stop lines.
+- `agentik session report --chains` lists the chain's restart and stop lines.

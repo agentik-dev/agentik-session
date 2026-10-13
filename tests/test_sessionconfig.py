@@ -33,7 +33,7 @@ def test_every_shipped_config_validates():
 
 def test_local_defers_to_claude_locals_measured_subagent_default():
     """Forcing local/default here re-introduces the 54-tool prefill case that
-    claude-local deliberately routes to sonnet."""
+    the local lane deliberately routes to sonnet."""
     assert sessionconfig.load_configs()["local"].subagent_model is None
 
 

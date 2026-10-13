@@ -8,7 +8,7 @@ from claude_session.sessionconfig import SessionConfig
 def fake_bins(tmp_path, monkeypatch):
     """Pretend both launchers exist, so tests exercise resolution not PATH."""
     bins = {"claude": str(tmp_path / "claude"),
-            "claude-local": str(tmp_path / "claude-local")}
+            "claude-local": str(tmp_path / "claude-local")}  # c13: the old lane
     monkeypatch.setattr(launch.shutil, "which", lambda n: bins.get(n))
     return bins
 
@@ -37,7 +37,7 @@ def test_tools_not_allowedtools():
 def test_local_lane_delegates_to_claude_local(fake_bins):
     l = launch.build(SessionConfig(name="l", lane="local", subagent_model="sonnet"))
     assert l.program == fake_bins["claude-local"]
-    # claude-local owns the router and credential rules; we only pass its knob
+    # the local lane owns the router and credential rules; we only pass its knob
     assert l.env["CLAUDE_LOCAL_SUBAGENT"] == "sonnet"
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in l.env
     assert "ANTHROPIC_BASE_URL" not in l.env
@@ -137,7 +137,7 @@ def test_shell_preview_is_quoted(fake_bins):
 
 
 def test_config_env_cannot_redirect_credentials(fake_bins):
-    """claude-local unsets these deliberately; the launcher must refuse them."""
+    """The local lane unsets these deliberately; the launcher must refuse them."""
     for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "PATH", "PYTHONPATH",
                 "DYLD_INSERT_LIBRARIES", "CLAUDE_CODE_OAUTH_TOKEN"):
         with pytest.raises(launch.LaunchError, match=key):

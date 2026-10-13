@@ -60,7 +60,7 @@ SOURCE=design/readme/source.md
 CONTRACT=design/readme/contract.txt
 
 [ -n "$RENDER" ] && [ -x "$RENDER" ] || {
-  echo "readme: no respeak renderer, run: claude plugin install respeak@claude-code-respeak" >&2; exit 2; }
+  echo "readme: no respeak renderer, run: claude plugin install respeak@agentik" >&2; exit 2; }
 "$PY" -c 'import yaml' 2>/dev/null || {
   echo "readme: no PyYAML in $PY, run: .venv/bin/python -m pip install -e '.[readme]'" >&2; exit 2; }
 VERIFY="$(dirname "$RENDER")/respeak-verify-edit.py"
@@ -91,7 +91,7 @@ PY
 OUT="$(mktemp "$REPO/.readme-render.XXXXXX")" || exit 2
 RUNNER_DIR="$(mktemp -d)" || { rm -f "$OUT"; exit 2; }
 trap 'rm -f "$OUT"; rm -rf "$RUNNER_DIR"' EXIT
-# The helper rule, relay-r1 §10 at agent-relay b8d789b (row s16-resync, overhaul-r1 §2.5):
+# The helper rule, relay-r1 §10 at agentik-relay b8d789b (row s16-resync, overhaul-r1 §2.5):
 # a helper a sitting spawns keeps `RELAY_ROW` and `CLAUDE_SESSION_MAX_TURNS`, runs in the foreground as `CLAUDE_SESSION_DEPTH=$((d+1)) CLAUDE_SESSION_HELPER=1 claude -p … --max-turns N`, and is refused past depth 2; Stop and `start.json` skip it; `DropSitting` is the relay's own helpers' alone
 # respeak-render.sh has no turn cap of its own: its runner (RESPEAK_RENDER_CMD, default
 # claude) goes through a wrapper outside the repo that adds --max-turns to its `claude -p`.
