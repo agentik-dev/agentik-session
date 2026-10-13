@@ -22,7 +22,6 @@ tests/test_launch.py: sibling
 install-wrapper.sh: sibling
 tests/test_install.py: sibling
 # The manifests: the repo's name and the dependency names.
-.claude-plugin/marketplace.json: sibling
 claude_session/profiles.yaml: sibling
 claude_session/resolver.py: sibling
 claude_session/doctor.py: sibling

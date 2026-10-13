@@ -58,10 +58,10 @@ readme:  ## render README.md from design/readme/source.md through respeak, techn
 	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2000 --load 4 -- scripts/readme-render
 doclint:  ## the doc gate (conventions §5)
 	scripts/doclint
-hygiene:  ## the public-hygiene scan (conventions §6)
+hygiene:  ## the vendored copies' pins, then the public-hygiene scan (conventions §5, §6)
+	shasum -a 256 -c --status scripts/vendored.sha256 || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	scripts/hygiene
-validate:  ## claude plugin validate on the plugin and the marketplace
+validate:  ## claude plugin validate on the plugin (the marketplace is agentik-commons')
 	scripts/bounded --wall 60 -- claude plugin validate plugin/
-	scripts/bounded --wall 60 -- claude plugin validate .
 clean:
 	rm -rf .pytest_cache **/__pycache__

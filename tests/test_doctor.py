@@ -301,11 +301,11 @@ PLUGIN = ROOT / "plugin"
 def test_versions_agree():
     from claude_session import SEMVER, __version__
     manifest = json.loads((PLUGIN / ".claude-plugin/plugin.json").read_text())
-    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
-    assert manifest["version"] == SEMVER == market["plugins"][0]["version"]
+    assert manifest["version"] == SEMVER
     assert f'version = "{__version__}"' in (ROOT / "pyproject.toml").read_text()
-    assert market["plugins"][0]["name"] == manifest["name"] == "session"
-    assert market["plugins"][0]["source"] == "./plugin"
+    assert manifest["name"] == "session"
+    # agentik-r1 §5.2: the marketplace is agentik-commons'; this repo's file is gone.
+    assert not (ROOT / ".claude-plugin/marketplace.json").exists()
 
 
 def test_c1_the_version_moves_with_the_plugin():
