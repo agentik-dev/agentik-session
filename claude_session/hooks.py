@@ -198,7 +198,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "permissionDecisionReason": _wrap_up(zone),
             },
             "systemMessage": (
-                f"claude-session [{cfg.name}]: blocked a {tool} spawn — "
+                f"agentik-session [{cfg.name}]: blocked a {tool} spawn — "
                 "the rest is reserved for wrapping up."),
         }
 
@@ -260,7 +260,7 @@ def user_prompt_submit(payload: dict) -> dict:
         bits.append(
             f"{count} prompts since the last checkpoint (cadence is {cadence} in "
             f"the '{zone}' zone). Commit or durably record what is done, then "
-            "run `claude-session checkpoint` — so this session can be handed off "
+            "run `agentik-session checkpoint` — so this session can be handed off "
             "at any moment rather than only when it is convenient.")
 
     if not bits:
@@ -273,7 +273,7 @@ HELPER_PROFILE = "builder"
 
 
 def launch_profile(env) -> str | None:
-    """The profile `claude-session start` exported into this session, if any.
+    """The profile `agentik session start` exported into this session, if any.
 
     A helper a sitting spawns (the helper rule's `CLAUDE_SESSION_HELPER=1`) inherits
     the sitting's `CLAUDE_SESSION_PROFILE`; it resolves as `builder`, never as the
@@ -292,7 +292,7 @@ def session_start(payload: dict, env=None) -> dict:
 
     The session model is the payload's `model`; under `claude -p` the payload has
     none (a blank one is none), and the launcher's `CLAUDE_SESSION_MODEL` (the spawn
-    line's `--model`, agent-relay AR74) names it (S28). A helper
+    line's `--model`, agentik-relay AR74) names it (S28). A helper
     (`CLAUDE_SESSION_HELPER=1`) inherits its sitting's env but runs its own
     `claude -p` line: it never reads the variable.
     """
@@ -313,13 +313,13 @@ def session_start(payload: dict, env=None) -> dict:
         resolver.save_request(path.parent, cwd, launch_profile(env),
                               payload.get("transcript_path"), model, source)
     except Exception as e:                              # noqa: BLE001
-        print(f"claude-session: SessionStart resolved nothing: {e}", file=sys.stderr)
+        print(f"agentik-session: SessionStart resolved nothing: {e}", file=sys.stderr)
         return {}
     s = r.sections["session"]
     c = s["ceilings"]
     src = s.get("ceilings_source")
     capped = f" ({src})" if src and src != "profile" else ""
-    line = (f"claude-session: profile '{_token(s['profile'])}', ceilings "
+    line = (f"agentik-session: profile '{_token(s['profile'])}', ceilings "
             f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
             f"window ({_WSRC.sub('', str(s.get('window_source')))[:64]}), checkpoint at "
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
@@ -338,7 +338,7 @@ def _charter_reminder(session: dict, cwd) -> str:
     if any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
         return ""
     return (f"; charter: none open today under {d}, run "
-            f'claude-session charter open "<goal>"')
+            f'agentik-session charter open "<goal>"')
 
 
 def _charter(resolved: dict) -> str:
@@ -489,7 +489,7 @@ def session_end(payload: dict, env=None) -> dict:
     try:
         _ledger_line(payload, env)
     except Exception as e:                              # noqa: BLE001
-        print(f"claude-session: SessionEnd wrote no ledger line: {e}", file=sys.stderr)
+        print(f"agentik-session: SessionEnd wrote no ledger line: {e}", file=sys.stderr)
     return {}
 
 
@@ -525,7 +525,7 @@ def stop(payload: dict, env=None) -> dict:
 # The reason is user-facing: plain words, no ledger cite; the command is in the form
 # checkpoint takes (`--respawn` without `--charter FILE` exits 2).
 COMPACT_BLOCKED = ("This setup restarts a sitting rather than compacting it: bring the charter "
-                   "current and run `claude-session checkpoint --respawn --charter <this "
+                   "current and run `agentik-session checkpoint --respawn --charter <this "
                    "sitting's charter>`; a /compact you type yourself still runs.")
 
 

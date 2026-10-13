@@ -29,13 +29,13 @@ SENTINEL_SIDS = ("test-session", "cli-sess-0000-1111-2222", "sess-1", "meter-ses
 POISON = (b'{"poisoned": "the suite read the sentinel root, not its temp state",'
           b' "pct_context": 100.0, "pct_turns": 100.0, "turns": 400, "context": 180000}\n')
 
-_SENTINEL = Path(tempfile.mkdtemp(prefix="claude-session-sentinel-"))
+_SENTINEL = Path(tempfile.mkdtemp(prefix="agentik-session-sentinel-"))
 atexit.register(shutil.rmtree, _SENTINEL, ignore_errors=True)
 _ENV = pytest.MonkeyPatch()
 _ENV.setenv("HOME", str(_SENTINEL))
 _ENV.setenv("XDG_STATE_HOME", str(_SENTINEL / ".local" / "state"))
 # The configured model (ANTHROPIC_MODEL); the role the README's start steps export
-# (CLAUDE_SESSION_PROFILE) and the configuration `claude-session start` sets
+# (CLAUDE_SESSION_PROFILE) and the configuration `agentik session start` sets
 # (CLAUDE_SESSION_CONFIG); the helper mark, the depth and the turn cap a sitting's
 # helpers and relay children carry; the model a relay child's launcher names (S28); the
 # relay's row; a respawn launcher's chain.

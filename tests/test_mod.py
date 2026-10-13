@@ -83,7 +83,7 @@ def test_mod_start_absent_session_exits_1_and_creates_nothing(state):
     before = _files(state)
     rc, out, err = run("mod", "start", "--session", "no-such-session")
     assert (rc, out) == (1, "")
-    assert err.strip() == "claude-session: no session no-such-session"
+    assert err.strip() == "agentik-session: no session no-such-session"
     assert _files(state) == before
 
 

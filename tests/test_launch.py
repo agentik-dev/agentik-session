@@ -102,7 +102,7 @@ def test_system_note_explains_the_checkpoint_cadence(fake_bins):
                                                          "wind-down": 4, "reserve": 2}))
     note = l.argv[l.argv.index("--append-system-prompt") + 1]
     assert "every 20 prompts" in note and "tightening to 4" in note
-    assert "claude-session checkpoint" in note
+    assert "agentik-session checkpoint" in note
 
 
 def test_posture_off_tells_the_model_to_stay_quiet(fake_bins):

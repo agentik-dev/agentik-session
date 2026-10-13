@@ -323,7 +323,7 @@ def test_admit_reads_the_session_s_resolved_config(state):
 ], ids=["sid", "json", "list", "unknown-key", "kind", "resume", "rateLimits", "long-model"])
 def test_admit_refuses_and_writes_nothing(state, sid, stdin):
     rc, out, err = run("admit", stdin, sid=sid)
-    assert (rc, out) == (2, "") and err.startswith("claude-session: ")
+    assert (rc, out) == (2, "") and err.startswith("agentik-session: ")
     assert not (adir(state) / "ledger.jsonl").exists()
 
 
@@ -440,4 +440,4 @@ def test_admit_puts_the_config_s_notes_in_its_answer_and_on_stderr(state):
     rc, out, err = run("admit", ask())
     got = json.loads(out)
     assert rc == 0 and (got["mode"], got["notes"]) == ("observe", [rules.ENFORCE])
-    assert err == f"claude-session: {rules.ENFORCE}\n"
+    assert err == f"agentik-session: {rules.ENFORCE}\n"

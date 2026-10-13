@@ -1,6 +1,6 @@
 """The engine's measure beside the meter (design/mod-r1.md §2 row M2, §4, §6 S2; packet M2).
 
-`claude-session measure record --session <id>` is what the session plugin's hooks module
+`agentik-session measure record --session <id>` is what the session plugin's hooks module
 (plugin/hooks/session.ts) runs at every `session.measure`: one JSON object on stdin,
 `{context, rateLimits, cost, changed}`, written as `<state>/sessions/<id>/measure.json`
 `{at, context, rateLimits, cost, changed}` (an absent cost null), atomically and 0600 by the

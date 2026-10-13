@@ -16,7 +16,7 @@ The SessionStart block (`clause`) is one line of at most 320 bytes: each label
 is its level text to the first colon, at most 24 characters of
 `[A-Za-z0-9 '.,-]`, and the integers are bounded (`fallback` 60 to 3600 s,
 `waiting` 1 to 9), so four labels at the bound read 319 bytes. No hook enforces
-either rule set; `claude-session rules` prints both (`render`).
+either rule set; `agentik session rules` prints both (`render`).
 """
 
 from __future__ import annotations
@@ -157,11 +157,11 @@ def clause(session) -> str:
                    "loop")
     if not out:
         return ""
-    return ("; " + "; ".join(out) + "; claude-session rules prints both")[:BLOCK_MAX]
+    return ("; " + "; ".join(out) + "; agentik-session rules prints both")[:BLOCK_MAX]
 
 
 def render(session) -> str:
-    """What `claude-session rules` prints: both parts as resolved."""
+    """What `agentik session rules` prints: both parts as resolved."""
     pr, pa = parts(session)
     lines = []
     if pr["enabled"]:

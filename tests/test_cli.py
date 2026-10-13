@@ -354,7 +354,7 @@ def test_s19_profile_refuses_a_bad_respawn_value(tmp_path, monkeypatch):
     assert rc == 2 and "respawn.cap" in err and out == ""
 
 
-# ---- S21: `claude-session rules` --------------------------------------------
+# ---- S21: `agentik session rules` --------------------------------------------
 
 def test_s21_verb_prints_both_resolved(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

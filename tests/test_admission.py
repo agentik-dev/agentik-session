@@ -1,4 +1,4 @@
-"""Packet S25 (admission-r1 §5 S25): `claude-session admission record`, the machine's
+"""Packet S25 (admission-r1 §5 S25): `agentik session admission record`, the machine's
 admission ledger, the session-end sweep and rotation; and the module's static rule
 (no deny, no fs.write). The module's behaviour is `plugin/hooks/admission.test.ts`'s: the
 plugin's one hooks module, session.ts, carries admission's hooks (2.1.296 loads one module
@@ -138,7 +138,7 @@ def test_a_refusal_exits_2_and_writes_nothing(state, stdin, sid):
     before = _files(state)
     rc, out, err = run(stdin, sid=sid)
     assert rc == 2 and out == ""
-    assert len(err.strip().splitlines()) == 1 and err.startswith("claude-session: ")
+    assert len(err.strip().splitlines()) == 1 and err.startswith("agentik-session: ")
     assert _files(state) == before
 
 
@@ -173,7 +173,7 @@ def test_f4_each_kind_checks_its_values_by_type_and_writes_nothing(state, stdin)
     before = _files(state)
     rc, out, err = run(stdin)
     assert (rc, out) == (2, ""), err
-    assert len(err.strip().splitlines()) == 1 and err.startswith("claude-session: ")
+    assert len(err.strip().splitlines()) == 1 and err.startswith("agentik-session: ")
     assert "secret" not in err
     assert _files(state) == before
 
@@ -202,7 +202,7 @@ def test_f4_stdin_that_is_not_utf8_exits_2_and_writes_nothing(state):
             rc = cli.main(["admission", "record", "--session", SID])
     finally:
         sys.stdin = old
-    assert (rc, out.getvalue()) == (2, "") and err.getvalue().startswith("claude-session: ")
+    assert (rc, out.getvalue()) == (2, "") and err.getvalue().startswith("agentik-session: ")
     assert _files(state) == before
 
 def test_a_held_lock_exits_3_within_3_s_and_writes_nothing(state):
@@ -325,7 +325,7 @@ def test_an_unwritable_ledger_exits_3_with_one_line_and_writes_nothing(state):
     before = _files(state)
     rc, out, err = run({"kind": "start", "interactive": True})
     assert rc == 3 and out == ""
-    assert len(err.strip().splitlines()) == 1 and err.startswith("claude-session: ")
+    assert len(err.strip().splitlines()) == 1 and err.startswith("agentik-session: ")
     assert _files(state) == before and adir(state).read_text() == ""
 
 

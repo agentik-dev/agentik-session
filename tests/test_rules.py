@@ -22,7 +22,7 @@ S4 = ("the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md
 BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the Next "
          "act takes the highest ready; pacing: wake in the act's last tool call, a pending "
          "helper is the wake (one fallback, 1800s+), WAITING 3 stops the loop; "
-         "claude-session rules prints both")
+         "agentik-session rules prints both")
 BUGS = ("A bug ranks by harm and what it blocks, never by how sure or cheap its fix is; with "
         "neither it is S4, below S3, however easy.",
         "Met in an S3 slice, it is fixed there only on the slice's path, else filed S4 with a "
@@ -68,10 +68,10 @@ def test_s21_default_every_shipped_profile_keeps_both_on(tmp_path):
     ("on", BLOCK),
     ("absent", BLOCK),                                   # N6: a missing key is on
     ("priority-off", "; pacing: wake in the act's last tool call, a pending helper is the "
-                     "wake (one fallback, 1800s+), WAITING 3 stops the loop; claude-session "
+                     "wake (one fallback, 1800s+), WAITING 3 stops the loop; agentik-session "
                      "rules prints both"),
     ("pacing-off", "; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the "
-                   "rest; the Next act takes the highest ready; claude-session rules prints both"),
+                   "rest; the Next act takes the highest ready; agentik-session rules prints both"),
     ("both-off", ""),
 ])
 def test_s21_clause(sess, want):
@@ -141,7 +141,7 @@ def test_s21_docs_name_the_keys_and_quote_the_texts():
     runbook = (ROOT / "RUNBOOK.md").read_text()
     assert "\n### Priority and pacing\n" in runbook
     for doc in (skill, runbook):
-        for word in ("claude-session rules", "session.priority", "session.pacing", "WAITING"):
+        for word in ("agentik-session rules", "session.priority", "session.pacing", "WAITING"):
             assert word in doc
     blocks = [b for b in re.findall(r"```yaml\n(.*?)```", runbook, re.S)
               if "priority:" in b or "pacing:" in b]

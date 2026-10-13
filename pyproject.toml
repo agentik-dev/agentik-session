@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-code-session"
+name = "agentik-session"
 version = "2.0.0a14"
 description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
 readme = "README.md"
@@ -19,7 +19,7 @@ dev = ["pytest>=8"]
 readme = ["pyyaml"]
 
 [project.scripts]
-claude-session = "claude_session.cli:main"
+agentik-session = "claude_session.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["claude_session*"]

@@ -16,9 +16,9 @@ transcripts' `message.model` only), in the order `pick` reads them:
                    model as Claude Code resolved `--model`, `/model`, the env and
                    the settings, marker intact (`claude-opus-5-5[1m]`); under
                    `claude -p` the payload has none, and the launcher's env names
-                   it: `CLAUDE_SESSION_MODEL`, the spawn line's `--model` (agent-relay
+                   it: `CLAUDE_SESSION_MODEL`, the spawn line's `--model` (agentik-relay
                    AR74), never read by a helper (`CLAUDE_SESSION_HELPER=1`); a later
-                   `claude-session set model` drops it until the next SessionStart
+                   `agentik session set model` drops it until the next SessionStart
   the declared     the resolved profile's `model` (`opus[1m]`), the overlay's included
   the configured   `ANTHROPIC_MODEL`, then the settings `model` key (local,
                    project, user)

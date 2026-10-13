@@ -132,7 +132,7 @@ def test_set_rewrites_the_resolved_file(tmp_path, monkeypatch):
 def test_charter_reminder_when_required_and_none_open_today(tmp_path):
     ctx = hooks.session_start(payload(), env_for(tmp_path))["hookSpecificOutput"]["additionalContext"]
     assert ctx.endswith('; charter: none open today under history/sittings, '
-                        'run claude-session charter open "<goal>"')
+                        'run agentik-session charter open "<goal>"')
 
 
 def test_no_charter_reminder_when_one_is_open_today(tmp_path):
@@ -160,8 +160,8 @@ def test_no_charter_reminder_when_not_required(tmp_path):
 S21_BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the "
              "Next act takes the highest ready; pacing: wake in the act's last tool call, a "
              "pending helper is the wake (one fallback, 1800s+), WAITING 3 stops the loop; "
-             "claude-session rules prints both")
-S21_REMINDER = '; charter: none open today under history/sittings, run claude-session charter open "<goal>"'
+             "agentik-session rules prints both")
+S21_REMINDER = '; charter: none open today under history/sittings, run agentik-session charter open "<goal>"'
 
 
 def _s21_ctx(tmp_path, config=None):
@@ -183,10 +183,10 @@ def test_s21_block_off(tmp_path):
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n")
     assert ctx.endswith(at + "; pacing: wake in the act's last tool call, a pending helper is "
                         "the wake (one fallback, 1800s+), WAITING 3 stops the loop; "
-                        "claude-session rules prints both" + S21_REMINDER)    # the control
+                        "agentik-session rules prints both" + S21_REMINDER)    # the control
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n"
                                  "  pacing: {enabled: false}\n")
-    assert ctx.endswith(at + S21_REMINDER) and "claude-session rules" not in ctx
+    assert ctx.endswith(at + S21_REMINDER) and "agentik-session rules" not in ctx
 
 
 def test_s21_bytes_at_the_bound(tmp_path):

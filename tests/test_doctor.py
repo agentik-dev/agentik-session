@@ -347,7 +347,7 @@ def test_s19_shim_never_blocks_stop(tmp_path):
     import subprocess
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    _exe(bin_ / "claude-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
+    _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
     env = {"PATH": "%s:/usr/bin:/bin" % bin_}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,
@@ -363,7 +363,7 @@ def test_skill_frontmatter():
     head = text.split("---")[1]
     desc = [l for l in head.splitlines() if l.startswith("description:")][0]
     assert len(desc.split(":", 1)[1].strip()) < 200
-    assert "Bash(claude-session *)" in head and len(text.splitlines()) < 500
+    assert "Bash(agentik-session *)" in head and len(text.splitlines()) < 500
     assert not (ROOT / "SKILL.md").exists()
 
 
@@ -445,7 +445,7 @@ def test_s20b_shim_drops_post_tool_use_failure(tmp_path):
     import subprocess
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    _exe(bin_ / "claude-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
+    _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
     env = {"PATH": "%s:/usr/bin:/bin" % bin_}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,
@@ -508,7 +508,7 @@ def test_s22_shim_drops_post_tool_batch(tmp_path):
     import subprocess
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    _exe(bin_ / "claude-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
+    _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
     env = {"PATH": "%s:/usr/bin:/bin" % bin_}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,

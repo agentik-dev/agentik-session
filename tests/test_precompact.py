@@ -34,7 +34,7 @@ def test_c1_auto_is_blocked_with_one_line():
     # Fix round N2: plain words, no portfolio cite, and the command in the form the CLI takes.
     assert "restarts a sitting rather than compacting it" in out["reason"]
     assert "entry 17" not in out["reason"] and "portfolio" not in out["reason"]
-    assert "`claude-session checkpoint --respawn --charter <" in out["reason"]
+    assert "`agentik session checkpoint --respawn --charter <" in out["reason"]
 
 
 def test_c1_the_reasons_command_passes_checkpoints_flag_checks(tmp_path, monkeypatch):
@@ -43,7 +43,7 @@ def test_c1_the_reasons_command_passes_checkpoints_flag_checks(tmp_path, monkeyp
     import contextlib, io, re, shlex
     from claude_session import cli
     cmds = re.findall(r"`([^`]*)`", hooks.COMPACT_BLOCKED)
-    assert len(cmds) == 1 and cmds[0].startswith("claude-session checkpoint ")
+    assert len(cmds) == 1 and cmds[0].startswith("agentik-session checkpoint ")
     md = tmp_path / "c.md"
     md.write_text("# x\n")
     argv = shlex.split(re.sub(r"<[^>]*>", shlex.quote(str(md)), cmds[0]))[1:]
@@ -115,7 +115,7 @@ def test_c1_hooks_json_keeps_the_classic_eight_and_adds_precompact():
 def _fake_cli(tmp_path: Path, body: str) -> dict:
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    exe = bin_ / "claude-session"
+    exe = bin_ / "agentik-session"
     exe.write_text("#!/bin/sh\ncat >/dev/null\n" + body)
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
     return {"PATH": "%s:/usr/bin:/bin" % bin_}

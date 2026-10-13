@@ -24,10 +24,10 @@ def test_command_runs_one_verb_under_thirty_lines(verb):
     assert lines[0] == "---"
     head = text.split("---")[1]
     assert re.search(r'^description: "[^"]+"$', head, re.M)
-    assert "allowed-tools: [Bash(claude-session *)]" in head
-    runs = re.findall(r"claude-session (\S+) \$ARGUMENTS", text)
+    assert "allowed-tools: [Bash(agentik-session *)]" in head
+    runs = re.findall(r"agentik-session (\S+) \$ARGUMENTS", text)
     assert runs == [verb]
-    assert f"!`claude-session {verb} $ARGUMENTS`" in lines
+    assert f"!`agentik session {verb} $ARGUMENTS`" in lines
 
 
 def test_every_command_verb_is_a_cli_verb():
@@ -43,6 +43,6 @@ def test_skill_sections_and_ceiling():
         assert h in heads
     assert len(text.splitlines()) < 500
     head = text.split("---")[1]
-    assert "  - Bash(claude-session *)\n  - Read\n" in head
+    assert "  - Bash(agentik-session *)\n  - Read\n" in head
     for word in ("CHECKPOINT", "EXIT", "charter open", "charter check", "charter close"):
         assert word in text

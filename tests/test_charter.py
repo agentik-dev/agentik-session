@@ -1,4 +1,4 @@
-"""charter.py and `claude-session charter`: the shape of D10, open, close."""
+"""charter.py and `agentik session charter`: the shape of D10, open, close."""
 import importlib.machinery
 import importlib.util
 import io
@@ -386,7 +386,7 @@ def _s22_next(rel):
     d, name = os.path.split(os.path.abspath(rel))
     return (f"next: git -C {d} add -- {name} && "
             f'git -C {d} commit -m "charter: the exit taken" -- {name}')
-S22_THEN = "then: claude-session checkpoint --respawn --charter "
+S22_THEN = "then: agentik-session checkpoint --respawn --charter "
 S22_NEXT = [("RESPAWN: the next act", True), ("The coordinator: review and merge", False)]
 
 
@@ -493,7 +493,7 @@ def test_s22_docs_say_the_order():
         i = text.index(start)
         return " ".join(text[i:text.index(end, i)].split())
     for flat in (part("plugin/skills/session/SKILL.md", "## The charter", "## Priority"),
-                 part("RUNBOOK.md", "### Restarting a sitting", "`claude-session report")):
+                 part("RUNBOOK.md", "### Restarting a sitting", "`agentik session report")):
         said = [s for s in flat.split(". ") if "commit the charter" in s]
         assert len(said) == 1, said
         s = said[0]

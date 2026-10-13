@@ -6,9 +6,10 @@ disposable as an unconfigured one -- which is what makes "adjust it for this
 session only" the default rather than a feature.
 
 For the local lanes this delegates to the user's own `agentik-agents local` (its
-pre-rename script `claude-local` when only that is on PATH), which already owns the router preflight, the credential rules (never replace the seat
-OAuth) and a measured subagent default. Reimplementing that contract here would
-mean maintaining two copies of it.
+pre-rename script when only that is on PATH), which already owns the router
+preflight, the credential rules (never replace the seat OAuth) and a measured
+subagent default. Reimplementing that contract here would mean maintaining two
+copies of it.
 """
 
 from __future__ import annotations
@@ -176,7 +177,7 @@ def build(cfg: SessionConfig, extra: list[str] | None = None,
                 f"config {cfg.name!r} sets env {k}, which is not allowed: it "
                 "would redirect credentials, alter the interpreter, or replace "
                 "the seat's auth. Remove it with "
-                f"`claude-session set env '{{}}' --save --config {cfg.name}`.")
+                f"`agentik session set env '{{}}' --save --config {cfg.name}`.")
         env[k] = str(v)
     env["CLAUDE_SESSION_CONFIG"] = cfg.name
 
@@ -223,7 +224,7 @@ def _system_note(cfg: SessionConfig) -> str:
                 f"{cadence.get('wind-down', 6)} once the budget is most of the "
                 "way spent. A checkpoint means: commit or otherwise durably "
                 "record what is done, so the session can be handed off at any "
-                "point. Run `claude-session checkpoint` to mark one.")
+                "point. Run `agentik-session checkpoint` to mark one.")
         if cfg.posture in ("ask", "deny"):
             bits.append(
                 f"Subagent spawning is gated ({cfg.posture}) once the budget is "

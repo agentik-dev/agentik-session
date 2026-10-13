@@ -117,7 +117,7 @@ def test_record_refuses_and_writes_nothing(state, tmp_path, text):
     before = _files(state)
     rc, out, err = record(text)
     assert (rc, out) == (2, "")
-    assert err.startswith("claude-session: ") and len(err.strip().splitlines()) == 1
+    assert err.startswith("agentik-session: ") and len(err.strip().splitlines()) == 1
     assert _files(state) == before
 
 
@@ -127,7 +127,7 @@ def test_record_bad_id_exits_2_and_writes_nothing(state, tmp_path, bad):
     before = _files(state)
     rc, out, err = record(MEASURE, sid=bad)
     assert (rc, out) == (2, "")
-    assert err.startswith("claude-session: ") and len(err.strip().splitlines()) == 1
+    assert err.startswith("agentik-session: ") and len(err.strip().splitlines()) == 1
     assert _files(state) == before
 
 
@@ -135,7 +135,7 @@ def test_record_absent_session_exits_1_and_creates_nothing(state):
     before = _files(state)
     rc, out, err = record(MEASURE, sid="no-such-session")
     assert (rc, out) == (1, "")
-    assert err.strip() == "claude-session: no session no-such-session"
+    assert err.strip() == "agentik-session: no session no-such-session"
     assert _files(state) == before
 
 
@@ -267,7 +267,7 @@ def test_f1_the_whole_shape_is_checked_and_a_wrong_one_writes_nothing(state, tmp
     before = _files(state)
     rc, out, err = record(text)
     assert (rc, out) == (2, ""), err
-    assert err.startswith("claude-session: ") and len(err.strip().splitlines()) == 1
+    assert err.startswith("agentik-session: ") and len(err.strip().splitlines()) == 1
     assert "secret" not in err
     assert _files(state) == before
 
@@ -291,7 +291,7 @@ def test_f2_a_string_that_cannot_be_written_or_a_deep_nest_exits_2(state, tmp_pa
     _metered(tmp_path)
     before = _files(state)
     rc, out, err = record(text)
-    assert (rc, out) == (2, "") and err.startswith("claude-session: ")
+    assert (rc, out) == (2, "") and err.startswith("agentik-session: ")
     assert _files(state) == before
 
 
@@ -301,7 +301,7 @@ def test_f2_stdin_that_is_not_utf8_exits_2_and_writes_nothing(state, tmp_path, e
     before = _files(state)
     data = _ok(rateLimits=[{"kind": "KIND", "percentUsed": 1}]).encode().replace(b"KIND", b"\xff\xfe")
     rc, out, err = run_raw(data, errors=errors)
-    assert (rc, out) == (2, "") and err.startswith("claude-session: "), err
+    assert (rc, out) == (2, "") and err.startswith("agentik-session: "), err
     assert _files(state) == before
 
 
@@ -312,7 +312,7 @@ def test_f2_the_verb_refuses_bad_utf8_from_a_real_stdin(tmp_path):
                         "--session", SID], input=b'{"changed": ["\xff"]}', capture_output=True,
                        env=env, timeout=60)
     assert p.returncode == 2, p.stderr
-    assert p.stderr.decode().startswith("claude-session: ") and b"Traceback" not in p.stderr
+    assert p.stderr.decode().startswith("agentik-session: ") and b"Traceback" not in p.stderr
     assert not (tmp_path / "xdg").exists()
 
 
