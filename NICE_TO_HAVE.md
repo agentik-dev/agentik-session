@@ -181,3 +181,7 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## A wait on the meter counts as WAITING and stops the loop (2026-10-14, the observer; S3)
 - example-ops's umbrella waited on `room for N` three wakes in a row and stopped its loop at WAITING 3 (20:48, 2026-10-13), as the rules say (`claude_session/rules.py:62`, the pacing line). Room opened at 21:47 (33) and the window reset at 00:30, but nothing restarts a stopped loop, so example-ops sat idle about four hours until the owner's hand. WAITING is for an outside party; the meter frees itself at a known time (band.json's `resetsAt`, and room as the rate falls). Proposal: the rules say a wait on the meter is not WAITING: wake at the reset, or after a fallback, and continue, never counting it toward the stop. (the observer, from the umbrella's charter and the band readings)
+
+## band-target's notes (2026-10-14, the builder; S4)
+- `plugin/skills/session/SKILL.md` (the window paragraph) and `RUNBOOK.md` (the band paragraph) still give the band line with `resets <HH:MM>` only; neither says it reads `week resets` when the seven-day reset bounds the horizon (outside the change's named files).
+- The ledger's `verdict` line records `T` but not `bound` (`VERDICT_KEYS`), so a T cut short by the weekly reset reads unexplained in an audit of the ledger; adding the key changes the ledger's verdict shape (conventions §7).

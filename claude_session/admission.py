@@ -646,10 +646,13 @@ def fit(rows, now: datetime, seeds: dict) -> dict:
     return {"a": a if a >= 0 else seeds["a"], "b": b, "intervals": len(pairs), "seeded": False}
 
 
-def _rise(rows, reads: list, now: datetime, T: float, seeds: dict, sids: set) -> tuple:
+def _rise(rows, reads: list, now: datetime, T: float, seeds: dict, sids: set,
+          T5: float | None = None) -> tuple:
     """(rise, fit, lives, running) with no new spawn: a·m·T, m the running main threads
-    (and `sids`), plus each running helper's b_f·min(T, max(L_t − age, 5)); `running`
-    counts the helpers in flight, those with no done and not aged out."""
+    (and `sids`), plus each running helper's b_f·min(T5, max(L_t − age, 5)), T5 the
+    five-hour horizon (T when not given: fix round F2); `running` counts the helpers in
+    flight, those with no done and not aged out."""
+    T5 = T if T5 is None else T5
     f = fit(rows, now, seeds)
     rs = runs(rows)
     lv = lives(rs)
@@ -660,25 +663,43 @@ def _rise(rows, reads: list, now: datetime, T: float, seeds: dict, sids: set) ->
             age = _minutes(now - r["start"])
             if 0 <= age <= out:
                 running += 1
-                rise += f["b"].get(r["family"], seeds["b"]["other"]) * min(T, max(L - age, FLOOR))
+                rise += f["b"].get(r["family"], seeds["b"]["other"]) * min(T5, max(L - age, FLOOR))
     return rise, f, lv, running
 
 
+def horizon(resets: datetime, seven: list, now: datetime) -> tuple:
+    """(T, until, bound), the background term's horizon: minutes to the five-hour `resets`,
+    or to the newest seven-day reading's resetsAt when that is ahead of now and before it,
+    since weekly allowance left at its reset is lost (the owner, 2026-10-14 06:43); within
+    SAME_RESET_S they are one moment, and the five-hour bounds it. The newest reading
+    decides even when its reset has passed: the week has reset (fix round F1)."""
+    until, bound = resets, FIVE
+    if seven:
+        week = max(enumerate(seven), key=lambda ix: (ix[1][0], ix[0]))[1][3]
+        if now < week < resets and not _same(week, resets):
+            until, bound = week, SEVEN
+    return max(0.0, _minutes(until - now)), until, bound
+
+
 def project(rows, req: dict, sid, now: datetime, seeds: dict):
-    """peak = P + a·T + Σ (running) b_f·min(T, max(L_t − age, 5)) + b_f·min(T, L_t) (the
+    """peak = P + a·T + Σ (running) b_f·min(T5, max(L_t − age, 5)) + b_f·min(T5, L_t) (the
     new spawn), from the newest five-hour reading whose resetsAt is ahead (the request's
-    own counts, at `now`); None when there is none."""
+    own counts, at `now`): T to `horizon`'s reset (`until`, named by `bound`), T5 to the
+    five-hour `resets`, which the texts name (fix round F2). None when there is none."""
     reads = readings(rows, FIVE)
     fresh = [x for x in reads + limits(req.get("rateLimits"), FIVE, now, sid) if x[3] > now]
     if not fresh:
         return None
     _, _, P, resets = max(enumerate(fresh), key=lambda ix: (ix[1][0], ix[0]))[1]
-    T = max(0.0, _minutes(resets - now))
-    rise, f, lv, _ = _rise(rows, reads, now, T, seeds, {sid})
+    seven = readings(rows, SEVEN) + limits(req.get("rateLimits"), SEVEN, now, sid)
+    T, until, bound = horizon(resets, seven, now)
+    T5 = max(0.0, _minutes(resets - now))
+    rise, f, lv, _ = _rise(rows, reads, now, T, seeds, {sid}, T5)
     fam = family(req.get("model"), req.get("parentModel"))
     typ = helper_type(req.get("subagentType"), req.get("fork"))
-    rise += f["b"].get(fam, seeds["b"]["other"]) * min(T, _life(lv, typ, seeds)[0])
-    return {"peak": P + rise, "P": P, "T": T, "resets": resets, "fit": f}
+    rise += f["b"].get(fam, seeds["b"]["other"]) * min(T5, _life(lv, typ, seeds)[0])
+    return {"peak": P + rise, "P": P, "T": T, "resets": resets, "until": until, "bound": bound,
+            "fit": f}
 
 
 # ---- The verdict and its texts (design/admission-r1.md §3.3; packet S26 ruling 4) ----
@@ -906,11 +927,13 @@ def _room(peak: float, each: float, T: float, settings: dict):
 
 
 def band(rows, now: datetime, settings: dict, tz=None) -> dict:
-    """{P, peak, ceiling, resetsAt, running, room, deferred, P7, mode, at}: the newest
-    five-hour reading not past its reset and its peak with no new spawn, the helpers in
-    flight, the room for spawns of the parent's family, the held verdicts since the window's
-    start, the seven-day reading; {mode, at} alone with no such reading. resetsAt is local
-    (`tz` for tests), so every reader draws the same HH:MM from the file."""
+    """{P, peak, ceiling, resetsAt, until, bound, running, room, deferred, P7, mode, at}:
+    the newest five-hour reading not past its reset (resetsAt, where a meter wait wakes) and
+    its peak with no new spawn, the reset its background term runs to (`horizon`'s: until,
+    named by bound; fix round F3), the helpers in flight, the room for spawns of the
+    parent's family (each costed over the five-hour window), the held verdicts since the
+    window's start, the seven-day reading; {mode, at} alone with no such reading. The times
+    are local (`tz` for tests), so every reader draws the same HH:MM."""
     out = {"mode": settings["mode"], "at": _ts(now)}
     reads = readings(rows, FIVE)
     fresh = [x for x in reads if x[3] > now]
@@ -918,8 +941,10 @@ def band(rows, now: datetime, settings: dict, tz=None) -> dict:
         return out
     _, _, P, resets = _newest(fresh)
     seeds = settings["seeds"]
-    T = max(0.0, _minutes(resets - now))
-    rise, f, lv, running = _rise(rows, reads, now, T, seeds, set())
+    seven = readings(rows, SEVEN)
+    T, until, bound = horizon(resets, seven, now)
+    T5 = max(0.0, _minutes(resets - now))
+    rise, f, lv, running = _rise(rows, reads, now, T, seeds, set(), T5)
     spawns = sorted(((t, r) for r in rows if r.get("kind") == "spawn"
                      and (t := _when(r.get("ts"))) is not None),
                     key=lambda x: x[0])            # by time alone: two in one second (fix round 1, F1)
@@ -927,13 +952,14 @@ def band(rows, now: datetime, settings: dict, tz=None) -> dict:
     fam = family(last.get("parentModel"), None)
     fam = "opus" if fam == "other" else fam
     typ = helper_type(last.get("subagentType"), last.get("fork")) if last else "other"
-    each = f["b"].get(fam, seeds["b"]["other"]) * min(T, _life(lv, typ, seeds)[0])
+    each = f["b"].get(fam, seeds["b"]["other"]) * min(T5, _life(lv, typ, seeds)[0])
     held = sum(1 for r in rows if r.get("kind") == "verdict" and r.get("verdict") in HELD
                and (t := _when(r.get("ts"))) is not None and resets - WINDOW <= t <= now)
-    seven = [x for x in readings(rows, SEVEN) if x[3] > now]
+    seven = [x for x in seven if x[3] > now]
     return {"P": _round(P, 2), "peak": _round(P + rise, 2), "ceiling": settings["ceiling"],
-            "resetsAt": _local(resets, tz).isoformat(timespec="seconds"), "running": running,
-            "room": _room(P + rise, each, T, settings), "deferred": held,
+            "resetsAt": _local(resets, tz).isoformat(timespec="seconds"),
+            "until": _local(until, tz).isoformat(timespec="seconds"), "bound": bound,
+            "running": running, "room": _room(P + rise, each, T5, settings), "deferred": held,
             "P7": _round(_newest(seven)[2], 2) if seven else None, **out}
 
 
@@ -988,17 +1014,24 @@ def clip(line: str, columns: int) -> str:
 def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
     """§3.5's line from band.json: `5h P% → peak% · ceiling c · resets HH:MM (h:mm) ·
     n helpers, room for r · d deferred · 7d P7%`, then `observe` and the age past 120 s; a
-    part with no figure is left out. The hooks module's admissionLine is its twin."""
+    part with no figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` when the
+    seven-day reset bounds the background term (`until`). admissionLine is its twin."""
     now = now or datetime.now(timezone.utc)
     P, peak, c = _real(b.get("P")), _real(b.get("peak")), _real(b.get("ceiling"))
     parts = ["5h no reading" if P is None
              else f"5h {_pct(P)}%" + (f" → {_pct(peak)}%" if peak is not None else "")]
     if c is not None:
         parts.append(f"ceiling {int(c) if c == int(c) else repr(c)}")
-    w = _wall(b.get("resetsAt"))
-    if w is not None:
-        left = max(0, math.floor((w[2] - now).total_seconds() / 60))
-        parts.append(f"resets {w[0]}:{w[1]} ({left // 60}h{left % 60:02d})")
+    w, u = _wall(b.get("resetsAt")), _wall(b.get("until"))
+
+    def left(x) -> str:
+        n = max(0, math.floor((x[2] - now).total_seconds() / 60))
+        return f"({n // 60}h{n % 60:02d})"
+    if b.get("bound") == SEVEN and u is not None:
+        parts.append(f"week resets {u[0]}:{u[1]} {left(u)}"
+                     + (f", 5h {w[0]}:{w[1]}" if w is not None else ""))
+    elif w is not None:
+        parts.append(f"resets {w[0]}:{w[1]} {left(w)}")
     running, room = _real(b.get("running")), _real(b.get("room"))
     helpers = [_count(running, "helper", "helpers")] if running is not None else []
     helpers += [f"room for {_pct(room)}"] if room is not None else []

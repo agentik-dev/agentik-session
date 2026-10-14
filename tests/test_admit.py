@@ -451,3 +451,62 @@ def test_admit_puts_the_config_s_notes_in_its_answer_and_on_stderr(state):
     got = json.loads(out)
     assert rc == 0 and (got["mode"], got["notes"]) == ("observe", [rules.ENFORCE])
     assert err == f"agentik-session: {rules.ENFORCE}\n"
+
+
+# ---- the horizon: the earlier of the two resets (the owner, 2026-10-14 06:43) ----------
+# Weekly allowance left at the seven-day reset is lost, so when that reset comes first the
+# band fills the five-hour window by it. P 40 at 10:00, the five-hour reset 226 minutes on.
+H_NOW = at(10)
+H_FIVE = H_NOW + timedelta(minutes=226)
+
+
+def _horizon_rows(seven_in: float):
+    return [reading(H_NOW - timedelta(minutes=1), 40, H_FIVE,
+                    seven=(60, H_NOW + timedelta(minutes=seven_in)))]
+
+
+def test_a_seven_day_reset_before_the_five_hour_one_bounds_the_horizon():
+    seeds = rules.admission(None)["seeds"]
+    p = admission.project(_horizon_rows(77), ask(), SID, H_NOW, seeds)
+    # T 77: a 0.10 x 1 thread x 77 = 7.7; the opus spawn 0.15 x min(77, 15) = 2.25
+    assert p["T"] == 77 and p["peak"] == pytest.approx(40 + 7.7 + 2.25)
+    assert (p["bound"], p["until"], p["resets"]) == ("seven_day", H_NOW + timedelta(minutes=77), H_FIVE)
+    assert decide(_horizon_rows(77), H_NOW)["T"] == 77
+
+
+@pytest.mark.parametrize("seven_in", [300, 60 * 24 * 3, -10, 226 - 0.5],
+                         ids=["after", "days-after", "past", "same-moment"])
+def test_a_seven_day_reset_after_past_or_at_the_five_hour_one_keeps_it(seven_in):
+    seeds = rules.admission(None)["seeds"]
+    p = admission.project(_horizon_rows(seven_in), ask(), SID, H_NOW, seeds)
+    # T 226: a 0.10 x 1 thread x 226 = 22.6; the opus spawn 0.15 x 15 = 2.25
+    assert p["T"] == 226 and p["peak"] == pytest.approx(40 + 22.6 + 2.25)
+    assert (p["bound"], p["until"], p["resets"]) == ("five_hour", H_FIVE, H_FIVE)
+
+
+def test_the_request_s_own_seven_day_reading_bounds_the_horizon():
+    lim = [{"kind": "five_hour", "percentUsed": 40, "resetsAt": iso(H_FIVE)},
+           {"kind": "seven_day", "percentUsed": 60, "resetsAt": iso(H_NOW + timedelta(minutes=77))}]
+    p = admission.project([], ask(rateLimits=lim), SID, H_NOW, rules.admission(None)["seeds"])
+    assert (p["T"], p["bound"]) == (77, "seven_day")
+
+
+def test_f1_the_newest_seven_day_reading_decides_even_when_its_reset_has_passed():
+    """Fix round F1: a reading says the week resets 16:00, a newer one 13:59; at 14:00 the
+    newest says the week already reset, so the five-hour reset (17:00) bounds T."""
+    five = at(17)
+    rows = [reading(at(13, 50), 40, five, seven=(60, at(16))),
+            reading(at(13, 55), 41, five, seven=(1, at(13, 59)))]
+    p = admission.project(rows, ask(), SID, at(14), rules.admission(None)["seeds"])
+    assert (p["T"], p["until"], p["bound"]) == (180, five, "five_hour")
+
+
+def test_f2_a_spawn_near_the_weekly_reset_counts_its_life_against_the_five_hour_window():
+    """Fix round F2: the weekly reset bounds a·T alone; the new spawn's own term keeps the
+    five-hour T. The week resets in 2 minutes, the five-hour window in 150."""
+    rows = [reading(H_NOW - timedelta(minutes=1), 40, H_NOW + timedelta(minutes=150),
+                    seven=(60, H_NOW + timedelta(minutes=2)))]
+    p = admission.project(rows, ask(), SID, H_NOW, rules.admission(None)["seeds"])
+    # a 0.10 x 1 thread x 2 = 0.2; the opus spawn 0.15 x min(150, 15) = 2.25, not x 2
+    assert (p["T"], p["bound"]) == (2, "seven_day")
+    assert p["peak"] == pytest.approx(40 + 0.2 + 2.25)
