@@ -2,9 +2,9 @@
 
 | item | value |
 |---|---|
-| from | the observer's check-in 114 (macbase `history/observer/2026-10-14.md`); `NICE_TO_HAVE.md` "A wait on the meter counts as WAITING and stops the loop" (20de033); home-tech's umbrella charter 2026-10-13-13 (WAITING 3 at 20:48 on `room for 0`; room opened 21:47; idle until the owner's hand) |
+| from | the observer's check-in 114 (example-mac `history/observer/2026-10-14.md`); `NICE_TO_HAVE.md` "A wait on the meter counts as WAITING and stops the loop" (20de033); example-ops's umbrella charter 2026-10-13-13 (WAITING 3 at 20:48 on `room for 0`; room opened 21:47; idle until the owner's hand) |
 | pin | `main` at 20de033 (alpha.14); worktree `.claude/worktrees/s29-meter-wait`, branch `s29-meter-wait` off it; this packet is on the branch |
-| wall | this repo; no push, `--amend`, rebase, device, `agentik session run`, `claude plugin install/update/marketplace`, `make readme`, `make install` or `make check`; never write under `~/.local/state`; never run `relay` or `agentik relay` `run`, `plan`, `gate`, `stop`, `kill`, `clean` or `resume`; never build or run a relay binary; never write in `~/code/syrvis`, `~/code/home-tech` or their worktrees |
+| wall | this repo; no push, `--amend`, rebase, device, `agentik session run`, `claude plugin install/update/marketplace`, `make readme`, `make install` or `make check`; never write under `~/.local/state`; never run `relay` or `agentik relay` `run`, `plan`, `gate`, `stop`, `kill`, `clean` or `resume`; never build or run a relay binary; never write in another repo or its worktrees |
 | may touch | `claude_session/rules.py` (`PACE`, `clause`), `claude_session/charter.py` (`warnings` only), `plugin/skills/session/SKILL.md` and `RUNBOOK.md` (their "Priority and pacing" sections), `tests/test_rules.py`, `tests/test_charter.py`, and the README's status line in `README.md` and `design/readme/source.md` with `design/readme/rendered.sha256` re-hashed (`shasum -a 256 design/readme/source.md README.md`) |
 | acceptance | `.venv/bin/python -B -m pytest tests/test_rules.py tests/test_charter.py tests/test_readme.py -q 2>&1 \| tail -1` reads `passed`, no `failed`; the act-1 commit's new tests fail on 20de033 |
 | verify | `make check`, by the coordinator |
