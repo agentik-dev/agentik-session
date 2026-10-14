@@ -326,7 +326,12 @@ CLAUDE_SESSION_PROFILE=orchestrator-opus agentik session run --chain night -- \
 Everything after `--` goes to `claude` unchanged at every start, behind a
 fresh `--session-id`. Flags that resume, fork, detach or print are refused,
 and so is `/compact`. A value that begins with `-` is refused after its
-flag; write it as `--flag=value`. A sitting restarts only when its charter's
+flag; write it as `--flag=value`. The last argument is the first prompt,
+sent again at every start. Without one, every restart opens an idle session
+that waits for a person, so `run` warns once and still runs. A list flag
+(`--add-dir`, `--tools`, `--allowedTools`, `--disallowedTools`,
+`--mcp-config`) reads every argument after it, the prompt too, so write it
+as `--flag=value`. A sitting restarts only when its charter's
 `## Next act` opens on `RESPAWN`, the main thread ran `agentik session
 checkpoint --respawn --charter <file>`, and the turn has ended and stood
 `settle` seconds with no helper call open. The launcher then ends the
