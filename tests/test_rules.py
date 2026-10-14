@@ -280,3 +280,11 @@ def test_s30_docs_name_the_lifetime():
         section = doc.split("Priority and pacing\n", 1)[1].split("\n#", 1)[0]
         for word in ("3300", "270", "promptCacheTtl", "within plan usage"):
             assert word in section, word
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                                  "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+                                  "CLAUDE_CODE_USE_MANTLE"])
+def test_s30_f2_every_documented_provider_is_5m(tmp_path, name):
+    env = {"HOME": str(tmp_path / "home"), name: "1"}
+    assert rules().lifetime(env, tmp_path, _s30_band(41)) == ("5m", "a cloud provider")
