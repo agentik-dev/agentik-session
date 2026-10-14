@@ -16,6 +16,7 @@
 - [x] act 5, docs: RUNBOOK, README + source renamed in step, sidecar re-hashed; test_readme's tokens (§3); `.hygiene-allow` rows; hygiene exit 0, `renamed` outside 0
 - [x] verify: `make check` run once (102 s): 3 byte-count asserts red (the clause is one byte longer under the new name); fixed after it and rerun targeted (149 pass), lint, doclint, hygiene 0; the gate reruns `make check`
 - [x] acceptance + charter close
+- [x] fix round: F1 `resolve_plugin` names first; F2 doctor warns when new and old IDs are both enabled; NICE_TO_HAVE lines; `make check` once
 
 ## Rulings beyond the packet
 - R15: `tests/test_hygiene.py` is commons' own suite copied verbatim (30 pass on the vendored copy), since the canonical JSON gained `outside_*` keys and `renamed`, which an exit swap alone cannot meet (ruling 11 amended).

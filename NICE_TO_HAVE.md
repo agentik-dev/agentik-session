@@ -162,3 +162,7 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `plugin/hooks/session.ts`'s `runTool` falls back to the old name on a not-found rejection; no TS test drives that branch yet (the hook shim's is acceptance line 4).
 - The README's install bullet names only the launcher; the next `make readme` could name the `claude-session` link and the `agentik` front door, and re-render the hand-renamed text.
 - doctor's `relay` row looks for `relay` and `tmux` on PATH; once agentik-r1-relay installs `agentik-relay`, it could accept either name.
+- `session.ts`'s fallback is unproven: the test harness never delivers a not-found rejection to `runTool`, so the switch proves it with one `claude plugin test`.
+- c4 picks by folder, so a new `.claude/agentik/` holding only `config.local.yaml` skips the committed old `config.yaml` (doctor flags it "unread").
+- The respawn match is a substring test (`agentik-session checkpoints --respawn` matches); the marker's timestamp guards it.
+- doctor's relay row looks for `relay` only, not `agentik-relay`.
