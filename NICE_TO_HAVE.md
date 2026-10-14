@@ -6,6 +6,10 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## band-target's verify round (2026-10-14, the observer): PASS, two notes
+- S4: `design/admission-r1.md:44`'s peak formula still writes `min(T, …)` for the helper terms, which keep the five-hour horizon since the fix round. (verify note 1)
+- S4: `admission.py:815` and `:958` (older than this change): P7 and the denial check still skip past-reset seven-day readings without first taking the newest, so F1's rule does not reach them; a probe gave `denied` on an older 98% while the band showed P7 60. (verify note 2)
+
 ## The observer's check-in 117 (2026-10-14): a lead, not confirmed
 - S4: the band's projected peak rose while a session sat idle (a consumer sitting's charter read 286%, then 365%, with no helper running), so the fit may count only active minutes and over-project after a quiet spell. Confirm with the admission ledger's readings over an idle hour before any fix. (the observer's Explore helper, from the sitting's charter and its hook line)
 
