@@ -10,6 +10,17 @@
 # The window each model family runs on. A model string names its family
 # (`claude-opus-5-5` is opus); `<family>-1m` is the family under Claude Code's
 # 1M marker (`opus[1m]`), spelled so because a key holds no brackets.
+# The table is deliberately cautious: it keys on the family, not the version, and
+# reads 200k for a family unless every model this setup runs in it has 1M. As of
+# 2026-10-14 Anthropic's "Context windows" page gives 1M to Fable and Mythos, Opus 4.6
+# and later, Sonnet 4.6 and later, and Haiku 5.5, and 200k to Sonnet 4.5 and older; the
+# Claude Code "Model configuration" page says Claude Code runs Fable, Sonnet 5 and later,
+# Haiku 5.5 and Opus 4.7 and later on 1M by default, needs `[1m]` for Opus 4.6 and
+# Sonnet 4.6, and auto-compacts a 1M model at about 967K tokens. So a plain `opus`,
+# `sonnet` or `haiku` may run on 1M while this table reads 200k. Only the orchestrator
+# roles differ by window (180k on 200k, 400k on 1M; every other role keeps 180k on
+# both), so the cautious reading costs an orchestrator its 400k unless its model is
+# named `fable` or `opus[1m]`, as portfolio entry 17's start lines do.
 models:
   fable: 1000000
   mythos: 1000000
