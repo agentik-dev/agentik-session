@@ -7,7 +7,10 @@ elif command -v claude-session >/dev/null 2>&1; then tool=claude-session
 else exit 0
 fi
 # Stop never blocks: exit 2 there holds every turn end, and a CLI older than the plugin
-# refuses `hook Stop`. PostToolUseFailure and PostToolBatch are treated as Stop: an older
+# refuses `hook Stop`. (Claude Code caps the hold: after 8 consecutive Stop blocks with no
+# tool call between them it overrides the next and ends the turn, a cap set by
+# CLAUDE_CODE_STOP_HOOK_BLOCK_CAP; "Automate actions with hooks", as of 2026-10-14. Eight
+# held turn ends are still eight wasted turns, so the shim still never blocks.) PostToolUseFailure and PostToolBatch are treated as Stop: an older
 # CLI refuses them too, PostToolBatch's exit 2 stops the agentic loop, and neither has
 # anything to say. PreCompact keeps the tool's stdout (its block) but never its exit: an
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
