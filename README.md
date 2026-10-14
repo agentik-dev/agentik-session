@@ -168,7 +168,7 @@ A charter has five parts: the title line; the table (goal, budget, pin, window, 
 
 ## Status
 
-Status: version `v2.0.0-alpha.14`, rendered `2026-10-13`, `1138` tests in the suite.
+Status: version `v2.0.0-alpha.14`, rendered `2026-10-13`, `1141` tests in the suite.
 
 ## Credit
 
