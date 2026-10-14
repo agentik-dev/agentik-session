@@ -332,3 +332,30 @@ def test_s30_f4_user_settings_follow_claude_config_dir(tmp_path):
     assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "within plan usage, 5h 41%")
     assert r.lifetime({"HOME": str(home)}, tmp_path, _s30_band(41)) == (
         "1h", "promptCacheTtl, user settings")                          # the control
+
+
+def test_s30_f5_settings_are_read_from_small_regular_files_only(tmp_path):
+    import os
+    import threading
+    r = rules()
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    local = tmp_path / ".claude" / "settings.local.json"
+    local.parent.mkdir()
+    os.mkfifo(local, 0o600)
+    env, got = {"HOME": str(home)}, []
+    th = threading.Thread(target=lambda: got.append(r.lifetime(env, tmp_path, _s30_band(41))),
+                          daemon=True)
+    th.start()
+    th.join(3)
+    if th.is_alive():                                    # unblock the reader before failing
+        os.close(os.open(local, os.O_WRONLY | os.O_NONBLOCK))
+        th.join(3)
+        pytest.fail("a FIFO at settings.local.json blocked the lifetime")
+    assert got == [("5m", "promptCacheTtl, user settings")]
+    local.unlink()
+    local.write_text(json.dumps({"promptCacheTtl": "1h"}) + " " * (1 << 20))   # over the cap
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("5m", "promptCacheTtl, user settings")
+    local.write_text(json.dumps({"promptCacheTtl": "1h"}))                      # the control
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "promptCacheTtl, local settings")

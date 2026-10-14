@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,6 +92,7 @@ ENABLE_1H = "ENABLE_PROMPT_CACHING_1H"
 CLOUD = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
          "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_USE_MANTLE")   # fix round F2
 PLAN = 100                        # a usage reading at or past this is on usage credits
+SETTINGS_MAX = 1 << 20            # a settings file past this, or not a regular file, is unread
 DISABLE = "DISABLE_PROMPT_CACHING"     # and its per-model `_<MODEL>` forms: no cache (F3)
 UNKNOWN = "no usage reading and no override"
 LIFETIME = {
@@ -245,6 +248,36 @@ def _truthy(v) -> bool:
     return isinstance(v, str) and v.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _small(path: Path, cap: int = SETTINGS_MAX):
+    """A regular file's text of at most `cap` bytes, else None: opened non-blocking, so a
+    FIFO there never hangs a hook, as admission.read_band reads band.json (fix round F5)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > cap:
+            return None
+        chunks, n = [], 0
+        while n <= cap:
+            b = os.read(fd, cap + 1 - n)
+            if not b:
+                break
+            chunks.append(b)
+            n += len(b)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if n > cap:
+        return None
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _setting(env, cwd):
     """`promptCacheTtl` from the local, project, then user settings: (ttl, why) or None.
     A value but `5m` or `1h` is skipped, as Claude Code ignores it. The user's settings are
@@ -256,8 +289,8 @@ def _setting(env, cwd):
                                    ("project", Path(cwd) / ".claude" / "settings.json")]
     for scope, path in [*here, ("user", user / "settings.json")]:
         try:
-            doc = json.loads(path.read_text())
-        except (OSError, ValueError):
+            doc = json.loads(_small(path) or "")
+        except ValueError:
             continue
         v = doc.get("promptCacheTtl") if isinstance(doc, dict) else None
         if v in TTLS:
