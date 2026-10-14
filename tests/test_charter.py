@@ -378,6 +378,62 @@ def test_s21_waiting(line, want):
         assert charter.waiting(other) is None, other
 
 
+# ---- S29: a wait on the usage meter is not WAITING ---------------------------
+
+S29_METER = ("a wait on the usage meter is not WAITING (session.pacing): keep the act as the "
+             "Next act and wake at the band's reset")
+S29_STOP = "the loop stops"
+
+
+def _s29_warns(next_act, session=SECTION):
+    raw = (S21_HEAD + S21_LISTED + "## Next act\n" + next_act + "\n").encode()
+    return charter.warnings(raw, session)
+
+
+@pytest.mark.parametrize("what", [
+    "room for 0 on the band", "the usage meter", "a Usage Limit hit", "the five-hour band",
+    "the 5h band", "ROOM FOR 0", "the meter's reset",
+], ids=["room-for", "meter", "usage-limit", "five-hour", "5h", "upper", "meter-s"])
+@pytest.mark.parametrize("n", [1, 3, 9])
+def test_s29_meter_wait_warns_at_any_n(what, n):
+    """Ruling 3: one line at any n; ruling 1: it never counts toward the stop."""
+    assert _s29_warns(f"WAITING {n}: {what}; band.json's resetsAt") == [S29_METER]
+
+
+@pytest.mark.parametrize("next_act,want", [
+    ("WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md", []),
+    ("WAITING 3: CI; the run's status", [S29_STOP]),
+    ("WAITING 2: the parameter sweep; its log", []),         # a word that only holds "meter"
+    ("WAITING: room for 0", ["WAITING <n>: <what>; <how to tell>"]),    # misshapen, not named
+    ("WAITING 2: CI; the meter shows room", []),             # the meter in <how to tell> only
+    ("the next act names the meter", []),
+], ids=["owner", "ci-at-the-stop", "parameter", "misshapen", "how-to-tell", "no-waiting"])
+def test_s29_other_waiting_gets_no_meter_line(next_act, want):
+    assert _s29_warns("WAITING 1: room for 0; band.json's resetsAt") == [S29_METER]  # control
+    got = _s29_warns(next_act)
+    assert len(got) == len(want) and all(w in g for w, g in zip(want, got)), got
+    assert S29_METER not in got
+
+
+def test_s29_meter_line_only_with_pacing_on():
+    line = "WAITING 3: room for 0; band.json's resetsAt"
+    assert _s29_warns(line) == [S29_METER]                                 # the control
+    assert _s29_warns(line, {**SECTION, "pacing": {"enabled": False}}) == []
+    assert _s29_warns(line, {**SECTION, "pacing": {"waiting": 1}}) == [S29_METER]
+
+
+@pytest.mark.parametrize("verb", ["check", "close"])
+def test_s29_meter_wait_keeps_the_exit(tmp_path, monkeypatch, verb):
+    _s21_repo(tmp_path, monkeypatch)
+    p = _s21_charter(tmp_path, next_act="WAITING 4: room for 0; band.json's resetsAt")
+    argv = ("charter", "check", str(p)) if verb == "check" else (
+        "charter", "close", "--exit", "goal met", str(p))
+    rc, out, err = run(*argv)
+    assert rc == 0 and err.count("\n") == 1 and "warning" in err and S29_METER in err
+    assert S29_STOP not in err
+    assert out == "" if verb == "check" else out.strip() == str(p)
+
+
 # ---- S22: close names its commit, and the respawn that follows (F13) --------
 
 def _s22_next(rel):
