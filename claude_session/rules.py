@@ -247,11 +247,14 @@ def _truthy(v) -> bool:
 
 def _setting(env, cwd):
     """`promptCacheTtl` from the local, project, then user settings: (ttl, why) or None.
-    A value but `5m` or `1h` is skipped, as Claude Code ignores it."""
-    home = Path(env.get("HOME") or Path.home())
+    A value but `5m` or `1h` is skipped, as Claude Code ignores it. The user's settings are
+    under CLAUDE_CONFIG_DIR when it is set, else ~/.claude (fix round F4)."""
+    moved = env.get("CLAUDE_CONFIG_DIR")
+    user = (Path(moved).expanduser() if moved
+            else Path(env.get("HOME") or Path.home()) / ".claude")
     here = [] if cwd is None else [("local", Path(cwd) / ".claude" / "settings.local.json"),
                                    ("project", Path(cwd) / ".claude" / "settings.json")]
-    for scope, path in [*here, ("user", home / ".claude" / "settings.json")]:
+    for scope, path in [*here, ("user", user / "settings.json")]:
         try:
             doc = json.loads(path.read_text())
         except (OSError, ValueError):

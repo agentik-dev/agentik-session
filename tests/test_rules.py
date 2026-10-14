@@ -317,3 +317,18 @@ def test_s30_f3_off_gives_no_keep_warm_advice():
     assert r.hint("off", "DISABLE_PROMPT_CACHING") == (
         "cache off (DISABLE_PROMPT_CACHING): no wait keeps it warm; an idle wait takes the "
         "long fallback, never an early wake to keep a cache")
+
+
+def test_s30_f4_user_settings_follow_claude_config_dir(tmp_path):
+    r = rules()
+    home, cfg = tmp_path / "home", tmp_path / "cfg"
+    (home / ".claude").mkdir(parents=True)
+    cfg.mkdir()
+    (home / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "1h"}))
+    (cfg / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)}
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("5m", "promptCacheTtl, user settings")
+    (cfg / "settings.json").unlink()                      # HOME's is not read once it moved
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "within plan usage, 5h 41%")
+    assert r.lifetime({"HOME": str(home)}, tmp_path, _s30_band(41)) == (
+        "1h", "promptCacheTtl, user settings")                          # the control
