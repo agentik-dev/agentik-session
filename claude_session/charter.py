@@ -97,14 +97,23 @@ def waiting(line: str | None) -> int | None:
 def warnings(raw: bytes, session: dict) -> list[str]:
     """What `check` and `close` print on stderr, their exit unchanged (S21): no
     `- open by level:` line under Handover (priority on); a Next act opening WAITING
-    misshapen, or at n of `pacing.waiting` or more (pacing on)."""
+    misshapen, or at n of `pacing.waiting` or more (pacing on). A well-formed WAITING
+    whose <what> names the usage meter (S29) gets its own line at any n, never the
+    stop's: a meter wait is not WAITING."""
     text = raw.decode("utf-8", "replace")
     priority, pacing = rules.parts(session)
     out = []
     if priority["enabled"] and not rules.handover_listed(text):
         out.append(f"the Handover has no '{rules.HANDOVER}' line (session.priority is on): "
                    f"list the open items by level, highest first, or '{rules.SEED}'")
-    n = waiting(next_act_line(text)) if pacing["enabled"] else None
+    line = next_act_line(text)
+    n = waiting(line) if pacing["enabled"] else None
+    if n:
+        what = WAITING_LINE.match(line.rstrip()).group(2)
+        if re.search(r"\b(room for|meter|usage limit|five-hour|5h)", what, re.I):
+            out.append("a wait on the usage meter is not WAITING (session.pacing): keep the "
+                       "act as the Next act and wake at the band's reset")
+            return out
     if n == 0:
         out.append("the Next act opens WAITING but is not "
                    "'WAITING <n>: <what>; <how to tell>' (session.pacing is on)")
