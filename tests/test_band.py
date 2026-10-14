@@ -377,3 +377,26 @@ def test_overlapping_windows_take_a_verdict_once():
     rows = [reading(at(10), 95, at(14)), reading(at(13, 40), 50, at(18, 30)),
             verdict(at(13, 45), "wait")]
     assert [w["held"] for w in admission.windows(rows)] == [True, False]
+
+
+# ---- a main thread runs from its reading to its end line (the observer, 2026-10-13) ----
+
+def end(t, sid):
+    return {"ts": iso(t), "session": sid, "kind": "end", "reason": "prompt_input_exit"}
+
+
+OTHER = "test-sess-3333-4444-5555"
+
+
+def test_an_ended_session_is_not_a_running_main_thread():
+    rows = [reading(at(12, 20), 72, RESETS), reading(at(12, 30), 72, RESETS, sid=OTHER),
+            end(at(12, 31), OTHER)]
+    b = admission.band(rows, NOW, rules.admission({}), tz=UTC)
+    assert b["peak"] == round(72 + 0.10 * 1 * 72.0, 2)       # SID alone: 79.2
+
+
+def test_a_resumed_session_reads_again_and_runs_again():
+    rows = [reading(at(12, 20), 72, RESETS), reading(at(12, 30), 72, RESETS, sid=OTHER),
+            end(at(12, 31), OTHER), reading(at(12, 40), 72, RESETS, sid=OTHER)]
+    b = admission.band(rows, NOW, rules.admission({}), tz=UTC)
+    assert b["peak"] == round(72 + 0.10 * 2 * 72.0, 2)       # both: 86.4

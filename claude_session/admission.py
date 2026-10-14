@@ -557,8 +557,24 @@ def intervals(reads: list) -> list:
     return out
 
 
-def _active(reads: list, t: datetime) -> set:
-    return {x[1] for x in reads if t - ACTIVE < x[0] <= t}
+def ends(rows) -> dict:
+    """session -> the times of its end lines."""
+    out: dict = {}
+    for r in rows:
+        t = _when(r.get("ts"))
+        if r.get("kind") == "end" and t is not None:
+            out.setdefault(r.get("session"), []).append(t)
+    return out
+
+
+def _active(reads: list, t: datetime, gone: dict) -> set:
+    """The main threads running at t: a reading in the last ACTIVE, and no end line from its
+    newest reading to t. A resumed session reads again, so it runs again."""
+    newest: dict = {}
+    for x in reads:
+        if t - ACTIVE < x[0] <= t:
+            newest[x[1]] = max(x[0], newest.get(x[1], x[0]))
+    return {s for s, r in newest.items() if not any(r <= e <= t for e in gone.get(s, ()))}
 
 
 def _solve(X: list, y: list):
@@ -594,6 +610,7 @@ def fit(rows, now: datetime, seeds: dict) -> dict:
     spans = [(r["start"], _until(r, now, lv, seeds), r["family"]) for r in rs]
     names = list(seeds["b"])
     X, y, m_of = [], [], []
+    gone = ends(rows)
     for s, e in pairs:
         span = _minutes(e[0] - s[0])
         n = dict.fromkeys(names, 0.0)
@@ -601,7 +618,7 @@ def fit(rows, now: datetime, seeds: dict) -> dict:
             lap = _minutes(min(t1, e[0]) - max(t0, s[0]))
             if lap > 0 and f in n:
                 n[f] += lap / span
-        m = max(1, len(_active(reads, e[0])))
+        m = max(1, len(_active(reads, e[0], gone)))
         X.append([m] + [n[f] for f in names])
         y.append((e[2] - s[2]) / span)
         m_of.append((e[0], m, n))
@@ -630,13 +647,13 @@ def fit(rows, now: datetime, seeds: dict) -> dict:
 
 
 def _rise(rows, reads: list, now: datetime, T: float, seeds: dict, sids: set) -> tuple:
-    """(rise, fit, lives, running) with no new spawn: a·m·T, m the active main threads
+    """(rise, fit, lives, running) with no new spawn: a·m·T, m the running main threads
     (and `sids`), plus each running helper's b_f·min(T, max(L_t − age, 5)); `running`
     counts the helpers in flight, those with no done and not aged out."""
     f = fit(rows, now, seeds)
     rs = runs(rows)
     lv = lives(rs)
-    rise, running = f["a"] * len(_active(reads, now) | sids) * T, 0
+    rise, running = f["a"] * len(_active(reads, now, ends(rows)) | sids) * T, 0
     for r in rs:
         if r["end"] is None:
             L, out = _life(lv, r["type"], seeds)

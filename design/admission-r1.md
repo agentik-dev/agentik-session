@@ -38,7 +38,7 @@ The rate model needs no token weights, since the plan's weights are not publishe
 
 - r: the window's burn in points a minute, over 10-minute intervals of readings.
 - n_f: helpers of model family f in flight in each interval.
-- Fit r = a + Σ b_f·n_f by least squares. a is fit over the last 45 minutes, with one term per active main thread. Until 20 intervals exist, P3's seeds stand in.
+- Fit r = a + Σ b_f·n_f by least squares. a is fit over the last 45 minutes, with one term per active main thread: one with a reading in the last 45 minutes and no end line since its newest reading (the observer, 2026-10-13; a respawn's ended sitting no longer counts). Until 20 intervals exist, P3's seeds stand in.
 - L_t: the median life of a helper of type t. A fork is its own type. An entry older than its type's 95th-percentile life ages out.
 - T: minutes to `resetsAt`. P: the newest five-hour `percentUsed` whose `resetsAt` is still ahead.
 - peak = P + a·T + Σ (running) b_f·min(T, max(L_t − age, 5)) + b_f·min(T, L_t) (the new spawn).
