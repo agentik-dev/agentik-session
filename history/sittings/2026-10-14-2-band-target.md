@@ -10,13 +10,13 @@
 
 ## Done-ness
 - [x] act 1: red tests: `project` T 77 over 77 (seven-day 77 min, five-hour 226 min), seven-day after, past or within `SAME_RESET_S` keeps today's T, the band line `week resets` (Python and the module's twin): `tests/test_admit.py tests/test_band.py` 11 failed, 86 passed (`assert (226.0 == 77)`); `claude plugin test plugin` 1 fail, 48 pass
-- [ ] act 2: `admission.horizon` shared by `project` and `band`; `bound` in both; `band_line` and `admissionLine` say `week resets`; the design sentence; the README count
+- [x] act 2: `admission.horizon` shared by `project` and `band`; `project` gains `until` and `bound` (`resets` stays the five-hour one the texts name), band.json's `resetsAt` is the bounding reset beside `bound`; `band_line` and `admissionLine` say `week resets`; §3.2's sentence; the README count 1172 to 1182, the sidecar re-hashed: test_readme, test_admit, test_band, test_hooks* 205 passed; module 49 pass; lint 0, doclint 0
 - [ ] gate: `nice -n 10 make check` once; `scripts/hygiene --require-private`
 
 ## Handover
 - (open)
 
 ## Next act
-Act 2.
+The gate.
 
 Exit: (open)

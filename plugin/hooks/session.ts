@@ -53,7 +53,8 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number):
 // `agentik-session admission` rewrites <state>/admission/band.json inside the ledger's lock at
 // every record and admit; the band draws it under the session's line. This is the twin of
 // Python's band_line (one fixture in session.test.ts pins both): a part with no figure is
-// left out, `observe` is last while the mode is, and the age past 120 s follows it.
+// left out, `observe` is last while the mode is, and the age past 120 s follows it; the
+// reset reads `week resets` when band.json's bound is the seven-day one.
 const ISO = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/
 const fig = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null
 const whole = (n: number): string => String(Math.round(n))
@@ -82,7 +83,8 @@ export const admissionLine = (band: string | null, nowMs: number): string | null
   const w = wall(b.resetsAt)
   if (w) {
     const left = Math.max(0, Math.floor((w[2] - nowMs) / 60000))
-    parts.push(`resets ${w[0]}:${w[1]} (${Math.floor(left / 60)}h${String(left % 60).padStart(2, '0')})`)
+    const word = b.bound === 'seven_day' ? 'week resets' : 'resets'
+    parts.push(`${word} ${w[0]}:${w[1]} (${Math.floor(left / 60)}h${String(left % 60).padStart(2, '0')})`)
   }
   const running = fig(b.running), room = fig(b.room)
   const helpers: string[] = []
