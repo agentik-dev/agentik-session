@@ -41,7 +41,7 @@ No test here runs the relay, so D5's recursion closes only through the relay's p
 
 - C1 relay plan or gate → `make check` → `make test` (334 tests, three spawning the hook on temp state) plus `validate` (two `claude plugin validate`: two node starts, no timeout) plus doclint and hygiene. Bound: NONE: no timeout, lock or load check; 310 concurrent gates were 620 node starts and 310 suites (D5). Fix: acceptance drops the suite (T1); doclint's `check_packets` refuses a line matching `make (check|test)`, `go test ./...`, `pytest` without a file, or `relay (plan|run|gate)` without `--rows` and a temp `XDG_STATE_HOME`, one test; `validate` under `timeout 60`; a per-tree lock (`mkdir .check.lock`, stale at 900 s).
 - C2 `claude-session start` → `execvpe claude` → SessionStart → `claude-session hook` (a leaf). `start` scrubs `CLAUDECODE` and `CLAUDE_CODE_SESSION_ID` (launch.py:207), so a nested start cannot see its depth, and the gate skips Bash: a child may `claude-session start builder` without limit. Bound: NONE (the relay's process group holds only its children). Fix: `start` sets `CLAUDE_SESSION_DEPTH` (survives the scrub) and refuses above 1 without `--nested`; one test.
-- C3 PostToolUse `*` → sh → a python probe → `python -m claude_session`: three processes per tool call. Leaf; bound: Claude Code's 60 s default (hooks.json declares none). With `.venv` absent the probe's `python3` is pyenv's shim, so D5's rehash lock stalls every tool call 60 s. Fix: `timeout` per hook (5 s); the wrapper tries homebrew's python3 before the bare name.
+- C3 PostToolUse `*` → sh → a python probe → `python -m claude_session`: three processes per tool call. Leaf; bound: Claude Code's 600 s default (hooks.json declares none). With `.venv` absent the probe's `python3` is pyenv's shim, so D5's rehash lock stalls every tool call 60 s. Fix: `timeout` per hook (5 s); the wrapper tries homebrew's python3 before the bare name.
 - C4 `checkpoint --commit` → `git commit` → git hooks: none exist, no `hooksPath`; a future pre-commit running `make check` is a chain, not a cycle. Bounded by design.
 - C5 `make readme` → respeak → `claude -p`: outside `check` because R6-9 made the sidecar the invariant; `make install` → doctor → `claude` twice (20 s each). Bounded leaves.
 - C6 tests on the live tree (D7's class): `test_charter` checks every real charter under `history/sittings/`; `test_hook_session_start` runs the hook at `ROOT`; `test_doctor` reads `plugin/` and the manifests. Read-only, temp XDG: bounded, but the result depends on untracked files (E1). Fix: fixtures plus tracked charters.
@@ -59,7 +59,7 @@ No test here runs the relay, so D5's recursion closes only through the relay's p
 
 ## 5. TLA+
 
-No protocol here deserves a model: the zone map and the gate are pure functions with table tests. The relay's model takes this repo as environment: a hook may hold a tool call up to 60 s; a ledger line with `child_exit` has `clean` in {true, false}, never null; `CLAUDE_SESSION_DEPTH` at most 1.
+No protocol here deserves a model: the zone map and the gate are pure functions with table tests. The relay's model takes this repo as environment: a hook may hold a tool call up to 600 s; a ledger line with `child_exit` has `clean` in {true, false}, never null; `CLAUDE_SESSION_DEPTH` at most 1.
 
 ## 6. Decisions for the owner
 
