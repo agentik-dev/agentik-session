@@ -6,6 +6,9 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## The research site's vendor-docs check (2026-10-14): one behaviour item left
+- S4: PreCompact's quiet pass rests on an undocumented reading, that a passing PreCompact's stdout becomes the compaction's custom instructions (observed on claude 2.1.296; `claude_session/hooks.py` `QUIET_PASS`). The "Hooks reference" of 2026-10-14 sends most events' passing stdout to the debug log and does not list PreCompact as an exception. Add a check that fails loudly when the behaviour changes, such as a `doctor` probe or a gated live test that runs a manual `/compact` under a PreCompact hook printing a marker and looks for it in the summary. It needs a real `claude`, so it waits for a sitting that may run one. Source: the research site's fix prompt, item 8.
+
 ## band-target's verify round (2026-10-14, the observer): PASS, two notes
 - S4: `design/admission-r1.md:44`'s peak formula still writes `min(T, …)` for the helper terms, which keep the five-hour horizon since the fix round. (verify note 1)
 - S4: `admission.py:815` and `:958` (older than this change): P7 and the denial check still skip past-reset seven-day readings without first taking the newest, so F1's rule does not reach them; a probe gave `denied` on an older 98% while the band showed P7 60. (verify note 2)
