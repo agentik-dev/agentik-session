@@ -1,5 +1,6 @@
 """S21: the priority and pacing defaults, the SessionStart block and `rules`' text."""
 
+import json
 import re
 from pathlib import Path
 
@@ -163,3 +164,220 @@ def test_s21_docs_name_the_keys_and_quote_the_texts():
     assert blocks                                        # N2: the examples parse
     for b in blocks:
         load(b)
+
+
+# ---- S30: the idle wake follows the prompt cache's lifetime in force -------------------
+
+S30_1H = ", cache 1h: idle wakes <=3300s"
+S30_5M = ", cache 5m: no keep-warm wakes"
+S30_TAIL = "; agentik-session rules prints both"
+S30_NONE = "no usage reading and no override"
+
+
+def _s30_band(p=41, p7=None, ahead=True):
+    from datetime import datetime, timedelta, timezone
+    t = datetime.now(timezone.utc) + (timedelta(hours=2) if ahead else -timedelta(minutes=5))
+    b = {"mode": "observe", "P": p, "peak": p, "resetsAt": t.isoformat(timespec="seconds")}
+    return b if p7 is None else {**b, "P7": p7}
+
+
+@pytest.mark.parametrize("env,settings,band,want", [
+    ({"FORCE_PROMPT_CACHING_5M": "1", "CLAUDE_CODE_PROMPT_CACHE_TTL": "1h",
+      "ENABLE_PROMPT_CACHING_1H": "1"}, {"local": "1h"}, 41, ("5m", "FORCE_PROMPT_CACHING_5M")),
+    ({"FORCE_PROMPT_CACHING_5M": " TRUE "}, {}, 41, ("5m", "FORCE_PROMPT_CACHING_5M")),
+    ({"FORCE_PROMPT_CACHING_5M": "0", "CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"}, {"local": "5m"}, 100,
+     ("1h", "CLAUDE_CODE_PROMPT_CACHE_TTL")),
+    ({"CLAUDE_CODE_PROMPT_CACHE_TTL": "2h"}, {"local": "5m", "user": "1h"}, 41,
+     ("5m", "promptCacheTtl, local settings")),
+    ({}, {"project": "5m", "user": "1h"}, 41, ("5m", "promptCacheTtl, project settings")),
+    ({}, {"local": "1H", "project": "not json", "user": "1h"}, 100,
+     ("1h", "promptCacheTtl, user settings")),
+    ({"ENABLE_PROMPT_CACHING_1H": "1"}, {"user": "5m"}, 41, ("5m", "promptCacheTtl, user settings")),
+    ({"ENABLE_PROMPT_CACHING_1H": "yes"}, {}, 100, ("1h", "ENABLE_PROMPT_CACHING_1H")),
+    ({"CLAUDE_CODE_USE_BEDROCK": "1"}, {}, 41, ("5m", "a cloud provider")),
+    ({"CLAUDE_CODE_USE_VERTEX": "0"}, {}, 41, ("1h", "within plan usage, 5h 41%")),
+    ({}, {}, 72.5, ("1h", "within plan usage, 5h 72.5%")),
+    ({}, {}, 100, ("5m", "past plan usage, 5h 100%")),
+    ({}, {}, (60, 100), ("5m", "past plan usage, 7d 100%")),
+    ({}, {}, (60, 99.5), ("1h", "within plan usage, 5h 60%")),
+    ({}, {}, "past", (None, S30_NONE)),
+    ({}, {}, "empty", (None, S30_NONE)),
+    ({}, {}, None, (None, S30_NONE)),
+    ({}, {}, "text", (None, S30_NONE)),
+], ids=["force-first", "force-truthy", "env-before-setting", "bad-env-then-local",
+        "project-before-user", "bad-values-skipped", "setting-before-enable", "enable-1h",
+        "cloud", "cloud-off", "within", "past-5h", "past-7d", "7d-under", "reset-passed",
+        "no-reading", "no-band", "not-a-number"])
+def test_s30_lifetime_follows_claude_code_s_order(tmp_path, env, settings, band, want):
+    home, cwd = tmp_path / "home", tmp_path / "repo"
+    paths = {"local": cwd / ".claude/settings.local.json",
+             "project": cwd / ".claude/settings.json", "user": home / ".claude/settings.json"}
+    for scope, v in settings.items():
+        paths[scope].parent.mkdir(parents=True, exist_ok=True)
+        paths[scope].write_text(v if v == "not json" else json.dumps({"promptCacheTtl": v}))
+    named = {"past": _s30_band(100, ahead=False), "empty": {"mode": "observe"}, None: None,
+             "text": {**_s30_band(), "P": "41"}}
+    if band is None or isinstance(band, str):
+        b = named[band]
+    else:
+        b = _s30_band(*band) if isinstance(band, tuple) else _s30_band(band)
+    assert rules().lifetime({"HOME": str(home), **env}, cwd, b) == want
+
+
+def test_s30_clause_names_the_lifetime_when_it_fits():
+    r = rules()
+    head = BLOCK[:-len(S30_TAIL)]
+    assert r.clause(session(), "1h") == head + S30_1H + S30_TAIL
+    assert r.clause(session(), "5m") == head + S30_5M + S30_TAIL
+    assert len((head + S30_1H + S30_TAIL).encode()) == 316 <= r.BLOCK_MAX
+    assert r.clause(session(), None) == r.clause(session()) == BLOCK      # unknown: as before
+    off = r.clause(session(pacing={"enabled": False}), "1h")
+    assert off == r.clause(session(pacing={"enabled": False})) and "cache" not in off
+    levels = {n: "x" * 30 + ": t" for n in r.LEVELS}
+    big = session({"levels": levels}, {"fallback": 3600, "waiting": 9})
+    assert r.clause(big, "1h") == r.clause(big) and len(r.clause(big).encode()) == 320
+    near = session({"levels": {**r.PRIORITY["levels"], "S1": "harmful harm: t"}})
+    assert len(r.clause(near).encode()) + len(S30_1H) > r.BLOCK_MAX >= len(r.clause(near).encode())
+    assert r.clause(near, "1h") == r.clause(near)                  # never cut for the lifetime
+
+
+def test_s30_render_item_6_names_the_lifetime():
+    r = rules()
+    assert len(r.PACE) == 5 and r.WARM == {"1h": 3300, "5m": 270}
+    out = r.render(session(), ("1h", "within plan usage, 5h 41%"))
+    assert ("  6. the prompt cache lives 1h here (within plan usage, 5h 41%): an idle wait "
+            "(items 2, 4 and 5) wakes at most 3300 s apart, whatever the fallback, so the "
+            "cache survives; a wake at 3600 s lands past the hour and rewrites the whole "
+            "context\n") in out
+    assert out.index("  5. ") < out.index("  6. ") < out.index("a packet or brief bounds")
+    out = r.render(session(pacing={"fallback": 2400}), ("5m", "CLAUDE_CODE_PROMPT_CACHE_TTL"))
+    assert ("  6. the prompt cache lives 5m here (CLAUDE_CODE_PROMPT_CACHE_TTL): any wait past "
+            "about 270 s misses it anyway, so an idle wait takes the long fallback (2400 s or "
+            "more) and never wakes early just to keep the cache\n") in out
+    out = r.render(session())
+    assert (f"  6. the prompt cache's lifetime is not known here ({S30_NONE}): on 1h (a "
+            "subscription within plan usage) an idle wait wakes at most 3300 s apart; on 5m "
+            "(usage credits, an API key, a cloud provider or promptCacheTtl 5m) it takes the "
+            "long fallback and never wakes early to keep the cache\n") in out
+    assert "  6. " not in r.render(session(pacing={"enabled": False}), ("1h", "x"))
+
+
+def test_s30_hint():
+    r = rules()
+    assert r.hint("1h", "within plan usage, 5h 41%") == (
+        "cache 1h (within plan usage, 5h 41%): an idle wake waits at most 3300 s, so the "
+        "cache survives")
+    assert r.hint("5m", "past plan usage, 5h 100%") == (
+        "cache 5m (past plan usage, 5h 100%): a wait past about 270 s misses anyway; an idle "
+        "wait takes the long fallback, never an early wake to keep the cache")
+    assert r.hint(None, S30_NONE) is None
+
+
+def test_s30_docs_name_the_lifetime():
+    skill = (ROOT / "plugin/skills/session/SKILL.md").read_text()
+    runbook = (ROOT / "RUNBOOK.md").read_text()
+    for doc in (skill, runbook):
+        section = doc.split("Priority and pacing\n", 1)[1].split("\n#", 1)[0]
+        for word in ("3300", "270", "promptCacheTtl", "within plan usage"):
+            assert word in section, word
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                                  "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+                                  "CLAUDE_CODE_USE_MANTLE"])
+def test_s30_f2_every_documented_provider_is_5m(tmp_path, name):
+    env = {"HOME": str(tmp_path / "home"), name: "1"}
+    assert rules().lifetime(env, tmp_path, _s30_band(41)) == ("5m", "a cloud provider")
+
+
+S30_OFF = ", cache off: no keep-warm wakes"
+DISABLES = ["DISABLE_PROMPT_CACHING", "DISABLE_PROMPT_CACHING_HAIKU",
+            "DISABLE_PROMPT_CACHING_SONNET", "DISABLE_PROMPT_CACHING_OPUS",
+            "DISABLE_PROMPT_CACHING_FABLE"]
+
+
+@pytest.mark.parametrize("name", DISABLES)
+def test_s30_f3_a_disabled_cache_reads_off(tmp_path, name):
+    r = rules()
+    env = {"HOME": str(tmp_path / "home"), name: "1", "CLAUDE_CODE_PROMPT_CACHE_TTL": "1h",
+           "ENABLE_PROMPT_CACHING_1H": "1"}
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("off", name)
+    env = {"HOME": str(tmp_path / "home"), name: "0"}
+    assert r.lifetime(env, tmp_path, _s30_band(41))[0] == "1h"          # the control
+
+
+def test_s30_f3_off_gives_no_keep_warm_advice():
+    r = rules()
+    assert r.clause(session(), "off") == BLOCK[:-len(S30_TAIL)] + S30_OFF + S30_TAIL
+    out = r.render(session(), ("off", "DISABLE_PROMPT_CACHING"))
+    assert ("  6. the prompt cache is off here (DISABLE_PROMPT_CACHING): no wait keeps it "
+            "warm, so an idle wait takes the long fallback (1800 s or more) and never wakes "
+            "early to keep a cache\n") in out
+    assert "3300" not in out.split("  6. ", 1)[1]
+    assert r.hint("off", "DISABLE_PROMPT_CACHING") == (
+        "cache off (DISABLE_PROMPT_CACHING): no wait keeps it warm; an idle wait takes the "
+        "long fallback, never an early wake to keep a cache")
+
+
+def test_s30_f4_user_settings_follow_claude_config_dir(tmp_path):
+    r = rules()
+    home, cfg = tmp_path / "home", tmp_path / "cfg"
+    (home / ".claude").mkdir(parents=True)
+    cfg.mkdir()
+    (home / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "1h"}))
+    (cfg / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg)}
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("5m", "promptCacheTtl, user settings")
+    (cfg / "settings.json").unlink()                      # HOME's is not read once it moved
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "within plan usage, 5h 41%")
+    assert r.lifetime({"HOME": str(home)}, tmp_path, _s30_band(41)) == (
+        "1h", "promptCacheTtl, user settings")                          # the control
+
+
+def test_s30_f5_settings_are_read_from_small_regular_files_only(tmp_path):
+    import os
+    import threading
+    r = rules()
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    local = tmp_path / ".claude" / "settings.local.json"
+    local.parent.mkdir()
+    os.mkfifo(local, 0o600)
+    env, got = {"HOME": str(home)}, []
+    th = threading.Thread(target=lambda: got.append(r.lifetime(env, tmp_path, _s30_band(41))),
+                          daemon=True)
+    th.start()
+    th.join(3)
+    if th.is_alive():                                    # unblock the reader before failing
+        os.close(os.open(local, os.O_WRONLY | os.O_NONBLOCK))
+        th.join(3)
+        pytest.fail("a FIFO at settings.local.json blocked the lifetime")
+    assert got == [("5m", "promptCacheTtl, user settings")]
+    local.unlink()
+    local.write_text(json.dumps({"promptCacheTtl": "1h"}) + " " * (1 << 20))   # over the cap
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("5m", "promptCacheTtl, user settings")
+    local.write_text(json.dumps({"promptCacheTtl": "1h"}))                      # the control
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "promptCacheTtl, local settings")
+
+
+@pytest.mark.parametrize("env,settings,want", [
+    ({"ANTHROPIC_API_KEY": "sk-test"}, {}, (None, "ANTHROPIC_API_KEY is set")),
+    ({"ANTHROPIC_BASE_URL": "https://gateway.example"}, {}, (None, "ANTHROPIC_BASE_URL is set")),
+    ({}, {"project": {"apiKeyHelper": "/bin/echo"}}, (None, "apiKeyHelper, project settings")),
+    ({}, {"user": {"apiKeyHelper": "/bin/echo"}}, (None, "apiKeyHelper, user settings")),
+    ({"ANTHROPIC_API_KEY": ""}, {}, ("1h", "within plan usage, 5h 41%")),
+    ({"ANTHROPIC_API_KEY": "sk-test"}, {"user": {"promptCacheTtl": "1h"}},
+     ("1h", "promptCacheTtl, user settings")),
+    ({"ANTHROPIC_BASE_URL": "https://gateway.example", "CLAUDE_CODE_USE_BEDROCK": "1"}, {},
+     ("5m", "a cloud provider")),
+], ids=["api-key", "gateway", "helper-project", "helper-user", "empty-key", "setting-wins",
+        "cloud-wins"])
+def test_s30_a_key_or_a_gateway_reads_unknown(tmp_path, env, settings, want):
+    home = tmp_path / "home"
+    paths = {"project": tmp_path / ".claude" / "settings.json",
+             "user": home / ".claude" / "settings.json"}
+    for scope, doc in settings.items():
+        paths[scope].parent.mkdir(parents=True, exist_ok=True)
+        paths[scope].write_text(json.dumps(doc))
+    assert rules().lifetime({"HOME": str(home), **env}, tmp_path, _s30_band(41)) == want

@@ -145,6 +145,12 @@ whole, as resolved.
   hit) is not WAITING: the Next act stays the act, the wake is the band's
   reset or one fallback, whichever is first, and it never counts toward the
   stop.
+- The prompt cache's lifetime sets how long an idle wait may be. On 1h (a
+  subscription within plan usage) an idle wait wakes at most 3300 s apart, so
+  the cache survives. On 5m (usage credits, an API key, a cloud provider, or
+  `promptCacheTtl: 5m`) any wait past about 270 s misses anyway, so an idle
+  wait takes the long fallback and never wakes early to keep the cache.
+  `agentik-session rules` and the prompt line name the lifetime in force.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
   the Handover line is missing or a WAITING is misshapen or at the stop, and

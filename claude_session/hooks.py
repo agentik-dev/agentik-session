@@ -225,6 +225,31 @@ def _admission_line() -> str | None:
         return None
 
 
+def _lifetime(cwd, env) -> tuple:
+    """`rules.lifetime` from env, the settings under cwd and band.json (packet S30); display
+    only, as the band line: on any failure, unknown. Imported here, as `_admission_line`."""
+    try:
+        from . import admission
+        return rules.lifetime(env, cwd, admission.read_band(env))
+    except Exception:  # noqa: BLE001 - the lifetime never breaks a hook
+        return None, rules.UNKNOWN
+
+
+def _cache_line(payload: dict) -> str | None:
+    """The prompt cache's lifetime and what it means for an idle wait (packet S30), when this
+    session's pacing is on and something names the lifetime; None otherwise."""
+    try:
+        env = os.environ
+        sdir = _session_dir(payload.get("session_id"), env)
+        s = (_load_json(sdir / "resolved.json").get("session") or {}) if sdir else {}
+        if not rules.parts(s)[1]["enabled"]:
+            return None
+        cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        return rules.hint(*_lifetime(cwd, env))
+    except Exception:  # noqa: BLE001 - the line never breaks the prompt hook
+        return None
+
+
 def user_prompt_submit(payload: dict) -> dict:
     """Budget context, and the checkpoint nudge that is the real mechanism."""
     sid = payload.get("session_id")
@@ -255,6 +280,9 @@ def user_prompt_submit(payload: dict) -> dict:
     band = _admission_line()
     if band:
         bits.append(band)
+    cache = _cache_line(payload)            # the prompt cache's lifetime (S30)
+    if cache:
+        bits.append(cache)
 
     if cadence and count >= cadence:
         bits.append(
@@ -323,7 +351,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
             f"window ({_WSRC.sub('', str(s.get('window_source')))[:64]}), checkpoint at "
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
-    line += rules.clause(s)                 # priority and pacing, at most 320 bytes (S21)
+    line += rules.clause(s, _lifetime(cwd, env)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
     return {"hookSpecificOutput": {"hookEventName": "SessionStart",
                                    "additionalContext": line}}

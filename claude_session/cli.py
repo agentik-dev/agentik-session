@@ -275,8 +275,11 @@ def _warn(path, section: dict | None) -> None:
 
 
 def cmd_rules(args) -> int:
-    """The priority and pacing this session meets, as resolved (S21)."""
-    sys.stdout.write(rules.render(_session_section(os.getcwd())))
+    """The priority and pacing this session meets, as resolved (S21), with the prompt
+    cache's lifetime in force (S30)."""
+    cwd = os.getcwd()
+    life = rules.lifetime(os.environ, cwd, admission.read_band(os.environ))
+    sys.stdout.write(rules.render(_session_section(cwd), life))
     return 0
 
 

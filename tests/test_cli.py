@@ -382,6 +382,45 @@ def test_s21_verb_reads_the_layers(tmp_path, monkeypatch):
     assert rc == 2 and "pacing.waiting" in err and out == ""
 
 
+# ---- S30: `rules` names the prompt cache's lifetime ---------------------------
+
+def test_s30_verb_names_the_lifetime(tmp_path, monkeypatch):
+    import json
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from claude_session import admission
+    monkeypatch.chdir(tmp_path)
+    rc, out, err = run("rules")
+    assert rc == 0 and err == "", err
+    assert ("  6. the prompt cache's lifetime is not known here (no usage reading and no "
+            "override): on 1h") in out
+    monkeypatch.setenv("CLAUDE_CODE_PROMPT_CACHE_TTL", "5m")
+    rc, out, _ = run("rules")
+    assert ("  6. the prompt cache lives 5m here (CLAUDE_CODE_PROMPT_CACHE_TTL): any wait past "
+            "about 270 s misses it anyway") in out
+    monkeypatch.delenv("CLAUDE_CODE_PROMPT_CACHE_TTL")
+    d = admission.directory(os.environ)
+    d.mkdir(parents=True)
+    t = datetime.now(timezone.utc) + timedelta(hours=2)
+    (d / "band.json").write_text(json.dumps({"mode": "observe", "P": 41,
+                                             "resetsAt": t.isoformat(timespec="seconds")}))
+    rc, out, _ = run("rules")
+    assert ("  6. the prompt cache lives 1h here (within plan usage, 5h 41%): an idle wait "
+            "(items 2, 4 and 5) wakes at most 3300 s apart") in out
+
+
+def test_s30_f1_verb_reads_the_project_dir_s_settings(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "sub").mkdir()
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    monkeypatch.chdir(tmp_path / "sub")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    rc, out, _ = run("rules")
+    assert rc == 0 and "  6. the prompt cache lives 5m here (promptCacheTtl, project settings)" in out
+
+
 # ---- S22: a respawn refuses an uncommitted charter (F13) --------------------
 
 def _s22_remedy(f):
