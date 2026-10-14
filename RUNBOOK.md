@@ -271,7 +271,8 @@ SessionStart's line carries one block of at most 320 bytes after `resolved
 config at <path>`: the four level labels, that the Next act takes the highest
 ready, and the pacing. Each label is its level's text to the first colon, at
 most 24 characters. `agentik-session rules` prints both whole, as resolved:
-the levels, the rules for filing and for bugs, and the pacing four.
+the levels, the rules for filing and for bugs, the pacing items, and the
+prompt cache's lifetime.
 
 - Priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest. A
   bug ranks by harm and what it blocks, never by how sure or cheap its fix
@@ -286,6 +287,18 @@ the levels, the rules for filing and for bugs, and the pacing four.
   charter. A wait on the usage meter (room for 0, or a usage limit hit) is
   not WAITING: the Next act stays the act, the wake is the band's reset or
   one fallback, whichever is first, and it never counts toward the stop.
+- The prompt cache's lifetime: on 1h (a subscription within plan usage) an
+  idle wait wakes at most 3300 s apart, so the cache survives; on 5m (usage
+  credits, an API key, a cloud provider, or `promptCacheTtl: 5m`) any wait
+  past about 270 s misses anyway, so an idle wait takes the long fallback and
+  never wakes early to keep the cache. It is read in Claude Code's order:
+  `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `promptCacheTtl`
+  in the local, project, then user settings, `ENABLE_PROMPT_CACHING_1H`; then
+  a cloud provider is 5m, and the band's five-hour reading is 1h under 100%
+  and 5m at 100% or past (usage credits). With none of these it is unknown.
+  `agentik-session rules` prints it as pacing item 6, and the prompt line
+  adds it after the band line; SessionStart's block names it only when the
+  whole block still fits 320 bytes.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `charter close` warn
   on stderr, their exit unchanged, when the Handover line is missing or the
