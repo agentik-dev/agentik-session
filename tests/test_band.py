@@ -289,6 +289,24 @@ def test_s30_the_prompt_line_without_a_lifetime_or_with_pacing_off(monkeypatch):
     assert bits and not any(x.startswith("cache ") for x in bits)       # pacing off: nothing
 
 
+def test_s30_f1_project_settings_come_from_the_project_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    now = datetime.now(UTC)
+    record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))      # Claude's `cd` moves only cwd
+    bits = _context(hooks.user_prompt_submit({"session_id": SID, "cwd": str(repo / "sub")}))
+    assert bits[-1] == S30_5M.format(why="promptCacheTtl, project settings")
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR")                 # unset: the payload's cwd
+    bits = _context(hooks.user_prompt_submit({"session_id": SID, "cwd": str(repo)}))
+    assert bits[-1] == S30_5M.format(why="promptCacheTtl, project settings")
+    bits = _context(hooks.user_prompt_submit({"session_id": SID, "cwd": str(repo / "sub")}))
+    assert bits[-1] == S30_1H
+
+
 # ---- report's window use: held, idle, under 90; no ledger ----
 
 def run(*argv):

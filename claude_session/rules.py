@@ -271,7 +271,10 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
     FORCE_PROMPT_CACHING_5M; CLAUDE_CODE_PROMPT_CACHE_TTL; the `promptCacheTtl` setting;
     ENABLE_PROMPT_CACHING_1H; then the default: 5m on a cloud provider, else band.json's
     five-hour reading while its reset is ahead: 5m past plan usage (5h or 7d at PLAN or
-    more), 1h within it. `(None, UNKNOWN)` when nothing says (an API key leaves no reading)."""
+    more), 1h within it. `(None, UNKNOWN)` when nothing says (an API key leaves no reading).
+    The project's settings are under CLAUDE_PROJECT_DIR, which Claude's `cd` never moves;
+    under `cwd` only when it is unset (fix round F1)."""
+    cwd = env.get("CLAUDE_PROJECT_DIR") or cwd
     if _truthy(env.get(FORCE_5M)):
         return "5m", FORCE_5M
     if env.get(TTL_VAR) in TTLS:

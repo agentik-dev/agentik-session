@@ -410,6 +410,17 @@ def test_s30_verb_names_the_lifetime(tmp_path, monkeypatch):
             "(items 2, 4 and 5) wakes at most 3300 s apart") in out
 
 
+def test_s30_f1_verb_reads_the_project_dir_s_settings(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "sub").mkdir()
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    monkeypatch.chdir(tmp_path / "sub")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    rc, out, _ = run("rules")
+    assert rc == 0 and "  6. the prompt cache lives 5m here (promptCacheTtl, project settings)" in out
+
+
 # ---- S22: a respawn refuses an uncommitted charter (F13) --------------------
 
 def _s22_remedy(f):

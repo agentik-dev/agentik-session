@@ -246,3 +246,15 @@ def test_s30_bound_case_drops_the_lifetime(tmp_path):
     block = ctx.split(at, 1)[1][:-len(S21_REMINDER)]
     assert "WAITING 9 stops" in block and "cache" not in block
     assert len(block.encode()) == 320 <= 320
+
+
+def test_s30_f1_the_block_reads_the_project_dir_s_settings(tmp_path):
+    _s30_band(tmp_path, 41)
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    (repo / ".claude").mkdir(exist_ok=True)
+    (repo / ".claude" / "settings.json").write_text(json.dumps({"promptCacheTtl": "5m"}))
+    env = env_for(tmp_path, CLAUDE_PROJECT_DIR=str(repo))
+    out = hooks.session_start(dict(payload(), cwd=str(repo / "sub")), env)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert ", cache 5m: no keep-warm wakes" + S30_TAIL in ctx
