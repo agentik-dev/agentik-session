@@ -206,3 +206,7 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## A chain started with no first prompt restarts idle (2026-10-14, the observer; S3)
 - `agentik session run` takes claude's arguments after `--` and sends them the same at every start, and accepts none at all. syrvis's orient chain was started with no first prompt after `--`, so its 14:40 restart opened an empty session that waited for a person (orient charter 2026-10-14-7, act 0: "`agentik session run` carried no first prompt after `--`, so the restart had none to send"). An unattended respawn then stalls until someone types. Candidates: `run` warns at start, and `doctor` flags a chain, when no positional prompt follows `--`; or the restart sends a default resume line naming the charter.
+
+## S31's review (2026-10-14, the observer; S4)
+- An empty or blank first prompt (`--model opus ''`, `'   '`) gives no warning, though it likely starts idle; unchecked how claude treats an empty prompt.
+- With the prompt before an option (`'/loop 3h go' --model opus`), the long-`/loop` warning is missed: `long_loop` reads only the last argument (the RUNBOOK's form), while `prompt_gap` finds the first prompt anywhere.

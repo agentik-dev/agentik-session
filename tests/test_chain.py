@@ -639,6 +639,15 @@ def test_s31_prompt_or_warning(args, warns, fake, monkeypatch):
     assert len(_idle_warnings(err)) == (1 if warns else 0), err
 
 
+def test_s31_swallowed_loop_warns_only_idle(fake, monkeypatch):
+    # The list option reads the /loop as its value, so there is no first prompt to call long.
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    rc, _, err = _cli("run", "--chain", "c1", "--", "--allowedTools", "Bash", "/loop 2h go")
+    assert rc == 0 and len(fake.starts()) == 1, err
+    warned = [l for l in err.splitlines() if l.startswith("warning:")]
+    assert len(warned) == 1 and warned == _idle_warnings(err), err
+
+
 def test_s31_lock_held_refusal_stays_one_line(fake, monkeypatch):
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     lock = _state() / "respawn" / "c1" / "lock"

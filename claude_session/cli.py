@@ -756,7 +756,7 @@ def cmd_run(args) -> int:
         warnings.append(f"warning: claude's arguments after -- carry no first prompt{why}, "
                         "so every restart opens an idle session that waits for a person; "
                         'give one: agentik session run -- "<first prompt>"')
-    minutes = chain.long_loop(args.claude_args)
+    minutes = chain.long_loop(args.claude_args) if gap is None else None   # no prompt, no /loop
     if minutes is not None:
         warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; a "
                         "/loop of 60 minutes or more asks its question (cloud or session) "
