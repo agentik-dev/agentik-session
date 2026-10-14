@@ -323,3 +323,13 @@ def test_s20a_exec_launch_uses_scrub(captured_exec, monkeypatch):
     assert seen == [1]
     child = captured_exec[0][2]
     assert child["KEEP_ME"] == "1" and not set(scrubbed) & set(child)
+
+
+def test_c13_a_new_name_in_any_folder_beats_an_old_name_in_an_earlier_one(tmp_path,
+                                                                         monkeypatch):
+    # agentik-r1 packet ruling 8 (fix round F1): names first, new then old; folders inside
+    code, plugins = tmp_path / "code", tmp_path / "plugins"
+    (code / "claude-code-respeak").mkdir(parents=True)
+    (plugins / "agentik-respeak").mkdir(parents=True)
+    monkeypatch.setattr(launch, "PLUGIN_SEARCH", [code, plugins])
+    assert launch.resolve_plugin("respeak") == plugins / "agentik-respeak"

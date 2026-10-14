@@ -91,9 +91,11 @@ class Launch:
 
 
 def resolve_plugin(name: str) -> Path | None:
+    # Names first (the plain name, the agentik-* name, then the old), each searched in every
+    # folder, so an old checkout never beats a new one in a later folder (ruling 8).
     candidates = [name, *PLUGIN_ALIASES.get(name, ())]
-    for base in PLUGIN_SEARCH:
-        for cand in candidates:
+    for cand in candidates:
+        for base in PLUGIN_SEARCH:
             p = base / cand
             if p.is_dir():
                 return p
