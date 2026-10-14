@@ -87,7 +87,7 @@ def test_band_on_a_synthetic_ledger_matches_a_hand_count():
         room += 1
     assert (round(peak, 2), room) == (81.75, 5)
     assert b == {"P": 72, "peak": 81.75, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
-                 "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
+                 "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
                  "at": iso(NOW)}
 
 
@@ -400,3 +400,38 @@ def test_a_resumed_session_reads_again_and_runs_again():
             end(at(12, 31), OTHER), reading(at(12, 40), 72, RESETS, sid=OTHER)]
     b = admission.band(rows, NOW, rules.admission({}), tz=UTC)
     assert b["peak"] == round(72 + 0.10 * 2 * 72.0, 2)       # both: 86.4
+
+
+# ---- the horizon's bound (the owner, 2026-10-14 06:43): the weekly reset, when first ----
+
+def _week_rows(seven_in: float) -> list:
+    """P 72 at 12:50, the five-hour reset 226 minutes after NOW, the seven-day one `seven_in`."""
+    lim = [{"kind": "five_hour", "percentUsed": 72, "resetsAt": iso(NOW + timedelta(minutes=226))},
+           {"kind": "seven_day", "percentUsed": 41, "resetsAt": iso(NOW + timedelta(minutes=seven_in))}]
+    return [{"ts": iso(at(12, 50)), "session": SID, "kind": "reading", "rateLimits": lim}]
+
+
+def test_the_band_fills_by_a_seven_day_reset_that_comes_first():
+    b = admission.band(_week_rows(77), NOW, rules.admission({}), tz=UTC)
+    # T 77: one main thread, a 0.10 x 77 = 7.7; room: 79.7 + n x 0.15 x 15 + 3 <= 97, n = 6
+    assert (b["P"], b["peak"], b["room"], b["P7"]) == (72, 79.7, 6, 41)
+    assert (b["resetsAt"], b["bound"]) == ("2026-10-12T14:10:00+00:00", "seven_day")
+
+
+def test_the_band_keeps_the_five_hour_reset_when_the_seven_day_one_is_later():
+    b = admission.band(_week_rows(300), NOW, rules.admission({}), tz=UTC)
+    assert (b["peak"], b["resetsAt"], b["bound"]) == (94.6, "2026-10-12T16:39:00+00:00", "five_hour")
+
+
+def test_the_band_line_says_week_resets_when_the_seven_day_reset_bounds_it():
+    week = admission.band_line({**FULL, "bound": "seven_day"}, NOW)
+    assert week == LINE.replace(" · resets 14:05", " · week resets 14:05")
+    assert admission.band_line({**FULL, "bound": "five_hour"}, NOW) == LINE
+
+
+def test_python_draws_the_module_s_week_fixture_line():
+    _, _, now = _fixture()
+    text = (HOOKS_DIR / ("session.test." + "ts")).read_text()
+    band = re.search(r"^const BAND_WEEK = '(.*)'$", text, re.M).group(1)
+    line = re.search(r"^const BAND_WEEK_LINE = '(.*)'$", text, re.M).group(1)
+    assert "week resets" in line and admission.band_line(json.loads(band), now) == line

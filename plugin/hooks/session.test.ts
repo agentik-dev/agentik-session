@@ -13,6 +13,9 @@ const PROPS = (columns: number, hasSurvey = false) => ({ component: 'AbovePrompt
 // two lines and NOW above, and asserts Python's band_line gives BAND_LINE for BAND at NOW.
 const BAND = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
 const BAND_LINE = '5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
+// The weekly reset bounds the horizon (the owner, 2026-10-14): the line says `week resets`.
+const BAND_WEEK = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:17:00+00:00", "bound": "seven_day", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
+const BAND_WEEK_LINE = '5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
 const BAND_JSON = '/state/admission/band.json'
 
 const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
@@ -73,6 +76,11 @@ const texts = (tree: any): any[] => (tree.children as any[]).map(c => c.type ===
 test('the band draws band.json as a second line, the text Python draws from the same file', async (t: any, on: any) => {
   const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND })
   expect(texts(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_LINE])
+})
+
+test('the seven-day reset bounding the horizon: week resets, as Python draws it', async (t: any, on: any) => {
+  const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND_WEEK })
+  expect(texts(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_WEEK_LINE])
 })
 
 test('the second line is cut to bodyColumns: 80', async (t: any, on: any) => {
