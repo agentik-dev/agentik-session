@@ -596,6 +596,94 @@ def test_s20a_long_loop_warns(fake, monkeypatch):
     assert not [l for l in err.splitlines() if l.startswith("warning:")]
 
 
+# ---- S31: a chain started with no first prompt restarts idle (NICE, the observer) -----
+
+def _idle_warnings(err):
+    return [l for l in err.splitlines()
+            if l.startswith("warning:") and "every restart opens an idle session" in l]
+
+
+def _fast_cli_chain(monkeypatch):
+    """`run`'s Chain at the harness's timings, so a restart through the CLI costs little."""
+    ch = C()
+    real = ch.Chain
+    monkeypatch.setattr(ch, "Chain", lambda *a, **kw: real(
+        *a, **{"poll": 0.05, "grace": 0.05, "kill_grace": 0.5, **kw}))
+
+
+def test_s31_no_prompt_warns_once_and_still_starts(fake, monkeypatch):
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    _fast_cli_chain(monkeypatch)
+    fake.set(_sitting(fake), [["exit", 0]])
+    rc, _, err = _cli("run", "--chain", "c1", "--floor", "0", "--settle", "0", "--",
+                      "--model", "m")
+    assert rc == 0, err
+    s = fake.starts()
+    assert len(s) == 2 and s[0]["argv"][2:] == s[1]["argv"][2:] == ["--model", "m"]
+    warned = _idle_warnings(err)
+    assert len(warned) == 1, err                       # once at start, never per restart
+    assert 'agentik session run -- "<first prompt>"' in warned[0]
+    assert err.index(warned[0]) < err.index("ended on RESPAWN")
+
+
+@pytest.mark.parametrize("args,warns", [
+    (["go on"], False),
+    (["--model", "opus", "go on"], False),
+    (["--model", "opus"], True),                       # opus is --model's value, not a prompt
+])
+def test_s31_prompt_or_warning(args, warns, fake, monkeypatch):
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    rc, _, err = _cli("run", "--chain", "c1", "--", *args)
+    assert rc == 0 and len(fake.starts()) == 1, err
+    assert fake.starts()[0]["argv"][2:] == args
+    assert len(_idle_warnings(err)) == (1 if warns else 0), err
+
+
+def test_s31_swallowed_loop_warns_only_idle(fake, monkeypatch):
+    # The list option reads the /loop as its value, so there is no first prompt to call long.
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    rc, _, err = _cli("run", "--chain", "c1", "--", "--allowedTools", "Bash", "/loop 2h go")
+    assert rc == 0 and len(fake.starts()) == 1, err
+    warned = [l for l in err.splitlines() if l.startswith("warning:")]
+    assert len(warned) == 1 and warned == _idle_warnings(err), err
+
+
+def test_s31_lock_held_refusal_stays_one_line(fake, monkeypatch):
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    lock = _state() / "respawn" / "c1" / "lock"
+    lock.parent.mkdir(parents=True)
+    with open(lock, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        rc, _, err = _cli("run", "--chain", "c1", "--", "--model", "m")
+    assert rc == 2 and len(err.strip().splitlines()) == 1 and "lock" in err, err
+
+
+@pytest.mark.parametrize("args,gap", [
+    ([], ""),
+    (["--model", "m", "--effort", "high"], ""),
+    (["--model=m", "go on"], None),
+    (["--verbose", "--strict-mcp-config", "go on"], None),   # bare: they take no value
+    (["--verbose"], ""),
+    (["--system-prompt-snapshot", "on"], ""),           # `<on|off>`: on is its value
+    (["--add-dir", "../x", "go on"], "--add-dir"),      # a list reads every argument after it
+    (["--allowedTools", "Bash", "Edit"], "--allowedTools"),
+    (["--add-dir", "../x"], ""),
+    (["--add-dir=../x", "go on"], None),                # the = form ends the list
+    (["--add-dir", "../x", "--model", "m", "go on"], None),
+    (["go on", "--add-dir", "../x"], None),
+])
+def test_s31_prompt_gap(args, gap):
+    assert C().prompt_gap(args) == gap
+
+
+def test_s31_list_option_names_the_fix(fake, monkeypatch):
+    monkeypatch.setattr(C(), "on_tty", lambda: True)
+    rc, _, err = _cli("run", "--chain", "c1", "--", "--add-dir", "../x", "go on")
+    assert rc == 0 and len(fake.starts()) == 1, err
+    (w,) = _idle_warnings(err)
+    assert "--add-dir=<value>" in w, w
+
+
 # ---- the fix round: the adversaries' blocks and notes ---------------------------------
 
 def _chain(fx, guards, **kw):

@@ -748,15 +748,23 @@ def cmd_run(args) -> int:
         chain.guards(cwd, env, flags)
     except resolver.ResolveError as e:
         _die(f"agentik-session run: {e}", 2)
-    minutes = chain.long_loop(args.claude_args)
+    warnings = []
+    gap = chain.prompt_gap(args.claude_args)
+    if gap is not None:                 # S31: warned, never refused; it may be meant
+        why = (f" ({gap} reads every argument after it as its value: write {gap}=<value>)"
+               if gap else "")
+        warnings.append(f"warning: claude's arguments after -- carry no first prompt{why}, "
+                        "so every restart opens an idle session that waits for a person; "
+                        'give one: agentik session run -- "<first prompt>"')
+    minutes = chain.long_loop(args.claude_args) if gap is None else None   # no prompt, no /loop
     if minutes is not None:
-        print(f"warning: the first prompt is a /loop of {minutes:g} minutes; a /loop of 60 "
-              "minutes or more asks its question (cloud or session) before it arms, so "
-              "every restarted sitting waits there: give an interval under 60m, or none",
-              file=sys.stderr)
+        warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; a "
+                        "/loop of 60 minutes or more asks its question (cloud or session) "
+                        "before it arms, so every restarted sitting waits there: give an "
+                        "interval under 60m, or none")
     return chain.Chain(name, list(args.claude_args), resolver.state_dir(env),
                        chain.Effects(), lambda: chain.guards(cwd, env, flags),
-                       argv=["agentik", "session", *args.raw_argv]).run()
+                       argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
 
 def build_parser() -> argparse.ArgumentParser:

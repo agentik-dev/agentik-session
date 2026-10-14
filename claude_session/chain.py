@@ -42,7 +42,12 @@ ALLOWED = frozenset({
 FORBIDDEN = ("-p", "--print", "-c", "--continue", "-r", "--resume", "--fork-session",
              "--session-id", "--from-pr", "--teleport", "--bg", "--background", "--tmux",
              "-w")
-_BARE = frozenset({"--strict-mcp-config", "--system-prompt-snapshot", "--verbose"})
+# What claude reads after each allowlisted option (its 2.1.300 definitions): nothing
+# after a bare one; every following non-option argument after a list (`<x...>`)
+# written apart; one value after the rest (`--system-prompt-snapshot <on|off>` too).
+_BARE = frozenset({"--strict-mcp-config", "--verbose"})
+_LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
+                    "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 12, "floor": 600, "settle": 60}
 _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overlay is read
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
@@ -132,6 +137,26 @@ def long_loop(args) -> float | None:
     return minutes if minutes >= 60 else None
 
 
+def prompt_gap(args) -> str | None:
+    """None when claude's arguments carry a positional first prompt (S31: a chain without
+    one restarts into an idle session); else "", or the list option that reads the would-be
+    prompt as one more of its values. An option's value is never a prompt: one argument
+    after a valued option, and every non-option argument after a list written apart."""
+    takes, lst, gap = False, None, ""
+    for a in map(str, args):
+        if takes:
+            takes = False
+        elif a.startswith("-"):
+            flag, bare = a.split("=", 1)[0], "=" in a
+            takes = not bare and flag not in _BARE
+            lst = flag if not bare and flag in _LISTS else None
+        elif lst:
+            gap = lst
+        else:
+            return None
+    return gap
+
+
 def _json(path: Path):
     """The file's JSON object; None when it is absent; {} when it is not an object."""
     try:
@@ -214,8 +239,9 @@ class Chain:
     again before each restart; `poll`, `grace` and `kill_grace` are seconds."""
 
     def __init__(self, name, args, state, effects, guards, *, poll=2, grace=10,
-                 kill_grace=30, argv=None):
+                 kill_grace=30, argv=None, warnings=()):
         self.name, self.args, self.state, self.fx = name, list(args), Path(state), effects
+        self.warnings = list(warnings)  # said once, after the lock and the guards hold
         self._guards = guards
         self.poll, self.grace, self.kill_grace = poll, grace, kill_grace
         self.argv = list(argv) if argv else ["agentik", "session", "run", "--chain", name,
@@ -249,6 +275,8 @@ class Chain:
             except resolver.ResolveError as e:
                 self.fx.say(f"error: agentik-session run: {e}")
                 return 2
+            for line in self.warnings:          # a refusal above stays one line (§3.1)
+                self.fx.say(line)
             old = self._trap()
             try:
                 return self._chain()
