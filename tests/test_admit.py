@@ -182,6 +182,16 @@ def test_the_fit_recovers_a_and_b():
     assert f["b"]["haiku"] == 0.02 and f["b"]["fable"] == 0.25   # never seen: the seeds
 
 
+def test_a_session_that_read_once_and_ended_does_not_halve_a():
+    """A respawn: the old sitting's last reading, then its end line. Counted to the end of
+    ACTIVE, it doubles m over the last 45 minutes and the refit a falls to about half."""
+    rows = synthetic_day()
+    last = [r for r in rows if r["kind"] == "reading" and r["ts"] == iso(at(12, 15))][0]
+    rows += [{**last, "session": OTHER},
+             {"ts": iso(at(12, 16)), "session": OTHER, "kind": "end", "reason": "prompt_input_exit"}]
+    f = admission.fit(sorted(rows, key=lambda r: r["ts"]), NOW, rules.admission(None)["seeds"])
+    assert f["a"] == pytest.approx(A, abs=0.01)
+
 def test_the_peak_against_a_synthetic_day():
     rows = synthetic_day()
     P = [r for r in rows if r["kind"] == "reading"][-1]["rateLimits"][0]["percentUsed"]
