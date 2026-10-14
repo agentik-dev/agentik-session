@@ -2,11 +2,11 @@
 
 <img src="assets/icon.svg" alt="" width="56" align="left">
 
-`session` is a Claude Code plugin, with its `agentik-session` command line tool, that gives each Claude Code session one named profile, a budget with a hard stop, and a written charter. It is the part of a small family of plugins that answers "how much may this session spend, and what happens when it runs out".
+`session` is a Claude Code plugin, with its `agentik-session` command line tool, that gives each Claude Code session one named profile, a budget with a stop, and a written charter. It is part of a small family of plugins that answers "how much may this session spend, and what happens when it runs out".
 
 ## Why it exists
 
-Several plugins cooperate in unattended relay runs: a driver spawns builder sessions, each builder may spawn agents, and nobody is watching the terminal. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns with a hard stop, a charter that says what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget a swarm can fork past its means; with them, every session winds down at a known point and leaves a record a person can read.
+Several plugins cooperate in unattended relay runs: a driver spawns builder sessions, each builder may spawn agents, and nobody watches the terminal. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter that says what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget a swarm can fork past its means; with them, every session winds down at a known point and leaves a record a person can read.
 
 ## Install
 
@@ -75,10 +75,10 @@ Profiles ship in `claude_session/profiles.yaml`. The `defaults` entry carries ev
 | `orchestrator` | large, complex work: Fable 5.1 on its 1M window |
 | `orchestrator-opus` | small and medium orchestrated projects: Opus 5.5 on its 1M window (`opus[1m]`) |
 
-- `agentik session start <profile>` launches Claude Code with that profile, by flags only (nothing is written to `settings.json`). `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one; a nested `start` exits 2 without `--nested`.
+- `agentik session start <profile>` launches Claude Code with that profile, by flags only (nothing is written to `settings.json`). `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling; Claude Code's own `--max-turns` is print mode only. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one; a nested `start` exits 2 without `--nested`.
 - `agentik session set <knob> <value>` changes this session only. Launch-time knobs (model, effort, tools) print the in-session equivalent (`/model`, `/effort`); `posture` applies at once.
 - A session's profile is its role. The SessionStart hook takes the name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets), else `session.profile` in `config.local.yaml`, then in `config.yaml`, else `frontier`. A helper a session spawns (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`, so a helper of an orchestrator keeps 180000 context tokens.
-- The model decides the window, by the `models:` table in `profiles.yaml`: fable and mythos 1M; opus 200k, or 1M as `opus[1m]`; sonnet and haiku 200k. A transcript's `message.model` never carries `[1m]`, so for Opus the window comes from the SessionStart payload's `model`, then the profile's `model`, then `ANTHROPIC_MODEL` and the settings `model` key.
+- The model decides the window, by the `models:` table in `profiles.yaml`: fable and mythos 1M; opus 200k, or 1M as `opus[1m]`; sonnet and haiku 200k. Cautious: Claude Code runs Opus 4.7 and later on 1M unmarked. A transcript's `message.model` never carries `[1m]`, so for Opus the window comes from the SessionStart payload's `model`, then the profile's `model`, then `ANTHROPIC_MODEL` and the settings `model` key.
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 

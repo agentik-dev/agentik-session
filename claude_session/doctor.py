@@ -22,6 +22,10 @@ PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
 OLD_PLUGIN_ID = "session@claude-code-session"
 # --max-turns is accepted but unlisted in `claude --help`; a probe costs a turn, so none.
+# Both --max-turns and --max-budget-usd work in print mode only and default to no limit;
+# the budget is a client-side estimate checked after each response, so spend can pass
+# it by one response plus any running subagents (Claude Code's "CLI reference" and the
+# Agent SDK's "How the agent loop works", as of 2026-10-14).
 # --session-id: `agentik session run` starts every sitting with it (respawn-r1 §3.1).
 CLAUDE_FLAGS = ("--model", "--effort", "--tools", "--permission-mode",
                 "--max-budget-usd", "--output-format", "--session-id")

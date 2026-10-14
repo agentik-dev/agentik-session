@@ -73,7 +73,9 @@ def cmd_start(args) -> int:
         _die(str(e))
     l.env[launch.DEPTH_VAR] = str(child)
     if args.max_turns is not None:
-        # review r6 E5: claude stops at N, and the meter's turn ceiling follows it
+        # review r6 E5: the meter's turn ceiling follows N. claude's own --max-turns works
+        # in print mode only and defaults to no limit (Claude Code's "CLI reference", as of
+        # 2026-10-14), so in an interactive start only the meter's ceiling and its rule apply.
         l.argv += ["--max-turns", str(args.max_turns)]
         l.env[resolver.MAX_TURNS_VAR] = str(args.max_turns)
     for w in l.warnings:

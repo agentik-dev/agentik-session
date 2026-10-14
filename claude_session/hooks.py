@@ -557,8 +557,10 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "PreCompact": pre_compact})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop"})
-# A passing PreCompact's raw stdout becomes the compaction's custom instructions (claude
-# 2.1.296), so its pass prints nothing; its block still prints its decision.
+# A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
+# on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
+# events' passing stdout to the debug log and does not list PreCompact as an exception.
+# Either way, its pass prints nothing; its block still prints its decision.
 QUIET_PASS = frozenset({"pre-compact", "PreCompact"})
 
 
