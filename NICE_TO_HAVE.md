@@ -7,7 +7,7 @@ audience: owner, agent
 # claude-code-session: what a review left open, none of it blocking
 
 ## The observer's check-in 117 (2026-10-14): a lead, not confirmed
-- S4: the band's projected peak rose while a session sat idle (a home-tech sitting's charter read 286%, then 365%, with no helper running), so the fit may count only active minutes and over-project after a quiet spell. Confirm with the admission ledger's readings over an idle hour before any fix. (the observer's Explore helper, from the sitting's charter and its hook line)
+- S4: the band's projected peak rose while a session sat idle (a consumer sitting's charter read 286%, then 365%, with no helper running), so the fit may count only active minutes and over-project after a quiet spell. Confirm with the admission ledger's readings over an idle hour before any fix. (the observer's Explore helper, from the sitting's charter and its hook line)
 
 ## A helper call no batch resolves (2026-10-11, the stale-call fix)
 - PostToolBatch now closes a helper's call that another PreToolUse hook blocked. Unverified with a real `claude`: a helper call whose batch never resolves, such as an owner's denial that aborts the helper or an interrupt before the batch ends, may still leave `calls/<id>` open. A backstop is SubagentStop closing every call of its `agent_id`, which needs the call file to record the id. Claude Code's live calls are the measure: of 2026-10-11's sessions, 13 held call files older than 30 minutes.
