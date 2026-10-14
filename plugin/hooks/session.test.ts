@@ -99,7 +99,7 @@ test('no reading: 5h no reading', async (t: any, on: any) => {
 test('while hasSurvey: neither line, and what next gives', async (t: any, on: any) => {
   const survey = { type: 'Text', props: {}, children: ['survey: how was it?'] }
   const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND }, 120, true, survey)
-  expect(tree).toEqual(survey)
+  expect(tree).toMatchObject(survey) // the engine (2.1.299) tags a node with its plugin: `part`
 })
 
 test('another mod\'s line is kept under the two', async (t: any, on: any) => {
