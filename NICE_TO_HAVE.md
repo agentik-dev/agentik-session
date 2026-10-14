@@ -166,3 +166,4 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - c4 picks by folder, so a new `.claude/agentik/` holding only `config.local.yaml` skips the committed old `config.yaml` (doctor flags it "unread").
 - The respawn match is a substring test (`agentik-session checkpoints --respawn` matches); the marker's timestamp guards it.
 - doctor's relay row looks for `relay` only, not `agentik-relay`.
+- (observer, 2026-10-13, S4, confirmed) `claude_session/profiles.yaml` lines 49 and 70 ship `respeak: {narrative: tech}`, a string, while respeak's provider layer wants `narrative:` as a mapping. Every `respeak-config.sh resolve` in a session prints `resolved.json#respeak: narrative is a mapping in a lower layer but str here; ignored`, and the profile's tone never reaches respeak. Fix: `respeak: {narrative: {default_mode: technical}}`, with `tests/test_resolver.py:114` updated.
