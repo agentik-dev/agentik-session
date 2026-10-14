@@ -17,12 +17,21 @@ is its level text to the first colon, at most 24 characters of
 `[A-Za-z0-9 '.,-]`, and the integers are bounded (`fallback` 60 to 3600 s,
 `waiting` 1 to 9), so four labels at the bound read 319 bytes. No hook enforces
 either rule set; `agentik session rules` prints both (`render`).
+
+The prompt cache's lifetime (packet S30) is read, never assumed (`lifetime`): an idle
+wait on the 1h lifetime wakes at most 3300 s apart, and on 5m it takes the long fallback,
+since any wait past about 270 s misses anyway. The block names it only when it is known
+and the whole block still fits BLOCK_MAX; `rules` prints it as pacing item 6, and the
+prompt hook as one line (`hint`).
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 LEVELS = ("S1", "S2", "S3", "S4")
 PRIORITY = {"enabled": True, "levels": {
@@ -67,6 +76,35 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "first, and it never counts toward the stop")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "
          "none; no hook enforces them")
+
+# The prompt cache's lifetime (packet S30; Claude Code's "How Claude Code uses prompt
+# caching"): the main conversation gets 1h only on a subscription within plan usage, else
+# 5m. WARM is the longest idle wait that still reads a warm cache: 3300 s leaves 300 under
+# the hour for a wakeup's late fire (3600 s was seen to fire at 3636 to 3648).
+TTLS = ("5m", "1h")
+WARM = {"1h": 3300, "5m": 270}
+FORCE_5M = "FORCE_PROMPT_CACHING_5M"
+TTL_VAR = "CLAUDE_CODE_PROMPT_CACHE_TTL"
+ENABLE_1H = "ENABLE_PROMPT_CACHING_1H"
+CLOUD = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+PLAN = 100                        # a usage reading at or past this is on usage credits
+UNKNOWN = "no usage reading and no override"
+LIFETIME = {
+    "1h": "the prompt cache lives 1h here ({why}): an idle wait (items 2, 4 and 5) wakes at "
+          "most {warm} s apart, whatever the fallback, so the cache survives; a wake at 3600 s "
+          "lands past the hour and rewrites the whole context",
+    "5m": "the prompt cache lives 5m here ({why}): any wait past about {warm} s misses it "
+          "anyway, so an idle wait takes the long fallback ({fallback} s or more) and never "
+          "wakes early just to keep the cache",
+    None: "the prompt cache's lifetime is not known here ({why}): on 1h (a subscription "
+          "within plan usage) an idle wait wakes at most {warm1h} s apart; on 5m (usage "
+          "credits, an API key, a cloud provider or promptCacheTtl 5m) it takes the long "
+          "fallback and never wakes early to keep the cache"}
+CLAUSE = {"1h": f", cache 1h: idle wakes <={WARM['1h']}s", "5m": ", cache 5m: no keep-warm wakes"}
+HINT = {"1h": "cache 1h ({why}): an idle wake waits at most {warm} s, so the cache survives",
+        "5m": "cache 5m ({why}): a wait past about {warm} s misses anyway; an idle wait takes "
+              "the long fallback, never an early wake to keep the cache"}
+TAIL = "; agentik-session rules prints both"
 
 _LABEL = re.compile(r"[A-Za-z0-9 '.,-]*")
 
@@ -146,9 +184,10 @@ def _label(text: str) -> str:
     return _LABEL.match(text.split(":", 1)[0]).group(0)[:LABEL_MAX].strip()
 
 
-def clause(session) -> str:
+def clause(session, ttl=None) -> str:
     """The SessionStart block: empty when both are off, else one line of at most
-    BLOCK_MAX bytes opening `; `."""
+    BLOCK_MAX bytes opening `; `. With pacing on and `ttl` known (`1h`, `5m`), the pacing
+    part ends with CLAUSE[ttl] when the whole block still fits; never cut for it (S30)."""
     pr, pa = parts(session)
     out = []
     if pr["enabled"]:
@@ -160,11 +199,16 @@ def clause(session) -> str:
                    "loop, a meter wait never")
     if not out:
         return ""
-    return ("; " + "; ".join(out) + "; agentik-session rules prints both")[:BLOCK_MAX]
+    if pa["enabled"] and ttl in CLAUSE:
+        named = "; " + "; ".join(out) + CLAUSE[ttl] + TAIL
+        if len(named.encode()) <= BLOCK_MAX:
+            return named
+    return ("; " + "; ".join(out) + TAIL)[:BLOCK_MAX]
 
 
-def render(session) -> str:
-    """What `agentik session rules` prints: both parts as resolved."""
+def render(session, life=None) -> str:
+    """What `agentik session rules` prints: both parts as resolved, and with pacing on, item
+    6: the prompt cache's lifetime `life`, `(ttl, why)` from `lifetime` (unknown when None)."""
     pr, pa = parts(session)
     lines = []
     if pr["enabled"]:
@@ -178,10 +222,81 @@ def render(session) -> str:
         lines.append(f"pacing: on (session.pacing: fallback {pa['fallback']} s, "
                      f"waiting {pa['waiting']})")
         lines += [f"  {i}. " + p.format(**pa) for i, p in enumerate(PACE, 1)]
+        ttl, why = life if isinstance(life, tuple) and len(life) == 2 else (None, UNKNOWN)
+        ttl = ttl if ttl in TTLS else None
+        lines.append(f"  {len(PACE) + 1}. " + LIFETIME[ttl].format(
+            why=why, warm=WARM.get(ttl), warm1h=WARM["1h"], fallback=pa["fallback"]))
     else:
         lines.append("pacing: off (session.pacing.enabled is false)")
     lines.append(BOUND)
     return "\n".join(lines) + "\n"
+
+
+def _truthy(v) -> bool:
+    return isinstance(v, str) and v.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _setting(env, cwd):
+    """`promptCacheTtl` from the local, project, then user settings: (ttl, why) or None.
+    A value but `5m` or `1h` is skipped, as Claude Code ignores it."""
+    home = Path(env.get("HOME") or Path.home())
+    here = [] if cwd is None else [("local", Path(cwd) / ".claude" / "settings.local.json"),
+                                   ("project", Path(cwd) / ".claude" / "settings.json")]
+    for scope, path in [*here, ("user", home / ".claude" / "settings.json")]:
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        v = doc.get("promptCacheTtl") if isinstance(doc, dict) else None
+        if v in TTLS:
+            return v, f"promptCacheTtl, {scope} settings"
+    return None
+
+
+def _percent(v):
+    ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    return v if ok else None
+
+
+def _instant(v):
+    try:
+        t = datetime.fromisoformat(v) if isinstance(v, str) else None
+    except ValueError:
+        return None
+    return t if t is not None and t.tzinfo is not None else None
+
+
+def lifetime(env, cwd, band=None, now=None) -> tuple:
+    """The main conversation's prompt-cache lifetime, `(ttl, why)`, in Claude Code's order:
+    FORCE_PROMPT_CACHING_5M; CLAUDE_CODE_PROMPT_CACHE_TTL; the `promptCacheTtl` setting;
+    ENABLE_PROMPT_CACHING_1H; then the default: 5m on a cloud provider, else band.json's
+    five-hour reading while its reset is ahead: 5m past plan usage (5h or 7d at PLAN or
+    more), 1h within it. `(None, UNKNOWN)` when nothing says (an API key leaves no reading)."""
+    if _truthy(env.get(FORCE_5M)):
+        return "5m", FORCE_5M
+    if env.get(TTL_VAR) in TTLS:
+        return env[TTL_VAR], TTL_VAR
+    found = _setting(env, cwd)
+    if found:
+        return found
+    if _truthy(env.get(ENABLE_1H)):
+        return "1h", ENABLE_1H
+    if any(_truthy(env.get(k)) for k in CLOUD):
+        return "5m", "a cloud provider"
+    b = band if isinstance(band, dict) else {}
+    p, p7, resets = _percent(b.get("P")), _percent(b.get("P7")), _instant(b.get("resetsAt"))
+    if p is None or resets is None or resets <= (now or datetime.now(timezone.utc)):
+        return None, UNKNOWN
+    if p >= PLAN:
+        return "5m", f"past plan usage, 5h {p:g}%"
+    if p7 is not None and p7 >= PLAN:
+        return "5m", f"past plan usage, 7d {p7:g}%"
+    return "1h", f"within plan usage, 5h {p:g}%"
+
+
+def hint(ttl, why) -> str | None:
+    """The prompt hook's line for a known lifetime; None when it is not known."""
+    return HINT[ttl].format(why=why, warm=WARM[ttl]) if ttl in HINT else None
 
 
 def handover_listed(text: str) -> bool:
