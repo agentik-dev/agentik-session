@@ -295,7 +295,9 @@ prompt cache's lifetime.
   `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, `promptCacheTtl`
   in the local, project (`CLAUDE_PROJECT_DIR`), then user settings
   (`CLAUDE_CONFIG_DIR`, else `~/.claude`), `ENABLE_PROMPT_CACHING_1H`; then
-  a cloud provider is 5m, and the band's five-hour reading is 1h under 100%
+  a cloud provider is 5m; an API key (`ANTHROPIC_API_KEY`, an `apiKeyHelper`)
+  or a gateway (`ANTHROPIC_BASE_URL`) is unknown; and the band's five-hour
+  reading is 1h under 100%
   and 5m at 100% or past (usage credits). With none of these it is unknown.
   `DISABLE_PROMPT_CACHING` or a per-model form reads off, first of all: no
   wait keeps a cache warm, so an idle wait takes the long fallback.

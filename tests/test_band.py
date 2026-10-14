@@ -317,6 +317,16 @@ def test_s30_f3_a_disabled_cache_reads_off_on_the_prompt_line(monkeypatch):
                         "wait takes the long fallback, never an early wake to keep a cache")
 
 
+def test_s30_a_key_claims_no_lifetime_on_the_prompt_line(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    now = datetime.now(UTC)
+    record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
+    assert _context(hooks.user_prompt_submit({"session_id": SID}))[-1] == S30_1H   # the control
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert bits[-1].startswith("5h 72%") and not any(x.startswith("cache ") for x in bits)
+
+
 # ---- report's window use: held, idle, under 90; no ledger ----
 
 def run(*argv):

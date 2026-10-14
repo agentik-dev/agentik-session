@@ -359,3 +359,25 @@ def test_s30_f5_settings_are_read_from_small_regular_files_only(tmp_path):
     assert r.lifetime(env, tmp_path, _s30_band(41)) == ("5m", "promptCacheTtl, user settings")
     local.write_text(json.dumps({"promptCacheTtl": "1h"}))                      # the control
     assert r.lifetime(env, tmp_path, _s30_band(41)) == ("1h", "promptCacheTtl, local settings")
+
+
+@pytest.mark.parametrize("env,settings,want", [
+    ({"ANTHROPIC_API_KEY": "sk-test"}, {}, (None, "ANTHROPIC_API_KEY is set")),
+    ({"ANTHROPIC_BASE_URL": "https://gateway.example"}, {}, (None, "ANTHROPIC_BASE_URL is set")),
+    ({}, {"project": {"apiKeyHelper": "/bin/echo"}}, (None, "apiKeyHelper, project settings")),
+    ({}, {"user": {"apiKeyHelper": "/bin/echo"}}, (None, "apiKeyHelper, user settings")),
+    ({"ANTHROPIC_API_KEY": ""}, {}, ("1h", "within plan usage, 5h 41%")),
+    ({"ANTHROPIC_API_KEY": "sk-test"}, {"user": {"promptCacheTtl": "1h"}},
+     ("1h", "promptCacheTtl, user settings")),
+    ({"ANTHROPIC_BASE_URL": "https://gateway.example", "CLAUDE_CODE_USE_BEDROCK": "1"}, {},
+     ("5m", "a cloud provider")),
+], ids=["api-key", "gateway", "helper-project", "helper-user", "empty-key", "setting-wins",
+        "cloud-wins"])
+def test_s30_a_key_or_a_gateway_reads_unknown(tmp_path, env, settings, want):
+    home = tmp_path / "home"
+    paths = {"project": tmp_path / ".claude" / "settings.json",
+             "user": home / ".claude" / "settings.json"}
+    for scope, doc in settings.items():
+        paths[scope].parent.mkdir(parents=True, exist_ok=True)
+        paths[scope].write_text(json.dumps(doc))
+    assert rules().lifetime({"HOME": str(home), **env}, tmp_path, _s30_band(41)) == want

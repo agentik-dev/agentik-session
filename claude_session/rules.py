@@ -93,6 +93,7 @@ CLOUD = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_F
          "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_USE_MANTLE")   # fix round F2
 PLAN = 100                        # a usage reading at or past this is on usage credits
 SETTINGS_MAX = 1 << 20            # a settings file past this, or not a regular file, is unread
+KEYED = ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL")   # a key or a gateway: no plan to read
 DISABLE = "DISABLE_PROMPT_CACHING"     # and its per-model `_<MODEL>` forms: no cache (F3)
 UNKNOWN = "no usage reading and no override"
 LIFETIME = {
@@ -278,23 +279,44 @@ def _small(path: Path, cap: int = SETTINGS_MAX):
         return None
 
 
-def _setting(env, cwd):
-    """`promptCacheTtl` from the local, project, then user settings: (ttl, why) or None.
-    A value but `5m` or `1h` is skipped, as Claude Code ignores it. The user's settings are
-    under CLAUDE_CONFIG_DIR when it is set, else ~/.claude (fix round F4)."""
+def _settings(env, cwd) -> list:
+    """`[(scope, doc)]` for the local, project, then user settings that read as one JSON
+    object. The user's are under CLAUDE_CONFIG_DIR when it is set, else ~/.claude (fix
+    round F4); each file is read by `_small` (F5)."""
     moved = env.get("CLAUDE_CONFIG_DIR")
     user = (Path(moved).expanduser() if moved
             else Path(env.get("HOME") or Path.home()) / ".claude")
     here = [] if cwd is None else [("local", Path(cwd) / ".claude" / "settings.local.json"),
                                    ("project", Path(cwd) / ".claude" / "settings.json")]
+    out = []
     for scope, path in [*here, ("user", user / "settings.json")]:
         try:
             doc = json.loads(_small(path) or "")
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
-        v = doc.get("promptCacheTtl") if isinstance(doc, dict) else None
-        if v in TTLS:
-            return v, f"promptCacheTtl, {scope} settings"
+        if isinstance(doc, dict):
+            out.append((scope, doc))
+    return out
+
+
+def _setting(docs: list):
+    """`promptCacheTtl`, the first in `docs`: (ttl, why) or None. A value but `5m` or `1h`
+    is skipped, as Claude Code ignores it."""
+    for scope, doc in docs:
+        if doc.get("promptCacheTtl") in TTLS:
+            return doc["promptCacheTtl"], f"promptCacheTtl, {scope} settings"
+    return None
+
+
+def _keyed(env, docs: list):
+    """Why the default may not be a subscription's: an API key, an `apiKeyHelper` or a
+    gateway base URL (the fix round's observation); None when none is in play."""
+    for var in KEYED:
+        if env.get(var):
+            return f"{var} is set"
+    for scope, doc in docs:
+        if doc.get("apiKeyHelper"):
+            return f"apiKeyHelper, {scope} settings"
     return None
 
 
@@ -312,14 +334,15 @@ def _instant(v):
 
 
 def lifetime(env, cwd, band=None, now=None) -> tuple:
-    """The main conversation's prompt-cache lifetime, `(ttl, why)`: `off` when
-    DISABLE_PROMPT_CACHING or a per-model form is set (fix round F3), else Claude Code's order:
-    FORCE_PROMPT_CACHING_5M; CLAUDE_CODE_PROMPT_CACHE_TTL; the `promptCacheTtl` setting;
-    ENABLE_PROMPT_CACHING_1H; then the default: 5m on a cloud provider, else band.json's
+    """The main conversation's prompt-cache lifetime, `(ttl, why)`. `off` when
+    DISABLE_PROMPT_CACHING or a per-model form is set (fix round F3); else Claude Code's
+    order: FORCE_PROMPT_CACHING_5M; CLAUDE_CODE_PROMPT_CACHE_TTL; the `promptCacheTtl`
+    setting; ENABLE_PROMPT_CACHING_1H; then the default: 5m on a cloud provider; unknown
+    with an API key, an apiKeyHelper or a gateway base URL in play; else band.json's
     five-hour reading while its reset is ahead: 5m past plan usage (5h or 7d at PLAN or
-    more), 1h within it. `(None, UNKNOWN)` when nothing says (an API key leaves no reading).
-    The project's settings are under CLAUDE_PROJECT_DIR, which Claude's `cd` never moves;
-    under `cwd` only when it is unset (fix round F1)."""
+    more), 1h within it. `(None, UNKNOWN)` when nothing says. The project's settings are
+    under CLAUDE_PROJECT_DIR, which Claude's `cd` never moves; under `cwd` only when it is
+    unset (fix round F1)."""
     cwd = env.get("CLAUDE_PROJECT_DIR") or cwd
     for k in [DISABLE, *sorted(k for k in env if k.startswith(DISABLE + "_"))]:
         if _truthy(env.get(k)):
@@ -328,13 +351,17 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
         return "5m", FORCE_5M
     if env.get(TTL_VAR) in TTLS:
         return env[TTL_VAR], TTL_VAR
-    found = _setting(env, cwd)
+    docs = _settings(env, cwd)
+    found = _setting(docs)
     if found:
         return found
     if _truthy(env.get(ENABLE_1H)):
         return "1h", ENABLE_1H
     if any(_truthy(env.get(k)) for k in CLOUD):
         return "5m", "a cloud provider"
+    keyed = _keyed(env, docs)
+    if keyed:
+        return None, keyed
     b = band if isinstance(band, dict) else {}
     p, p7, resets = _percent(b.get("P")), _percent(b.get("P7")), _instant(b.get("resetsAt"))
     if p is None or resets is None or resets <= (now or datetime.now(timezone.utc)):
