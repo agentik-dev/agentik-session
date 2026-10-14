@@ -557,3 +557,17 @@ def test_c4_c6_old_folder_and_key_are_warn_rows(machine):
     (new / "config.yaml").write_text("relay: {enabled: auto}\n")
     rows = {c.name: c.detail for c in doctor.run(machine.env, machine.repo).checks if c.warn}
     assert "unread" in rows["config-dir"] and "config-key" not in rows
+
+
+def test_f2_new_and_old_ids_both_enabled_warn_to_disable_the_old(machine):
+    # fix round F2: both IDs enabled fire every hook twice; a warn names the old to disable
+    old = [dict(p, id=i) for p, i in zip(machine.plugins, (
+        "session@claude-code-session", "decisions@claude-code-decisions"))]
+    machine.set_plugins(machine.plugins + old)
+    rep = doctor.run(machine.env, machine.repo)
+    assert failing(rep) == [] and rep.ok
+    warns = {c.name: c.detail for c in rep.checks if c.warn}
+    assert "disable session@claude-code-session" in warns["plugin"]
+    assert "each hook fires twice" in warns["plugin"]
+    assert "disable decisions@claude-code-decisions" in warns["decisions"]
+    assert "respeak" not in warns

@@ -59,6 +59,17 @@ def _pick_id(plugins, new: str, old: str):
     return new, None, False
 
 
+def _twice(plugins, pid: str, old: str) -> bool:
+    """The new ID picked while the old is enabled too: each hook fires twice (fix round F2)."""
+    o = plugins.get(old)
+    return pid != old and bool(o and o.get("enabled"))
+
+
+def _twice_note(old: str, new: str) -> str:
+    return f"{new} and {old} are both enabled, so each hook fires twice: disable {old} " \
+           "(agentik-r1 §8.3 step 3)"
+
+
 def _switch_note(old: str, new: str) -> str:
     return f"{old} is the ID before the switch: install {new}, then disable {old} " \
            "(agentik-r1 §8.3)"
@@ -266,6 +277,9 @@ def _check_plugin(plugins, err) -> Check:
     if old:
         return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
                      + _switch_note(pid, PLUGIN_ID), warn=True)
+    if _twice(plugins, pid, OLD_PLUGIN_ID):
+        return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
+                     + _twice_note(OLD_PLUGIN_ID, pid), warn=True)
     return Check("plugin", True, f"{PLUGIN_ID} {p.get('version')} enabled; hooks "
                  + ", ".join(HOOK_EVENTS))
 
@@ -287,6 +301,9 @@ def _check_dependency(dep: dict, plugins, err) -> Check:
     if old:
         return Check(name, True, f"{pid} {p.get('version')} installed; "
                      + _switch_note(pid, new), warn=True)
+    if _twice(plugins, pid, dep["old"]):
+        return Check(name, True, f"{pid} {p.get('version')} installed; "
+                     + _twice_note(dep["old"], pid), warn=True)
     return Check(name, True, f"{pid} {p.get('version')} installed")
 
 
