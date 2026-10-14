@@ -19,9 +19,9 @@ def world(tmp_path):
     env = {"HOME": str(home), "XDG_STATE_HOME": str(state)}
 
     def put(layer, text):
-        path = {"user": home / ".claude/claude-code-session/profiles.yaml",
-                "repo": repo / ".claude/claude-code-session/config.yaml",
-                "local": repo / ".claude/claude-code-session/config.local.yaml"}[layer]
+        path = {"user": home / ".claude/agentik/profiles.yaml",
+                "repo": repo / ".claude/agentik/config.yaml",
+                "local": repo / ".claude/agentik/config.local.yaml"}[layer]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     return env, repo, put
@@ -38,9 +38,12 @@ def test_defaults_alone(world):
     assert s["profile"] == "frontier" and s["model"] == "opus"
     assert s["ceilings"] == {"context": 180000, "turns": 400}
     assert s["push"] == "never" and s["device"] == "never"
-    assert r.sections["agent-relay"]["enabled"] == "auto"
+    assert r.sections["relay"]["enabled"] == "auto"
     assert r.sections["decisions"] == {"dir": "decisions"}
-    assert list(r.as_dict()) == ["provider", "session", "respeak", "decisions", "agent-relay"]
+    # agentik-r1 ruling 5: the section is `relay`, with a copy under the old key until r2
+    assert list(r.as_dict()) == ["provider", "session", "respeak", "decisions", "relay",
+                                 "agent-relay"]
+    assert r.as_dict()["agent-relay"] == r.sections["relay"] and r.renamed == []
     assert r.provider["version"] == SEMVER and r.provider["plugin"] == "session"
 
 
@@ -106,11 +109,55 @@ def test_overlay_file_is_read_and_hashed(world):
 
 
 def test_dependent_sections_pass_through_unknown_keys(world):
-    world[2]("repo", "respeak: {mode: eli5}\nagent-relay: {enabled: \"off\"}\n")
+    world[2]("repo", "respeak: {mode: eli5}\nrelay: {enabled: \"off\"}\n")
     r = run(world)
     assert r.sections["respeak"] == {"narrative": "tech", "mode": "eli5"}
-    assert r.sections["agent-relay"]["enabled"] == "off"
+    assert r.sections["relay"]["enabled"] == "off"
     assert r.unknown == []
+
+
+def test_c6_the_old_relay_key_is_read_and_relay_wins(world):
+    # agentik-r1 §6.3 c6 (packet ruling 5): the old key alone is read as `relay`, a warning;
+    # with both in one layer `relay` wins, a warning naming the old key.
+    env, repo, put = world
+    put("repo", 'agent-relay: {enabled: "off", queue: q.yaml}\n')
+    r = run(world)
+    assert r.sections["relay"] == {"enabled": "off", "queue": "q.yaml",
+                                   "merge": "merge-on-green"}
+    assert r.as_dict()["agent-relay"] == r.sections["relay"]
+    assert r.renamed == ["config.yaml: agent-relay is read as relay; rename the key"]
+    put("repo", 'relay: {enabled: "on"}\nagent-relay: {enabled: "off"}\n')
+    r = run(world)
+    assert r.sections["relay"]["enabled"] == "on" and r.unknown == []
+    assert r.renamed == ["config.yaml: agent-relay and relay both set; relay wins, "
+                         "remove agent-relay"]
+    # the user's profiles.yaml: its old key still overrides the shipped `relay`
+    put("repo", "")
+    put("user", 'profiles:\n  frontier:\n    agent-relay: {enabled: "off"}\n')
+    r = run(world)
+    assert r.sections["relay"]["enabled"] == "off"
+    assert r.renamed == ["profiles.yaml: frontier: agent-relay is read as relay; rename the key"]
+
+
+def test_c4_c5_the_old_folders_are_read_until_the_new_exist(tmp_path):
+    # agentik-r1 §6.3 c4 c5 (packet ruling 1): the new path when it exists, else the old.
+    home, repo = tmp_path / "home", tmp_path / "repo"
+    env = {"HOME": str(home), "XDG_STATE_HOME": str(tmp_path / "state")}
+    old_repo = repo / ".claude/claude-code-session"
+    old_user = home / ".claude/claude-code-session"
+    for d in (old_repo, old_user):
+        d.mkdir(parents=True)
+    (old_repo / "config.yaml").write_text("session: {effort: low}\n")
+    (old_user / "profiles.yaml").write_text("profiles:\n  mine: {effort: medium}\n")
+    r = resolve(repo, SID, env)
+    assert r.sections["session"]["effort"] == "low"
+    assert resolver.repo_dir(repo) == old_repo
+    assert str(old_user / "profiles.yaml") in dict(r.inputs)
+    assert resolve(repo, SID, env, profile="mine").sections["session"]["effort"] == "medium"
+    (repo / ".claude/agentik").mkdir()
+    (repo / ".claude/agentik/config.yaml").write_text("session: {effort: high}\n")
+    assert resolve(repo, SID, env).sections["session"]["effort"] == "high"
+    assert resolver.repo_dir(repo) == repo / ".claude/agentik"
 
 
 def test_unknown_keys_are_reported_and_ignored(world):

@@ -1,6 +1,6 @@
 """The admission ledger, in `observe` (design/admission-r1.md §2, §3.1, §5 S25).
 
-`claude-session admission record --session <id>` is what the session plugin's admission
+`agentik-session admission record --session <id>` is what the session plugin's admission
 hooks (plugin/hooks/session.ts, the plugin's one module) run at each hook they keep: one JSON object on stdin,
 `{kind, ...}`, appended as one line to the machine's ledger,
 `<state>/admission/ledger.jsonl`, under one flock waited for at most 2 s. Each kind has a

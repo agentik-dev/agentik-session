@@ -7,27 +7,26 @@ LICENSE: person
 plugin/.claude-plugin/plugin.json: sibling,person
 # The repo's own name (pyproject's project name, the Makefile's install paths).
 pyproject.toml: sibling
-Makefile: sibling
+Makefile: sibling,renamed
 # The design records name the sibling plugins they read and write.
 design/*.md: sibling
 bugs/*.md: sibling
 # ADV6-1's reproduction names a generic mDNS host name and an RFC 1918 address.
 design/review-adv6.md: lan
 # The tool's own state path (its name) and the plugins it loads by id.
-claude_session/config.py: sibling
-claude_session/launch.py: sibling
+claude_session/config.py: sibling,renamed
+claude_session/launch.py: sibling,renamed
 claude_session/sessionconfig.py: sibling
-tests/test_launch.py: sibling
+tests/test_launch.py: sibling,renamed
 # The launcher's one-time marker lives under the tool's state path (ADV10-5).
-install-wrapper.sh: sibling
-tests/test_install.py: sibling
+install-wrapper.sh: sibling,renamed
+tests/test_install.py: sibling,renamed
 # The manifests: the repo's name and the dependency names.
-.claude-plugin/marketplace.json: sibling
 claude_session/profiles.yaml: sibling
-claude_session/resolver.py: sibling
-claude_session/doctor.py: sibling
-tests/test_resolver.py: sibling
-tests/test_doctor.py: sibling
+claude_session/resolver.py: sibling,renamed
+claude_session/doctor.py: sibling,renamed
+tests/test_resolver.py: sibling,renamed
+tests/test_doctor.py: sibling,renamed
 tests/test_hook_session_start.py: sibling
 tests/test_hook_meter.py: sibling
 tests/test_hooks.py: sibling
@@ -83,3 +82,17 @@ design/packets/s6-readme.md: sibling
 design/packets/s7-conventions-and-doctor.md: sibling
 design/packets/s8-conventions-plugins.md: sibling
 design/packets/s9-hygiene-and-charters.md: sibling
+# agentik-r1 §6.1, §6.3 (packet ruling 12): `renamed` is allowed where the old name is load-
+# bearing until r2: the alias and its note (install-wrapper.sh, Makefile), the fallbacks to the
+# old state, repo and user folders, section key, plugin IDs, checkout folders and local lane
+# (config, resolver, doctor, launch), the respawn match's old spelling (hooks), the hook
+# shim's and module's old CLI (c11), and each one's test. The rows above carry it beside
+# `sibling`; the rows below are the files `sibling` never needed.
+claude_session/hooks.py: renamed
+plugin/hooks/run: renamed
+plugin/hooks/session.ts: renamed
+tests/test_hooks.py: renamed
+# scripts/doclint stays byte-identical across the repos (pinned by sha256 until r2); its
+# tests name the relay's legacy packet stems.
+scripts/doclint: renamed
+tests/test_doclint.py: renamed

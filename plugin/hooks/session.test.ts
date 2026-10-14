@@ -15,8 +15,8 @@ const BAND = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:
 const BAND_LINE = '5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
 const BAND_JSON = '/state/admission/band.json'
 
-const ARGV = ['claude-session', 'mod', 'start', '--session', 'sess-1']
-const NO_METER = 'session: no meter · claude-session doctor'
+const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
+const NO_METER = 'session: no meter · agentik-session doctor'
 
 const band = async (t: any, on: any, files: Record<string, string>, columns = 120, ran = 0) => {
   on('session.start', ($: any, e: any) => e)
@@ -39,11 +39,11 @@ test('the band reads ctx, turns and the zone from meter.json', async (t: any, on
 })
 
 test('no meter.json: no meter, and where to look', async (t: any, on: any) => {
-  expect(await band(t, on, {})).toBe('session: no meter · claude-session doctor')
+  expect(await band(t, on, {})).toBe('session: no meter · agentik-session doctor')
 })
 
 test('mod start failing: no meter', async (t: any, on: any) => {
-  expect(await band(t, on, { [`${DIR}/meter.json`]: METER }, 120, 1)).toBe('session: no meter · claude-session doctor')
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER }, 120, 1)).toBe('session: no meter · agentik-session doctor')
 })
 
 test('meter.json past 120 s: its age', async (t: any, on: any) => {
@@ -120,7 +120,7 @@ const retrying = async (t: any, on: any, failures: number) => {
     if (e.argv?.[1] === 'admission') return { value: { exitCode: 0, stdout: '', stderr: '' } }
     argvs.push(JSON.stringify(e.argv))
     return { value: argvs.length <= failures
-      ? { code: 1, stdout: '', stderr: 'claude-session: no session sess-1' }
+      ? { code: 1, stdout: '', stderr: 'agentik-session: no session sess-1' }
       : { code: 0, stdout: JSON.stringify({ dir: DIR }), stderr: '' } }
   })
   on('fs.read', ($: any, e: any) => {
@@ -163,8 +163,8 @@ test('mod start never answering: 24 tries, then the doctor line', async (t: any,
 // Packet M2: every session.measure sends one `measure record` (the four figures, never a
 // message's text), and admission's reading beside it when a window moved; either call
 // rejecting or hanging still reaches `next`, and the hook answers what `next` settled to.
-const MEASURED = ['claude-session', 'measure', 'record', '--session', 'sess-1']
-const READING = ['claude-session', 'admission', 'record', '--session', 'sess-1']
+const MEASURED = ['agentik-session', 'measure', 'record', '--session', 'sess-1']
+const READING = ['agentik-session', 'admission', 'record', '--session', 'sess-1']
 const LIMITS = [{ kind: 'five_hour', percentUsed: 41.5, resetsAt: '2026-10-12T14:05:00Z' }]
 const MEASURE_IN = { context: { tokens: 20000, window: 200000, percent: 10 }, rateLimits: LIMITS,
   cost: { usd: 1.25 }, prompt: 'never sent', message: 'secret text' }
@@ -182,7 +182,7 @@ const measuring = (on: any, fail: Record<string, 'reject' | 'hang'> = {}) => {
     const init = e.init ?? e
     calls.push({ argv: e.argv, stdin: JSON.parse(String(init.stdin ?? 'null')), raw: e })
     const how = fail[String(e.argv?.[1])]
-    if (how === 'reject') throw new Error('ENOENT: claude-session not found')
+    if (how === 'reject') throw new Error('ENOENT: agentik-session not found')
     if (how === 'hang') return new Promise(() => {})
     return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })

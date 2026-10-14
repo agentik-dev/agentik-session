@@ -1,4 +1,4 @@
-"""`claude-session run`: the launcher that restarts a RESPAWN sitting (respawn-r1 §3).
+"""`agentik session run`: the launcher that restarts a RESPAWN sitting (respawn-r1 §3).
 
 The launcher is the owner's foreground job. Each start runs `claude --session-id <U>
 <the owner's arguments>`, byte for byte the same every time, with the launcher's own
@@ -218,8 +218,8 @@ class Chain:
         self.name, self.args, self.state, self.fx = name, list(args), Path(state), effects
         self._guards = guards
         self.poll, self.grace, self.kill_grace = poll, grace, kill_grace
-        self.argv = list(argv) if argv else ["claude-session", "run", "--chain", name, "--",
-                                             *self.args]
+        self.argv = list(argv) if argv else ["agentik", "session", "run", "--chain", name,
+                                             "--", *self.args]
         self.home = self.state / "respawn" / name
         self.got: list[int] = []        # the signals the launcher took, in order
         self.restarts = 0               # the restarts this launcher made
@@ -235,19 +235,19 @@ class Chain:
             self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
             fd = os.open(self.home / "lock", os.O_RDWR | os.O_CREAT, 0o600)
         except OSError as e:
-            self.fx.say(f"error: claude-session run: the chain's lock cannot be opened: {e}")
+            self.fx.say(f"error: agentik-session run: the chain's lock cannot be opened: {e}")
             return 2
         try:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
-                self.fx.say(f"error: claude-session run: the chain {self.name} already runs "
+                self.fx.say(f"error: agentik-session run: the chain {self.name} already runs "
                             f"(its lock {self.home / 'lock'} is held)")
                 return 2
             try:
                 self.g = self.guards()
             except resolver.ResolveError as e:
-                self.fx.say(f"error: claude-session run: {e}")
+                self.fx.say(f"error: agentik-session run: {e}")
                 return 2
             old = self._trap()
             try:

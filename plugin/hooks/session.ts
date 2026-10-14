@@ -1,5 +1,5 @@
 // The session plugin's hooks module (design/mod-r1.md §6 S1, packet M1): one read-only band
-// above the prompt. At session.start it runs `claude-session mod start` (5 s), which writes
+// above the prompt. At session.start it runs `agentik-session mod start` (5 s), which writes
 // mod.json and prints the session's directory; the band reads meter.json and respawn.json
 // there and draws one line, and admission's band.json a second (packet S27b). It writes no
 // file, keeps no figure a decision reads, and needs no sibling plugin. The classic hooks in
@@ -18,7 +18,20 @@ import type { EngineInterface, Register } from 'claude-code'
 const STALE_S = 120
 const EVERY_MS = 5000
 const MAX_TRIES = 24      // `mod start` retried while the dir is unknown: 2 min of ticks
-const NO_METER = 'session: no meter · claude-session doctor'
+const NO_METER = 'session: no meter · agentik-session doctor'
+// agentik-r1 §6.3 c11 (packet ruling 7): the tool by its new name; when that is not on PATH
+// (the run rejects, not found), its old name, the alias until r2.
+const TOOL = 'agentik-session'
+const OLD_TOOL = 'claude-session'
+const notFound = (err: any): boolean => /ENOENT|not found/i.test(String(err?.message ?? err))
+async function runTool($: EngineInterface, argv: string[], opts: any): Promise<any> {
+  try {
+    return await $.process.run(argv, opts)
+  } catch (err) {
+    if (argv[0] !== TOOL || !notFound(err)) throw err
+    return await $.process.run([OLD_TOOL, ...argv.slice(1)], opts)
+  }
+}
 
 const clip = (line: string, columns: number): string =>
   columns > 0 && line.length > columns ? line.slice(0, Math.max(1, columns - 1)) + '…' : line
@@ -37,7 +50,7 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number):
 }
 
 // ---- Admission's line (design/admission-r1.md §3.5, packet S27b): it shows. ----
-// `claude-session admission` rewrites <state>/admission/band.json inside the ledger's lock at
+// `agentik-session admission` rewrites <state>/admission/band.json inside the ledger's lock at
 // every record and admit; the band draws it under the session's line. This is the twin of
 // Python's band_line (one fixture in session.test.ts pins both): a part with no figure is
 // left out, `observe` is last while the mode is, and the age past 120 s follows it.
@@ -87,7 +100,7 @@ export const admissionLine = (band: string | null, nowMs: number): string | null
 }
 
 // ---- Admission (design/admission-r1.md §3.1, packet S25): it observes. ----
-// Six hooks hand what they see to `claude-session admission record` through $.process.run
+// Six hooks hand what they see to `agentik-session admission record` through runTool
 // (5 s), which keeps one line per event on the machine's admission ledger; the policy lives
 // in the tool, this is glue. They never refuse and never rewrite: every hook returns what
 // `next` settled to, a failed record is one debug line, and a spawn's prompt and a
@@ -107,7 +120,7 @@ const limits = (v: unknown): unknown[] =>
     resetsAt: str(r?.resetsAt) }))
 
 const admissionArgv = (id: unknown): string[] =>
-  ['claude-session', 'admission', 'record', '--session', String(id)]
+  [TOOL, 'admission', 'record', '--session', String(id)]
 const exited = (fields: Record<string, unknown>, r: any): string | null =>
   Number(r?.exitCode) === 0 ? null
     : `admission: record ${fields.kind}: exit ${r?.exitCode}: ${String(r?.stderr ?? '').trim()}`.slice(0, 300)
@@ -131,7 +144,7 @@ async function record($: EngineInterface, fields: Record<string, unknown>, id: s
   try {
     const who = id ?? await within($, () => $.session.id())
     if (who === LATE) throw new Error(`no session id in ${BOUND_MS} ms`)
-    const r = await $.process.run(admissionArgv(who), { stdin: JSON.stringify(fields), timeoutMs })
+    const r = await runTool($, admissionArgv(who), { stdin: JSON.stringify(fields), timeoutMs })
     const line = exited(fields, r)
     if (line) await within($, () => $.ui.log(line, DEBUG))
   } catch (err) { try { await within($, () => $.ui.log(failed(fields, err), DEBUG)) } catch { /* nothing */ } }
@@ -151,7 +164,7 @@ async function admitDone($: EngineInterface, e: unknown): Promise<void> {
 }
 
 // The verdict, observed (design/admission-r1.md §3.3, packet S26 ruling 6): before `next`,
-// `claude-session admission admit` decides the spawn or the resume and appends its verdict
+// `agentik-session admission admit` decides the spawn or the resume and appends its verdict
 // line. In observe the answer is one debug line and `next(e)` always follows, whatever it
 // says: a refusal, an exit, a rejection or a late answer is a debug line too. The whole call
 // (the id read, the run and the answer's log) is raced against ADMIT_MS, the lock waiting at
@@ -159,13 +172,13 @@ async function admitDone($: EngineInterface, e: unknown): Promise<void> {
 // 1, F4). S27a makes it refuse.
 const ADMIT_MS = 3000
 const admitArgv = (id: unknown): string[] =>
-  ['claude-session', 'admission', 'admit', '--session', String(id)]
+  [TOOL, 'admission', 'admit', '--session', String(id)]
 
 async function admitCall($: EngineInterface, fields: Record<string, unknown>,
   say: (line: string) => Promise<void>): Promise<void> {
   const who = await within($, () => $.session.id())
   if (who === LATE) throw new Error(`no session id in ${BOUND_MS} ms`)
-  const r: any = await $.process.run(admitArgv(who), { stdin: JSON.stringify(fields), timeoutMs: ADMIT_MS })
+  const r: any = await runTool($, admitArgv(who), { stdin: JSON.stringify(fields), timeoutMs: ADMIT_MS })
   if (Number(r?.exitCode) !== 0) {
     await say(`admission: admit: exit ${r?.exitCode}: ${String(r?.stderr ?? '').trim()}`)
     return
@@ -193,11 +206,11 @@ async function usageNow($: EngineInterface): Promise<any> {
 }
 
 // ---- The measure (design/mod-r1.md §2 row M2, §6 S2; packet M2): it records. ----
-// Every session.measure hands the engine's figures to `claude-session measure record`
+// Every session.measure hands the engine's figures to `agentik-session measure record`
 // (5 s), which writes measure.json beside meter.json; `status` and `doctor` print the drift.
 // Nothing that decides reads it. Only the four figures are sent, never a message's text.
 const measureArgv = (id: unknown): string[] =>
-  ['claude-session', 'measure', 'record', '--session', String(id)]
+  [TOOL, 'measure', 'record', '--session', String(id)]
 
 const measureFields = (e: unknown): Record<string, unknown> => {
   const x: any = e
@@ -219,7 +232,7 @@ async function measured($: EngineInterface, e: unknown): Promise<void> {
   try {
     const who = await within($, () => $.session.id())
     if (who === LATE) throw new Error(`no session id in ${BOUND_MS} ms`)
-    const r: any = await within($, () => $.process.run(measureArgv(who),
+    const r: any = await within($, () => runTool($, measureArgv(who),
       { stdin: JSON.stringify(measureFields(e)), timeoutMs: LIMIT_MS }), LIMIT_MS + BOUND_MS)
     if (r === LATE) throw new Error(`no answer in ${LIMIT_MS + BOUND_MS} ms`)
     if (Number(r?.exitCode) !== 0) await say(`measure: record: exit ${r?.exitCode}: ${String(r?.stderr ?? '').trim()}`)
@@ -246,7 +259,7 @@ export const register: Register = on => {
         if (dir || !sid || tries >= MAX_TRIES) return
         tries += 1
         try {
-          const p: any = await $.process.run(['claude-session', 'mod', 'start', '--session', sid],
+          const p: any = await runTool($, [TOOL, 'mod', 'start', '--session', sid],
             { timeoutMs: EVERY_MS })
           dir = String(JSON.parse(String(p?.stdout ?? '')).dir ?? '')
         } catch { dir = '' }
@@ -266,7 +279,7 @@ export const register: Register = on => {
       if (!dir && sid && tries < MAX_TRIES) {
         tries += 1
         try {
-          const p: any = await $.process.run(['claude-session', 'mod', 'start', '--session', sid],
+          const p: any = await runTool($, [TOOL, 'mod', 'start', '--session', sid],
             { timeoutMs: EVERY_MS })
           dir = String(JSON.parse(String(p?.stdout ?? '')).dir ?? '')
         } catch { dir = '' }

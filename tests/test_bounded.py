@@ -187,7 +187,8 @@ def test_makefile_gate_is_bounded():
     # the README render spawns `claude -p`: walled and held off like the gate (ADV10-6);
     # test_readme.py holds the wall to the renderer's budget (F5)
     assert re.search(r"scripts/bounded --wall \d+ --load 4 -- scripts/readme-render\n", text)
-    assert text.count("scripts/bounded --wall 60 -- claude plugin validate") == 2
+    # agentik-r1 §5.2: the plugin only; the marketplace is agentik-commons'
+    assert text.count("scripts/bounded --wall 60 -- claude plugin validate") == 1
     assert ".check.lock" in (ROOT / ".gitignore").read_text().split()
 
 

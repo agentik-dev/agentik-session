@@ -1,6 +1,6 @@
 """The mod's one verb and its trace (design/mod-r1.md §4, packet M1).
 
-`claude-session mod start --session <id>` is the only thing the session plugin's hooks
+`agentik-session mod start --session <id>` is the only thing the session plugin's hooks
 module (plugin/hooks/session.ts) runs: it writes `mod.json` `{at, version}` into the
 directory the classic hooks made for the session, and prints that directory, which the
 module reads its band from. `status` and `doctor` print whether the mod has been seen.

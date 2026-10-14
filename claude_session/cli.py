@@ -1,4 +1,4 @@
-"""claude-session — verbs, argument parsing, and all the printing.
+"""agentik-session — verbs, argument parsing, and all the printing.
 
 Every sys.exit lives in this module; everything below it returns values.
 """
@@ -16,6 +16,7 @@ import time
 
 from . import (admission, charter, doctor, gitinfo, hooks, launch, ledger, measure, meter, mod,
                resolver, rules, sessionconfig, store)
+from . import SEMVER
 from .yamlsubset import dump
 from .sessionconfig import (IN_SESSION_EQUIVALENT, LAUNCH_ONLY, LIVE,
                             SETTABLE, SessionConfig)
@@ -56,7 +57,7 @@ def cmd_start(args) -> int:
     cfg = configs.get(args.config)
     if not cfg:
         _die(f"unknown configuration {args.config!r}. Known: "
-             f"{', '.join(sorted(configs))}  (claude-session config list)")
+             f"{', '.join(sorted(configs))}  (agentik session config list)")
     here = launch.depth(os.environ)
     if here is None:
         _die(f"{launch.DEPTH_VAR}={os.environ[launch.DEPTH_VAR]!r} is not a depth; "
@@ -114,7 +115,7 @@ def cmd_status(args) -> int:
         d = meter.load(sdir) if sdir else None
         if not d:
             print("no meter for this session: PostToolUse has not run (see "
-                  "`claude-session doctor`)", file=sys.stderr)
+                  "`agentik session doctor`)", file=sys.stderr)
             return 2
         if not args.json:
             print(meter.one_line(d))
@@ -130,7 +131,7 @@ def cmd_mod(args) -> int:
     try:
         sdir = mod.start(args.session, os.environ)
     except mod.ModError as e:
-        print(f"claude-session: {e}", file=sys.stderr)
+        print(f"agentik-session: {e}", file=sys.stderr)
         return e.code
     print(json.dumps({"dir": str(sdir)}))
     return 0
@@ -142,7 +143,7 @@ def _stdin() -> str | None:
     try:
         return sys.stdin.read()
     except UnicodeDecodeError:
-        print("claude-session: stdin is not UTF-8; nothing written", file=sys.stderr)
+        print("agentik-session: stdin is not UTF-8; nothing written", file=sys.stderr)
         return None
 
 
@@ -158,15 +159,15 @@ def cmd_admission(args) -> int:
             answer = admission.admit(args.session, text, os.environ)
             print(json.dumps(answer, ensure_ascii=False))
             for note in answer.get("notes", ()):
-                print(f"claude-session: {note}", file=sys.stderr)
+                print(f"agentik-session: {note}", file=sys.stderr)
         else:
             admission.record(args.session, text, os.environ)
     except admission.AdmissionError as e:
-        print(f"claude-session: {e}", file=sys.stderr)
+        print(f"agentik-session: {e}", file=sys.stderr)
         return e.code
     except OSError as e:                  # the disk, not the content: retry, as the lock
         msg = " ".join(f"admission: {e}".split())[:200]
-        print(f"claude-session: {msg}; nothing written", file=sys.stderr)
+        print(f"agentik-session: {msg}; nothing written", file=sys.stderr)
         return 3
     return 0
 
@@ -179,7 +180,7 @@ def cmd_measure(args) -> int:
     try:
         measure.record(args.session, text, os.environ)
     except measure.MeasureError as e:
-        print(f"claude-session: {e}", file=sys.stderr)
+        print(f"agentik-session: {e}", file=sys.stderr)
         return e.code
     return 0
 
@@ -297,7 +298,7 @@ def cmd_charter(args) -> int:
     cwd = os.getcwd()
     if args.action == "open":
         if len(args.args) != 1:
-            _die('charter open wants one goal: claude-session charter open "<goal>"')
+            _die('charter open wants one goal: agentik-session charter open "<goal>"')
         section = _session_section(cwd)
         rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
         rc2, head = gitinfo._git(cwd, "rev-parse", "--short", "HEAD")
@@ -335,7 +336,7 @@ def cmd_charter(args) -> int:
     except OSError:
         line = None
     if line is not None and charter.RESPAWN.match(line):
-        print("then: claude-session checkpoint --respawn --charter "
+        print("then: agentik-session checkpoint --respawn --charter "
               + shlex.quote(os.path.abspath(path)))
     return 0
 
@@ -478,7 +479,7 @@ def cmd_config(args) -> int:
         sessionconfig.save_configs(configs)
         print(f"created {args.name}"
               + (f" from {args.From}" if args.From else "")
-              + f"; adjust it with `claude-session set <key> <value> --config {args.name}`")
+              + f"; adjust it with `agentik session set <key> <value> --config {args.name}`")
         return 0
     return 0
 
@@ -721,27 +722,27 @@ def _respawn_flag(key: str, raw: str) -> int:
 
 
 def cmd_run(args) -> int:
-    """`claude-session run`: start claude, and restart it at each confirmed RESPAWN
+    """`agentik session run`: start claude, and restart it at each confirmed RESPAWN
     close (respawn-r1 §3). Every refusal before the first start exits 2 with one line."""
     from . import chain
     env = dict(os.environ)
     flags = {k: _respawn_flag(k, getattr(args, k)) for k in resolver.RESPAWN_KEYS
              if getattr(args, k) is not None}
     if not chain.on_tty():
-        _die("claude-session run: stdin and stdout must be a TTY; the launcher runs in "
+        _die("agentik-session run: stdin and stdout must be a TTY; the launcher runs in "
              "the owner's terminal", 2)
     why = chain.refusal(args.claude_args, env)
     if why:
-        _die(f"claude-session run: {why}", 2)
+        _die(f"agentik-session run: {why}", 2)
     cwd = os.getcwd()
     name = args.chain if args.chain is not None else chain.default_name(cwd, env)
     if not hooks.CHAIN_RE.match(name):
-        _die(f"claude-session run: refusing the chain name {name[:80]!r}: a chain name is "
+        _die(f"agentik-session run: refusing the chain name {name[:80]!r}: a chain name is "
              "1 to 64 of A-Z a-z 0-9 . _ -", 2)
     try:
         chain.guards(cwd, env, flags)
     except resolver.ResolveError as e:
-        _die(f"claude-session run: {e}", 2)
+        _die(f"agentik-session run: {e}", 2)
     minutes = chain.long_loop(args.claude_args)
     if minutes is not None:
         print(f"warning: the first prompt is a /loop of {minutes:g} minutes; a /loop of 60 "
@@ -750,15 +751,16 @@ def cmd_run(args) -> int:
               file=sys.stderr)
     return chain.Chain(name, list(args.claude_args), resolver.state_dir(env),
                        chain.Effects(), lambda: chain.guards(cwd, env, flags),
-                       argv=["claude-session", *args.raw_argv]).run()
+                       argv=["agentik", "session", *args.raw_argv]).run()
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="claude-session",
+        prog="agentik session",
         description="Launch Claude Code with a named configuration, and keep "
                     "the session handoff-ready.",
     )
+    p.add_argument("--version", action="version", version=f"agentik-session {SEMVER}")
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
 

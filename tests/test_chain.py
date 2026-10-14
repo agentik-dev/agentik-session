@@ -1,4 +1,4 @@
-"""S20a: `claude-session run`, the launcher (respawn-r1 §3.1 to §3.9 and §6; packet S20).
+"""S20a: `agentik session run`, the launcher (respawn-r1 §3.1 to §3.9 and §6; packet S20).
 
 Two harnesses. The fake `claude` (tests/fixtures/fake-claude) is a real child the chain
 starts, for the argv, the environment, the restart and the printed start line. The fake
@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -235,7 +236,7 @@ def respawn_seq(path, at=10, text=RESPAWN_TEXT, helper=False, write_charter=True
     """A sitting's close, a second apart: its charter, PreToolUse, the verb, PostToolUse
     (a helper's when `helper`), Stop at at+4."""
     bash = {"tool_name": "Bash",
-            "tool_input": {"command": f"claude-session checkpoint --respawn --charter {path}"}}
+            "tool_input": {"command": f"agentik-session checkpoint --respawn --charter {path}"}}
     seq = [(at, write(path, text))] if write_charter else []
     return seq + [(at + 1, hook("PreToolUse", **bash)), (at + 2, verb(path)),
                   (at + 3, hook("PostToolUse", **bash, **({"agent_id": "a1"} if helper else {}))),
@@ -533,15 +534,17 @@ def test_s20a_ledger_holds_no_next_act(fake, monkeypatch):
 # ---- §3.4: the printed start line (criterion 16) --------------------------------------
 
 def test_s20a_start_line_runs(fake, monkeypatch):
-    shim = fake.bin / "claude-session"
+    shim = fake.bin / "agentik-session"
     shim.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -B -m claude_session \"$@\"\n")
     shim.chmod(0o755)
+    # the printed line runs through the front door (agentik-r1 §4.3), the vendored copy
+    shutil.copy(ROOT / "scripts" / "agentik", fake.bin / "agentik")
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "builder")
     rc, _, err = _cli("run", "--chain", "c1", "--", *ARGS)
     assert rc == 0, err
     line = err.strip().splitlines()[-1]
-    assert line.startswith("CLAUDE_SESSION_PROFILE=builder claude-session run "), line
+    assert line.startswith("CLAUDE_SESSION_PROFILE=builder agentik session run "), line
     monkeypatch.delenv("CLAUDE_SESSION_PROFILE")
     master, slave = os.openpty()
     try:

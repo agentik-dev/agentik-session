@@ -1,5 +1,5 @@
 """The suite is run from inside sittings: a README-started orchestrator exports its role,
-`claude-session start` its configuration, a relay child its depth, turn cap and model. None of
+`agentik session start` its configuration, a relay child its depth, turn cap and model. None of
 it may reach a test (round 2 F2); conftest clears them for every test."""
 import os
 import subprocess

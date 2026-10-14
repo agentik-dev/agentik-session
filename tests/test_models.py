@@ -363,7 +363,7 @@ def test_meter_without_windows_keeps_the_limits_given(tmp_path):
     assert m.limits_source == "default window:200000"
 
 
-# Round 2 F1: `claude-session set model X` (the overlay) is newer than the SessionStart
+# Round 2 F1: `agentik session set model X` (the overlay) is newer than the SessionStart
 # payload's model, so it moves the window; the next SessionStart's model is newer again.
 def _set(*argv):
     import io

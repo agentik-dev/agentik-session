@@ -2,7 +2,7 @@
 
 Under `claude -p` the SessionStart payload carries no `model`, so a relay child on
 `claude-opus-5-5[1m]` resolved `declared:opus` and metered at 200k. The relay's spawn
-line exports `CLAUDE_SESSION_MODEL=<its --model>` (agent-relay AR74); `session_start`
+line exports `CLAUDE_SESSION_MODEL=<its --model>` (agentik-relay AR74); `session_start`
 reads it when the payload has none, never under `CLAUDE_SESSION_HELPER=1`, and
 `resolved.json` says which source named the session model.
 """

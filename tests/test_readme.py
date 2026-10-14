@@ -31,8 +31,9 @@ README_ALLOW_CEILING = {"sibling", "person"}
 
 # The facts the README must carry; fixed strings, not patterns.
 TOKENS = ["/session:read", "charter open", "resolved.json", "CLAUDE_CODE_SESSION_ID",
-          "make check", "/session:status", "claude-session report", "PreToolUse", "PreCompact",
-          "claude plugin marketplace add", "make install", "claude-session doctor", "MIT",
+          "make check", "/session:status", "agentik session report", "PreToolUse", "PreCompact",
+          "claude plugin marketplace add agentik-dev/agentik-commons", "session@agentik",
+          "make install", "agentik session doctor", "MIT",
           "scripts/hygiene", "scripts/doclint", "rendered.sha256", "design/overhaul-r1.md"]
 
 

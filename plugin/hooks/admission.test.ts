@@ -6,7 +6,7 @@ import { test, expect } from 'claude-code/testing'
 // hooks beside the band (2.1.296 loads one module per plugin), so only the process.run calls
 // that run `admission record` are counted; the band's `mod start` is answered and left out.
 
-const ARGV = ['claude-session', 'admission', 'record', '--session', 'sess-1']
+const ARGV = ['agentik-session', 'admission', 'record', '--session', 'sess-1']
 const LIMITS = [{ kind: 'five_hour', percentUsed: 41.5, resetsAt: '2026-10-12T14:05:00Z' }]
 const SPAWN = { tool_use_id: 'toolu_01', prompt: 'the whole task, never sent', description: 'read the packet',
   subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, model: 'opus',
@@ -24,7 +24,7 @@ type Call = { argv: string[], stdin: any, timeoutMs: unknown, raw: any }
 // before fix round 1, F4), and `sleeps` keeps every wait asked.
 type Answer = 'admitted' | 'deferred' | 'denied' | 'reject' | 'hang' | 'refused'
 const ANSWER_TEXT = 'admission: not started. The five-hour window is at 88% and resets at 14:05.'
-const ADMIT = ['claude-session', 'admission', 'admit', '--session', 'sess-1']
+const ADMIT = ['agentik-session', 'admission', 'admit', '--session', 'sess-1']
 const world = (on: any, mode: 'ok' | 'reject' | 'timeout' | 'refused' = 'ok', hang: string[] = [],
   answer: Answer = 'admitted') => {
   const calls: Call[] = []
@@ -48,22 +48,22 @@ const world = (on: any, mode: 'ok' | 'reject' | 'timeout' | 'refused' = 'ok', ha
     if (e.argv?.[2] === 'admit') {
       admits.push(call)
       order.push('admit')
-      if (answer === 'reject') throw new Error('ENOENT: claude-session not found')
+      if (answer === 'reject') throw new Error('ENOENT: agentik-session not found')
       if (answer === 'hang') return never()
       const refused = answer === 'refused'
       const verdict = refused ? null : { verdict: answer, mode: 'observe',
         text: answer === 'admitted' ? '' : ANSWER_TEXT, peak: 95.5 }
       return { value: { exitCode: refused ? 3 : 0, stdout: verdict ? JSON.stringify(verdict) : '',
-        stderr: refused ? 'claude-session: the admission ledger stayed locked past 2 s' : '',
+        stderr: refused ? 'agentik-session: the admission ledger stayed locked past 2 s' : '',
         isStdoutTruncated: false, isStderrTruncated: false } }
     }
     calls.push(call)
-    if (mode === 'reject') throw new Error('ENOENT: claude-session not found')
+    if (mode === 'reject') throw new Error('ENOENT: agentik-session not found')
     if (mode === 'timeout') {
       return new Promise((_, reject) => setTimeout(() => reject(new Error('timed out after 5000 ms')), 30))
     }
     return { value: { exitCode: mode === 'refused' ? 3 : 0, stdout: '',
-      stderr: mode === 'refused' ? 'claude-session: the admission ledger stayed locked past 2 s' : '',
+      stderr: mode === 'refused' ? 'agentik-session: the admission ledger stayed locked past 2 s' : '',
       isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return { calls, admits, order, logs, sleeps }
@@ -186,7 +186,7 @@ test('session.start records start; session.end records end under the ending id',
   await t.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await t.session.end({ reason: 'exit', sessionId: 'sess-0', resume: { id: 'sess-0' } })
   expect(calls.map(c => c.stdin)).toEqual([{ kind: 'start', interactive: false }, { kind: 'end', reason: 'exit' }])
-  expect(calls[1].argv).toEqual(['claude-session', 'admission', 'record', '--session', 'sess-0'])
+  expect(calls[1].argv).toEqual(['agentik-session', 'admission', 'record', '--session', 'sess-0'])
 })
 
 // ---- Packet S26: admit is called before `next`, and `next(e)` follows whatever it answers ----

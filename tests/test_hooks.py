@@ -175,8 +175,8 @@ def gate(tmp_path, monkeypatch, posture, payload=None):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     repo = tmp_path / "repo"
-    (repo / ".claude" / "claude-code-session").mkdir(parents=True)
-    (repo / ".claude" / "claude-code-session" / "config.yaml").write_text(
+    (repo / ".claude" / "agentik").mkdir(parents=True)
+    (repo / ".claude" / "agentik" / "config.yaml").write_text(
         'session: {posture: "%s"}\n' % posture)
     import os
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_SESSION_CONFIG"}
@@ -222,7 +222,7 @@ import time
 
 from claude_session import resolver, store
 
-MARK = "claude-session checkpoint --respawn --charter history/sittings/2026-10-10-1.md"
+MARK = "agentik-session checkpoint --respawn --charter history/sittings/2026-10-10-1.md"
 
 
 def _sdir():
@@ -266,6 +266,17 @@ def stat_mode(p):
     return os.stat(p).st_mode & 0o777
 
 
+@pytest.mark.parametrize("spelling", ["agentik-session", "agentik session", "claude-session"])
+def test_ruling9_each_checkpoint_spelling_confirms(spelling):
+    # agentik-r1 packet ruling 9: the tool, the front door and the pre-rename alias
+    use("signal")
+    cmd = f"{spelling} checkpoint --respawn --charter c.md"
+    hooks.pre_tool_use(_bash(cmd))
+    sha = _mark(_stamp("activity.json")["at"])
+    hooks.post_tool_use(_bash(cmd))
+    assert _stamp("respawn-main.json")["marker_sha256"] == sha
+
+
 @pytest.mark.parametrize("defect", ["agent_id", "no-respawn", "stale"])
 def test_s19_unconfirmed_marks(defect):
     use("signal")
@@ -273,7 +284,7 @@ def test_s19_unconfirmed_marks(defect):
     at = _stamp("activity.json")["at"]
     _mark(at - 5 if defect == "stale" else at)
     payload = {"agent_id": _bash(agent_id="a1"),
-               "no-respawn": _bash("claude-session checkpoint --charter c.md"),
+               "no-respawn": _bash("agentik-session checkpoint --charter c.md"),
                "stale": _bash()}[defect]
     hooks.post_tool_use(payload)
     assert _stamp("respawn-main.json") is None

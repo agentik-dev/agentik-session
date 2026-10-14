@@ -1,7 +1,11 @@
 #!/bin/sh
-# The plugin's one hook shim: hand the event (and stdin) to the tool on PATH.
-# Without the tool it exits 0 silently; `claude-session doctor` reports the gap.
-command -v claude-session >/dev/null 2>&1 || exit 0
+# The plugin's one hook shim: hand the event (and stdin) to the tool on PATH, by its new
+# name, else its old one, the alias until r2 (agentik-r1 §6.3 c11, packet ruling 7).
+# Without either it exits 0 silently; `agentik session doctor` reports the gap.
+if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session
+elif command -v claude-session >/dev/null 2>&1; then tool=claude-session
+else exit 0
+fi
 # Stop never blocks: exit 2 there holds every turn end, and a CLI older than the plugin
 # refuses `hook Stop`. PostToolUseFailure and PostToolBatch are treated as Stop: an older
 # CLI refuses them too, PostToolBatch's exit 2 stops the agentic loop, and neither has
@@ -9,7 +13,7 @@ command -v claude-session >/dev/null 2>&1 || exit 0
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
 # owner's typed /compact too. Other events keep the tool's exit (PreToolUse may block).
 case "$1" in
-  Stop|PostToolUseFailure|PostToolBatch) claude-session hook "$1" >/dev/null 2>&1; exit 0 ;;
-  PreCompact) claude-session hook "$1"; exit 0 ;;
+  Stop|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  PreCompact) "$tool" hook "$1"; exit 0 ;;
 esac
-exec claude-session hook "$1"
+exec "$tool" hook "$1"

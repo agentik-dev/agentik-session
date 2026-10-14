@@ -145,13 +145,13 @@ DEFAULTS: list[SessionConfig] = [
     ),
     SessionConfig(
         name="local",
-        description="Seat main thread, local subagents (serialised) via claude-local.",
-        # subagent_model is deliberately unset: claude-local already picks the
+        description="Seat main thread, local subagents (serialised) via `agentik-agents local`.",
+        # subagent_model is deliberately unset: the local lane already picks the
         # measured default (sonnet for the broad-tool built-ins, local for
         # Explore). Forcing local/default here would re-introduce the exact
         # case that was measured at ~3 minutes of prefill per turn.
         lane="local", effort="high", posture="signal",
-        notes=("Subagent routing is claude-local's: Explore runs on the local "
+        notes=("Subagent routing is the local lane's: Explore runs on the local "
                "27B, broad-tool agents stay on the seat. The local backend runs "
                "at concurrency 1, so local subagents are SERIALISED -- fanning "
                "out ten of them is ten sequential runs, not a parallel sweep. "
@@ -314,7 +314,7 @@ def get_active() -> str | None:
     """The configuration THIS session is running, or None.
 
     Only the environment variable can answer this. A session not started
-    through `claude-session start` has no active configuration, and saying so
+    through `agentik session start` has no active configuration, and saying so
     is more useful than guessing from a file that some other process wrote.
     """
     return os.environ.get("CLAUDE_SESSION_CONFIG") or None

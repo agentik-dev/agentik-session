@@ -1,10 +1,10 @@
 ---
 description: "Adjust one setting for this session only"
 argument-hint: "<knob> <value> [--save]"
-allowed-tools: [Bash(claude-session *)]
+allowed-tools: [Bash(agentik-session *)]
 ---
 
-!`claude-session set $ARGUMENTS`
+!`agentik-session set $ARGUMENTS`
 
 The output confirms the knob and its new value, and that this session's
 resolved file was rewritten. It is session-only unless `--save` was given;

@@ -38,11 +38,11 @@ def repo(tmp_path):
 
 
 def _env(home, **extra):
-    """A temp HOME, and stubs for `claude` and `claude-session` first on PATH: an install
-    that shells out to either (doctor) never reaches the real ones."""
+    """A temp HOME, and stubs for `claude` and the tool's two names first on PATH: an
+    install that shells out to any (doctor) never reaches the real ones."""
     stubs = home / "stubs"
     stubs.mkdir(parents=True, exist_ok=True)
-    for name in ("claude", "claude-session"):
+    for name in ("claude", "agentik-session", "claude-session"):
         (stubs / name).write_text("#!/bin/sh\nexit 0\n")
         (stubs / name).chmod(0o755)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
@@ -57,7 +57,7 @@ def _install(repo, home, python=sys.executable):
 
 
 def _share(home):
-    return home / ".local" / "share" / "claude-session"
+    return home / ".local" / "share" / "agentik-session"
 
 
 def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
@@ -65,7 +65,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     r = _install(repo, home)
     assert r.returncode == 0, r.stderr
     tree = _git(repo, "rev-parse", "HEAD:claude_session")
-    wrapper = (home / ".local" / "bin" / "claude-session").read_text()
+    wrapper = (home / ".local" / "bin" / "agentik-session").read_text()
     assert f'CODE="{_share(home) / tree}"' in wrapper
     # the venv's link in its resolved directory, never the link's target (ADV10-5)
     baked = os.path.join(os.path.realpath(os.path.dirname(sys.executable)),
@@ -75,14 +75,14 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     (cwd / "claude_session").mkdir(parents=True)
     for f in ("__init__.py", "__main__.py", "cli.py"):
         (cwd / "claude_session" / f).write_text(DECOY)
-    r = subprocess.run([str(home / ".local" / "bin" / "claude-session"), "hook", "PostToolUse"],
+    r = subprocess.run([str(home / ".local" / "bin" / "agentik-session"), "hook", "PostToolUse"],
                        cwd=cwd, input="{}", env=_env(home, PYTHONPATH=str(cwd)),
                        capture_output=True, text=True, timeout=30)
     assert "DECOY" not in r.stdout and r.returncode != 7, r.stdout + r.stderr
     assert r.returncode == 0, r.stderr
     # The root checkout cannot change a hook either: the installed copy is not the repo.
     (repo / "claude_session" / "cli.py").write_text(DECOY)
-    r = subprocess.run([str(home / ".local" / "bin" / "claude-session"), "hook", "PostToolUse"],
+    r = subprocess.run([str(home / ".local" / "bin" / "agentik-session"), "hook", "PostToolUse"],
                        cwd=tmp_path, input="{}", env=_env(home), capture_output=True, text=True,
                        timeout=30)
     assert r.returncode == 0 and "DECOY" not in r.stdout
@@ -95,7 +95,7 @@ def test_dirty_package_refuses(repo, tmp_path):
     r = _install(repo, home)
     assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
     assert "dirty" in r.stderr
-    assert not (home / ".local" / "bin" / "claude-session").exists()
+    assert not (home / ".local" / "bin" / "agentik-session").exists()
     assert not _share(home).exists()
     # a versioned Cellar interpreter is refused too (ADV10-5)
     _git(repo, "checkout", "-q", "--", "claude_session")
@@ -104,7 +104,7 @@ def test_dirty_package_refuses(repo, tmp_path):
     (cellar / "python3").symlink_to(sys.executable)
     r = _install(repo, home, python=cellar / "python3")
     assert r.returncode == 2 and "Cellar" in r.stderr, (r.stdout, r.stderr)
-    assert not (home / ".local" / "bin" / "claude-session").exists()
+    assert not (home / ".local" / "bin" / "agentik-session").exists()
 
 
 def test_untracked_file_in_package_refuses(repo, tmp_path):
@@ -126,18 +126,18 @@ def test_reinstall_prunes_the_old_tree(repo, tmp_path):
     # the newest few are kept (F8); the pruning itself is test_f8_reinstall_keeps_...
     assert sorted(p.name for p in _share(home).iterdir()) == sorted([old, new])
     assert (_share(home) / new / "claude_session" / "meter.py").read_text().endswith("# next\n")
-    assert f'CODE="{_share(home) / new}"' in (home / ".local" / "bin" / "claude-session").read_text()
+    assert f'CODE="{_share(home) / new}"' in (home / ".local" / "bin" / "agentik-session").read_text()
     # the frozen tree gone: a hook says `run make install` once and exits 0, other
     # verbs exit 1, and the next install removes the marker (ADV10-5)
     shutil.rmtree(_share(home) / new)
-    launcher = [str(home / ".local" / "bin" / "claude-session")]
+    launcher = [str(home / ".local" / "bin" / "agentik-session")]
     hooks = [subprocess.run(launcher + ["hook", "PostToolUse"], input="{}", env=_env(home),
                             capture_output=True, text=True, timeout=30) for _ in range(2)]
     assert [(h.returncode, "run make install" in h.stderr) for h in hooks] == [(0, True), (0, False)]
     r = subprocess.run(launcher + ["status"], env=_env(home), capture_output=True, text=True,
                        timeout=30)
     assert r.returncode == 1 and "run make install" in r.stderr
-    marker = home / "state" / "claude-code-session" / "install-needed"
+    marker = home / "state" / "agentik-session" / "install-needed"
     assert marker.read_text().strip() == str(_share(home) / new)
     assert _install(repo, home).returncode == 0
     assert not marker.exists()
@@ -147,7 +147,7 @@ def test_gone_interpreter_speaks_at_every_session_start(tmp_path):
     # ADV11-5: a hook's stderr is unseen on exit 0, so SessionStart says it as JSON, every
     # session; the marker keeps the other events quiet
     python = tmp_path / "gone" / "bin" / "python"
-    launcher = tmp_path / "claude-session"
+    launcher = tmp_path / "agentik-session"
     launcher.write_text((ROOT / "install-wrapper.sh").read_text()
                         .replace("__CODE__", str(tmp_path)).replace("__PYTHON__", str(python)))
     launcher.chmod(0o755)
@@ -161,7 +161,7 @@ def test_gone_interpreter_speaks_at_every_session_start(tmp_path):
         r = hook("SessionStart")
         assert r.returncode == 0
         assert json.loads(r.stdout) == {
-            "systemMessage": "claude-session: %s is gone; run make install" % python}
+            "systemMessage": "agentik-session: %s is gone; run make install" % python}
     r = hook("PreToolUse")
     assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
 
@@ -204,3 +204,79 @@ def test_f8_reinstall_keeps_a_tree_a_live_process_runs_from(repo, tmp_path):
     trees.append(_commit_next(repo, 5))
     assert _install(repo, home).returncode == 0
     assert sorted(p.name for p in _share(home).iterdir()) == sorted(trees[-3:])
+
+
+# ---- agentik-r1 ruling 2 and 3: the new name, the old link, the front door, the note ----
+
+def test_r1_install_writes_the_new_name_the_link_and_the_front_door(repo, tmp_path):
+    home = tmp_path / "home"
+    r = _install(repo, home)
+    assert r.returncode == 0, r.stderr
+    bin_ = home / ".local" / "bin"
+    assert os.readlink(bin_ / "claude-session") == "agentik-session"
+    assert (bin_ / "agentik").read_bytes() == (ROOT / "scripts" / "agentik").read_bytes()
+    assert os.access(bin_ / "agentik", os.X_OK)
+    assert [p.name for p in (home / ".local" / "share").iterdir()] == ["agentik-session"]
+    v = subprocess.run([str(bin_ / "agentik-session"), "--version"], env=_env(home),
+                       capture_output=True, text=True, timeout=30)
+    assert (v.returncode, v.stdout, v.stderr) == (0, "agentik-session 2.0.0-alpha.14\n", "")
+    # a reinstall replaces the link in place
+    assert _install(repo, home).returncode == 0
+    assert os.readlink(bin_ / "claude-session") == "agentik-session"
+
+
+def test_r1_install_clears_the_old_state_folders_marker_until_the_new_exists(repo, tmp_path):
+    # packet ruling 1: the marker is cleared where c1 resolves, the old folder while alone
+    home = tmp_path / "home"
+    old = home / "state" / "claude-code-session"
+    old.mkdir(parents=True)
+    (old / "install-needed").write_text("x\n")
+    assert _install(repo, home).returncode == 0
+    assert not (old / "install-needed").exists()
+
+
+def _wrapper(tmp_path, name):
+    """The launcher as `make install` writes it, its python gone, under `name`."""
+    launcher = tmp_path / name
+    launcher.write_text((ROOT / "install-wrapper.sh").read_text()
+                        .replace("__CODE__", str(tmp_path))
+                        .replace("__PYTHON__", str(tmp_path / "gone" / "python")))
+    launcher.chmod(0o755)
+    return launcher
+
+
+def _on_tty(argv, env):
+    """stderr a terminal: the alias note's one condition a pipe never meets."""
+    import pty
+    import select
+    master, slave = pty.openpty()
+    try:
+        r = subprocess.run(argv, input="{}", env=env, stdout=subprocess.PIPE, stderr=slave,
+                           text=True, timeout=30)
+        out = b""
+        while select.select([master], [], [], 0.5)[0]:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            out += chunk
+        return r.returncode, out.decode()
+    finally:
+        os.close(slave)
+        os.close(master)
+
+
+def test_r1_the_old_name_notes_once_on_a_terminal_never_in_a_hook(tmp_path):
+    # agentik-r1 §4.3 (packet ruling 3)
+    env = dict(os.environ, XDG_STATE_HOME=str(tmp_path / "state"))
+    new = _wrapper(tmp_path, "agentik-session")
+    old = tmp_path / "claude-session"
+    old.symlink_to("agentik-session")
+    note = "claude-session: renamed; use 'agentik session …' (ends 2026-12-31)"
+    code, err = _on_tty([str(old), "status"], env)
+    assert code == 1 and err.splitlines()[0].strip() == note
+    for argv in ([str(new), "status"], [str(old), "hook", "PreToolUse"]):
+        code, err = _on_tty(argv, env)
+        assert note not in err, argv
+    r = subprocess.run([str(old), "status"], env=env, capture_output=True, text=True,
+                       timeout=30)
+    assert note not in r.stderr          # a pipe sees nothing

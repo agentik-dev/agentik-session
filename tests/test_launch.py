@@ -8,7 +8,7 @@ from claude_session.sessionconfig import SessionConfig
 def fake_bins(tmp_path, monkeypatch):
     """Pretend both launchers exist, so tests exercise resolution not PATH."""
     bins = {"claude": str(tmp_path / "claude"),
-            "claude-local": str(tmp_path / "claude-local")}
+            "claude-local": str(tmp_path / "claude-local")}  # c13: the old lane
     monkeypatch.setattr(launch.shutil, "which", lambda n: bins.get(n))
     return bins
 
@@ -37,7 +37,7 @@ def test_tools_not_allowedtools():
 def test_local_lane_delegates_to_claude_local(fake_bins):
     l = launch.build(SessionConfig(name="l", lane="local", subagent_model="sonnet"))
     assert l.program == fake_bins["claude-local"]
-    # claude-local owns the router and credential rules; we only pass its knob
+    # the local lane owns the router and credential rules; we only pass its knob
     assert l.env["CLAUDE_LOCAL_SUBAGENT"] == "sonnet"
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in l.env
     assert "ANTHROPIC_BASE_URL" not in l.env
@@ -51,8 +51,16 @@ def test_seat_lane_sets_the_subagent_env_var(fake_bins):
 
 def test_local_lane_without_claude_local_fails_clearly(monkeypatch):
     monkeypatch.setattr(launch.shutil, "which", lambda n: None)
-    with pytest.raises(launch.LaunchError, match="claude-local"):
+    with pytest.raises(launch.LaunchError, match="agentik-agents"):
         launch.build(SessionConfig(name="l", lane="local"))
+
+
+def test_c13_local_lane_runs_agentik_agents_local_first(fake_bins, tmp_path):
+    # agentik-r1 §6.3 c13 (packet ruling 8): the dispatcher's `local` verb when on PATH.
+    fake_bins["agentik-agents"] = str(tmp_path / "agentik-agents")
+    l = launch.build(SessionConfig(name="l", lane="local", model="local/default"))
+    assert l.program == fake_bins["agentik-agents"]
+    assert l.argv[0] == "local" and l.argv[1:3] == ["--model", "local/default"]
 
 
 def test_local_only_without_a_model_warns(fake_bins):
@@ -64,12 +72,16 @@ def test_local_only_without_a_model_warns(fake_bins):
 
 
 def test_plugins_resolve_to_plugin_dir(tmp_path, monkeypatch, fake_bins):
-    repo = tmp_path / "code" / "claude-code-respeak"
-    repo.mkdir(parents=True)
+    old = tmp_path / "code" / "claude-code-respeak"
+    old.mkdir(parents=True)
     monkeypatch.setattr(launch, "PLUGIN_SEARCH", [tmp_path / "code"])
     l = launch.build(SessionConfig(name="f", plugins=["respeak"]))
     assert "--plugin-dir" in l.argv
-    assert str(repo) in l.argv
+    assert str(old) in l.argv
+    # agentik-r1 c13: the agentik-* folder first, once it exists
+    new = tmp_path / "code" / "agentik-respeak"
+    new.mkdir()
+    assert launch.resolve_plugin("respeak") == new
 
 
 def test_missing_plugin_warns_but_still_launches(monkeypatch, fake_bins):
@@ -90,7 +102,7 @@ def test_system_note_explains_the_checkpoint_cadence(fake_bins):
                                                          "wind-down": 4, "reserve": 2}))
     note = l.argv[l.argv.index("--append-system-prompt") + 1]
     assert "every 20 prompts" in note and "tightening to 4" in note
-    assert "claude-session checkpoint" in note
+    assert "agentik-session checkpoint" in note
 
 
 def test_posture_off_tells_the_model_to_stay_quiet(fake_bins):
@@ -125,7 +137,7 @@ def test_shell_preview_is_quoted(fake_bins):
 
 
 def test_config_env_cannot_redirect_credentials(fake_bins):
-    """claude-local unsets these deliberately; the launcher must refuse them."""
+    """The local lane unsets these deliberately; the launcher must refuse them."""
     for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "PATH", "PYTHONPATH",
                 "DYLD_INSERT_LIBRARIES", "CLAUDE_CODE_OAUTH_TOKEN"):
         with pytest.raises(launch.LaunchError, match=key):
@@ -311,3 +323,13 @@ def test_s20a_exec_launch_uses_scrub(captured_exec, monkeypatch):
     assert seen == [1]
     child = captured_exec[0][2]
     assert child["KEEP_ME"] == "1" and not set(scrubbed) & set(child)
+
+
+def test_c13_a_new_name_in_any_folder_beats_an_old_name_in_an_earlier_one(tmp_path,
+                                                                         monkeypatch):
+    # agentik-r1 packet ruling 8 (fix round F1): names first, new then old; folders inside
+    code, plugins = tmp_path / "code", tmp_path / "plugins"
+    (code / "claude-code-respeak").mkdir(parents=True)
+    (plugins / "agentik-respeak").mkdir(parents=True)
+    monkeypatch.setattr(launch, "PLUGIN_SEARCH", [code, plugins])
+    assert launch.resolve_plugin("respeak") == plugins / "agentik-respeak"

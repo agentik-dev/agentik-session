@@ -1,4 +1,4 @@
-"""`claude-session doctor`: the checks of overhaul-r1 §2.4, in that order.
+"""`agentik session doctor`: the checks of overhaul-r1 §2.4, in that order.
 
 Unknown is never a pass: a probe that cannot run, a file that cannot be read,
 a version that cannot be parsed, each is a failing check with the reason named.
@@ -18,9 +18,11 @@ from pathlib import Path
 
 from . import hooks, measure, meter, mod, resolver
 
-PLUGIN_ID = "session@claude-code-session"
+PLUGIN_ID = "session@agentik"
+# agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
+OLD_PLUGIN_ID = "session@claude-code-session"
 # --max-turns is accepted but unlisted in `claude --help`; a probe costs a turn, so none.
-# --session-id: `claude-session run` starts every sitting with it (respawn-r1 §3.1).
+# --session-id: `agentik session run` starts every sitting with it (respawn-r1 §3.1).
 CLAUDE_FLAGS = ("--model", "--effort", "--tools", "--permission-mode",
                 "--max-budget-usd", "--output-format", "--session-id")
 FRESH_S = 120
@@ -32,14 +34,45 @@ KNOWN_PYTHONS = ("3.11.16", "3.12.14", "3.13.15", "3.14.7")
 _PYENV_LINE = re.compile(r"^\s*3\.\d+\.\d+$")
 # The sibling plugins (mod-r1 §9, decided 2026-10-11): each is optional, so absent is a
 # note naming what it adds, and any installed version is fine (no range to outgrow).
+# `old` is the ID before the switch (agentik-r1 §6.3 c7): alone, a warn naming the switch.
+# `row` names the check when the plugin's name is taken (`relay` is the binaries' row).
 SIBLINGS = [
-    {"name": "decisions", "marketplace": "claude-code-decisions",
+    {"name": "decisions", "marketplace": "agentik", "old": "decisions@claude-code-decisions",
      "adds": "the decisions ledger, which reads its section of the resolved configuration"},
-    {"name": "respeak", "marketplace": "claude-code-respeak",
+    {"name": "respeak", "marketplace": "agentik", "old": "respeak@claude-code-respeak",
      "adds": "the plain-English renderer the built-in profiles load"},
-    {"name": "agent-relay", "marketplace": "agent-relay",
-     "adds": "the relay, and the hook that guards `push: never`"},
+    {"name": "relay", "marketplace": "agentik", "old": "agent-relay@agent-relay",
+     "adds": "the relay, and the hook that guards `push: never`", "row": "relay-plugin"},
 ]
+
+
+def _pick_id(plugins, new: str, old: str):
+    """(id, entry, is_old): the new ID when it is enabled, else the old when enabled, else
+    whichever is installed (new first); (new, None, False) when neither is (c7)."""
+    for pid in (new, old):
+        p = plugins.get(pid)
+        if p and p.get("enabled"):
+            return pid, p, pid == old
+    for pid in (new, old):
+        if plugins.get(pid):
+            return pid, plugins[pid], pid == old
+    return new, None, False
+
+
+def _twice(plugins, pid: str, old: str) -> bool:
+    """The new ID picked while the old is enabled too: each hook fires twice (fix round F2)."""
+    o = plugins.get(old)
+    return pid != old and bool(o and o.get("enabled"))
+
+
+def _twice_note(old: str, new: str) -> str:
+    return f"{new} and {old} are both enabled, so each hook fires twice: disable {old} " \
+           "(agentik-r1 §8.3 step 3)"
+
+
+def _switch_note(old: str, new: str) -> str:
+    return f"{old} is the ID before the switch: install {new}, then disable {old} " \
+           "(agentik-r1 §8.3)"
 
 
 @dataclass
@@ -219,11 +252,11 @@ def _plugin_list(env):
 def _check_plugin(plugins, err) -> Check:
     if plugins is None:
         return Check("plugin", False, err)
-    p = plugins.get(PLUGIN_ID)
+    pid, p, old = _pick_id(plugins, PLUGIN_ID, OLD_PLUGIN_ID)
     if not p:
         return Check("plugin", False, f"{PLUGIN_ID} not installed")
     if not p.get("enabled"):
-        return Check("plugin", False, f"{PLUGIN_ID} {p.get('version')} installed, disabled")
+        return Check("plugin", False, f"{pid} {p.get('version')} installed, disabled")
     try:
         registered = json.loads((Path(p.get("installPath") or "") / "hooks" / "hooks.json")
                                 .read_text()).get("hooks") or {}
@@ -232,15 +265,21 @@ def _check_plugin(plugins, err) -> Check:
     missing = [e for e in HOOK_EVENTS if e not in registered]
     if missing:
         return Check("plugin", False, "hooks not registered: " + ", ".join(missing)
-                     + f"; update the plugin: `claude plugin update {PLUGIN_ID}`, then "
+                     + f"; update the plugin: `claude plugin update {pid}`, then "
                      "restart Claude Code")
     # S20 ruling 3: a CLI older than its plugin refuses an event it does not know (exit 2).
     unknown = [e for e in registered if e not in hooks.HANDLERS]
     if unknown:
-        return Check("plugin", False, f"{PLUGIN_ID} {p.get('version')} registers "
-                     + ", ".join(unknown) + ", which this claude-session does not handle: "
+        return Check("plugin", False, f"{pid} {p.get('version')} registers "
+                     + ", ".join(unknown) + ", which this agentik-session does not handle: "
                      "the CLI is older than the plugin's hooks; install the CLI first "
                      "(`make install`), then `claude plugin update`")
+    if old:
+        return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
+                     + _switch_note(pid, PLUGIN_ID), warn=True)
+    if _twice(plugins, pid, OLD_PLUGIN_ID):
+        return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
+                     + _twice_note(OLD_PLUGIN_ID, pid), warn=True)
     return Check("plugin", True, f"{PLUGIN_ID} {p.get('version')} enabled; hooks "
                  + ", ".join(HOOK_EVENTS))
 
@@ -249,15 +288,22 @@ def _check_dependency(dep: dict, plugins, err) -> Check:
     """A sibling is optional: absent or disabled is a note, any version is fine. With no
     plugin list the `plugin` check is already red; this line only names the unknown."""
     name, mkt, adds = dep["name"], dep["marketplace"], dep["adds"]
-    pid = f"{name}@{mkt}"
+    new = f"{name}@{mkt}"
+    name = dep.get("row", name)
     if plugins is None:
         return Check(name, True, f"optional, not checked: {err}", note=True)
-    p = plugins.get(pid)
+    pid, p, old = _pick_id(plugins, new, dep["old"])
     if not p:
-        return Check(name, True, f"not installed, optional: {adds} (`{pid}`)", note=True)
+        return Check(name, True, f"not installed, optional: {adds} (`{new}`)", note=True)
     if not p.get("enabled"):
         return Check(name, True, f"{pid} {p.get('version')} installed, disabled, optional: "
                      + adds, note=True)
+    if old:
+        return Check(name, True, f"{pid} {p.get('version')} installed; "
+                     + _switch_note(pid, new), warn=True)
+    if _twice(plugins, pid, dep["old"]):
+        return Check(name, True, f"{pid} {p.get('version')} installed; "
+                     + _twice_note(dep["old"], pid), warn=True)
     return Check(name, True, f"{pid} {p.get('version')} installed")
 
 
@@ -266,7 +312,7 @@ def _sibling_absent(plugins, name: str) -> bool:
     if plugins is None:
         return False
     dep = next(d for d in SIBLINGS if d["name"] == name)
-    p = plugins.get(f"{name}@{dep['marketplace']}")
+    _, p, _ = _pick_id(plugins, f"{name}@{dep['marketplace']}", dep["old"])
     return not (p and p.get("enabled"))
 
 
@@ -337,23 +383,23 @@ def _check_meter_hook(plugins, err) -> Check:
                               .read_text()).get("hooks") or {}
         except (OSError, ValueError, AttributeError):
             return {}
-    p = (plugins or {}).get(PLUGIN_ID)
+    pid, p, _ = _pick_id(plugins or {}, PLUGIN_ID, OLD_PLUGIN_ID)
     if plugins is None:
         why = err
     elif not p:
         why = f"{PLUGIN_ID} not installed"
     elif not p.get("enabled"):
-        why = f"{PLUGIN_ID} disabled"
+        why = f"{pid} disabled"
     elif "PostToolUse" not in hooks_of(p):
-        why = f"{PLUGIN_ID} registers no PostToolUse"
+        why = f"{pid} registers no PostToolUse"
     else:
-        return Check("meter-hook", True, f"live: {PLUGIN_ID} registers PostToolUse")
+        return Check("meter-hook", True, f"live: {pid} registers PostToolUse")
     return Check("meter-hook", True, f"not live: {why}; "
                  "packet prompts keep the turns line (conventions §5)")
 
 
 def _check_config(env, cwd) -> tuple[Check, dict]:
-    path = Path(cwd) / resolver.REPO_DIR / "config.yaml"
+    path = resolver.repo_dir(cwd) / "config.yaml"
     sections: dict = {}
     try:
         r = resolver.resolve(cwd, "doctor", env, overlay={})
@@ -368,6 +414,27 @@ def _check_config(env, cwd) -> tuple[Check, dict]:
     return Check("config", True, detail), sections
 
 
+def _renamed(env, cwd) -> list:
+    try:
+        return resolver.resolve(cwd, "doctor", env, overlay={}).renamed
+    except resolver.ResolveError:
+        return []
+
+
+def _check_renamed(cwd, r_renamed) -> list:
+    """agentik-r1 §6.3's warn rows: the repo's old folder (c4), the old section key (c6)."""
+    rows = []
+    old = Path(cwd) / resolver.OLD_REPO_DIR
+    if old.is_dir() and not old.is_symlink():
+        new = Path(cwd) / resolver.REPO_DIR
+        where = "read" if resolver.repo_dir(cwd) == old else f"unread, {new} wins"
+        rows.append(Check("config-dir", True, f"{old} is the folder before the rename "
+                          f"({where}): `git mv` it to {new} (agentik-r1 §6.3 c4)", warn=True))
+    for line in r_renamed:
+        rows.append(Check("config-key", True, f"{line} (agentik-r1 §6.3 c6)", warn=True))
+    return rows
+
+
 def _check_git(env, sections, guarded: bool = True) -> Check:
     exe = _which("git", env)
     if not exe:
@@ -375,21 +442,21 @@ def _check_git(env, sections, guarded: bool = True) -> Check:
     push = (sections.get("session") or {}).get("push", "never")
     extra = ""
     if push == "never":
-        extra = ("; push: never, guarded by agent-relay (its check above)" if guarded
-                 else "; push: never, unguarded without agent-relay")
+        extra = ("; push: never, guarded by the relay plugin (its check above)" if guarded
+                 else "; push: never, unguarded without the relay plugin")
     return Check("git", True, exe + extra)
 
 
 def _check_relay(env, sections, sibling_absent: bool = False) -> Check | None:
-    enabled = (sections.get("agent-relay") or {}).get("enabled", "auto")
+    enabled = (sections.get("relay") or {}).get("enabled", "auto")
     if enabled not in ("auto", "on", True):
         return None
     if enabled == "auto" and sibling_absent:
-        return Check("relay", True, "agent-relay.enabled is auto and agent-relay not "
+        return Check("relay", True, "relay.enabled is auto and the relay plugin not "
                      "installed: no relay expected", note=True)
     missing = [b for b in ("relay", "tmux") if not _which(b, env)]
     if missing:
-        return Check("relay", False, "agent-relay.enabled is "
+        return Check("relay", False, "relay.enabled is "
                      f"{enabled}; not on PATH: " + ", ".join(missing))
     return Check("relay", True, "relay and tmux on PATH")
 
@@ -435,13 +502,15 @@ def run(env=None, cwd=None) -> Report:
     add(_check_meter_hook(plugins, err))
     cfg, sections = _check_config(env, cwd)
     add(cfg)
-    no_relay = _sibling_absent(plugins, "agent-relay")
+    no_relay = _sibling_absent(plugins, "relay")
     add(_check_git(env, sections, guarded=not no_relay))
     relay = _check_relay(env, sections, sibling_absent=no_relay)
     if relay:
         add(relay)
     add(_check_mod(env))         # the rows above keep their places
     add(_check_measure(env))     # last (packet M2)
+    for row in _check_renamed(cwd, _renamed(env, cwd)):
+        add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     return rep
 
 
