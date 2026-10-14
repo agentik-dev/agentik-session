@@ -132,6 +132,7 @@ The launcher is the shell's foreground job. Its child runs in the launcher's own
 ### §3.8 What it never does
 
 - **It never compacts or resumes.** No argv it builds holds a flag outside its allowlist or `/compact`, and every start is a fresh context.
+- **It never runs print mode.** `-p` is in the forbidden family (§3.1), so Claude Code 2.1.292's change (6 October 2026: a one-shot `claude -p` run now waits for its background commands rather than stopping them about 5 seconds after the final result; the changelog) does not touch the launcher. It touches the relay's `-p` children, whose design lives in the relay's repository.
 - **It never poses as a relay sitting.** It never sets `CLAUDE_SESSION_DEPTH` or `RELAY_ROW`.
 - **It restarts only on a confirmed RESPAWN.** It never restarts a sitting whose marker is missing or unconfirmed by the main thread, or whose Next act no longer opens on RESPAWN at decision time, or whose charter was not touched in this sitting.
 - **It never restarts after a crash.** That covers a non-zero exit or a signal it did not send, and also a hang-up, and the case where the stop file, the cap or the floor holds.

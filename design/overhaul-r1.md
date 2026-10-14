@@ -21,7 +21,7 @@ The fork-and-resume chain, all of item 4, and the sensor of item 3. The 2026-09-
 
 | defect (bugs/2026-09-12) | why it is structural | what replaces it |
 |---|---|---|
-| 1. the scheduled resume ends the run with agents in flight: the handoff is the final output, emitting it completes `claude -p`, builders are killed mid-edit | a handoff cannot be both the last message and a wait on children; the process model has no "drain" | one packet, one fresh session, one commit per act; the relay gates the tree after exit (brief: the gate) |
+| 1. the scheduled resume ends the run with agents in flight: the handoff is the final output, emitting it completes `claude -p`, builders are killed mid-edit (Claude Code 2.1.269; from 2.1.292, 6 October 2026, a `-p` run waits for its background commands, per the changelog) | a handoff cannot be both the last message and a wait on children; the process model has no "drain" | one packet, one fresh session, one commit per act; the relay gates the tree after exit (brief: the gate) |
 | 2. no usage sample on the first prompt after an idle window roll: samples come only from statusline renders | a sensor that depends on rendering measures the UI, not the sitting | the meter reads the session's own transcript: the last `cache_read_input_tokens` and the assistant-message count, exact and always present (example-mac `sitting-meter`, the seed) |
 | 3. `--fork-session` is not a resume: the job resumed `50a6c2aa`, the run reported `909fac9e`; the parent never sees the work, the fork queued its own follow-up | chaining sessions is the anti-pattern the brief names ("not `--resume` chaining; fresh context per sitting is the whole point") | the queue (`relay/queue.yaml`); `relay resume` is an intervention door, never a scheduler |
 | 4. stale run notices (a 09-08 run announced on 09-11) | state about "the last run" belongs to a ledger with timestamps, not a SessionStart banner | the burn ledger, one line per sitting, and `report` |
@@ -229,7 +229,7 @@ Each with its consumer and a recommendation; nothing is asked that nothing waits
 
 ## §8 The measure
 
-Cost is turns times context (the brief). Per deliverable, the number to print is `turns × median context`, read from the ledger (§2.2) for a plugin sitting and from `burn-report` for the rest. The targets, from this sitting's own reading and the burn-report of 2026-09-22:
+Cost is turns times context (the brief), but only while the prompt cache is warm. Corrected 2026-10-14 by Anthropic's "Pricing" page: each request's input is priced as a cache read, a cache write or uncached input, plus output. A warm turn rereads the context at the read rate (0.1x base input on most models, 0.05x on Opus 5.5 and Sonnet 5.5, 0.025x on Fable 5.1); a miss rewrites the whole context at the write rate (1.25x for the 5m lifetime, 2x for 1h). So the model is turns × context × read rate, plus misses × context × write rate. On Opus 5.5 ($4/MTok base) a warm 200,000-token context costs about $0.04 to read, a cold 1h rewrite $1.60 and a cold 5m rewrite $1.00. A miss comes from a gap past the lifetime in force, a model switch, an effort change on most models, a change to the tool definitions, a compaction, or a Claude Code upgrade ("How Claude Code uses prompt caching", 2026-10-14). Per deliverable, the number to print is `turns × median context`, read from the ledger (§2.2) for a plugin sitting and from `burn-report` for the rest. The targets, from this sitting's own reading and the burn-report of 2026-09-22:
 
 | deliverable | today | target |
 |---|---|---|
