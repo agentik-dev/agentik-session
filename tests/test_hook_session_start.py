@@ -164,12 +164,12 @@ S21_BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 th
 S21_REMINDER = '; charter: none open today under history/sittings, run agentik-session charter open "<goal>"'
 
 
-def _s21_ctx(tmp_path, config=None):
+def _s21_ctx(tmp_path, config=None, **extra):
     repo = tmp_path / "repo"
     (repo / ".claude" / "agentik").mkdir(parents=True, exist_ok=True)
     if config is not None:
         (repo / ".claude" / "agentik" / "config.yaml").write_text(config)
-    out = hooks.session_start(dict(payload(), cwd=str(repo)), env_for(tmp_path))
+    out = hooks.session_start(dict(payload(), cwd=str(repo)), env_for(tmp_path, **extra))
     path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     return out["hookSpecificOutput"]["additionalContext"], f"resolved config at {path}"
 
@@ -197,3 +197,52 @@ def test_s21_bytes_at_the_bound(tmp_path):
     assert block.startswith("; priority: S1 " + "y" * 24 + ", S2 ")      # the control
     assert "3600s+" in block and "WAITING 9 stops" in block
     assert len(block.encode()) == 320 <= 320    # agentik-r1: one byte longer, at the bound
+
+
+# ---- S30: the block names the prompt cache's lifetime when it is known and fits ----------
+
+S30_TAIL = "; agentik-session rules prints both"
+S30_HEAD = S21_BLOCK[:-len(S30_TAIL)]
+
+
+def _s30_band(tmp_path, p):
+    from datetime import datetime, timedelta, timezone
+
+    from claude_session import admission
+    d = admission.directory(env_for(tmp_path))
+    d.mkdir(parents=True, exist_ok=True)
+    t = datetime.now(timezone.utc) + timedelta(hours=2)
+    (d / "band.json").write_text(json.dumps({"mode": "observe", "P": p, "peak": p,
+                                             "resetsAt": t.isoformat(timespec="seconds")}))
+
+
+def test_s30_block_names_the_lifetime_from_the_band(tmp_path):
+    _s30_band(tmp_path, 41)
+    ctx, at = _s21_ctx(tmp_path)
+    assert ctx.endswith(at + S30_HEAD + ", cache 1h: idle wakes <=3300s" + S30_TAIL + S21_REMINDER)
+    _s30_band(tmp_path, 100)
+    ctx, at = _s21_ctx(tmp_path)
+    assert ctx.endswith(at + S30_HEAD + ", cache 5m: no keep-warm wakes" + S30_TAIL + S21_REMINDER)
+
+
+def test_s30_block_from_an_override(tmp_path):
+    _s30_band(tmp_path, 41)
+    ctx, at = _s21_ctx(tmp_path, CLAUDE_CODE_PROMPT_CACHE_TTL="5m")
+    assert ctx.endswith(at + S30_HEAD + ", cache 5m: no keep-warm wakes" + S30_TAIL + S21_REMINDER)
+    settings = tmp_path / "repo" / ".claude" / "settings.json"     # the payload's cwd
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"promptCacheTtl": "5m"}))
+    ctx, at = _s21_ctx(tmp_path)
+    assert ", cache 5m: no keep-warm wakes" + S30_TAIL in ctx
+
+
+def test_s30_bound_case_drops_the_lifetime(tmp_path):
+    _s30_band(tmp_path, 41)
+    ctx, _ = _s21_ctx(tmp_path)
+    assert ", cache 1h: idle wakes <=3300s" + S30_TAIL in ctx                # the control
+    levels = ", ".join(f'{n}: "{"y" * 40}: t"' for n in ("S1", "S2", "S3", "S4"))
+    ctx, at = _s21_ctx(tmp_path, "session:\n  priority:\n    levels: {%s}\n"
+                                 "  pacing: {fallback: 3600, waiting: 9}\n" % levels)
+    block = ctx.split(at, 1)[1][:-len(S21_REMINDER)]
+    assert "WAITING 9 stops" in block and "cache" not in block
+    assert len(block.encode()) == 320 <= 320

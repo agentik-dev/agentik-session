@@ -240,7 +240,7 @@ def test_the_prompt_hook_adds_the_band_line_after_the_budget_line(monkeypatch):
     with_ = _context(hooks.user_prompt_submit({"session_id": SID}))
     [line] = [x for x in with_ if x.startswith("5h ")]
     assert line.startswith("5h 72% → ") and line.endswith(" · observe")
-    assert [x for x in with_ if x != line] == without
+    assert [x for x in with_ if x != line and not x.startswith("cache ")] == without   # S30
     assert with_.index(line) == len(without)         # after the budget line
 
 
@@ -252,6 +252,41 @@ def test_the_prompt_hook_adds_nothing_without_a_readable_file(monkeypatch):
     assert _context(hooks.user_prompt_submit({"session_id": SID})) == without
     (adir() / "band.json").write_text("[1, 2]")
     assert _context(hooks.user_prompt_submit({"session_id": SID})) == without
+
+
+# ---- S30: the prompt line names the prompt cache's lifetime, after the band line ----
+
+S30_1H = "cache 1h (within plan usage, 5h 72%): an idle wake waits at most 3300 s, so the cache survives"
+S30_5M = ("cache 5m ({why}): a wait past about 270 s misses anyway; an idle wait takes the long "
+          "fallback, never an early wake to keep the cache")
+
+
+def test_s30_the_prompt_line_names_the_lifetime_after_the_band_line(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    now = datetime.now(UTC)
+    record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    [line] = [x for x in bits if x.startswith("5h ")]
+    assert bits[bits.index(line) + 1:] == [S30_1H]
+    record({"kind": "reading", "rateLimits": lim(100, now + timedelta(hours=2))},
+           now + timedelta(seconds=1))
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert bits[-1] == S30_5M.format(why="past plan usage, 5h 100%")
+
+
+def test_s30_the_prompt_line_without_a_lifetime_or_with_pacing_off(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert bits and not any(x.startswith("cache ") for x in bits)       # unknown: nothing
+    monkeypatch.setenv("CLAUDE_CODE_PROMPT_CACHE_TTL", "5m")
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert [x for x in bits if x.startswith("cache ")] == [
+        S30_5M.format(why="CLAUDE_CODE_PROMPT_CACHE_TTL")]              # no band, an override
+    sdir = config.state_dir(os.environ) / "sessions" / SID
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "resolved.json").write_text(json.dumps({"session": {"pacing": {"enabled": False}}}))
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert bits and not any(x.startswith("cache ") for x in bits)       # pacing off: nothing
 
 
 # ---- report's window use: held, idle, under 90; no ledger ----

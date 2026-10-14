@@ -45,7 +45,10 @@ INHERITED = ("ANTHROPIC_MODEL", "CLAUDE_SESSION_PROFILE", "CLAUDE_SESSION_CONFIG
              "RELAY_ROW", "CLAUDE_SESSION_CHAIN",
              # the marks of the Claude Code session the suite runs in, which `run`
              # refuses (S20 ruling 10)
-             "CLAUDECODE", "CLAUDE_CODE_SESSION_ID")
+             "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
+             # the prompt cache's lifetime and the provider, which `rules.lifetime` reads (S30)
+             "FORCE_PROMPT_CACHING_5M", "CLAUDE_CODE_PROMPT_CACHE_TTL", "ENABLE_PROMPT_CACHING_1H",
+             "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 for _k in INHERITED:
     _ENV.delenv(_k, raising=False)
 from claude_session.config import APP  # noqa: E402  (after the env: STATE_DIR is read at import)
