@@ -307,6 +307,16 @@ def test_s30_f1_project_settings_come_from_the_project_dir(monkeypatch, tmp_path
     assert bits[-1] == S30_1H
 
 
+def test_s30_f3_a_disabled_cache_reads_off_on_the_prompt_line(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    now = datetime.now(UTC)
+    record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
+    monkeypatch.setenv("DISABLE_PROMPT_CACHING", "1")
+    bits = _context(hooks.user_prompt_submit({"session_id": SID}))
+    assert bits[-1] == ("cache off (DISABLE_PROMPT_CACHING): no wait keeps it warm; an idle "
+                        "wait takes the long fallback, never an early wake to keep a cache")
+
+
 # ---- report's window use: held, idle, under 90; no ledger ----
 
 def run(*argv):

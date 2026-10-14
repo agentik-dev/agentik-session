@@ -288,3 +288,32 @@ def test_s30_docs_name_the_lifetime():
 def test_s30_f2_every_documented_provider_is_5m(tmp_path, name):
     env = {"HOME": str(tmp_path / "home"), name: "1"}
     assert rules().lifetime(env, tmp_path, _s30_band(41)) == ("5m", "a cloud provider")
+
+
+S30_OFF = ", cache off: no keep-warm wakes"
+DISABLES = ["DISABLE_PROMPT_CACHING", "DISABLE_PROMPT_CACHING_HAIKU",
+            "DISABLE_PROMPT_CACHING_SONNET", "DISABLE_PROMPT_CACHING_OPUS",
+            "DISABLE_PROMPT_CACHING_FABLE"]
+
+
+@pytest.mark.parametrize("name", DISABLES)
+def test_s30_f3_a_disabled_cache_reads_off(tmp_path, name):
+    r = rules()
+    env = {"HOME": str(tmp_path / "home"), name: "1", "CLAUDE_CODE_PROMPT_CACHE_TTL": "1h",
+           "ENABLE_PROMPT_CACHING_1H": "1"}
+    assert r.lifetime(env, tmp_path, _s30_band(41)) == ("off", name)
+    env = {"HOME": str(tmp_path / "home"), name: "0"}
+    assert r.lifetime(env, tmp_path, _s30_band(41))[0] == "1h"          # the control
+
+
+def test_s30_f3_off_gives_no_keep_warm_advice():
+    r = rules()
+    assert r.clause(session(), "off") == BLOCK[:-len(S30_TAIL)] + S30_OFF + S30_TAIL
+    out = r.render(session(), ("off", "DISABLE_PROMPT_CACHING"))
+    assert ("  6. the prompt cache is off here (DISABLE_PROMPT_CACHING): no wait keeps it "
+            "warm, so an idle wait takes the long fallback (1800 s or more) and never wakes "
+            "early to keep a cache\n") in out
+    assert "3300" not in out.split("  6. ", 1)[1]
+    assert r.hint("off", "DISABLE_PROMPT_CACHING") == (
+        "cache off (DISABLE_PROMPT_CACHING): no wait keeps it warm; an idle wait takes the "
+        "long fallback, never an early wake to keep a cache")

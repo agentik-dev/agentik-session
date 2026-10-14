@@ -20,7 +20,8 @@ either rule set; `agentik session rules` prints both (`render`).
 
 The prompt cache's lifetime (packet S30) is read, never assumed (`lifetime`): an idle
 wait on the 1h lifetime wakes at most 3300 s apart, and on 5m it takes the long fallback,
-since any wait past about 270 s misses anyway. The block names it only when it is known
+since any wait past about 270 s misses anyway, as it does with the cache off
+(DISABLE_PROMPT_CACHING). The block names it only when it is known
 and the whole block still fits BLOCK_MAX; `rules` prints it as pacing item 6, and the
 prompt hook as one line (`hint`).
 """
@@ -89,6 +90,7 @@ ENABLE_1H = "ENABLE_PROMPT_CACHING_1H"
 CLOUD = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
          "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_USE_MANTLE")   # fix round F2
 PLAN = 100                        # a usage reading at or past this is on usage credits
+DISABLE = "DISABLE_PROMPT_CACHING"     # and its per-model `_<MODEL>` forms: no cache (F3)
 UNKNOWN = "no usage reading and no override"
 LIFETIME = {
     "1h": "the prompt cache lives 1h here ({why}): an idle wait (items 2, 4 and 5) wakes at "
@@ -100,11 +102,17 @@ LIFETIME = {
     None: "the prompt cache's lifetime is not known here ({why}): on 1h (a subscription "
           "within plan usage) an idle wait wakes at most {warm1h} s apart; on 5m (usage "
           "credits, an API key, a cloud provider or promptCacheTtl 5m) it takes the long "
-          "fallback and never wakes early to keep the cache"}
-CLAUSE = {"1h": f", cache 1h: idle wakes <={WARM['1h']}s", "5m": ", cache 5m: no keep-warm wakes"}
+          "fallback and never wakes early to keep the cache",
+    "off": "the prompt cache is off here ({why}): no wait keeps it warm, so an idle wait "
+           "takes the long fallback ({fallback} s or more) and never wakes early to keep a "
+           "cache"}
+CLAUSE = {"1h": f", cache 1h: idle wakes <={WARM['1h']}s", "5m": ", cache 5m: no keep-warm wakes",
+          "off": ", cache off: no keep-warm wakes"}
 HINT = {"1h": "cache 1h ({why}): an idle wake waits at most {warm} s, so the cache survives",
         "5m": "cache 5m ({why}): a wait past about {warm} s misses anyway; an idle wait takes "
-              "the long fallback, never an early wake to keep the cache"}
+              "the long fallback, never an early wake to keep the cache",
+        "off": "cache off ({why}): no wait keeps it warm; an idle wait takes the long "
+               "fallback, never an early wake to keep a cache"}
 TAIL = "; agentik-session rules prints both"
 
 _LABEL = re.compile(r"[A-Za-z0-9 '.,-]*")
@@ -224,7 +232,7 @@ def render(session, life=None) -> str:
                      f"waiting {pa['waiting']})")
         lines += [f"  {i}. " + p.format(**pa) for i, p in enumerate(PACE, 1)]
         ttl, why = life if isinstance(life, tuple) and len(life) == 2 else (None, UNKNOWN)
-        ttl = ttl if ttl in TTLS else None
+        ttl = ttl if ttl in LIFETIME else None
         lines.append(f"  {len(PACE) + 1}. " + LIFETIME[ttl].format(
             why=why, warm=WARM.get(ttl), warm1h=WARM["1h"], fallback=pa["fallback"]))
     else:
@@ -268,7 +276,8 @@ def _instant(v):
 
 
 def lifetime(env, cwd, band=None, now=None) -> tuple:
-    """The main conversation's prompt-cache lifetime, `(ttl, why)`, in Claude Code's order:
+    """The main conversation's prompt-cache lifetime, `(ttl, why)`: `off` when
+    DISABLE_PROMPT_CACHING or a per-model form is set (fix round F3), else Claude Code's order:
     FORCE_PROMPT_CACHING_5M; CLAUDE_CODE_PROMPT_CACHE_TTL; the `promptCacheTtl` setting;
     ENABLE_PROMPT_CACHING_1H; then the default: 5m on a cloud provider, else band.json's
     five-hour reading while its reset is ahead: 5m past plan usage (5h or 7d at PLAN or
@@ -276,6 +285,9 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
     The project's settings are under CLAUDE_PROJECT_DIR, which Claude's `cd` never moves;
     under `cwd` only when it is unset (fix round F1)."""
     cwd = env.get("CLAUDE_PROJECT_DIR") or cwd
+    for k in [DISABLE, *sorted(k for k in env if k.startswith(DISABLE + "_"))]:
+        if _truthy(env.get(k)):
+            return "off", k
     if _truthy(env.get(FORCE_5M)):
         return "5m", FORCE_5M
     if env.get(TTL_VAR) in TTLS:
@@ -300,7 +312,7 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
 
 def hint(ttl, why) -> str | None:
     """The prompt hook's line for a known lifetime; None when it is not known."""
-    return HINT[ttl].format(why=why, warm=WARM[ttl]) if ttl in HINT else None
+    return HINT[ttl].format(why=why, warm=WARM.get(ttl)) if ttl in HINT else None
 
 
 def handover_listed(text: str) -> bool:

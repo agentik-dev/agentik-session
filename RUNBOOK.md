@@ -296,6 +296,8 @@ prompt cache's lifetime.
   in the local, project, then user settings, `ENABLE_PROMPT_CACHING_1H`; then
   a cloud provider is 5m, and the band's five-hour reading is 1h under 100%
   and 5m at 100% or past (usage credits). With none of these it is unknown.
+  `DISABLE_PROMPT_CACHING` or a per-model form reads off, first of all: no
+  wait keeps a cache warm, so an idle wait takes the long fallback.
   `agentik-session rules` prints it as pacing item 6, and the prompt line
   adds it after the band line; SessionStart's block names it only when the
   whole block still fits 320 bytes.
