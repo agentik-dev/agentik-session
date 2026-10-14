@@ -87,7 +87,7 @@ def test_band_on_a_synthetic_ledger_matches_a_hand_count():
         room += 1
     assert (round(peak, 2), room) == (81.75, 5)
     assert b == {"P": 72, "peak": 81.75, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
-                 "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
+                 "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
                  "at": iso(NOW)}
 
 
@@ -404,9 +404,9 @@ def test_a_resumed_session_reads_again_and_runs_again():
 
 # ---- the horizon's bound (the owner, 2026-10-14 06:43): the weekly reset, when first ----
 
-def _week_rows(seven_in: float) -> list:
-    """P 72 at 12:50, the five-hour reset 226 minutes after NOW, the seven-day one `seven_in`."""
-    lim = [{"kind": "five_hour", "percentUsed": 72, "resetsAt": iso(NOW + timedelta(minutes=226))},
+def _week_rows(seven_in: float, P: float = 72, five_in: float = 226) -> list:
+    """P at 12:50, the five-hour reset `five_in` minutes after NOW, the seven-day one `seven_in`."""
+    lim = [{"kind": "five_hour", "percentUsed": P, "resetsAt": iso(NOW + timedelta(minutes=five_in))},
            {"kind": "seven_day", "percentUsed": 41, "resetsAt": iso(NOW + timedelta(minutes=seven_in))}]
     return [{"ts": iso(at(12, 50)), "session": SID, "kind": "reading", "rateLimits": lim}]
 
@@ -415,18 +415,33 @@ def test_the_band_fills_by_a_seven_day_reset_that_comes_first():
     b = admission.band(_week_rows(77), NOW, rules.admission({}), tz=UTC)
     # T 77: one main thread, a 0.10 x 77 = 7.7; room: 79.7 + n x 0.15 x 15 + 3 <= 97, n = 6
     assert (b["P"], b["peak"], b["room"], b["P7"]) == (72, 79.7, 6, 41)
-    assert (b["resetsAt"], b["bound"]) == ("2026-10-12T14:10:00+00:00", "seven_day")
+    # resetsAt stays the five-hour reset (the pacing rule wakes there: fix round F3)
+    assert (b["resetsAt"], b["until"], b["bound"]) == ("2026-10-12T16:39:00+00:00",
+                                                       "2026-10-12T14:10:00+00:00", "seven_day")
 
 
 def test_the_band_keeps_the_five_hour_reset_when_the_seven_day_one_is_later():
     b = admission.band(_week_rows(300), NOW, rules.admission({}), tz=UTC)
-    assert (b["peak"], b["resetsAt"], b["bound"]) == (94.6, "2026-10-12T16:39:00+00:00", "five_hour")
+    assert (b["peak"], b["resetsAt"], b["until"], b["bound"]) == (
+        94.6, "2026-10-12T16:39:00+00:00", "2026-10-12T16:39:00+00:00", "five_hour")
+
+
+@pytest.mark.parametrize("P,room", [(95, 0), (50, 19)])
+def test_f2_room_near_the_weekly_reset_costs_each_spawn_over_the_five_hour_window(P, room):
+    """Fix round F2: the week resets in 2 minutes, the five-hour window in 150. a·T runs to
+    the week (0.10 x 2 = 0.2); each spawn costs 0.15 x min(150, 15) = 2.25, not 0.15 x 2.
+    P 50: 50.2 + 2.25 n + 3 <= 97 gives 19, where the week-costed spawn gave 99."""
+    b = admission.band(_week_rows(2, P=P, five_in=150), NOW, rules.admission({}), tz=UTC)
+    assert (b["bound"], b["peak"], b["room"]) == ("seven_day", round(P + 0.2, 2), room)
 
 
 def test_the_band_line_says_week_resets_when_the_seven_day_reset_bounds_it():
-    week = admission.band_line({**FULL, "bound": "seven_day"}, NOW)
-    assert week == LINE.replace(" · resets 14:05", " · week resets 14:05")
-    assert admission.band_line({**FULL, "bound": "five_hour"}, NOW) == LINE
+    week = admission.band_line({**FULL, "until": "2026-10-12T14:00:00+00:00", "bound": "seven_day"}, NOW)
+    assert week == LINE.replace(" · resets 14:05 (1h12)", " · week resets 14:00 (1h07), 5h 14:05")
+    five = {**FULL, "until": FULL["resetsAt"], "bound": "five_hour"}
+    assert admission.band_line(five, NOW) == LINE
+    # a seven-day bound with no readable until: the five-hour reset as before
+    assert admission.band_line({**FULL, "bound": "seven_day"}, NOW) == LINE
 
 
 def test_python_draws_the_module_s_week_fixture_line():

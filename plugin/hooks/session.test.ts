@@ -13,9 +13,9 @@ const PROPS = (columns: number, hasSurvey = false) => ({ component: 'AbovePrompt
 // two lines and NOW above, and asserts Python's band_line gives BAND_LINE for BAND at NOW.
 const BAND = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
 const BAND_LINE = '5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
-// The weekly reset bounds the horizon (the owner, 2026-10-14): the line says `week resets`.
-const BAND_WEEK = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:17:00+00:00", "bound": "seven_day", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
-const BAND_WEEK_LINE = '5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
+// The weekly reset bounds the horizon (the owner, 2026-10-14): `week resets`, then the 5h reset.
+const BAND_WEEK = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T15:30:00+00:00", "until": "2026-10-12T13:17:00+00:00", "bound": "seven_day", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
+const BAND_WEEK_LINE = '5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17), 5h 15:30 · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
 const BAND_JSON = '/state/admission/band.json'
 
 const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
