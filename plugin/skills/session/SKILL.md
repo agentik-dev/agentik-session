@@ -141,7 +141,10 @@ whole, as resolved.
   pending helper, Monitor or background task is the wake, with one fallback
   of `fallback` seconds (1800). Waiting on an outside party, the Next act
   opens `WAITING <n>: <what>; <how to tell>`, and the loop stops at
-  n = `waiting` (3).
+  n = `waiting` (3). A wait on the usage meter (room for 0, or a usage limit
+  hit) is not WAITING: the Next act stays the act, the wake is the band's
+  reset or one fallback, whichever is first, and it never counts toward the
+  stop.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
   the Handover line is missing or a WAITING is misshapen or at the stop, and

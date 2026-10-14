@@ -61,7 +61,10 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "an act ready: the minimum delay",
         "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to "
         "tell>`, a long delay, n the wakes in a row with nothing changed, the loop stopping "
-        "at n = {waiting} (a respawn reads n from the charter)")
+        "at n = {waiting} (a respawn reads n from the charter)",
+        "waiting on the usage meter (room for 0, or a usage limit hit) is not WAITING: the "
+        "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
+        "first, and it never counts toward the stop")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "
          "none; no hook enforces them")
 
@@ -154,7 +157,7 @@ def clause(session) -> str:
     if pa["enabled"]:
         out.append(f"pacing: wake in the act's last tool call, a pending helper is the wake "
                    f"(one fallback, {pa['fallback']}s+), WAITING {pa['waiting']} stops the "
-                   "loop")
+                   "loop, a meter wait never")
     if not out:
         return ""
     return ("; " + "; ".join(out) + "; agentik-session rules prints both")[:BLOCK_MAX]

@@ -159,7 +159,7 @@ def test_no_charter_reminder_when_not_required(tmp_path):
 
 S21_BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the "
              "Next act takes the highest ready; pacing: wake in the act's last tool call, a "
-             "pending helper is the wake (one fallback, 1800s+), WAITING 3 stops the loop; "
+             "pending helper is the wake (one fallback, 1800s+), WAITING 3 stops the loop, a meter wait never; "
              "agentik-session rules prints both")
 S21_REMINDER = '; charter: none open today under history/sittings, run agentik-session charter open "<goal>"'
 
@@ -182,7 +182,7 @@ def test_s21_block(tmp_path):
 def test_s21_block_off(tmp_path):
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n")
     assert ctx.endswith(at + "; pacing: wake in the act's last tool call, a pending helper is "
-                        "the wake (one fallback, 1800s+), WAITING 3 stops the loop; "
+                        "the wake (one fallback, 1800s+), WAITING 3 stops the loop, a meter wait never; "
                         "agentik-session rules prints both" + S21_REMINDER)    # the control
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n"
                                  "  pacing: {enabled: false}\n")
