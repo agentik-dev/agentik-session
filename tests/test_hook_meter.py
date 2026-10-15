@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import config, hooks, ledger, meter, resolver
+from claude_session import charter, config, hooks, ledger, meter, resolver
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests" / "fixtures" / "meter"
@@ -110,6 +110,88 @@ def test_output_stays_under_400_bytes_with_a_long_charter(env, tmp_path):
         {"session": {"posture": "signal", "charter": {"dir": "x" * 300}}}))
     out = tool(env, transcript(tmp_path, 180000))
     assert "CHECKPOINT" in ctx(out) and len(json.dumps(out)) <= 400
+
+
+# --- S33: under a launcher the line names the charter file and checkpoint --respawn ---
+
+S33_HEAD = "CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); charter "
+S33_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
+            "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
+            "the launcher restarts this sitting")
+NONE_FOUND = "<this sitting's charter>"
+
+
+def chained(env):
+    return {**env, hooks.CHAIN_VAR: "net"}
+
+
+def charters(cwd, d, *names):
+    """Each name under <cwd>/<d>, every next one a minute newer by mtime."""
+    (cwd / d).mkdir(parents=True, exist_ok=True)
+    out = []
+    for i, n in enumerate(names):
+        f = cwd / d / n
+        f.write_text("# sitting\n")
+        os.utime(f, (1_000_000 + 60 * i,) * 2)
+        out.append(f)
+    return out
+
+
+def charter_dir(env, d):
+    s = sdir(env)
+    s.mkdir(parents=True, exist_ok=True)
+    (s / "resolved.json").write_text(json.dumps(
+        {"session": {"posture": "signal", "charter": {"dir": d}}}))
+
+
+def test_s33_a_launcher_line_names_the_newest_charter_of_today(env, tmp_path):
+    t = charter.today()
+    charter_dir(env, "h")                   # a short dir: the absolute path fits MAX_OUT
+    old, _, f2 = charters(tmp_path, "h", "2026-01-01-9-old.md", f"{t}-1-x.md", f"{t}-2-x.md")
+    os.utime(old, (2_000_000,) * 2)         # the newest of all, but not today's
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(tmp_path)))
+    assert f"charter {f2};" in line and "end the turn" in line
+    assert f"`agentik session checkpoint --respawn --charter {f2}`" in line
+    assert line == S33_HEAD + f"{f2}; " + S33_TAIL.format(f=f2)
+
+
+@pytest.mark.parametrize("with_cwd", [True, False])
+def test_s33_no_charter_file_names_this_sittings_charter(env, tmp_path, with_cwd):
+    extra = {"cwd": str(tmp_path)} if with_cwd else {}
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), **extra))
+    assert line == S33_HEAD + f"{NONE_FOUND}; " + S33_TAIL.format(f=NONE_FOUND)
+    assert f"--charter {NONE_FOUND}`" in line
+
+
+@pytest.mark.parametrize("context", [144000, 180000])
+def test_s33_a_200_character_cwd_stays_under_the_cap(env, tmp_path, context):
+    cwd = tmp_path / ("c" * (199 - len(str(tmp_path))))
+    assert len(str(cwd)) == 200
+    f, = charters(cwd, "history/sittings", f"{charter.today()}-1-x.md")
+    out = tool(chained(env), transcript(tmp_path, context), cwd=str(cwd))
+    assert len(json.dumps(out)) <= hooks.MAX_OUT and "checkpoint --respawn" in ctx(out)
+    assert f"--charter history/sittings/{f.name}`" in ctx(out)
+    assert ctx(out).endswith("\n" + hooks.EXIT_RULE) == (context == 180000)
+
+
+def test_s33_the_tenth_tool_past_the_crossing_repeats_the_line(env, tmp_path):
+    charter_dir(env, "h")
+    f, = charters(tmp_path, "h", f"{charter.today()}-1-x.md")
+    p = transcript(tmp_path, 150000)
+    outs = [tool(chained(env), p, cwd=str(tmp_path)) for _ in range(11)]
+    assert [i for i, o in enumerate(outs) if o] == [0, 10]
+    assert ctx(outs[10]) == ctx(outs[0]) and f"--respawn --charter {f}`" in ctx(outs[10])
+
+
+@pytest.mark.parametrize("chain", [None, ""])
+def test_s33_off_a_launcher_the_pins_line(env, tmp_path, chain):
+    charters(tmp_path, "history/sittings", f"{charter.today()}-1-x.md")
+    e = {k: v for k, v in env.items() if k != hooks.CHAIN_VAR}
+    if chain is not None:
+        e[hooks.CHAIN_VAR] = chain
+    line = ctx(tool(e, transcript(tmp_path, 144000), cwd=str(tmp_path)))
+    assert line == ("CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); "
+                    "charter history/sittings; bring the charter current, commit, then exit")
 
 
 def test_unreadable_transcript_says_nothing_writes_nothing(env, tmp_path):

@@ -47,7 +47,7 @@ LAST_CHECKPOINT = "_last_checkpoint_at"
 
 
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")      # \Z: a trailing newline never passes
-MAX_OUT = 400
+MAX_OUT = 640                                   # S33 ruling 4: at most 640
 CHECKPOINT_EVERY = 10
 EXIT_RULE = ("EXIT: land the act in flight at a checkpoint, then exit; "
              "respawn, never compact")
@@ -395,12 +395,44 @@ def _signal(m: meter.Meter) -> bool:
     return False
 
 
-def _checkpoint_out(m: meter.Meter, charter: str) -> dict:
+# S33: under a launcher (CHAIN_VAR set) the line names the charter file and the marker's verb.
+NO_CHARTER = "<this sitting's charter>"
+RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
+                "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
+                "the launcher restarts this sitting")
+_SAFE_PATH = re.compile(r"^[A-Za-z0-9_./-]+\Z")    # a path the line may put on a command line
+
+
+def _charter_file(cwd, d: str) -> list[str]:
+    """S33 rulings 2 and 4: the charter file's spellings, longest first, NO_CHARTER last.
+    The file is the newest by mtime of `<cwd>/<d>/<today>-*.md`, else of `<cwd>/<d>/*.md`;
+    it is spelt absolute, then relative to cwd. A directory listing only; a failure, a cwd
+    that is not absolute, or a path outside `_SAFE_PATH` reads as none. Never raises."""
+    out = []
+    try:
+        if isinstance(cwd, str) and os.path.isabs(cwd):
+            base = Path(cwd) / d
+            for pat in (f"{charter.today()}-*.md", "*.md"):
+                found = [f for f in base.glob(pat) if f.is_file()]
+                if found:
+                    f = max(found, key=lambda f: f.stat().st_mtime)
+                    out = [str(f), os.path.relpath(f, cwd)]
+                    break
+    except Exception:                                   # noqa: BLE001
+        out = []
+    return [f for f in out if _SAFE_PATH.match(f) and not f.startswith("..")] + [NO_CHARTER]
+
+
+def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None) -> dict:
+    """The pin's line off a launcher (`files` None); under one (S33), a line per spelling
+    of the charter file in `files`, the first that fits MAX_OUT."""
     c = m.ceilings
-    for path in (charter, "?"):
-        line = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
-                f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); charter {path}; "
-                "bring the charter current, commit, then exit")
+    head = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
+            f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); charter ")
+    tails = ([f"{f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None else
+             [f"{path}; bring the charter current, commit, then exit" for path in (charter, "?")])
+    for tail in tails:
+        line = head + tail
         if m.used_pct >= 100.0:
             line += "\n" + EXIT_RULE
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
@@ -474,7 +506,11 @@ def post_tool_use(payload: dict, env=None) -> dict:
     off = "off" in (cfg.posture, posture)
     speak = False if off else _signal(m)
     meter.save(sdir, m, st)
-    return _checkpoint_out(m, _charter(resolved)) if speak else {}
+    if not speak:
+        return {}
+    d = _charter(resolved)
+    return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), d) if env.get(CHAIN_VAR)
+                           else None)
 
 
 def post_tool_use_failure(payload: dict, env=None) -> dict:
