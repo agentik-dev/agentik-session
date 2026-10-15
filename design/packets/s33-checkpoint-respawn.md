@@ -2,9 +2,9 @@
 
 | item | value |
 |---|---|
-| from | the observer's check-in 126 (2026-10-15 11:37, macbase `history/observer/2026-10-15.md`); `design/respawn-r1.md` §3.2 (the marker) and its files list (the SKILL.md's CHECKPOINT and EXIT text) |
+| from | the observer's check-in 126 (2026-10-15 11:37, the observer's log); `design/respawn-r1.md` §3.2 (the marker) and its files list (the SKILL.md's CHECKPOINT and EXIT text) |
 | pin | `main` at a83ce29 plus this packet's commit; branch `s33-checkpoint-respawn`, worktree `.claude/worktrees/s33-checkpoint-respawn` |
-| wall | this repo; no push, `--amend`, rebase, merge, device, network, real `claude`, `agentik session run`, `claude plugin`, `make readme`, `make install` or `make check`; never write in the account's state directory (`~/.local/state/claude-code-session`); no `agentik-session` verb that writes; never run `relay` or `agentik relay` with any verb; never build or run a relay binary; never `pkill -f` |
+| wall | this repo; no push, `--amend`, rebase, merge, device, network, real `claude`, `agentik session run`, `claude plugin`, `make readme`, `make install` or `make check`; never write in the account's state directory (the plugin's, under `~/.local/state`); no `agentik-session` verb that writes; never run `relay` or `agentik relay` with any verb; never build or run a relay binary; never `pkill -f` |
 | may touch | `claude_session/hooks.py` (`_checkpoint_out`, its caller in `post_tool_use`, `MAX_OUT`, a new helper that reads the recorded charter), `claude_session/cli.py` (`charter open` and a new helper that records its file; fix round), `tests/test_hook_meter.py`, `tests/test_charter.py` (one s33 test; fix round), `plugin/skills/session/SKILL.md` (the CHECKPOINT bullet only), `NICE_TO_HAVE.md`, this packet, `history/sittings/2026-10-15-1-s33.md` |
 | acceptance | 1: `.venv/bin/python -B -m pytest tests/test_hook_meter.py -q -k s33 2>&1 \| tail -1` reads `passed`, no `failed` (pin: (a) to (d) failed); 2: `.venv/bin/python -B -m pytest tests/test_hook_meter.py -q 2>&1 \| tail -1` reads `passed`, no `failed`; 3: `.venv/bin/python -B -m pytest tests -q -k "hook or respawn or chain or charter" 2>&1 \| tail -1` reads `passed`, no `failed`; 4 (fix round): `.venv/bin/python -B -m pytest tests -q -k "charter" 2>&1 \| tail -1` reads `passed`, no `failed` |
 | verify | `make check`, by the coordinator, after this branch |
@@ -12,7 +12,7 @@
 
 ## 1. What the source says
 
-The check-in: network-konsume-config's sitting 2026-10-15-4 ran under `agentik-session run --chain network` (launcher pid 64813). At 80.4% its only CHECKPOINT line read `CHECKPOINT: 80.4% context (144757/180000), 8.2% turns (33/400); charter history/sittings; bring the charter current, commit, then exit`. Its brief never names `checkpoint --respawn`; it ran none, wrote no `respawn.json` (its sitting 3 did, at 08:17:19), stopped its loop at 08:28:53, and the launcher has waited on a marker since. The line names a directory, not the charter file, and says "exit" where the launcher needs the marker.
+The check-in: example-net's sitting 2026-10-15-4 ran under `agentik-session run --chain network` (launcher pid 64813). At 80.4% its only CHECKPOINT line read `CHECKPOINT: 80.4% context (144757/180000), 8.2% turns (33/400); charter history/sittings; bring the charter current, commit, then exit`. Its brief never names `checkpoint --respawn`; it ran none, wrote no `respawn.json` (its sitting 3 did, at 08:17:19), stopped its loop at 08:28:53, and the launcher has waited on a marker since. The line names a directory, not the charter file, and says "exit" where the launcher needs the marker.
 
 respawn-r1 §3.2: "The launcher learns that a sitting ended on RESPAWN from a marker the sitting writes, never from the transcript. `claude-session checkpoint --respawn --charter FILE` first does what `checkpoint` does today ..." The launcher sets `CLAUDE_SESSION_CHAIN` in the child's environment (`claude_session/chain.py:299`, `hooks.CHAIN_VAR`), which the hooks inherit.
 
@@ -31,7 +31,7 @@ No new key, verb or resolved-file field; one new file in the session dir, `chart
 
 ## 4. Findings that name this row
 
-The check-in's S2. Two live chains lack the verb in their briefs (network-konsume-config, syrvis-konsume-config); this fix reaches them through `make install`, since every hook call runs the installed tree.
+The check-in's S2. Two live chains lack the verb in their briefs (example-net, example-platform); this fix reaches them through `make install`, since every hook call runs the installed tree.
 
 ## 5. Forbidden reads
 
