@@ -211,3 +211,8 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - An empty or blank first prompt (`--model opus ''`, `'   '`) gives no warning, though it likely starts idle; unchecked how claude treats an empty prompt.
 - With the prompt before an option (`'/loop 3h go' --model opus`), the long-`/loop` warning is missed: `long_loop` reads only the last argument (the RUNBOOK's form), while `prompt_gap` finds the first prompt anywhere.
 - S4 (the observer, 2026-10-14, seen live): the `not-started` and `deferred` texts name the five-hour window's present percentage and reset, not the projected peak and the ceiling that held the spawn, so a relay night's `band` line read "the five-hour window is at 65%, resets 20:30" beside peak 96.96: a reader sees room at 65% and cannot tell why the row waits. The text could add "projected <peak>% past the <ceiling>% ceiling" (s26-admit ruling 4's figures).
+
+## S32's review (2026-10-15, the observer; S4)
+- `row_life` counts a row that ends at its own start as 0.0 minutes, so rows killed at once pull L_row toward 0 (the adversary; no such row in the ledger today). A floor (FLOOR, 5) or skipping zero-length rows would hold it.
+- An end line whose `session` is a list crashes `ends()` with a TypeError (exit 1, read by the relay as `unchecked`, which spawns); true at 6e97555 too, and `record` validates the session, so no normal write reaches it.
+- Live, 2026-10-15 02:30:41: po2c's first ask under the install read peak 133.84 (P 34), against 200.49 a minute before; still held, the window at 34% an hour in.
