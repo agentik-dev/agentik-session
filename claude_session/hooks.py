@@ -395,7 +395,9 @@ def _signal(m: meter.Meter) -> bool:
     return False
 
 
-# S33: under a launcher (CHAIN_VAR set) the line names the charter file and the marker's verb.
+# S33: under a launcher (CHAIN_VAR, by CHAIN_RE) the line names the charter this sitting's
+# `charter open` recorded in CHARTER_REC, and the marker's verb.
+CHARTER_REC = "charter.json"
 NO_CHARTER = "<this sitting's charter>"
 RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
                 "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
@@ -403,24 +405,22 @@ RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, 
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9_./-]+\Z")    # a path the line may put on a command line
 
 
-def _charter_file(cwd, d: str) -> list[str]:
-    """S33 rulings 2 and 4: the charter file's spellings, longest first, NO_CHARTER last.
-    The file is the newest by mtime of `<cwd>/<d>/<today>-*.md`, else of `<cwd>/<d>/*.md`;
-    it is spelt absolute, then relative to cwd. A directory listing only; a failure, a cwd
-    that is not absolute, or a path outside `_SAFE_PATH` reads as none. Never raises."""
+def _charter_file(cwd, sdir: Path) -> list[str]:
+    """S33 rulings 2 and 4: the spellings of the charter this sitting's `charter open`
+    recorded (`<sdir>/charter.json` {path}), absolute then relative to cwd, NO_CHARTER last.
+    The record is named only when its path is absolute, passes _SAFE_PATH, is a file and lies
+    under the payload's cwd; no directory is listed. A failure reads as none. Never raises."""
     out = []
     try:
-        if isinstance(cwd, str) and os.path.isabs(cwd):
-            base = Path(cwd) / d
-            for pat in (f"{charter.today()}-*.md", "*.md"):
-                found = [f for f in base.glob(pat) if f.is_file()]
-                if found:
-                    f = max(found, key=lambda f: f.stat().st_mtime)
-                    out = [str(f), os.path.relpath(f, cwd)]
-                    break
+        rec = _load_json(sdir / CHARTER_REC).get("path")
+        if (isinstance(rec, str) and isinstance(cwd, str) and os.path.isabs(rec)
+                and os.path.isabs(cwd) and _SAFE_PATH.match(rec) and os.path.isfile(rec)):
+            rel = os.path.relpath(os.path.realpath(rec), os.path.realpath(cwd))
+            if rel != os.pardir and not rel.startswith(os.pardir + os.sep):
+                out = [rec, rel]
     except Exception:                                   # noqa: BLE001
         out = []
-    return [f for f in out if _SAFE_PATH.match(f) and not f.startswith("..")] + [NO_CHARTER]
+    return [f for f in out if _SAFE_PATH.match(f)] + [NO_CHARTER]
 
 
 def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None) -> dict:
@@ -508,9 +508,9 @@ def post_tool_use(payload: dict, env=None) -> dict:
     meter.save(sdir, m, st)
     if not speak:
         return {}
-    d = _charter(resolved)
-    return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), d) if env.get(CHAIN_VAR)
-                           else None)
+    chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
+    return _checkpoint_out(m, _charter(resolved),
+                           _charter_file(payload.get("cwd"), sdir) if chained else None)
 
 
 def post_tool_use_failure(payload: dict, env=None) -> dict:

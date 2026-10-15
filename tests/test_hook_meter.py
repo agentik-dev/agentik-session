@@ -112,7 +112,7 @@ def test_output_stays_under_400_bytes_with_a_long_charter(env, tmp_path):
     assert "CHECKPOINT" in ctx(out) and len(json.dumps(out)) <= 400
 
 
-# --- S33: under a launcher the line names the charter file and checkpoint --respawn ---
+# --- S33: under a launcher the line names the recorded charter and checkpoint --respawn ---
 
 S33_HEAD = "CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); charter "
 S33_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
@@ -121,8 +121,8 @@ S33_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, comm
 NONE_FOUND = "<this sitting's charter>"
 
 
-def chained(env):
-    return {**env, hooks.CHAIN_VAR: "net"}
+def chained(env, name="net"):
+    return {**env, hooks.CHAIN_VAR: name}
 
 
 def charters(cwd, d, *names):
@@ -137,22 +137,28 @@ def charters(cwd, d, *names):
     return out
 
 
-def charter_dir(env, d):
+def record(env, path):
+    """What this sitting's `charter open` leaves in its session dir (S33 ruling 2)."""
     s = sdir(env)
     s.mkdir(parents=True, exist_ok=True)
-    (s / "resolved.json").write_text(json.dumps(
-        {"session": {"posture": "signal", "charter": {"dir": d}}}))
+    (s / hooks.CHARTER_REC).write_text(json.dumps({"path": str(path)}))
 
 
-def test_s33_a_launcher_line_names_the_newest_charter_of_today(env, tmp_path):
+def s33_lines(f, cwd):
+    """The line for either spelling the ladder may choose (F3: whatever the temp root's
+    length): absolute, or relative to cwd once the absolute one passes MAX_OUT."""
+    return {S33_HEAD + f"{s}; " + S33_TAIL.format(f=s) for s in (str(f), os.path.relpath(f, cwd))}
+
+
+def test_s33_a_recorded_charter_is_named_beside_a_newer_childs(env, tmp_path):
     t = charter.today()
-    charter_dir(env, "h")                   # a short dir: the absolute path fits MAX_OUT
-    old, _, f2 = charters(tmp_path, "h", "2026-01-01-9-old.md", f"{t}-1-x.md", f"{t}-2-x.md")
-    os.utime(old, (2_000_000,) * 2)         # the newest of all, but not today's
+    mine, child = charters(tmp_path, "h", f"{t}-1-orch.md", f"{t}-2-s33.md")
+    record(env, mine)
     line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(tmp_path)))
-    assert f"charter {f2};" in line and "end the turn" in line
-    assert f"`agentik session checkpoint --respawn --charter {f2}`" in line
-    assert line == S33_HEAD + f"{f2}; " + S33_TAIL.format(f=f2)
+    assert line in s33_lines(mine, tmp_path) and child.name not in line
+    assert "checkpoint --respawn --charter " in line and "end the turn" in line
+    assert hooks._charter_file(str(tmp_path), sdir(env)) == [
+        str(mine), f"h/{mine.name}", hooks.NO_CHARTER]
 
 
 @pytest.mark.parametrize("with_cwd", [True, False])
@@ -168,6 +174,7 @@ def test_s33_a_200_character_cwd_stays_under_the_cap(env, tmp_path, context):
     cwd = tmp_path / ("c" * (199 - len(str(tmp_path))))
     assert len(str(cwd)) == 200
     f, = charters(cwd, "history/sittings", f"{charter.today()}-1-x.md")
+    record(env, f)
     out = tool(chained(env), transcript(tmp_path, context), cwd=str(cwd))
     assert len(json.dumps(out)) <= hooks.MAX_OUT and "checkpoint --respawn" in ctx(out)
     assert f"--charter history/sittings/{f.name}`" in ctx(out)
@@ -175,23 +182,52 @@ def test_s33_a_200_character_cwd_stays_under_the_cap(env, tmp_path, context):
 
 
 def test_s33_the_tenth_tool_past_the_crossing_repeats_the_line(env, tmp_path):
-    charter_dir(env, "h")
     f, = charters(tmp_path, "h", f"{charter.today()}-1-x.md")
-    p = transcript(tmp_path, 150000)
+    record(env, f)
+    p = transcript(tmp_path, 144000)
     outs = [tool(chained(env), p, cwd=str(tmp_path)) for _ in range(11)]
     assert [i for i, o in enumerate(outs) if o] == [0, 10]
-    assert ctx(outs[10]) == ctx(outs[0]) and f"--respawn --charter {f}`" in ctx(outs[10])
+    assert ctx(outs[10]) == ctx(outs[0]) and ctx(outs[10]) in s33_lines(f, tmp_path)
 
 
-@pytest.mark.parametrize("chain", [None, ""])
+@pytest.mark.parametrize("chain", [None, "", "a b", ".."])
 def test_s33_off_a_launcher_the_pins_line(env, tmp_path, chain):
-    charters(tmp_path, "history/sittings", f"{charter.today()}-1-x.md")
+    """Unset, empty, or a value CHAIN_RE refuses (F4, as cli.py reads it): no launcher."""
+    f, = charters(tmp_path, "history/sittings", f"{charter.today()}-1-x.md")
+    record(env, f)
     e = {k: v for k, v in env.items() if k != hooks.CHAIN_VAR}
     if chain is not None:
         e[hooks.CHAIN_VAR] = chain
     line = ctx(tool(e, transcript(tmp_path, 144000), cwd=str(tmp_path)))
     assert line == ("CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); "
                     "charter history/sittings; bring the charter current, commit, then exit")
+
+
+def test_s33_no_record_names_the_placeholder_beside_todays_charters(env, tmp_path):
+    t = charter.today()
+    charters(tmp_path, "history/sittings", f"{t}-1-orch.md", f"{t}-2-s33.md", "README.md")
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(tmp_path)))
+    assert line == S33_HEAD + f"{NONE_FOUND}; " + S33_TAIL.format(f=NONE_FOUND)
+
+
+@pytest.mark.parametrize("case", ["gone", "outside", "unsafe", "relative", "junk"])
+def test_s33_an_unusable_record_names_the_placeholder(env, tmp_path, case):
+    cwd = tmp_path / "repo"
+    f, = charters(cwd, "h", f"{charter.today()}-1-x.md")
+    if case == "gone":
+        record(env, f)
+        f.unlink()
+    elif case == "outside":
+        record(env, charters(tmp_path, "other", "x.md")[0])
+    elif case == "unsafe":
+        record(env, charters(cwd, "a b", "x.md")[0])
+    elif case == "relative":
+        record(env, f"h/{f.name}")
+    else:
+        record(env, f)
+        (sdir(env) / hooks.CHARTER_REC).write_text("{not json")
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(cwd)))
+    assert line == S33_HEAD + f"{NONE_FOUND}; " + S33_TAIL.format(f=NONE_FOUND)
 
 
 def test_unreadable_transcript_says_nothing_writes_nothing(env, tmp_path):

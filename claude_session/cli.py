@@ -311,6 +311,7 @@ def cmd_charter(args) -> int:
                             head.strip() if rc2 == 0 else None,
                             repo=os.path.basename(top.strip()) if rc == 0 else None,
                             row=os.environ.get("RELAY_ROW"))
+        _record_charter(path)
         print(path)
         return 0
     if len(args.args) > 1:
@@ -606,6 +607,26 @@ def _rewrite_resolved(model_set: bool = False) -> None:
                                   req.get("transcript_path"), None)
     except (resolver.ResolveError, OSError, KeyError) as e:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
+
+
+def _record_charter(path) -> None:
+    """S33 ruling 2: `charter open` records the file it made, absolute, in this sitting's
+    session dir (`sessions/<sid>/charter.json` {path}), found as `checkpoint --respawn`
+    finds it; the CHECKPOINT line names it under a launcher. Without a session id, in a
+    helper, or with no session dir it writes nothing; a failed write is a note, never a
+    refusal, since the charter is open either way."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
+        return
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
+    if not sdir.is_dir():
+        return
+    try:
+        store._write_private(sdir / hooks.CHARTER_REC,
+                             json.dumps({"path": os.path.abspath(path)}) + "\n")
+    except OSError as e:
+        print(f"note: charter open: the session's charter record was not written: {e}",
+              file=sys.stderr)
 
 
 def _respawn_check(args) -> tuple[str, str, str] | None:

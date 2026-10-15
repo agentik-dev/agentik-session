@@ -2,6 +2,8 @@
 import importlib.machinery
 import importlib.util
 import io
+import json
+import os
 import subprocess
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -179,6 +181,26 @@ def test_cli_open_reads_relay_row(tmp_path, monkeypatch):
     monkeypatch.setenv("RELAY_ROW", "s7")
     rc, out, _ = run("charter", "open", "--dir", str(tmp_path), "probe")
     assert rc == 0 and out.strip().endswith(f"{charter.today()}-1-s7.md")
+
+
+def test_s33_open_records_its_file_in_the_session_dir(tmp_path, monkeypatch):
+    """S33 ruling 2: `charter open` writes `sessions/<sid>/charter.json` {path}, the file's
+    absolute path, which the hook names under a launcher; without a session dir, or in a
+    helper, it writes nothing and still succeeds."""
+    from claude_session import hooks, resolver
+    monkeypatch.delenv("CLAUDE_SESSION_HELPER", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s33-sess")
+    monkeypatch.chdir(tmp_path)
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), "s33-sess")
+    assert run("charter", "open", "--dir", "a", "probe")[0] == 0 and not sdir.exists()
+    sdir.mkdir(parents=True)
+    rc, out, _ = run("charter", "open", "--dir", "b", "probe")
+    rec = json.loads((sdir / hooks.CHARTER_REC).read_text())
+    assert rc == 0 and rec == {"path": str(tmp_path / out.strip())}
+    assert Path(rec["path"]).is_absolute() and Path(rec["path"]).is_file()
+    monkeypatch.setenv("CLAUDE_SESSION_HELPER", "1")
+    assert run("charter", "open", "--dir", "c", "probe")[0] == 0
+    assert json.loads((sdir / hooks.CHARTER_REC).read_text()) == rec
 
 
 def test_close_appends_one_line(tmp_path):
