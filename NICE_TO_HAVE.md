@@ -220,5 +220,5 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## S33's notes (2026-10-15, the builder; S4)
 - `design/overhaul-r1.md` (§ the exit, and its proof table) still says the meter prints at most 400 bytes; `MAX_OUT` is 640 since S33, as the line under a launcher names the charter path twice.
 - Under a launcher at or past 100%, the EXIT rule leaves room for an absolute charter path of about 110 characters; a worktree's charter is near that and falls to the relative spelling, which runs only from the sitting's cwd.
-- A charter path with a character outside `[A-Za-z0-9_./-]` (a space in the repo's path) is never put on the line's command; such a sitting gets the relative spelling or `<this sitting's charter>`.
-- `test_s33_a_launcher_line_names_the_newest_charter_of_today` prints 612 of 640 bytes on this Mac's temp root; a temp root about 14 characters longer turns its absolute path relative and fails it.
+- The line names only the charter `charter open` recorded, absolute and inside `[A-Za-z0-9_./-]`, under the payload's cwd: a sitting that writes its charter by hand, works in a repo whose path holds a space, or whose cwd moved to a subdirectory gets `<this sitting's charter>`.
+- A second `charter open` in one sitting moves the record to the newer file; `charter close` leaves it.
