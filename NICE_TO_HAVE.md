@@ -210,3 +210,4 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## S31's review (2026-10-14, the observer; S4)
 - An empty or blank first prompt (`--model opus ''`, `'   '`) gives no warning, though it likely starts idle; unchecked how claude treats an empty prompt.
 - With the prompt before an option (`'/loop 3h go' --model opus`), the long-`/loop` warning is missed: `long_loop` reads only the last argument (the RUNBOOK's form), while `prompt_gap` finds the first prompt anywhere.
+- S4 (the observer, 2026-10-14, seen live): the `not-started` and `deferred` texts name the five-hour window's present percentage and reset, not the projected peak and the ceiling that held the spawn, so a relay night's `band` line read "the five-hour window is at 65%, resets 20:30" beside peak 96.96: a reader sees room at 65% and cannot tell why the row waits. The text could add "projected <peak>% past the <ceiling>% ceiling" (s26-admit ruling 4's figures).
