@@ -47,7 +47,7 @@ LAST_CHECKPOINT = "_last_checkpoint_at"
 
 
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")      # \Z: a trailing newline never passes
-MAX_OUT = 400
+MAX_OUT = 640                                   # S33 ruling 4: at most 640
 CHECKPOINT_EVERY = 10
 EXIT_RULE = ("EXIT: land the act in flight at a checkpoint, then exit; "
              "respawn, never compact")
@@ -395,12 +395,47 @@ def _signal(m: meter.Meter) -> bool:
     return False
 
 
-def _checkpoint_out(m: meter.Meter, charter: str) -> dict:
+# S33: under a launcher (CHAIN_VAR, by CHAIN_RE) the line names the charter this sitting's
+# `charter open` recorded in CHARTER_REC, and the marker's verb.
+CHARTER_REC = "charter.json"
+NO_CHARTER = "<this sitting's charter>"
+RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
+                "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
+                "the launcher restarts this sitting")
+_SAFE_PATH = re.compile(r"^[A-Za-z0-9_./-]+\Z")    # a path the line may put on a command line
+
+
+def _charter_file(cwd, sdir: Path, d: str) -> list[str]:
+    """S33 rulings 2 and 4: the spellings of the charter this sitting's `charter open`
+    recorded (`<sdir>/charter.json` {path}), absolute then relative to cwd, NO_CHARTER last.
+    The record is named only when its path is absolute, passes _SAFE_PATH, is a file, and its
+    directory is exactly `<cwd>/<d>` (resolved; R1: never a worktree's or a subdirectory's
+    charter dir); no directory is listed. A failure reads as none. Never raises."""
+    out = []
+    try:
+        rec = _load_json(sdir / CHARTER_REC).get("path")
+        if (isinstance(rec, str) and isinstance(cwd, str) and os.path.isabs(rec)
+                and os.path.isabs(cwd) and _SAFE_PATH.match(rec) and os.path.isfile(rec)
+                and os.path.realpath(os.path.dirname(rec))
+                == os.path.realpath(os.path.join(cwd, d))):
+            rel = os.path.relpath(os.path.realpath(rec), os.path.realpath(cwd))
+            if rel != os.pardir and not rel.startswith(os.pardir + os.sep):
+                out = [rec, rel]
+    except Exception:                                   # noqa: BLE001
+        out = []
+    return [f for f in out if _SAFE_PATH.match(f)] + [NO_CHARTER]
+
+
+def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None) -> dict:
+    """The pin's line off a launcher (`files` None); under one (S33), a line per spelling
+    of the charter file in `files`, the first that fits MAX_OUT."""
     c = m.ceilings
-    for path in (charter, "?"):
-        line = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
-                f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); charter {path}; "
-                "bring the charter current, commit, then exit")
+    head = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
+            f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); charter ")
+    tails = ([f"{f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None else
+             [f"{path}; bring the charter current, commit, then exit" for path in (charter, "?")])
+    for tail in tails:
+        line = head + tail
         if m.used_pct >= 100.0:
             line += "\n" + EXIT_RULE
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
@@ -474,7 +509,11 @@ def post_tool_use(payload: dict, env=None) -> dict:
     off = "off" in (cfg.posture, posture)
     speak = False if off else _signal(m)
     meter.save(sdir, m, st)
-    return _checkpoint_out(m, _charter(resolved)) if speak else {}
+    if not speak:
+        return {}
+    chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
+    d = _charter(resolved)
+    return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None)
 
 
 def post_tool_use_failure(payload: dict, env=None) -> dict:

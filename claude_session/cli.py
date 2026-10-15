@@ -311,6 +311,7 @@ def cmd_charter(args) -> int:
                             head.strip() if rc2 == 0 else None,
                             repo=os.path.basename(top.strip()) if rc == 0 else None,
                             row=os.environ.get("RELAY_ROW"))
+        _record_charter(path, section)
         print(path)
         return 0
     if len(args.args) > 1:
@@ -606,6 +607,35 @@ def _rewrite_resolved(model_set: bool = False) -> None:
                                   req.get("transcript_path"), None)
     except (resolver.ResolveError, OSError, KeyError) as e:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
+
+
+def _record_charter(path, section: dict) -> None:
+    """S33 ruling 2: `charter open` records the file it made, absolute, in this sitting's
+    session dir (`sessions/<sid>/charter.json` {path}), found as `checkpoint --respawn`
+    finds it; the CHECKPOINT line names it under a launcher. It writes only when the file's
+    directory is exactly `<the session's cwd>/<charter dir>`, the cwd read from the session
+    dir's `request.json` (R1: a helper's Bash carries its parent's id, so its open in a
+    worktree never takes the parent's record). Without a session id, in a helper, with no
+    session dir or no recorded cwd it writes nothing; a failed write is a note, never a
+    refusal, since the charter is open either way."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
+        return
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
+    if not sdir.is_dir():
+        return
+    scwd = (resolver.load_request(sdir) or {}).get("cwd")
+    if not isinstance(scwd, str) or not os.path.isabs(scwd):
+        return
+    want = os.path.join(scwd, hooks._charter({"session": section}))
+    if os.path.realpath(os.path.dirname(os.path.abspath(path))) != os.path.realpath(want):
+        return
+    try:
+        store._write_private(sdir / hooks.CHARTER_REC,
+                             json.dumps({"path": os.path.abspath(path)}) + "\n")
+    except OSError as e:
+        print(f"note: charter open: the session's charter record was not written: {e}",
+              file=sys.stderr)
 
 
 def _respawn_check(args) -> tuple[str, str, str] | None:
