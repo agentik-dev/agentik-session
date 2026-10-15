@@ -510,3 +510,72 @@ def test_f2_a_spawn_near_the_weekly_reset_counts_its_life_against_the_five_hour_
     # a 0.10 x 1 thread x 2 = 0.2; the opus spawn 0.15 x min(150, 15) = 2.25, not x 2
     assert (p["T"], p["bound"]) == (2, "seven_day")
     assert p["peak"] == pytest.approx(40 + 0.2 + 2.25)
+
+
+# ---- packet S32: a fresh relay row is charged its life (design/fresh-session-r1.md §2) ----
+# The seeds (a 0.10, b_opus 0.15, life 15); P 2 with the five-hour reset 274 minutes ahead;
+# the ask is a relay row's, `relay-row`, whose own session has no lines yet.
+R_NOW = at(10)
+R_FIVE = R_NOW + timedelta(minutes=274)
+ROW = "adm-row-4444-5555"
+
+
+def _row_ask():
+    return ask(subagentType="relay-row", tool_use_id="2026-10-14-7/us3bfix/1")
+
+
+def _other_reads(pct=2, resets=R_FIVE, seven=None):
+    return [start(R_NOW - timedelta(minutes=30), True, sid=OTHER),
+            reading(R_NOW - timedelta(minutes=1), pct, resets, sid=OTHER, seven=seven)]
+
+
+def _verdict(t, sid, typ):
+    return {"ts": iso(t), "session": sid, "kind": "verdict", "tool_use_id": f"{sid}/1",
+            "verdict": "admitted", "mode": "observe", "peak": 40.0, "P": 20, "T": 200.0,
+            "family": "opus", "type": typ}
+
+
+def _end(t, sid):
+    return {"ts": iso(t), "session": sid, "kind": "end", "reason": "other"}
+
+
+def test_s32_a_fresh_relay_row_is_charged_its_life_not_the_window():
+    seeds = rules.admission(None)["seeds"]
+    p = admission.project(_other_reads(), _row_ask(), SID, R_NOW, seeds)
+    # 2 + a 0.10 x 1 thread (the other) x 274 + the row's own a 0.10 x min(274, 15); no spawn term
+    assert p["T"] == 274 and p["P"] == 2
+    assert p["peak"] == pytest.approx(2 + 27.4 + 1.5)
+
+
+def test_s32_a_relay_row_ask_adds_no_spawn_term():
+    seeds = rules.admission(None)["seeds"]
+    rows = [reading(R_NOW - timedelta(minutes=1), 2, R_FIVE, sid=SID)]
+    p = admission.project(rows, _row_ask(), SID, R_NOW, seeds)
+    # the asking id read, so it is an active main thread, alone: 2 + 0.10 x 1 x 274
+    assert p["peak"] == pytest.approx(2 + 27.4)
+
+
+def test_s32_the_row_life_is_the_median_of_the_asked_sessions_start_to_end():
+    seeds = rules.admission(None)["seeds"]
+    rows = []
+    for i, (sid, minutes) in enumerate((("row-a", 10), ("row-b", 40), ("row-c", 20))):
+        t0 = at(3 + i)
+        rows += [_verdict(t0 - timedelta(seconds=30), sid, "relay-row"), start(t0, False, sid=sid),
+                 _end(t0 + timedelta(minutes=minutes), sid)]
+    rows += [_verdict(at(6), "row-open", "relay-row"), start(at(6, 1), False, sid="row-open")]
+    rows += [_verdict(at(4, 30), "sitting", "general-purpose"), start(at(4), True, sid="sitting"),
+             _end(at(5, 30), "sitting")]
+    rows = sorted(rows, key=lambda r: r["ts"]) + _other_reads()
+    assert admission.row_life(rows, seeds) == pytest.approx(20)
+    assert admission.row_life(_other_reads(), seeds) == pytest.approx(15)   # none ended: the seed
+    p = admission.project(rows, _row_ask(), SID, R_NOW, seeds)
+    assert p["peak"] == pytest.approx(2 + 27.4 + 2.0)
+
+
+def test_s32_a_fresh_relay_row_near_the_weekly_reset_counts_its_life_against_the_five_hour_window():
+    seeds = rules.admission(None)["seeds"]
+    rows = _other_reads(40, R_NOW + timedelta(minutes=150), seven=(60, R_NOW + timedelta(minutes=2)))
+    p = admission.project(rows, _row_ask(), SID, R_NOW, seeds)
+    # a 0.10 x 1 thread x 2 = 0.2; the row's own a 0.10 x min(150, 15) = 1.5, not x 2
+    assert (p["T"], p["bound"]) == (2, "seven_day")
+    assert p["peak"] == pytest.approx(40 + 0.2 + 1.5)
