@@ -20,21 +20,21 @@ fresh-session-r1 §2.1: "When the request's type is `relay-row` and its session 
 2. **Active** is `_active` over the ledger's readings and end lines at `now`, as `_rise` reads it; the request's own `rateLimits` give P and T but do not make its session active (the relay's ask carries none, band-pacing-r1 §2.2).
 3. **`row_life(rows, seeds) -> float`**: the sessions with a `verdict` line whose `type` is `relay-row`; each one's first `start` line to its first `end` line at or after it, in minutes; the median (even count: the mean of the middle two); `seeds["life"]` when none has ended. A session with no start or no end line is left out.
 4. **`project`**: `_rise` gets `{sid}` unless the request is a relay row; a relay row not active adds `a·min(T5, row_life)`, with `a` the fit's; a relay row active adds nothing; any other request adds `b_f·min(T5, L_t)` as today.
+5. **Tests**, in `tests/test_admit.py`, red first (each fails at the pin):
+   1. `test_s32_a_fresh_relay_row_is_charged_its_life_not_the_window`: another interactive thread's reading, the asking id has no lines: 2 + 0.10 × 274 + 0.10 × 15 = 30.9 (pin: 59.05).
+   2. `test_s32_a_relay_row_ask_adds_no_spawn_term`: the reading is the asking id's own, active and alone: 2 + 0.10 × 274 = 29.4 (pin: 31.65).
+   3. `test_s32_the_row_life_is_the_median_of_the_asked_sessions_start_to_end`: as 1, and hours earlier three asked rows ended 10, 20 and 40 minutes after their start lines, one asked row has no end line, one interactive `general-purpose` session ran 90: `row_life` is 20 and the ask reads 2 + 27.4 + 2.0 = 31.4 (pin: no `row_life`; 59.05).
+   4. `test_s32_a_fresh_relay_row_near_the_weekly_reset_counts_its_life_against_the_five_hour_window`: the other thread reads 40, the week resets in 2 minutes and the window in 150: 40 + 0.10 × 2 + 0.10 × 15 = 41.7 (pin: 42.65).
+
+   The control, green before and after: `test_the_peak_against_a_synthetic_day`, `test_f2_a_spawn_near_the_weekly_reset_counts_its_life_against_the_five_hour_window`, `test_a_session_that_read_once_and_ended_does_not_halve_a`.
 
 ## 3. Interfaces
 
 `admission.row_life(rows, seeds)` (new, pure); `admission.project`'s return keys unchanged; the `verdict` line, `admission admit`'s answer and `session.admission` unchanged.
 
-## 4. Tests
+## 4. Findings that name this row
 
-Red first (each fails at the pin):
-
-1. `test_s32_a_fresh_relay_row_is_charged_its_life_not_the_window`: another interactive thread's reading, the asking id has no lines: 2 + 0.10 × 274 + 0.10 × 15 = 30.9 (pin: 59.05).
-2. `test_s32_a_relay_row_ask_adds_no_spawn_term`: the reading is the asking id's own, active and alone: 2 + 0.10 × 274 = 29.4 (pin: 31.65).
-3. `test_s32_the_row_life_is_the_median_of_the_asked_sessions_start_to_end`: as 1, and hours earlier three asked rows ended 10, 20 and 40 minutes after their start lines, one asked row has no end line, one interactive `general-purpose` session ran 90: `row_life` is 20 and the ask reads 2 + 27.4 + 2.0 = 31.4 (pin: no `row_life`; 59.05).
-4. `test_s32_a_fresh_relay_row_near_the_weekly_reset_counts_its_life_against_the_five_hour_window`: the other thread reads 40, the week resets in 2 minutes and the window in 150: 40 + 0.10 × 2 + 0.10 × 15 = 41.7 (pin: 42.65).
-
-The control, green before and after: `test_the_peak_against_a_synthetic_day`, `test_f2_a_spawn_near_the_weekly_reset_counts_its_life_against_the_five_hour_window`, `test_a_session_that_read_once_and_ended_does_not_halve_a`.
+fresh-session-r1 §5 (the two cited holds stay; an orchestrator under-read until agentik-relay's AR85 makes it ask as `relay-orchestrator`, which lands before this merges; L_row on four rows; a row dead without its end line); the refuter's note on §3 P2 (three continuation spawns, `part: 2`, counted as asks), which act 2 folds.
 
 ## 5. Forbidden reads
 

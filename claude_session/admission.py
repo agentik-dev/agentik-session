@@ -577,6 +577,30 @@ def _active(reads: list, t: datetime, gone: dict) -> set:
     return {s for s, r in newest.items() if not any(r <= e <= t for e in gone.get(s, ()))}
 
 
+ROW = "relay-row"                         # a relay row's ask (agentik-relay band-pacing-r1 §2.2)
+
+
+def row_life(rows, seeds: dict) -> float:
+    """L_row, a relay row's life (design/fresh-session-r1.md §2.2): the median minutes from
+    start line to end line of the sessions with a `relay-row` verdict line, each its first
+    start line to the first end line at or after it; the seed life while none has ended. A
+    row writes no spawn or done line, so it never reaches `lives`."""
+    asked = {s for r in rows if r.get("kind") == "verdict" and r.get("type") == ROW
+             and (s := _str(r.get("session")))}
+    first: dict = {}
+    for r in rows:
+        t, s = _when(r.get("ts")), _str(r.get("session"))
+        if r.get("kind") == "start" and t is not None and s in asked:
+            first[s] = min(t, first.get(s, t))
+    gone = ends(rows)
+    xs = sorted(_minutes(min(after) - t0) for s, t0 in first.items()
+                if (after := [e for e in gone.get(s, ()) if e >= t0]))
+    if not xs:
+        return float(seeds["life"])
+    mid = len(xs) // 2
+    return xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
+
+
 def _solve(X: list, y: list):
     """Least squares by the normal equations, Gauss-Jordan with partial pivots; None when
     singular."""
@@ -685,7 +709,10 @@ def project(rows, req: dict, sid, now: datetime, seeds: dict):
     """peak = P + a·T + Σ (running) b_f·min(T5, max(L_t − age, 5)) + b_f·min(T5, L_t) (the
     new spawn), from the newest five-hour reading whose resetsAt is ahead (the request's
     own counts, at `now`): T to `horizon`'s reset (`until`, named by `bound`), T5 to the
-    five-hour `resets`, which the texts name (fix round F2). None when there is none."""
+    five-hour `resets`, which the texts name (fix round F2). None when there is none.
+    A relay row (type `relay-row`) is its own main thread, never a spawn (fresh-session-r1
+    §2.1): it joins a·T only once it is active (a ledger reading in ACTIVE and no end line
+    since), and until then adds a·min(T5, L_row), `row_life`'s; it adds no b_f term."""
     reads = readings(rows, FIVE)
     fresh = [x for x in reads + limits(req.get("rateLimits"), FIVE, now, sid) if x[3] > now]
     if not fresh:
@@ -694,10 +721,14 @@ def project(rows, req: dict, sid, now: datetime, seeds: dict):
     seven = readings(rows, SEVEN) + limits(req.get("rateLimits"), SEVEN, now, sid)
     T, until, bound = horizon(resets, seven, now)
     T5 = max(0.0, _minutes(resets - now))
-    rise, f, lv, _ = _rise(rows, reads, now, T, seeds, {sid}, T5)
     fam = family(req.get("model"), req.get("parentModel"))
     typ = helper_type(req.get("subagentType"), req.get("fork"))
-    rise += f["b"].get(fam, seeds["b"]["other"]) * min(T5, _life(lv, typ, seeds)[0])
+    row = typ == ROW
+    rise, f, lv, _ = _rise(rows, reads, now, T, seeds, set() if row else {sid}, T5)
+    if not row:
+        rise += f["b"].get(fam, seeds["b"]["other"]) * min(T5, _life(lv, typ, seeds)[0])
+    elif sid not in _active(reads, now, ends(rows)):
+        rise += f["a"] * min(T5, row_life(rows, seeds))
     return {"peak": P + rise, "P": P, "T": T, "resets": resets, "until": until, "bound": bound,
             "fit": f}
 
