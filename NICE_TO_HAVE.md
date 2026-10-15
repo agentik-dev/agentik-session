@@ -216,3 +216,9 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `row_life` counts a row that ends at its own start as 0.0 minutes, so rows killed at once pull L_row toward 0 (the adversary; no such row in the ledger today). A floor (FLOOR, 5) or skipping zero-length rows would hold it.
 - An end line whose `session` is a list crashes `ends()` with a TypeError (exit 1, read by the relay as `unchecked`, which spawns); true at 6e97555 too, and `record` validates the session, so no normal write reaches it.
 - Live, 2026-10-15 02:30:41: po2c's first ask under the install read peak 133.84 (P 34), against 200.49 a minute before; still held, the window at 34% an hour in.
+
+## S33's notes (2026-10-15, the builder; S4)
+- `design/overhaul-r1.md` (§ the exit, and its proof table) still says the meter prints at most 400 bytes; `MAX_OUT` is 640 since S33, as the line under a launcher names the charter path twice.
+- Under a launcher at or past 100%, the EXIT rule leaves room for an absolute charter path of about 110 characters; a worktree's charter is near that and falls to the relative spelling, which runs only from the sitting's cwd.
+- A charter path with a character outside `[A-Za-z0-9_./-]` (a space in the repo's path) is never put on the line's command; such a sitting gets the relative spelling or `<this sitting's charter>`.
+- `test_s33_a_launcher_line_names_the_newest_charter_of_today` prints 612 of 640 bytes on this Mac's temp root; a temp root about 14 characters longer turns its absolute path relative and fails it.

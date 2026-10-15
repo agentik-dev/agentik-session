@@ -72,7 +72,9 @@ Two lines arrive as hook context; act on them, do not argue with them:
 - **`CHECKPOINT: ...`** at the profile's `checkpoint_at` (80% by default), then
   every tenth tool: bring the charter current, commit, and run
   `agentik-session checkpoint`. The session must be handed off at any moment
-  from here.
+  from here. Under `agentik session run`, the sitting runs
+  `agentik session checkpoint --respawn --charter <file>` and ends the turn,
+  and the launcher restarts it.
 - **`EXIT: ...`** at or past 100%: land the act in flight at a checkpoint, then
   exit; respawn, never compact. A RESPAWN close (the charter's Next act opens on
   `RESPAWN`) is marked as the sitting's last act: once the charter is current and
