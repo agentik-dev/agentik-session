@@ -168,7 +168,7 @@ Five parts: the title line; the table (goal, budget, pin, window, agents); `## D
 
 ## Status
 
-Status: version `v2.0.0-alpha.15`, rendered `2026-10-14`, `1258` tests in the suite.
+Status: version `v2.0.0-alpha.15`, rendered `2026-10-14`, `1262` tests in the suite.
 
 ## Credit
 
