@@ -144,6 +144,14 @@ def record(env, path):
     (s / hooks.CHARTER_REC).write_text(json.dumps({"path": str(path)}))
 
 
+def charter_dir(env, d):
+    """The resolved charter dir (a short one keeps the absolute path under MAX_OUT)."""
+    s = sdir(env)
+    s.mkdir(parents=True, exist_ok=True)
+    (s / "resolved.json").write_text(json.dumps(
+        {"session": {"posture": "signal", "charter": {"dir": d}}}))
+
+
 def s33_lines(f, cwd):
     """The line for either spelling the ladder may choose (F3: whatever the temp root's
     length): absolute, or relative to cwd once the absolute one passes MAX_OUT."""
@@ -152,12 +160,13 @@ def s33_lines(f, cwd):
 
 def test_s33_a_recorded_charter_is_named_beside_a_newer_childs(env, tmp_path):
     t = charter.today()
+    charter_dir(env, "h")
     mine, child = charters(tmp_path, "h", f"{t}-1-orch.md", f"{t}-2-s33.md")
     record(env, mine)
     line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(tmp_path)))
     assert line in s33_lines(mine, tmp_path) and child.name not in line
     assert "checkpoint --respawn --charter " in line and "end the turn" in line
-    assert hooks._charter_file(str(tmp_path), sdir(env)) == [
+    assert hooks._charter_file(str(tmp_path), sdir(env), "h") == [
         str(mine), f"h/{mine.name}", hooks.NO_CHARTER]
 
 
@@ -182,6 +191,7 @@ def test_s33_a_200_character_cwd_stays_under_the_cap(env, tmp_path, context):
 
 
 def test_s33_the_tenth_tool_past_the_crossing_repeats_the_line(env, tmp_path):
+    charter_dir(env, "h")
     f, = charters(tmp_path, "h", f"{charter.today()}-1-x.md")
     record(env, f)
     p = transcript(tmp_path, 144000)
@@ -212,21 +222,52 @@ def test_s33_no_record_names_the_placeholder_beside_todays_charters(env, tmp_pat
 
 @pytest.mark.parametrize("case", ["gone", "outside", "unsafe", "relative", "junk"])
 def test_s33_an_unusable_record_names_the_placeholder(env, tmp_path, case):
-    cwd = tmp_path / "repo"
-    f, = charters(cwd, "h", f"{charter.today()}-1-x.md")
+    cwd = tmp_path / ("a b" if case == "unsafe" else "repo")
+    f, = charters(cwd, "history/sittings", f"{charter.today()}-1-x.md")
     if case == "gone":
         record(env, f)
         f.unlink()
     elif case == "outside":
-        record(env, charters(tmp_path, "other", "x.md")[0])
+        record(env, charters(tmp_path, "other/history/sittings", "x.md")[0])
     elif case == "unsafe":
-        record(env, charters(cwd, "a b", "x.md")[0])
+        record(env, f)
     elif case == "relative":
-        record(env, f"h/{f.name}")
+        record(env, f"history/sittings/{f.name}")
     else:
         record(env, f)
         (sdir(env) / hooks.CHARTER_REC).write_text("{not json")
     line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(cwd)))
+    assert line == S33_HEAD + f"{NONE_FOUND}; " + S33_TAIL.format(f=NONE_FOUND)
+
+
+def test_s33_a_helpers_open_in_a_worktree_keeps_the_parents_record(env, tmp_path, monkeypatch):
+    """R1: an in-process helper's Bash carries its parent's session id and no helper mark;
+    its `charter open` in a worktree under the parent's cwd must not take the record."""
+    import io
+    from contextlib import redirect_stdout
+    from claude_session import cli
+    repo = tmp_path / "repo"
+    wt = repo / ".claude" / "worktrees" / "b"
+    wt.mkdir(parents=True)
+    s = sdir(env)
+    s.mkdir(parents=True, exist_ok=True)
+    resolver.save_request(s, repo, None, None)
+    monkeypatch.delenv("CLAUDE_SESSION_HELPER", raising=False)
+    for where in (repo, wt):                            # the parent, then the helper
+        monkeypatch.chdir(where)
+        with redirect_stdout(io.StringIO()):
+            assert cli.main(["charter", "open", "probe"]) == 0
+    mine = repo / "history" / "sittings" / f"{charter.today()}-1.md"
+    assert mine.is_file() and (wt / "history" / "sittings" / mine.name).is_file()
+    assert json.loads((s / hooks.CHARTER_REC).read_text()) == {"path": str(mine)}
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(repo)))
+    assert line in s33_lines(mine, repo)
+
+
+def test_s33_a_record_in_a_subdirectorys_charter_dir_names_the_placeholder(env, tmp_path):
+    f, = charters(tmp_path, "sub/history/sittings", f"{charter.today()}-1-x.md")
+    record(env, f)
+    line = ctx(tool(chained(env), transcript(tmp_path, 144000), cwd=str(tmp_path)))
     assert line == S33_HEAD + f"{NONE_FOUND}; " + S33_TAIL.format(f=NONE_FOUND)
 
 
