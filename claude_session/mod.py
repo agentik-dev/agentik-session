@@ -17,6 +17,9 @@ from .hooks import _SID
 from .store import _write_private
 
 MOD = "mod.json"
+# The band's limit note (packet S34 ruling 6), the twin of `limitNote` in session.ts; one
+# fixture in session.test.ts pins both (tests/test_s34.py).
+LIMIT_NOTE = "limit: the model's limit ended the last turn; /model to switch"
 
 
 class ModError(Exception):
@@ -69,3 +72,29 @@ def line(sdir) -> str:
     if not seen:
         return "not seen"
     return "seen, age unknown" if a is None else f"seen {_ago(a)} ago"
+
+
+def _at(text):
+    """A stamp's `at` (a finite number), from the file's text; None when unreadable."""
+    try:
+        at = json.loads(text)["at"]
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+    ok = isinstance(at, (int, float)) and not isinstance(at, bool) and at == at \
+        and abs(at) != float("inf")
+    return at if ok else None
+
+
+def limit_note(limited, turn_ended) -> str | None:
+    """LIMIT_NOTE when `limited.json`'s text says `rate_limit` at a time later than
+    `turn-ended.json`'s (or there is no readable turn end); else None (S34 ruling 6)."""
+    try:
+        doc = json.loads(limited) if limited is not None else None
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("error") != "rate_limit":
+        return None
+    at, ended = _at(limited), _at(turn_ended) if turn_ended is not None else None
+    if at is None or (ended is not None and at <= ended):
+        return None
+    return LIMIT_NOTE

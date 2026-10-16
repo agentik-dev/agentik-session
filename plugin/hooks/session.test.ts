@@ -64,6 +64,40 @@ test('respawn.json present: respawn marked', async (t: any, on: any) => {
     .toBe('session: ctx 62% · turns 31% · notice · respawn marked')
 })
 
+// ---- Packet S34 ruling 6: a rate limit ended the last turn, so the band names /model ----
+// The one fixture both twins read: tests/test_s34.py reads these lines and asserts mod.py's
+// limit_note gives LIMIT_NOTE for LIMITED alone and over ENDED_BEFORE, and none over
+// ENDED_AFTER or for OVERLOADED.
+const LIMITED = '{"at": 1791806370.25, "error": "rate_limit"}'
+const OVERLOADED = '{"at": 1791806370.25, "error": "overloaded"}'
+const ENDED_BEFORE = '{"at": 1791806300}'
+const ENDED_AFTER = '{"at": 1791806400.5}'
+const LIMIT_NOTE = "limit: the model's limit ended the last turn; /model to switch"
+
+test('limited.json after the last turn end: the limit note in place of the zone', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/limited.json`]: LIMITED, [`${DIR}/turn-ended.json`]: ENDED_BEFORE }))
+    .toBe(`session: ctx 62% · turns 31% · ${LIMIT_NOTE}`)
+})
+
+test('limited.json and no turn end yet: the note, and before the first meter too', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/limited.json`]: LIMITED, [`${DIR}/respawn.json`]: '{}' }))
+    .toBe(`session: ctx 62% · turns 31% · ${LIMIT_NOTE} · respawn marked`)
+})
+
+test('no meter yet, limited: the note in place of no meter', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/limited.json`]: LIMITED })).toBe(`session: ${LIMIT_NOTE}`)
+})
+
+test('a later turn end clears the note; another error never shows it', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/limited.json`]: LIMITED, [`${DIR}/turn-ended.json`]: ENDED_AFTER }))
+    .toBe('session: ctx 62% · turns 31% · notice')
+})
+
+test('overloaded is not the model\'s limit: the zone stands', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/limited.json`]: OVERLOADED }))
+    .toBe('session: ctx 62% · turns 31% · notice')
+})
+
 // ---- Packet S27b: admission's line under the session's, from band.json ----
 const lines = async (t: any, on: any, files: Record<string, string>, columns = 120,
                      hasSurvey = false, below: any = undefined) => {

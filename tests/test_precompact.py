@@ -16,7 +16,8 @@ from claude_session import doctor, hooks
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugin"
 CLASSIC = {"SessionStart": 10, "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5,
-           "PostToolBatch": 5, "UserPromptSubmit": 5, "Stop": 5, "SessionEnd": 15}
+           "PostToolBatch": 5, "UserPromptSubmit": 5, "Stop": 5, "StopFailure": 5,
+           "SessionEnd": 15}       # S34 adds StopFailure
 
 
 def payload(trigger) -> dict:

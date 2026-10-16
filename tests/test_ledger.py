@@ -85,7 +85,7 @@ from datetime import datetime, timezone
 S19_KEYS = {
     "restart": ("kind", "chain", "seq", "at", "from_session", "to_session", "profile", "repo",
                 "charter", "charter_sha256", "sitting_seconds", "ended_by", "restarts_24h",
-                "cap"),
+                "cap", "model", "start_model"),      # S34 ruling 4
     "stop": ("kind", "chain", "at", "session", "profile", "repo", "reason", "exit_status",
              "sitting_seconds", "restarts"),
 }

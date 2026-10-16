@@ -20,7 +20,8 @@ SID = "mod-sess-0000-1111"
 CLASSIC = {   # the pin's (1204d4c) classic block: event -> (matcher, timeout); S1 adds only `modules`
     "SessionStart": ("", 10), "PreToolUse": ("*", 5), "PostToolUse": ("*", 5),
     "PostToolUseFailure": ("*", 5), "PostToolBatch": (None, 5), "UserPromptSubmit": (None, 5),
-    "Stop": (None, 5), "SessionEnd": (None, 15), "PreCompact": (None, 5),
+    "Stop": (None, 5), "StopFailure": (None, 5), "SessionEnd": (None, 15),
+    "PreCompact": (None, 5),          # S34 adds StopFailure
 }
 
 # The three sibling plugins, spelled in pieces so the hygiene scan of this file finds none.

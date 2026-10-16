@@ -1034,3 +1034,121 @@ def test_s22_live_call_still_holds_ready(fake):
     assert c._ready(sdir, now) is False
     hooks.post_tool_use({**a2, "tool_name": "Bash", "tool_use_id": "toolu_02gate"})
     assert c._ready(sdir, now) is True                                  # the positive control
+
+
+# ---- S34: a respawn keeps the model the sitting ended on, and says so ------------------
+# (packet S34 rulings 1 to 4 and 8 (a) to (f); OPEN-QUESTIONS 7, answered 2026-10-16)
+
+OPUS = "claude-opus-5-5"
+
+
+def meter_says(model, raw=None):
+    """The sitting's meter.json reads `model` (`raw`: the file's bytes as given). The
+    launcher reads this state file, never a transcript."""
+    def act(fx, p):
+        sdir = resolver.session_dir(_state(), p.sid)
+        sdir.mkdir(parents=True, exist_ok=True)
+        body = raw if raw is not None else json.dumps({"session_id": p.sid, "model": model})
+        (sdir / "meter.json").write_text(body)
+    return act
+
+
+def _carry(fake, monkeypatch, args, reads):
+    """A chain on `args` whose sittings close on RESPAWN, sitting n's meter.json made by
+    `reads[n]` (a model, an action, or None for no file), then one that exits. Returns the
+    starts' arguments after `--session-id <sid>`, the said lines with the count said
+    before each start, the restart entries and the chain."""
+    plans = []
+    for r in reads:
+        pre = [] if r is None else [(5, r if callable(r) else meter_says(r))]
+        plans.append(pre + respawn_seq(fake.charter) + [end(7200)])
+    fx = _fx(monkeypatch, plans + [[end(1)]])
+    before, real = [], fx.spawn
+
+    def spawn(argv, env):
+        before.append(len(fx.said))
+        return real(argv, env)
+    fx.spawn = spawn
+    c = C().Chain("c1", list(args), _state(), fx, dict(G), poll=2, grace=10, kill_grace=30)
+    assert c.run() == 0 and _stops() == ["no-marker"]
+    assert len(fx.procs) == len(reads) + 1
+    return [p.argv[3:] for p in fx.procs], (fx.said, before), _lines("restart"), c
+
+
+def _warned(said):
+    return [s for s in said if "the model the sitting ended on" in s]
+
+
+def test_s34_a_fable_start_carries_opus_at_1m(fake, monkeypatch):
+    args = ["--model", "fable", "--effort", "high", "/loop check in"]
+    starts, (said, before), (r,), c = _carry(fake, monkeypatch, args, [OPUS])
+    assert starts == [args, ["--model", f"{OPUS}[1m]", "--effort", "high", "/loop check in"]]
+    line = (f"c1: the successor runs on --model {OPUS}[1m], the model the sitting ended "
+            "on; the start line says --model fable")
+    assert _warned(said) == [line]
+    assert said.index(line) < before[1]                       # said before the successor
+    assert (r["model"], r["start_model"]) == (f"{OPUS}[1m]", "fable")
+    assert c.args == args                                     # ruling 3: never rewritten
+
+
+def test_s34_b_joined_form_stays_one_token(fake, monkeypatch):
+    args = ["--effort", "high", "--model=fable", "go"]
+    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [OPUS])
+    assert starts[1] == ["--effort", "high", f"--model={OPUS}[1m]", "go"]
+    assert len(_warned(said)) == 1 and r["model"] == f"{OPUS}[1m]"
+    assert r["start_model"] == "fable"
+
+
+def test_s34_c_same_family_keeps_the_start_line(fake, monkeypatch):
+    args = ["--model", "opus[1m]", "go"]
+    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [OPUS])
+    assert starts == [args, args] and _warned(said) == []
+    assert (r["model"], r["start_model"]) == (None, "opus[1m]")
+
+
+def test_s34_d_a_200k_start_carries_bare(fake, monkeypatch):
+    args = ["--model", "sonnet", "go"]
+    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [OPUS])
+    assert starts[1] == ["--model", OPUS, "go"]
+    assert _warned(said) == [f"c1: the successor runs on --model {OPUS}, the model the "
+                             "sitting ended on; the start line says --model sonnet"]
+    assert (r["model"], r["start_model"]) == (OPUS, "sonnet")
+
+
+@pytest.mark.parametrize("args,read", [
+    (["--effort", "high", "go"], OPUS),                        # no --model
+    (["--model", "fable", "go"], None),                        # no meter.json
+    (["--model", "fable", "go"], "<synthetic>"),
+    (["--model", "fable", "go"], "gpt-9-turbo"),               # a family the table lacks
+    (["--model", "fable", "go"], meter_says(None, raw="{not json")),
+    (["--model", "fable", "go"], meter_says(None, raw='{"turns": 3}')),
+    (["--model", "fable", "go"], meter_says(None, raw='["claude-opus-5-5"]')),
+])
+def test_s34_e_nothing_to_carry(args, read, fake, monkeypatch):
+    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [read])
+    assert starts == [args, args] and _warned(said) == []
+    assert r["model"] is None
+    assert r["start_model"] == (None if "--model" not in args else "fable")
+
+
+def test_s34_e_a_resolve_failure_carries_nothing(fake, monkeypatch):
+    def broken(cwd, env):
+        raise resolver.ResolveError("models.opus must be a positive integer")
+    monkeypatch.setattr(C(), "model_table", broken)
+    args = ["--model", "fable", "go"]
+    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [OPUS])
+    assert starts == [args, args] and _warned(said) == [] and r["model"] is None
+
+
+def test_s34_f_each_restart_compares_with_the_start_line(fake, monkeypatch):
+    # Sitting 1 switched to opus; sitting 2 kept it (the carry holds by itself); sitting 3
+    # switched back to fable, which returns the chain to the start line.
+    args = ["--model", "fable", "go"]
+    reads = [OPUS, OPUS, "claude-fable-5-1"]
+    starts, (said, _), rs, c = _carry(fake, monkeypatch, args, reads)
+    carried = ["--model", f"{OPUS}[1m]", "go"]
+    assert starts == [args, carried, carried, args]
+    assert len(_warned(said)) == 2
+    assert [(r["model"], r["start_model"]) for r in rs] == [
+        (f"{OPUS}[1m]", "fable"), (f"{OPUS}[1m]", "fable"), (None, "fable")]
+    assert c.args == args

@@ -1,8 +1,9 @@
 """`agentik session run`: the launcher that restarts a RESPAWN sitting (respawn-r1 §3).
 
 The launcher is the owner's foreground job. Each start runs `claude --session-id <U>
-<the owner's arguments>`, byte for byte the same every time, with the launcher's own
-environment minus `launch.scrub`'s list plus `CLAUDE_SESSION_CHAIN`. It restarts a
+<the owner's arguments>`, byte for byte the same every time except `--model`, which
+follows the model the sitting ended on (its `meter.json`; OPEN-QUESTIONS 7, packet S34),
+with the launcher's own environment minus `launch.scrub`'s list plus `CLAUDE_SESSION_CHAIN`. It restarts a
 sitting only on a RESPAWN close the main thread confirmed, after the turn has ended
 and stood `settle` seconds, under the cap, the floor and the stop files; it never
 compacts, resumes, detaches or reads a transcript.
@@ -29,7 +30,7 @@ try:
 except ImportError:                                     # pragma: no cover  (not POSIX)
     termios = None
 
-from . import charter, hooks, launch, ledger, resolver
+from . import charter, hooks, launch, ledger, meter, models, resolver
 
 # §3.1's allowlist; a refused flag is named, and adding one is a one-line change.
 ALLOWED = frozenset({
@@ -122,6 +123,55 @@ def guards(cwd, env, flags) -> dict:
             raise resolver.ResolveError(f"respawn.{k} must be a non-negative integer")
         out[k] = v
     return out
+
+
+def model_table(cwd, env) -> dict:
+    """The models table the resolver builds (shipped plus the user's `models:`), resolved
+    as the guards are. Raises resolver.ResolveError."""
+    r = resolver.resolve(cwd, _GUARD_SESSION, env,
+                         profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+    table = r.sections["session"].get("models")
+    return table if isinstance(table, dict) else {}
+
+
+def _model_at(args) -> tuple[int, bool] | None:
+    """(index, joined) of the last `--model X` (the value's index) or `--model=X` (the
+    token's) in the owner's arguments; None without one. A value never begins with '-'
+    (`refusal`), so a `--model` token is always the flag."""
+    at = None
+    for i, a in enumerate(args):
+        a = str(a)
+        if a == "--model" and i + 1 < len(args):
+            at = (i + 1, False)
+        elif a.startswith("--model="):
+            at = (i, True)
+    return at
+
+
+def carry(args, read, table) -> tuple[list, str | None, str | None]:
+    """(the successor's arguments, the carried model or None, the start line's model or
+    None) for a sitting whose meter read `read` (S34 rulings 1 and 2). Nothing carries
+    without a start `--model`, a read model whose family the table knows, or with one of
+    the start line's family; else that one value is replaced in its own position and form,
+    with `[1m]` when the start line's window is 1M or more and the table has the read
+    family's `-1m` entry."""
+    args = [str(a) for a in args]
+    at = _model_at(args)
+    if at is None:
+        return args, None, None
+    i, joined = at
+    start = args[i][len("--model="):] if joined else args[i]
+    if not isinstance(table, dict) or not isinstance(read, str):
+        return args, None, start
+    fam = models.family(read, table)
+    if fam is None or read == meter.SYNTHETIC or fam == models.family(start, table):
+        return args, None, start
+    one_m = (models.window_of(start, table) or 0) >= models.ONE_M
+    value = (f"{read}[1m]" if one_m and f"{fam}{models.SUFFIX}" in table
+             and not models.marked(read) else read)
+    out = list(args)
+    out[i] = f"--model={value}" if joined else value
+    return out, value, start
 
 
 def long_loop(args) -> float | None:
@@ -299,12 +349,12 @@ class Chain:
         child_env[hooks.CHAIN_VAR] = self.name
         self.started = self.fx.now()
         attrs = self.fx.tty_save()
-        sid, n = self.fx.uuid(), 0
+        sid, n, args = self.fx.uuid(), 0, list(self.args)
         while True:
             n += 1
             start = self.fx.now()
             try:
-                proc = self.fx.spawn([program, "--session-id", sid, *self.args], child_env)
+                proc = self.fx.spawn([program, "--session-id", sid, *args], child_env)
             except OSError as e:                 # A-F6: a stop line, never a traceback
                 self.fx.tty_restore(attrs)
                 self.fx.say(f"{self.name}: claude did not start ({e})")
@@ -319,13 +369,15 @@ class Chain:
                 reason = self._grace(n, marker["charter"], count + 1, cut)
             if reason is None:
                 nxt = self.fx.uuid()
+                succ, carried, start_model = self._carry(sid)
                 entry = {"kind": "restart", "chain": self.name, "seq": self.restarts + 1,
                          "from_session": sid, "to_session": nxt,
                          "profile": env.get("CLAUDE_SESSION_PROFILE") or None,
                          "repo": Path.cwd().name, "charter": marker.get("charter"),
                          "charter_sha256": marker.get("charter_sha256"),
                          "sitting_seconds": seconds, "ended_by": ended_by or "exit",
-                         "restarts_24h": count + 1, "cap": self.g["cap"]}
+                         "restarts_24h": count + 1, "cap": self.g["cap"],
+                         "model": carried, "start_model": start_model}      # S34 ruling 4
                 try:
                     self.fx.append(self.state, entry)       # §3.5: before the successor
                 except (OSError, ledger.LedgerError) as e:
@@ -335,10 +387,25 @@ class Chain:
                 else:
                     self.restarts += 1
                     self.tally.append(self.fx.now())
-                    sid = nxt
+                    if carried is not None:                   # S34 ruling 4
+                        self.fx.say(f"{self.name}: the successor runs on --model {carried}, "
+                                    "the model the sitting ended on; the start line says "
+                                    f"--model {start_model}")
+                    sid, args = nxt, succ
                     continue
             self._stop(sid, reason, code, seconds)
             return code
+
+    def _carry(self, sid: str) -> tuple[list, str | None, str | None]:
+        """`carry` for the ending sitting, always against the start line (S34 ruling 3):
+        its `meter.json`'s model, under the table resolved now; a resolve failure or an
+        unreadable meter carries nothing."""
+        doc = _json(resolver.session_dir(self.state, sid) / meter.METER) or {}
+        try:
+            table = model_table(Path.cwd(), getattr(self, "env", {}))
+        except (resolver.ResolveError, OSError):
+            table = None
+        return carry(self.args, doc.get("model"), table)
 
     # ---- the watch (§3.3) -------------------------------------------------------------
 
