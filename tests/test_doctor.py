@@ -51,7 +51,7 @@ def machine(tmp_path, monkeypatch):
     (install / "hooks").mkdir(parents=True)
     (install / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
         "SessionStart": [], "PreToolUse": [], "PostToolUse": [], "PostToolUseFailure": [],
-        "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "SessionEnd": [],
+        "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "StopFailure": [], "SessionEnd": [],
         "PreCompact": []}}))
     plugins = [
         {"id": "session@agentik", "version": "2.0.0", "enabled": True,
@@ -319,7 +319,7 @@ def test_hooks_json_is_the_shim_on_session_start_only():
     hooks_json = json.loads((PLUGIN / "hooks/hooks.json").read_text())
     assert list(hooks_json["hooks"]) == list(doctor.HOOK_EVENTS) == [
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
-        "UserPromptSubmit", "Stop", "SessionEnd", "PreCompact"]
+        "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact"]
     cmd = hooks_json["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert cmd == "${CLAUDE_PLUGIN_ROOT}/hooks/run SessionStart"
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
@@ -371,7 +371,7 @@ def test_skill_frontmatter():
 # stall there is silent. Tool and prompt hooks get 5 s, SessionStart 10, SessionEnd 15.
 HOOK_TIMEOUTS = {"SessionStart": 10, "SessionEnd": 15, "UserPromptSubmit": 5,
                  "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5, "PostToolBatch": 5,
-                 "Stop": 5, "PreCompact": 5}
+                 "Stop": 5, "StopFailure": 5, "PreCompact": 5}
 
 
 def test_every_hook_command_has_its_events_timeout():
@@ -390,9 +390,10 @@ def test_every_hook_command_has_its_events_timeout():
 # ---- S19: Stop and PreToolUse on every tool (respawn-r1 §3.3, criterion 18) ----
 
 S19_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-              "PostToolBatch", "UserPromptSubmit", "Stop", "SessionEnd", "PreCompact"]
+              "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
+              "PreCompact"]
 # S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
-# PreCompact (mod-r1 §6)
+# PreCompact (mod-r1 §6); S34 adds StopFailure (ruling 5)
 
 
 def test_s19_hooks_register_stop_and_every_tool():

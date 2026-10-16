@@ -28,14 +28,14 @@ resolves to deny, even though Claude Code still reports success. Read section
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
-   `Stop`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
+   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
    `agentik-session hook <event>` and exits 0 silently when the CLI is not on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the CLI installs
    first: `make install`, then `claude plugin update
    session@agentik`, then restart Claude Code. That order is
    what keeps the CLI current with its plugin's hooks. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
+   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
    PreCompact's stdout, its block), so no turn end, no helper's loop and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
