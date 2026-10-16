@@ -278,7 +278,9 @@ def cmd_rules(args) -> int:
     """The priority and pacing this session meets, as resolved (S21), with the prompt
     cache's lifetime in force (S30)."""
     cwd = os.getcwd()
-    life = rules.lifetime(os.environ, cwd, admission.read_band(os.environ))
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")               # its account's band (S35)
+    life = rules.lifetime(os.environ, cwd,
+                          admission.session_band(admission.read_band(os.environ), sid))
     sys.stdout.write(rules.render(_session_section(cwd), life))
     return 0
 
