@@ -38,11 +38,33 @@ const clip = (line: string, columns: number): string =>
 
 const pct = (n: unknown): string => `${Math.round(Number(n))}%`
 
-export const bandLine = (meter: string | null, respawn: boolean, nowMs: number): string => {
+// Packet S34 ruling 6: a turn the model's rate limit ended (limited.json, the StopFailure
+// hook's) and no later turn end (turn-ended.json) names /model, in place of the zone word,
+// or of `no meter` before the first meter. The twin of mod.py's limit_note (one fixture in
+// session.test.ts pins both).
+export const LIMIT_NOTE = "limit: the model's limit ended the last turn; /model to switch"
+const stampAt = (text: string | null): number | null => {
+  try {
+    const at = text === null ? null : JSON.parse(text)?.at
+    return typeof at === 'number' && Number.isFinite(at) ? at : null
+  } catch { return null }
+}
+export const limitNote = (limited: string | null, turnEnded: string | null): string | null => {
+  let d: any = null
+  try { d = limited === null ? null : JSON.parse(limited) } catch { d = null }
+  if (!d || typeof d !== 'object' || Array.isArray(d) || d.error !== 'rate_limit') return null
+  const at = stampAt(limited)
+  const ended = stampAt(turnEnded)
+  return at === null || (ended !== null && at <= ended) ? null : LIMIT_NOTE
+}
+
+export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
+                         limited: string | null = null, turnEnded: string | null = null): string => {
   let m: any = null
   try { m = meter === null ? null : JSON.parse(meter) } catch { m = null }
-  if (!m || typeof m !== 'object' || m.zone === undefined) return NO_METER
-  let line = `session: ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${m.zone}`
+  const note = limitNote(limited, turnEnded)
+  if (!m || typeof m !== 'object' || m.zone === undefined) return note ? `session: ${note}` : NO_METER
+  let line = `session: ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${note ?? m.zone}`
   if (respawn) line += ' · respawn marked'
   const age = Math.floor((nowMs - Date.parse(String(m.ts))) / 1000)
   if (Number.isFinite(age) && age > STALE_S) line += ` · ${age}s old`
@@ -311,10 +333,16 @@ export const register: Register = on => {
       let band: string | null = null
       try { meter = String(await $.fs.read(`${dir}/meter.json`)) } catch { meter = null }
       try { await $.fs.read(`${dir}/respawn.json`); respawn = true } catch { respawn = false }
+      let limited: string | null = null
+      let ended: string | null = null
+      try { limited = String(await $.fs.read(`${dir}/limited.json`)) } catch { limited = null }
+      if (limited !== null) {
+        try { ended = String(await $.fs.read(`${dir}/turn-ended.json`)) } catch { ended = null }
+      }
       const at = bandPath(dir)
       if (at) { try { band = String(await $.fs.read(at)) } catch { band = null } }
       const now = Number(await $.clock.now())
-      rows.push(bandLine(meter, respawn, now))
+      rows.push(bandLine(meter, respawn, now, limited, ended))
       const line = admissionLine(band, now)
       if (line !== null) rows.push(line)
     }

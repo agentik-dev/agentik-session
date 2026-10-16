@@ -12,11 +12,11 @@ fi
 # CLAUDE_CODE_STOP_HOOK_BLOCK_CAP; "Automate actions with hooks", as of 2026-10-14. Eight
 # held turn ends are still eight wasted turns, so the shim still never blocks.) PostToolUseFailure and PostToolBatch are treated as Stop: an older
 # CLI refuses them too, PostToolBatch's exit 2 stops the agentic loop, and neither has
-# anything to say. PreCompact keeps the tool's stdout (its block) but never its exit: an
+# anything to say. StopFailure (a turn an API error ended) is fire-and-forget, as Stop. PreCompact keeps the tool's stdout (its block) but never its exit: an
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
 # owner's typed /compact too. Other events keep the tool's exit (PreToolUse may block).
 case "$1" in
-  Stop|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
   PreCompact) "$tool" hook "$1"; exit 0 ;;
 esac
 exec "$tool" hook "$1"

@@ -60,6 +60,7 @@ MARKER = "respawn.json"
 CONFIRMED = "respawn-main.json"
 ACTIVITY = "activity.json"
 TURN_ENDED = "turn-ended.json"
+LIMITED = "limited.json"     # a turn an API error ended (S34 ruling 5); the band reads it
 HELPER_ACTIVITY = "helper-activity.json"
 CALLS = "calls"         # a helper's open tool calls, one file per `tool_use_id` (S20 ruling 2)
 
@@ -588,6 +589,21 @@ def stop(payload: dict, env=None) -> dict:
     return {}
 
 
+def stop_failure(payload, env=None) -> dict:
+    """A turn an API error ended (Claude Code's StopFailure, fired instead of Stop; packet
+    S34 ruling 5): `limited.json` {at, error}, the payload's `error` a string cut to 64,
+    else null, for the main thread only; a helper's (agent_id) writes nothing. It writes no
+    `turn-ended.json`, since no turn ended, and never raises; dispatch prints nothing."""
+    try:
+        if isinstance(payload, dict) and not payload.get("agent_id"):
+            err = payload.get("error")
+            _stamp(payload, os.environ if env is None else env, LIMITED,
+                   {"at": time.time(), "error": err[:64] if isinstance(err, str) else None})
+    except Exception:                                   # noqa: BLE001
+        pass
+    return {}
+
+
 # C1 (mod-r1 §6, §8): a sitting restarts rather than compacts (portfolio entry 17).
 # The reason is user-facing: plain words, no ledger cite; the command is in the form
 # checkpoint takes (`--respawn` without `--charter FILE` exits 2).
@@ -612,6 +628,7 @@ HANDLERS = {
     "session-start": session_start,
     "session-end": session_end,
     "stop": stop,
+    "stop-failure": stop_failure,
     "post-tool-use-failure": post_tool_use_failure,
     "post-tool-batch": post_tool_batch,
     "pre-compact": pre_compact,
@@ -620,10 +637,11 @@ HANDLERS = {
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "UserPromptSubmit": user_prompt_submit,
                  "SessionStart": session_start, "SessionEnd": session_end, "Stop": stop,
+                 "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
                  "PreCompact": pre_compact})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
-SILENT = frozenset({"stop", "Stop"})
+SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure"})   # StopFailure: fire-and-forget
 # A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.
