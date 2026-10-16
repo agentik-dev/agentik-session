@@ -733,6 +733,65 @@ def project(rows, req: dict, sid, now: datetime, seeds: dict):
             "fit": f}
 
 
+# ---- Accounts (packet S35): a reading's seven-day resetsAt names its login ----
+# The statusline names no account, but a login's weekly reset is fixed for its week. With
+# two or more keys in the ledger, a session's band and verdict use only its account's lines;
+# with fewer, or for a session with no account, every line, as before S35.
+MAX_ACCOUNTS = 16                         # band.json's accounts, newest reading first
+MAX_SESSIONS = 256                        # band.json's sessions, newest first
+
+
+def account(lims):
+    """A rateLimits list's account key: its seven-day resetsAt in UTC, to the minute
+    (`2026-10-20T21:10Z`); None (unknown) without a dated one."""
+    for lim in lims if isinstance(lims, list) else []:
+        if isinstance(lim, dict) and lim.get("kind") == SEVEN:
+            t = _when(lim.get("resetsAt"))
+            if t is not None:
+                return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    return None
+
+
+def _sid(r):
+    s = r.get("session")
+    return s if isinstance(s, str) else None
+
+
+def _keyed(rows) -> tuple:
+    """(each row's own key, or None; session -> (time, key) of its newest keyed reading)."""
+    own, of = [], {}
+    for r in rows:
+        t = _when(r.get("ts")) if r.get("kind") == "reading" else None
+        k = account(r.get("rateLimits")) if t is not None else None
+        own.append(k)
+        s = _sid(r)
+        if k is not None and s is not None and (s not in of or t >= of[s][0]):
+            of[s] = (t, k)
+    return own, of
+
+
+def _split(rows, own: list, of: dict) -> dict:
+    """key -> its lines: a keyed reading by its own key, any other line by its session's."""
+    out: dict = {}
+    for r, k in zip(rows, own):
+        k = k if k is not None else of.get(_sid(r), (None, None))[1]
+        if k is not None:
+            out.setdefault(k, []).append(r)
+    return out
+
+
+def scoped(rows, sid, key=None) -> list:
+    """The lines `sid` is judged on: its account's (`key`, else its newest keyed reading's)
+    when the ledger holds two or more keys; else every line."""
+    own, of = _keyed(rows)
+    key = key or of.get(sid, (None, None))[1]
+    if key is None or len({k for _, k in of.values()} | {key}) < 2:
+        return rows
+    if isinstance(sid, str):
+        of[sid] = (None, key)
+    return _split(rows, own, of).get(key, [])
+
+
 # ---- The verdict and its texts (design/admission-r1.md §3.3; packet S26 ruling 4) ----
 # In S26 the mode is `observe`: the verdict is recorded and answered, and nothing refuses.
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -827,7 +886,9 @@ def _interactive(rows, sid) -> bool:
 
 def decide(rows, req: dict, sid, now: datetime, settings: dict, tz=None) -> dict:
     """The verdict, in ruling 4's order: unread, stale (or wait), denied, deferred or
-    not-started, admitted. `peak` is unrounded; None when no fresh reading projects one."""
+    not-started, admitted. `peak` is unrounded; None when no fresh reading projects one.
+    Only the lines of the request's account count (`scoped`, packet S35)."""
+    rows = scoped(rows, sid, account(req.get("rateLimits")))
     fam = family(req.get("model"), req.get("parentModel"))
     typ = helper_type(req.get("subagentType"), req.get("fork"))
     seeds = settings["seeds"]
@@ -994,13 +1055,43 @@ def band(rows, now: datetime, settings: dict, tz=None) -> dict:
             "P7": _round(_newest(seven)[2], 2) if seven else None, **out}
 
 
+def bands(rows, now: datetime, settings: dict, tz=None) -> dict:
+    """band.json's object (packet S35 ruling 4): `band()` over every line, as before; with
+    two or more account keys also `accounts` {key: `band()` over its lines} for the
+    MAX_ACCOUNTS newest and `sessions` {sid: key} for the MAX_SESSIONS newest of those."""
+    out = band(rows, now, settings, tz)
+    own, of = _keyed(rows)
+    newest: dict = {}
+    for t, k in of.values():
+        newest[k] = max(t, newest.get(k, t))
+    if len(newest) < 2:
+        return out
+    keep = sorted(newest, key=lambda k: newest[k], reverse=True)[:MAX_ACCOUNTS]
+    split = _split(rows, own, of)
+    accounts = {k: band(split.get(k, []), now, settings, tz) for k in sorted(keep)}
+    sids = sorted((s for s in of if of[s][1] in accounts), key=lambda s: of[s][0],
+                  reverse=True)[:MAX_SESSIONS]
+    return {**out, "accounts": accounts, "sessions": {s: of[s][1] for s in sorted(sids)}}
+
+
+def session_band(b, sid):
+    """The band `sid` draws (packet S35 ruling 5): band.json's `accounts[sessions[sid]]`
+    when both are there and it is an object; else `b` itself, the top level (or None)."""
+    if not isinstance(b, dict) or not isinstance(sid, str):
+        return b
+    of, accounts = b.get("sessions"), b.get("accounts")
+    k = of.get(sid) if isinstance(of, dict) else None
+    a = accounts.get(k) if isinstance(accounts, dict) and isinstance(k, str) else None
+    return a if isinstance(a, dict) else b
+
+
 def _write_band(d: Path, now: datetime, settings: dict) -> None:
     """band.json from the whole ledger, inside the caller's lock; atomic and 0600 through
     the private writer. A failure leaves the last band and says so on one stderr line: it is
     display, never the record (fix round 1, F1)."""
     try:
         rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
-        store._write_private(d / BAND, json.dumps(band(rows, now, settings), allow_nan=False) + "\n")
+        store._write_private(d / BAND, json.dumps(bands(rows, now, settings), allow_nan=False) + "\n")
     except Exception as e:  # noqa: BLE001 - the band never fails a record or a verdict
         why = " ".join(f"{type(e).__name__}: {e}".split())[:200]
         print(f"admission: band.json not written ({why}); the ledger line is kept", file=sys.stderr)

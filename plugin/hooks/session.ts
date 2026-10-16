@@ -96,10 +96,22 @@ const bandPath = (d: string): string => {
   return m ? `${m[1]}/admission/band.json` : ''
 }
 
-export const admissionLine = (band: string | null, nowMs: number): string | null => {
+// The band this session draws (packet S35 ruling 5), the twin of Python's session_band:
+// band.json's accounts[sessions[id]] when both are there and it is an object; else the top
+// level, which is all a band.json from before S35, or with one account, holds.
+const own = (o: any, k: unknown): any =>
+  o && typeof o === 'object' && !Array.isArray(o) && typeof k === 'string'
+    && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined
+export const sessionBand = (b: any, id: string): any => {
+  const a = own(b.accounts, own(b.sessions, id))
+  return a && typeof a === 'object' && !Array.isArray(a) ? a : b
+}
+
+export const admissionLine = (band: string | null, nowMs: number, id = ''): string | null => {
   let b: any = null
   try { b = band === null ? null : JSON.parse(band) } catch { b = null }
   if (!b || typeof b !== 'object' || Array.isArray(b)) return null
+  b = sessionBand(b, id)
   const P = fig(b.P), peak = fig(b.peak), c = fig(b.ceiling)
   const parts = [P === null ? '5h no reading' : `5h ${whole(P)}%` + (peak !== null ? ` → ${whole(peak)}%` : '')]
   if (c !== null) parts.push(`ceiling ${String(c)}`)
@@ -343,7 +355,7 @@ export const register: Register = on => {
       if (at) { try { band = String(await $.fs.read(at)) } catch { band = null } }
       const now = Number(await $.clock.now())
       rows.push(bandLine(meter, respawn, now, limited, ended))
-      const line = admissionLine(band, now)
+      const line = admissionLine(band, now, /\/sessions\/([^/]+)\/?$/.exec(dir)?.[1] ?? '')
       if (line !== null) rows.push(line)
     }
     const kids: any[] = rows.map(l => ({ type: 'Text', props: {}, children: [clip(l, columns)] }))

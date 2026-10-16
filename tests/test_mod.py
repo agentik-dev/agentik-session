@@ -236,7 +236,7 @@ def test_criterion_3_band_json_is_display_only():
     for fn in (admission.decide, admission.project, admission.fit, admission._stale_in_flight,
                hooks.pre_tool_use):
         assert not pat.search(inspect.getsource(fn)), fn.__name__
-    assert "_admission_line()" in inspect.getsource(hooks.user_prompt_submit)
+    assert "_admission_line(sid)" in inspect.getsource(hooks.user_prompt_submit)   # S35: its account
     assert "read_band" in inspect.getsource(hooks._admission_line)
 
 

@@ -17,6 +17,10 @@ const BAND_LINE = '5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 help
 const BAND_WEEK = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T15:30:00+00:00", "until": "2026-10-12T13:17:00+00:00", "bound": "seven_day", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
 const BAND_WEEK_LINE = '5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17), 5h 15:30 · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe'
 const BAND_JSON = '/state/admission/band.json'
+// Two logins on one Mac (packet S35): each session draws its own account's band; an id with
+// no account draws the top level, BAND_LINE. tests/test_s35.py reads these two lines too.
+const BAND_TWO = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00", "accounts": {"2026-10-17T05:00Z": {"P": 40, "peak": 55.2, "ceiling": 97, "resetsAt": "2026-10-12T14:30:00+00:00", "until": "2026-10-12T14:30:00+00:00", "bound": "five_hour", "running": 1, "room": 9, "deferred": 0, "P7": 81, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, "2026-10-21T22:00Z": {"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}}, "sessions": {"sess-1": "2026-10-17T05:00Z", "sess-2": "2026-10-21T22:00Z"}}'
+const BAND_TWO_LINE = '5h 40% → 55% · ceiling 97 · resets 14:30 (2h30) · 1 helper, room for 9 · 0 deferred · 7d 81% · observe'
 
 const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
 const NO_METER = 'session: no meter · agentik-session doctor'
@@ -120,6 +124,17 @@ test('the seven-day reset bounding the horizon: week resets, as Python draws it'
 test('the second line is cut to bodyColumns: 80', async (t: any, on: any) => {
   const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND }, 80)
   expect(texts(tree)[1]).toBe('5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · 1 def…')
+})
+
+test('s35: two accounts: the band draws this session\'s own account, the line Python draws', async (t: any, on: any) => {
+  const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND_TWO })
+  expect(texts(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_TWO_LINE])
+})
+
+test('s35: a session with no account, and a band.json from before S35, draw the top level', async (t: any, on: any) => {
+  const other = JSON.parse(BAND_TWO)
+  other.sessions = { 'sess-2': '2026-10-21T22:00Z' }
+  expect(texts(await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: JSON.stringify(other) }))[1]).toBe(BAND_LINE)
 })
 
 test('no band.json, or an unreadable one: the session line alone', async (t: any, on: any) => {

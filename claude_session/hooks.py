@@ -215,23 +215,25 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     }
 
 
-def _admission_line() -> str | None:
-    """admission's band line from band.json (packet S27b ruling 4), display only; None with
-    no file, an unreadable one, or any failure. Imported here: admission imports this module."""
+def _admission_line(sid=None) -> str | None:
+    """admission's band line from band.json (packet S27b ruling 4), this session's account's
+    (packet S35), display only; None with no file, an unreadable one, or any failure.
+    Imported here: admission imports this module."""
     try:
         from . import admission
-        b = admission.read_band(os.environ)
+        b = admission.session_band(admission.read_band(os.environ), sid)
         return admission.band_line(b) if b is not None else None
     except Exception:  # noqa: BLE001 - the line never breaks the prompt hook
         return None
 
 
-def _lifetime(cwd, env) -> tuple:
-    """`rules.lifetime` from env, the settings under cwd and band.json (packet S30); display
-    only, as the band line: on any failure, unknown. Imported here, as `_admission_line`."""
+def _lifetime(cwd, env, sid=None) -> tuple:
+    """`rules.lifetime` from env, the settings under cwd and band.json (packet S30), this
+    session's account's (packet S35); display only, as the band line: on any failure,
+    unknown. Imported here, as `_admission_line`."""
     try:
         from . import admission
-        return rules.lifetime(env, cwd, admission.read_band(env))
+        return rules.lifetime(env, cwd, admission.session_band(admission.read_band(env), sid))
     except Exception:  # noqa: BLE001 - the lifetime never breaks a hook
         return None, rules.UNKNOWN
 
@@ -246,7 +248,7 @@ def _cache_line(payload: dict) -> str | None:
         if not rules.parts(s)[1]["enabled"]:
             return None
         cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-        return rules.hint(*_lifetime(cwd, env))
+        return rules.hint(*_lifetime(cwd, env, payload.get("session_id")))
     except Exception:  # noqa: BLE001 - the line never breaks the prompt hook
         return None
 
@@ -278,7 +280,7 @@ def user_prompt_submit(payload: dict) -> dict:
     elif zone not in (CLEAR, UNKNOWN):
         bits.append(_budget_line(zone))
 
-    band = _admission_line()
+    band = _admission_line(sid)
     if band:
         bits.append(band)
     cache = _cache_line(payload)            # the prompt cache's lifetime (S30)
@@ -352,7 +354,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
             f"window ({_WSRC.sub('', str(s.get('window_source')))[:64]}), checkpoint at "
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
-    line += rules.clause(s, _lifetime(cwd, env)[0])     # at most 320 bytes (S21, S30)
+    line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
     return {"hookSpecificOutput": {"hookEventName": "SessionStart",
                                    "additionalContext": line}}
