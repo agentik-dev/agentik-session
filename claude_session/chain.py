@@ -376,12 +376,8 @@ class Chain:
                          "repo": Path.cwd().name, "charter": marker.get("charter"),
                          "charter_sha256": marker.get("charter_sha256"),
                          "sitting_seconds": seconds, "ended_by": ended_by or "exit",
-                         "restarts_24h": count + 1, "cap": self.g["cap"]}
-                # S34 ruling 4's two fields, each once the ledger's closed restart keys
-                # name it (ledger.py is outside S34; its charter's handover).
-                entry.update({k: v for k, v in (("model", carried),
-                                                ("start_model", start_model))
-                              if k in ledger.CHAIN_KEYS["restart"]})
+                         "restarts_24h": count + 1, "cap": self.g["cap"],
+                         "model": carried, "start_model": start_model}      # S34 ruling 4
                 try:
                     self.fx.append(self.state, entry)       # §3.5: before the successor
                 except (OSError, ledger.LedgerError) as e:

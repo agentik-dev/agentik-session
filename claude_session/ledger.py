@@ -26,7 +26,7 @@ LEDGER_KEYS = ("session", "project", "repo", "turns", "sidechain_turns", "tokens
 # The chain's line kinds (respawn-r1 §3.6), each a closed key set; `kind` names it.
 RESTART_KEYS = ("kind", "chain", "seq", "at", "from_session", "to_session", "profile", "repo",
                 "charter", "charter_sha256", "sitting_seconds", "ended_by", "restarts_24h",
-                "cap")
+                "cap", "model", "start_model")       # S34: the carried model and the start line's
 STOP_KEYS = ("kind", "chain", "at", "session", "profile", "repo", "reason", "exit_status",
              "sitting_seconds", "restarts")
 CHAIN_KEYS = {"restart": RESTART_KEYS, "stop": STOP_KEYS}

@@ -1053,21 +1053,11 @@ def meter_says(model, raw=None):
     return act
 
 
-def _ledger_takes_the_fields(monkeypatch):
-    """The ledger's restart keys with ruling 4's two fields, as the handover's decide line
-    asks of ledger.py (outside S34's may-touch)."""
-    keys = tuple(dict.fromkeys(ledger.CHAIN_KEYS["restart"] + ("model", "start_model")))
-    monkeypatch.setattr(ledger, "RESTART_KEYS", keys)
-    monkeypatch.setitem(ledger.CHAIN_KEYS, "restart", keys)
-
-
-def _carry(fake, monkeypatch, args, reads, fields=True):
+def _carry(fake, monkeypatch, args, reads):
     """A chain on `args` whose sittings close on RESPAWN, sitting n's meter.json made by
     `reads[n]` (a model, an action, or None for no file), then one that exits. Returns the
     starts' arguments after `--session-id <sid>`, the said lines with the count said
     before each start, the restart entries and the chain."""
-    if fields:
-        _ledger_takes_the_fields(monkeypatch)
     plans = []
     for r in reads:
         pre = [] if r is None else [(5, r if callable(r) else meter_says(r))]
@@ -1099,15 +1089,6 @@ def test_s34_a_fable_start_carries_opus_at_1m(fake, monkeypatch):
     assert said.index(line) < before[1]                       # said before the successor
     assert (r["model"], r["start_model"]) == (f"{OPUS}[1m]", "fable")
     assert c.args == args                                     # ruling 3: never rewritten
-
-
-def test_s34_a_the_ledger_today_still_restarts(fake, monkeypatch):
-    # With the ledger's restart keys as they stand, the carry and its line still land and
-    # the restart line is written without the two fields (never a refused line).
-    args = ["--model", "fable", "go"]
-    starts, (said, _), (r,), _c = _carry(fake, monkeypatch, args, [OPUS], fields=False)
-    assert starts[1] == ["--model", f"{OPUS}[1m]", "go"] and len(_warned(said)) == 1
-    assert "model" not in r and "start_model" not in r
 
 
 def test_s34_b_joined_form_stays_one_token(fake, monkeypatch):
