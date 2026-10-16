@@ -59,7 +59,7 @@ The deferred list lives in the ledger, keyed by the chain (`CLAUDE_SESSION_CHAIN
 
 ### §3.5 The band
 
-The band is one line in `AbovePrompt`, cut to `bodyColumns`. It yields while `hasSurvey` is true and keeps other mods' lines. For example: `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41%`. The prompt hook adds the same line to the budget context.
+The band is one line in `AbovePrompt`, cut to `bodyColumns`. It yields while `hasSurvey` is true and keeps other mods' lines. For example: `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41%`. The prompt hook adds the same line to the budget context. With two logins on one Mac, a reading's seven-day `resetsAt` keys its account, and each session draws its band, and each verdict projects, from its own account's lines alone (packet S35).
 
 ### §3.6 Using 90% without crossing 100
 
