@@ -312,7 +312,7 @@ def test_versions_agree():
 def test_c1_the_version_moves_with_the_plugin():
     # C1 changes plugin/ (hooks.json, the shim), so the plugin's version moves with it.
     from claude_session import SEMVER, __version__
-    assert (SEMVER, __version__) == ("2.0.0-alpha.16", "2.0.0a16")
+    assert (SEMVER, __version__) == ("2.0.0-alpha.17", "2.0.0a17")
 
 
 def test_hooks_json_is_the_shim_on_session_start_only():
