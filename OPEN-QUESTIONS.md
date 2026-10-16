@@ -2,6 +2,11 @@
 
 ## Open
 
+- 7. When you switch a launcher-run sitting's model with `/model`, should its respawns keep that model?
+  - **Why it comes up:** `agentik session run` replays the start line it was launched with, `--model` included. home-tech's umbrella chain was launched with `--model fable`; on 2026-10-16 its respawns at 06:48 and 07:13 each opened with "You've reached your Fable limit" and sat idle until you typed `/model` (07:24, eleven minutes), and the next respawn will do the same. syrvis's orient sat at the same message from 01:07 to past 07:46. Nothing tells you; the band shows only the five-hour and seven-day windows.
+  - **Options:** (a) *Recommended:* a respawn keeps the model the sitting last ran on: when a sitting switched with `/model`, the launcher passes that model to its successor instead of the start line's `--model`, and the meter prints one line naming `/model` when a limit message ends a turn. This changes entry 17's "same start line" for the model only, amended in the portfolio ledger. (b) The chain's config names a fallback model, and `run` restarts the sitting on it when a limit message ends a turn. (c) A warning line only; respawns keep the start line's model.
+  - **Proposed:** (a), since your `/model` is already the signal, and Opus 5.5 at the 1M window is a model entry 17 allows an orchestrator.
+
 ## Answered
 
 - 6. Should the band's projection of a fresh relay row change: Yes, fix it. A row's new session is charged as a main thread over the whole window (a·T) and again as a spawn, so night 2026-10-14-7 held us3bfix 53 minutes at 2-7% used (peak 174 to 186) in a window that closed near 60%, and night 2026-10-15-1 held po2c at 0% used, peak 141, a minute after the reset (2026-10-15; the owner's word in the observer session, 01:2x, which also kept answer 2 when shown the week at 31% after 10% of it). Next: a design note amending admission-r1 §3.2, one refuter round, then a packet.
