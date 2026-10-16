@@ -29,7 +29,7 @@ overhaul-r1 §1.2 (D6) retired the fork-and-resume chain whole. This design shar
 
 The owner's start line changes by one word. `CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'`, followed by a paste, becomes `CLAUDE_SESSION_PROFILE=orchestrator-opus claude-session run -- --model 'opus[1m]' '/loop 3h Run one observer check-in: …'`. The pasted first prompt becomes the last positional argument. Interactive `claude` takes a positional prompt as its first message, and P2 proves that a `/loop` there arms just as a paste does.
 
-- **Each start** runs `claude --session-id <U> <claude args>`. `U` is a fresh uuid4 the launcher mints, and the owner's arguments follow in their original order, byte for byte, every time. The launcher re-sends the start line's own first prompt and adds nothing to it. The successor reads the newest charter because the start line already tells it to.
+- **Each start** runs `claude --session-id <U> <claude args>`. `U` is a fresh uuid4 the launcher mints, and the owner's arguments follow in their original order, byte for byte, every time, except `--model`, which follows the model the sitting ended on (OPEN-QUESTIONS 7, 2026-10-16; packet S34). The launcher re-sends the start line's own first prompt and adds nothing to it. The successor reads the newest charter because the start line already tells it to.
 - **The environment** is the launcher's own, minus `exec_launch`'s scrub list (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_SESSION_MAX_TURNS`), plus `CLAUDE_SESSION_CHAIN=<chain>`. It sets no `CLAUDE_SESSION_DEPTH` and no `RELAY_ROW`.
   - agent-relay's hooks (`inSitting`) read a `CLAUDE_SESSION_DEPTH` of 1 or more as a relay sitting. A relay sitting's Stop hook blocks a stop on an uncommitted act. Without the variable, the relay's hooks see the child exactly as they see a hand-started session today, and never block its stops (F1).
   - `CLAUDE_SESSION_PROFILE` passes through untouched, so this plugin's hooks resolve the profile as they do today.
@@ -115,7 +115,7 @@ The checks bind the marker to this sitting (F2):
 
 The ledger gets two new line kinds in `ledger.jsonl`. Each is a closed key set, and the writer refuses unknown keys in both, as it does for `LEDGER_KEYS`. Session lines do not change: they carry no `kind` key.
 
-- **restart**: `kind, chain, seq, at, from_session, to_session, profile, repo, charter, charter_sha256, sitting_seconds, ended_by, restarts_24h, cap`. It is written before the successor starts (§3.5).
+- **restart**: `kind, chain, seq, at, from_session, to_session, profile, repo, charter, charter_sha256, sitting_seconds, ended_by, restarts_24h, cap, model, start_model`; `model` is the `--model` the successor carries, `start_model` the start line's, each null when there is none (packet S34). It is written before the successor starts (§3.5).
 - **stop**: `kind, chain, at, session, profile, repo, reason, exit_status, sitting_seconds, restarts`.
 
 By default `ledger.read` returns session lines only, so `report`'s table and `--json` output are byte-identical on a ledger that holds chain lines. `report --chains` prints the chain lines. No content reaches the ledger: the charter appears by path and hash, and its Next act's text never does. The SessionEnd line of the sitting that ended is written by the hook as it is today.
