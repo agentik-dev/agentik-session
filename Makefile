@@ -56,7 +56,7 @@ check:  ## the gate, one per tree (.check.lock), walled at 840 s (inside the rel
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 tree-note:
 	@[ -z "$$(git status --porcelain)" ] || echo "check: note: the tree is dirty; this result is not a function of HEAD (R6 E1)"
-check-unlocked: tree-note test lint doclint hygiene validate  ## the gate unbounded: test, lint, doclint, hygiene, validate, the mod's tests, README freshness
+check-unlocked: tree-note test lint doclint hygiene plugin-version-check validate  ## the gate unbounded: test, lint, doclint, hygiene, validate, the mod's tests, README freshness
 	scripts/bounded --wall 60 -- claude plugin test plugin
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
@@ -68,6 +68,8 @@ doclint:  ## the doc gate (conventions §5)
 hygiene:  ## the vendored copies' pins, then the public-hygiene scan (conventions §5, §6)
 	shasum -a 256 -c --status scripts/vendored.sha256 || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	scripts/hygiene
+plugin-version-check:  ## a change under plugin/ fails until plugin.json's version moves (GUIDE §7)
+	$(PYTHON) scripts/plugin-version-check
 validate:  ## claude plugin validate on the plugin (the marketplace is agentik-commons')
 	scripts/bounded --wall 60 -- claude plugin validate plugin/
 clean:
