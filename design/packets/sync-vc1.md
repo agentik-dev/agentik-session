@@ -1,0 +1,44 @@
+# Packet sync-vc1: the version check vendored in and run by `make check`
+
+| item | value |
+|---|---|
+| from | agentik-commons `NICE_TO_HAVE.md`, the S3 line "A plugin changed under an old version (2026-10-14)": packet version-check (merged at `dcec631`) made `scripts/plugin-version-check` canonical and `scripts/sync`'s fourth copy, and left "each plugin repo's next sync packet copies it in and adds it to that repo's `make check`"; GUIDE.md §5 (`check` runs `scripts/plugin-version-check`) and §7 (its rule) |
+| pin | `main` at `2bce6a7`; agentik-commons `main` at `02409f0`; branch `sync-vc1`, worktree `.claude/worktrees/sync-vc1`, off main; a hand-run builder |
+| wall | this repo only; agentik-commons read-only (its `scripts/sync` writes here, once). No push, merge, `--amend`, rebase, `git stash`, network or install; no `claude` beyond `make check`'s own lines. Never build or run a relay binary; never run `relay` or `agentik relay` `run`, `plan`, `gate`, `stop`, `kill`, `clean` or `resume`; never write inside `~/.local/state/agent-relay`. `.venv` is a symlink to the main checkout's, made before any `make`. Never write under `.venv`, `~/.local/state` or `~/.config`; one make at a time on the machine (ruling 5) |
+| may touch | `scripts/plugin-version-check` (new) and `scripts/vendored.sha256`, by agentik-commons' `scripts/sync` only; `scripts/agentik`, `scripts/hygiene`, `scripts/bounded`, by that sync only and only if commons' bytes moved past the pin; `Makefile` (the target and its name in the chain); `design/packets/sync-vc1.md`, `history/sittings/*.md`, `history/sessions/NEXT`. Nothing else |
+| acceptance | `grep -c -F 'c97596e7b129ac53fb2c8b22adfcf3a9d7e5bd71b6c9473d719aa2cda8063c4b  scripts/plugin-version-check' scripts/vendored.sha256` reads `1` (on main: `0`); `grep -c -F -e '4cd780d9c66d996e58b217b39ee0679e426172ab9ad7bd4e17971b188e7e7600  scripts/agentik' -e '8ef611607c0fdc44703fa48c374ebc00edc1488da56292985380200d219eb2e9  scripts/hygiene' -e '188adff23545f99159a189174baf3771f7e790e5f1256958b0e3e3ac4ed11306  scripts/bounded' scripts/vendored.sha256` reads `3` (on main: `3`); `grep -c '' scripts/vendored.sha256` reads `4` (on main: `3`); `grep -c -F 'scripts/plugin-version-check' Makefile` reads `1` (on main: `0`); `sed -n '/^hygiene:/,/^validate:/p' Makefile \| grep -c -F 'PYTHON) scripts/plugin-version-check'` reads `1` (on main: `0`); `sed -n '/^check-unlocked:/p' Makefile \| grep -c plugin-version-check` reads `1` (on main: `0`); `grep -c '' Makefile` reads `75` (on main: `74`); `grep -c -F '"version": "2.0.0-alpha.18"' plugin/.claude-plugin/plugin.json` reads `1` (on main: `1`) |
+| budget | 25 turns, 100k context, `claude-opus-5-5`; one helper sitting, checkpoint at 20 turns; three acts, one commit each; the charter opens with doclint's five rows |
+| verify | `make check` |
+
+## 1. What the source says
+
+- GUIDE.md §5: `check` runs, with the rest, `shasum -a 256 -c scripts/vendored.sha256` and `scripts/plugin-version-check` (§7). §7: the check exits 1 when a file under `plugin/` changed after the commit that last changed `plugin.json`'s `version` (a bump not yet committed passes), 0 when nothing did, 2 on usage or a git failure; flags `--json` and `--repo DIR`; stdlib only.
+- Commons' `scripts/sync <repo>` copies `bin/agentik` to `scripts/agentik` and `scripts/hygiene`, `scripts/bounded` and `scripts/plugin-version-check` into `scripts/`, each mode 755, then rewrites `scripts/vendored.sha256` as four lines in `shasum -a 256 -c` form. It touches nothing else and never commits; this packet's builder does.
+- Measured on main at `2bce6a7` against commons at `02409f0`: `scripts/agentik`, `scripts/hygiene` and `scripts/bounded` equal commons' bytes (`cmp` exits 0 for each, the three pins match), so the sync rewrites them unchanged; `scripts/plugin-version-check` is absent; `scripts/vendored.sha256` has three lines. The sync's diff is one new file and one added pin line (measured in a scratch clone).
+- Commons' check run on this main prints `version 2.0.0-alpha.18, set at ee47450f7a5f; nothing under plugin/ changed since` and exits 0. This packet changes nothing under `plugin/`, so the branch reads the same.
+- `check-unlocked`'s chain is `tree-note test lint doclint hygiene validate`, then the plugin's tests and README freshness; `hygiene`'s recipe runs the vendored sha check, then `scripts/hygiene`. The repo's interpreter variable is `PYTHON` (`$(CURDIR)/.venv/bin/python`); no line sets `PYTHONDONTWRITEBYTECODE`.
+
+## 2. Rulings
+
+1. The sync is the only writer of the vendored files; none is edited by hand. If it changes `scripts/agentik`, `scripts/hygiene` or `scripts/bounded` (commons moved past the pin), the builder keeps those bytes and names the files in the report.
+2. The Makefile gains a target `plugin-version-check`, its `##` help line and one recipe line, a tab then `$(PYTHON) scripts/plugin-version-check`, and `check-unlocked`'s prerequisite list names `plugin-version-check` right after `hygiene`. So it runs after the vendored sha check, which pins the copy it runs, and the scan, and before `validate`, so it fails before the lines that spawn `claude`. The `hygiene` recipe and `make hygiene` are unchanged. No help text or comment spells `scripts/plugin-version-check`, so the acceptance count stays 1. No `PYTHONDONTWRITEBYTECODE=1`: no sibling line sets it, and the script imports only the standard library. Every other line stays as it is.
+3. No version bump: the check reads clean on main and the branch changes nothing under `plugin/`; `plugin.json` stays at `2.0.0-alpha.18`.
+4. `.hygiene-allow` is not edited. A new hygiene hit (the new copy is a live file) is red: the builder reports the group and its count and leaves the branch as it is. A scratch clone with the sync, the line and this packet scanned 0 outside the allowlist.
+5. Commits by explicit path: act 1 this packet alone (the packet copy-in rule); act 2 the files the sync changed; act 3 the Makefile with the charter. One `make check`, last, in the worktree, started only when `ps -axo command | grep -E '(^|/)make (check|check-unlocked)( |$)' | grep -v grep` prints nothing: four sibling repos build this packet today, and a relay night's Go child cycles its own `make check-fast`, which does not hold this. While a check runs, wait 20 to 60 s with jitter and look again, up to 20 minutes; past that, report it unrun. A last stderr line `bounded: stop: lock`, `load` or `wall` is unrun, not red: wait 60 s and run it once more.
+6. The may-touch row is closed. A change the work needs outside it is a stop and a report line, never an edit.
+
+## 3. Interfaces
+
+`scripts/plugin-version-check` is new here: flags `--json` and `--repo DIR`, exits 0, 1 and 2, its rule GUIDE.md §7's. `make hygiene`, a MAKE_TARGETED goal, now runs it after the scan, and `make check` runs it through `hygiene`: a change under `plugin/` without a version bump turns both red (exit 1, one stderr line per file). Nothing else changes: `scripts/hygiene` and `scripts/bounded` keep their flags and exits, `scripts/agentik` its verbs, `make install` its copy of `scripts/agentik`, and `hygiene`'s help text stays as it is.
+
+## 4. Findings that name this row
+
+agentik-hq's `HANDOFF.md` items 3 and 5 (each plugin repo wires `plugin-version-check` into its `check` in its next sync packet) and the "Left" clause of agentik-commons' S3 line "A plugin changed under an old version (2026-10-14)" are answered for this repo when this branch merges; those notes are theirs to make, not this repo's. Commons' `make versions` line for this plugin is unchanged by this packet: no bump, so `plugin.json` and the marketplace's line read as they did.
+
+## 5. Forbidden reads
+
+Transcripts; anything under `~/.local/state` or `~/.claude/projects`; any other repo, except agentik-commons' `scripts/sync`, `bin/agentik`, `scripts/hygiene`, `scripts/bounded`, `scripts/plugin-version-check` and `GUIDE.md`.
+
+## 6. Report
+
+At most six lines: the branch head; the files the sync changed (expected: `scripts/plugin-version-check` new, `scripts/vendored.sha256` one line added); each acceptance line's result; the hand checks (`shasum -a 256 -c scripts/vendored.sha256` prints four lines ending `: OK`; `cmp` of the four vendored files against commons' `bin/agentik` and `scripts/` copies exits 0; `.venv/bin/python scripts/plugin-version-check; echo rc=$?` prints `nothing under plugin/ changed since` and `rc=0`); and `make check`'s result (green; red, with the failing target's last lines; or unrun, on a `bounded: stop:` line or the 20-minute wait).
