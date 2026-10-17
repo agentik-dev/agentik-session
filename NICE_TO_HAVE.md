@@ -236,3 +236,7 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - At a login's weekly reset its key (the seven-day `resetsAt`) moves, so for up to 29 hours the ledger holds two keys for one login: the per-account split is on, the new week's fit starts from the seeds until 20 intervals accrue, and a session that has not read since the reset draws the old key's band (`5h no reading` once that window passes) until its next reading. Merging a key with its successor a week on would keep the fit's history.
 - The relay's band pacing reads band.json's top level, every line, so two logins still share one pace there; reading `accounts` is that repo's row.
 - The key assumes the statusline's seven-day `resetsAt` holds still to the minute for a week. If it drifted, each drift would read as a new login and the fit would stay seeded. Not seen; a look at the live ledger's seven-day values would settle it, which this builder may not read.
+
+## sync-vc1's refuter round (2026-10-17, the refuter): PASS, one note
+
+- S4: `make plugin-version-check` is not a goal doclint accepts in an acceptance line: it is not in doclint's `MAKE_TARGETED`, so doclint refuses it as a whole-suite run, and doclint stays byte-identical across the repos, so this repo cannot add it. Until commons' doclint admits the goal, a later packet writes `.venv/bin/python scripts/plugin-version-check` there. The round's F1 (`.PHONY` names the goal) and F2 (`check-unlocked`'s help text names it after `hygiene`) rode in the commit that wrote this note, sync-vc1's Amendment 3.

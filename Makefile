@@ -1,4 +1,4 @@
-.PHONY: help test doctor install skill lint clean check check-unlocked tree-note doclint hygiene validate readme
+.PHONY: help test doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme
 # The virtualenv first: `python3` and the scripts' shebangs resolve to it, never Apple's.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 # The newest installed respeak renderer, under either marketplace name.
@@ -56,7 +56,7 @@ check:  ## the gate, one per tree (.check.lock), walled at 840 s (inside the rel
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 tree-note:
 	@[ -z "$$(git status --porcelain)" ] || echo "check: note: the tree is dirty; this result is not a function of HEAD (R6 E1)"
-check-unlocked: tree-note test lint doclint hygiene plugin-version-check validate  ## the gate unbounded: test, lint, doclint, hygiene, validate, the mod's tests, README freshness
+check-unlocked: tree-note test lint doclint hygiene plugin-version-check validate  ## the gate unbounded: test, lint, doclint, hygiene, plugin-version-check, validate, the mod's tests, README freshness
 	scripts/bounded --wall 60 -- claude plugin test plugin
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
