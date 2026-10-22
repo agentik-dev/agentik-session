@@ -1,8 +1,10 @@
 # Packet S36: a wait never stops the loop
 
+The brief's text, verbatim but for hygiene: "the sibling umbrella" stands for the private management repo the brief names, and a home path is dropped.
+
 | item | value |
 |---|---|
-| from | syrvis-hq's finding of 2026-10-20 by message (its `NICE_TO_HAVE.md`, last line, 5b7f769), on the owner's word of 2026-10-20 05:5x (syrvis-hq 838edbf); `NICE_TO_HAVE.md:192` (S29's row: "nothing restarts a stopped loop"); `claude_session/chain.py` lines 7 and 502 (a restart only on a RESPAWN close) |
+| from | the sibling umbrella's finding of 2026-10-20 by message (its `NICE_TO_HAVE.md`, last line, 5b7f769), on the owner's word of 2026-10-20 05:5x (the sibling umbrella 838edbf); `NICE_TO_HAVE.md:192` (S29's row: "nothing restarts a stopped loop"); `claude_session/chain.py` lines 7 and 502 (a restart only on a RESPAWN close) |
 | pin | `main` at dce04b9 (alpha.18); worktree `.claude/worktrees/s36-wait-never-stops`, branch `s36-wait-never-stops` off it; this packet is on the branch |
 | wall | this repo; no push, `--amend`, rebase, device, `agentik session run`, `claude plugin install/update/marketplace`, `make readme`, `make install` or `make check`; never write under `~/.local/state`; never run `relay` or `agentik relay` `run`, `plan`, `gate`, `stop`, `kill`, `clean` or `resume`; never build or run a relay binary; never write in another repo or its worktrees |
 | may touch | `claude_session/rules.py` (`PACE` items 4 and 5, `clause`), `claude_session/charter.py` (`warnings` and its docstring only), `plugin/skills/session/SKILL.md` and `RUNBOOK.md` (their "Priority and pacing" sections), `plugin/.claude-plugin/plugin.json` (`version` only), `README.md` and `design/readme/source.md` (lines 113 and 135 and the status line) with `design/readme/rendered.sha256` re-hashed (`shasum -a 256 design/readme/source.md README.md`), `tests/test_rules.py`, `tests/test_charter.py`, `tests/test_hook_session_start.py`, `design/packets/s36-wait-never-stops.md`, `NICE_TO_HAVE.md` (what is filed outside), `history/sittings/*.md`, `history/sessions/NEXT` |
@@ -12,7 +14,7 @@
 
 ## 1. What the source says (quoted)
 
-`rules.PACE` item 4: "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to tell>`, a long delay, n the wakes in a row with nothing changed, the loop stopping at n = {waiting} (a respawn reads n from the charter)". `clause()`: "WAITING {waiting} stops the loop, a meter wait never". `charter.warnings` at n >= `waiting`: "the loop stops; close the sitting, the outside party unchanged". `chain.py` line 7: the launcher restarts a "sitting only on a RESPAWN close the main thread confirmed"; a loop that stopped on WAITING 3 leaves its claude at the prompt, which the launcher never reads (NICE:192: "nothing restarts a stopped loop, so example-ops sat idle about four hours until the owner's hand", 2026-10-13). On 2026-10-19 and 20 syrvis-hq's loop stopped three times on WAITING 3, each read by the owner as something to restart. The owner's word (syrvis-hq 838edbf): "from the third WAITING in a row the wake is 3300 s (the cache's idle limit) and the charter is brought current and committed, and the loop never stops on a wait: under the launcher only the checkpoint ends a sitting, and nothing is ever the owner's to restart."
+`rules.PACE` item 4: "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to tell>`, a long delay, n the wakes in a row with nothing changed, the loop stopping at n = {waiting} (a respawn reads n from the charter)". `clause()`: "WAITING {waiting} stops the loop, a meter wait never". `charter.warnings` at n >= `waiting`: "the loop stops; close the sitting, the outside party unchanged". `chain.py` line 7: the launcher restarts a "sitting only on a RESPAWN close the main thread confirmed"; a loop that stopped on WAITING 3 leaves its claude at the prompt, which the launcher never reads (NICE:192: "nothing restarts a stopped loop, so example-ops sat idle about four hours until the owner's hand", 2026-10-13). On 2026-10-19 and 20 the sibling umbrella's loop stopped three times on WAITING 3, each read by the owner as something to restart. The owner's word (the sibling umbrella 838edbf): "from the third WAITING in a row the wake is 3300 s (the cache's idle limit) and the charter is brought current and committed, and the loop never stops on a wait: under the launcher only the checkpoint ends a sitting, and nothing is ever the owner's to restart."
 
 ## 2. Rulings (the hq sitting's, reversible)
 
@@ -29,11 +31,11 @@
 
 ## 4. Findings that name this row
 
-syrvis-hq's NICE line (above); `NICE_TO_HAVE.md:192` (S29, landed: its "nothing restarts a stopped loop" is this packet's ground; the row stays, an item leaves when it lands); the research survey's line 188. The README's status line counts the suite: raise its count by the tests added, in both files, and re-hash the sidecar.
+the sibling umbrella's NICE line (above); `NICE_TO_HAVE.md:192` (S29, landed: its "nothing restarts a stopped loop" is this packet's ground; the row stays, an item leaves when it lands); the research survey's line 188. The README's status line counts the suite: raise its count by the tests added, in both files, and re-hash the sidecar.
 
 ## 5. Forbidden reads
 
-Transcripts under `~/.claude/projects` (grep only, and none is needed); `~/.local/state` beyond reading; `~/code/syrvis-hq` and every other repo (the finding is quoted here).
+Transcripts under `~/.claude/projects` (grep only, and none is needed); `~/.local/state` beyond reading; every other repo (the finding is quoted here).
 
 ## 6. Report (one table, at most five bullets, under 600 words)
 

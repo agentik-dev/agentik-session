@@ -240,3 +240,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## sync-vc1's refuter round (2026-10-17, the refuter): PASS, one note
 
 - S4: `make plugin-version-check` is not a goal doclint accepts in an acceptance line: it is not in doclint's `MAKE_TARGETED`, so doclint refuses it as a whole-suite run, and doclint stays byte-identical across the repos, so this repo cannot add it. Until commons' doclint admits the goal, a later packet writes `.venv/bin/python scripts/plugin-version-check` there. The round's F1 (`.PHONY` names the goal) and F2 (`check-unlocked`'s help text names it after `hygiene`) rode in the commit that wrote this note, sync-vc1's Amendment 3.
+
+## README line 135 lost its commit clause to the source ceiling (2026-10-22, S36; S4)
+- `design/readme/source.md` sat 5 bytes under `SOURCE_CEILING` (16384) and S36's ruling 5 adds 53 to line 113, so line 135 now reads only "on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`" and line 113 "on in every shipped profile" (was "both on in"); source.md is 16381. Restoring "wake at the idle limit, commit the charter" there needs a trim elsewhere in source.md or a higher ceiling; RUNBOOK §4 and SKILL.md carry the whole rule.

@@ -110,7 +110,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 
 ## Priority and pacing
 
-- Two session keys, both on in every shipped profile: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; `WAITING <n>` stops the loop at `waiting`).
+- Two session keys, on in every shipped profile: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; from `WAITING <n>` at `waiting` the wake is the cache's idle limit, and no wait stops the loop).
 - SessionStart's line carries them in one block of at most 320 bytes. `agentik session rules` prints both whole, as resolved.
 - Any layer overrides them, field by field; `set` does not. A level's text is quoted, since it holds ": ". No hook enforces either.
 
@@ -132,7 +132,7 @@ One file per sitting, `history/sittings/<date>-<n>.md` (the profile's `charter.d
 - `agentik session charter check <file>` exits 2 naming the failing part.
 - `agentik session charter close --exit "<text>"` appends the exit line from the meter.
 - While `session.priority` is on, `open` writes `- open by level: none yet` under Handover. Each Handover lists the open items by level, highest first.
-- `check` and `close` warn, their exit unchanged, when that line is missing or the Next act opens `WAITING <n>: <what>; <how to tell>` misshapen or at `session.pacing.waiting`.
+- `check` and `close` warn, exit unchanged, on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`.
 
 Five parts: the title line; the table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## Next act`. A charter stays under 4,096 bytes.
 
@@ -168,7 +168,7 @@ Five parts: the title line; the table (goal, budget, pin, window, agents); `## D
 
 ## Status
 
-Status: version `v2.0.0-alpha.18`, rendered `2026-10-14`, `1332` tests in the suite.
+Status: version `v2.0.0-alpha.19`, rendered `2026-10-14`, `1338` tests in the suite.
 
 ## Credit
 
