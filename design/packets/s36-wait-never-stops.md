@@ -42,3 +42,5 @@ Transcripts under `~/.claude/projects` (grep only, and none is needed); `~/.loca
 Acts with commit shas; acceptance output verbatim; the red-before evidence (the act-1 tests failing on dce04b9); the block's byte counts (`BLOCK`, and with the 1h tail); anything filed outside the packet, with its NICE line.
 
 Amendment 1 (2026-10-22, the coordinator's ruling, reversible): `may touch` also covers, for the version only, `claude_session/__init__.py` lines 3 and 5 (`2.0.0a19`, `2.0.0-alpha.19`), `pyproject.toml:7` and the pin at `tests/test_doctor.py:316`, since GUIDE §7 keeps one version, which `test_versions_agree` checks.
+
+Amendment 2 (2026-10-22, the coordinator's ruling, reversible): `may touch` also covers `tests/test_install.py:222`, its version pin only (`agentik-session 2.0.0-alpha.19\n`), the last place the old version is pinned outside history, packets and NICE.
