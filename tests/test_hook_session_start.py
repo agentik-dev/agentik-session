@@ -159,7 +159,7 @@ def test_no_charter_reminder_when_not_required(tmp_path):
 
 S21_BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the "
              "Next act takes the highest ready; pacing: wake in the act's last tool call, a "
-             "pending helper is the wake (one fallback, 1800s+), WAITING 3 stops the loop, a meter wait never; "
+             "pending helper is the wake (one fallback, 1800s+), no wait stops the loop; WAITING 3+: idle limit; "
              "agentik-session rules prints both")
 S21_REMINDER = '; charter: none open today under history/sittings, run agentik-session charter open "<goal>"'
 
@@ -182,7 +182,7 @@ def test_s21_block(tmp_path):
 def test_s21_block_off(tmp_path):
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n")
     assert ctx.endswith(at + "; pacing: wake in the act's last tool call, a pending helper is "
-                        "the wake (one fallback, 1800s+), WAITING 3 stops the loop, a meter wait never; "
+                        "the wake (one fallback, 1800s+), no wait stops the loop; WAITING 3+: idle limit; "
                         "agentik-session rules prints both" + S21_REMINDER)    # the control
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority: {enabled: false}\n"
                                  "  pacing: {enabled: false}\n")
@@ -195,7 +195,7 @@ def test_s21_bytes_at_the_bound(tmp_path):
                                  "  pacing: {fallback: 3600, waiting: 9}\n" % levels)
     block = ctx.split(at, 1)[1][:-len(S21_REMINDER)]
     assert block.startswith("; priority: S1 " + "y" * 24 + ", S2 ")      # the control
-    assert "3600s+" in block and "WAITING 9 stops" in block
+    assert "3600s+" in block and "no wait stops the loop; WAITING 9+: idle limit" in block
     assert len(block.encode()) == 320 <= 320    # agentik-r1: one byte longer, at the bound
 
 
@@ -244,7 +244,7 @@ def test_s30_bound_case_drops_the_lifetime(tmp_path):
     ctx, at = _s21_ctx(tmp_path, "session:\n  priority:\n    levels: {%s}\n"
                                  "  pacing: {fallback: 3600, waiting: 9}\n" % levels)
     block = ctx.split(at, 1)[1][:-len(S21_REMINDER)]
-    assert "WAITING 9 stops" in block and "cache" not in block
+    assert "no wait stops the loop; WAITING 9+: idle limit" in block and "cache" not in block
     assert len(block.encode()) == 320 <= 320
 
 
@@ -258,3 +258,17 @@ def test_s30_f1_the_block_reads_the_project_dir_s_settings(tmp_path):
     out = hooks.session_start(dict(payload(), cwd=str(repo / "sub")), env)
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ", cache 5m: no keep-warm wakes" + S30_TAIL in ctx
+
+
+# ---- S36: a wait never stops the loop ---------------------------------------
+
+def test_s36_block_says_no_wait_stops_the_loop(tmp_path):
+    ctx, _ = _s21_ctx(tmp_path)
+    assert "no wait stops the loop; WAITING 3+: idle limit; " in ctx and "WAITING 3 stops" not in ctx
+    _s30_band(tmp_path, 41)
+    ctx, at = _s21_ctx(tmp_path)
+    block = ctx.split(at, 1)[1]
+    block = block[:block.index(S30_TAIL) + len(S30_TAIL)]
+    assert block.endswith("no wait stops the loop; WAITING 3+: idle limit, cache 1h: idle wakes "
+                          "<=3300s" + S30_TAIL)
+    assert len(block.encode()) == 318 <= 320

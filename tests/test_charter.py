@@ -409,7 +409,7 @@ def test_s21_waiting(line, want):
 
 S29_METER = ("a wait on the usage meter is not WAITING (session.pacing): keep the act as the "
              "Next act and wake at the band's reset")
-S29_STOP = "the loop stops"
+S29_STOP = "never stops the loop"
 
 
 def _s29_warns(next_act, session=SECTION):
@@ -423,7 +423,7 @@ def _s29_warns(next_act, session=SECTION):
 ], ids=["room-for", "meter", "usage-limit", "five-hour", "5h", "upper", "meter-s"])
 @pytest.mark.parametrize("n", [1, 3, 9])
 def test_s29_meter_wait_warns_at_any_n(what, n):
-    """Ruling 3: one line at any n; ruling 1: it never counts toward the stop."""
+    """Ruling 3: one line at any n; ruling 1: it never counts toward n (S36)."""
     assert _s29_warns(f"WAITING {n}: {what}; band.json's resetsAt") == [S29_METER]
 
 
@@ -583,3 +583,18 @@ def test_s22_docs_say_the_order():
         assert -1 < s.find("close") < s.find("commit the charter") < s.find(
             "checkpoint --respawn"), s
         assert "not committed" in flat
+
+
+# ---- S36: a wait never stops the loop ---------------------------------------
+
+S36_LINE = ("WAITING {n} is at session.pacing.waiting ({w}) or past it: wake at the cache's "
+            "idle limit, bring the charter current and commit it; a wait never stops the loop "
+            "or closes the sitting, only the checkpoint does")
+
+
+@pytest.mark.parametrize("n,w,warned", [(3, 3, True), (9, 3, True), (1, 1, True),
+                                        (2, 3, False)], ids=["at", "past", "at-one", "under"])
+def test_s36_waiting_at_n_never_stops_the_loop(n, w, warned):
+    got = _s29_warns(f"WAITING {n}: CI; the run's status", {**SECTION, "pacing": {"waiting": w}})
+    assert got == ([S36_LINE.format(n=n, w=w)] if warned else [])
+    assert not any("the loop stops" in g or "close the sitting" in g for g in got)
