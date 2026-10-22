@@ -142,11 +142,14 @@ whole, as resolved.
 - `session.pacing`: the fallback wakeup rides the act's last tool call. A
   pending helper, Monitor or background task is the wake, with one fallback
   of `fallback` seconds (1800). Waiting on an outside party, the Next act
-  opens `WAITING <n>: <what>; <how to tell>`, and the loop stops at
-  n = `waiting` (3). A wait on the usage meter (room for 0, or a usage limit
-  hit) is not WAITING: the Next act stays the act, the wake is the band's
-  reset or one fallback, whichever is first, and it never counts toward the
-  stop.
+  opens `WAITING <n>: <what>; <how to tell>`, n the wakes in a row with
+  nothing changed. From n = `waiting` (3) the wake is the longest idle wait
+  the cache allows, and the charter is brought current and committed. A wait
+  never stops the loop: under `agentik session run` a stopped loop only
+  idles until a hand, and only the checkpoint ends a sitting. A wait on the
+  usage meter (room for 0, or a usage limit hit) is not WAITING: the Next
+  act stays the act, the wake is the band's reset or one fallback, whichever
+  is first, and it never counts toward n.
 - The prompt cache's lifetime sets how long an idle wait may be. On 1h (a
   subscription within plan usage) an idle wait wakes at most 3300 s apart, so
   the cache survives. On 5m (usage credits, an API key, a cloud provider, or
@@ -155,8 +158,8 @@ whole, as resolved.
   `agentik-session rules` and the prompt line name the lifetime in force.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
-  the Handover line is missing or a WAITING is misshapen or at the stop, and
-  their exit is unchanged.
+  the Handover line is missing or a WAITING is misshapen or at `waiting` or
+  past it, and their exit is unchanged.
 - Any layer overrides them, never `set`: `priority: {enabled: false}`, one
   level's quoted text under `priority.levels`, `pacing: {fallback: 2400}`.
 

@@ -283,10 +283,14 @@ prompt cache's lifetime.
   `fallback` seconds, never re-armed on a hand-back. An act ready takes the
   minimum delay. Waiting on an outside party, the Next act opens
   `WAITING <n>: <what>; <how to tell>`, n the wakes in a row with nothing
-  changed, and the loop stops at n = `waiting`. A respawn reads n from the
-  charter. A wait on the usage meter (room for 0, or a usage limit hit) is
-  not WAITING: the Next act stays the act, the wake is the band's reset or
-  one fallback, whichever is first, and it never counts toward the stop.
+  changed. From n = `waiting` the wake is the longest idle wait the cache
+  allows (the next bullet), and the charter is brought current and
+  committed. A wait never stops the loop: under `agentik session run` a
+  stopped loop only idles until a hand, and only the checkpoint ends a
+  sitting. A respawn reads n from the charter. A wait on the usage meter
+  (room for 0, or a usage limit hit) is not WAITING: the Next act stays the
+  act, the wake is the band's reset or one fallback, whichever is first, and
+  it never counts toward n.
 - The prompt cache's lifetime: on 1h (a subscription within plan usage) an
   idle wait wakes at most 3300 s apart, so the cache survives; on 5m (usage
   credits, an API key, a cloud provider, or `promptCacheTtl: 5m`) any wait
@@ -307,8 +311,9 @@ prompt cache's lifetime.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `charter close` warn
   on stderr, their exit unchanged, when the Handover line is missing or the
-  Next act's WAITING is misshapen or at the stop. `check` resolves from the
-  current directory, and a failed resolve warns nothing.
+  Next act's WAITING is misshapen or at `waiting` or past it, where the line
+  says to wake at the idle limit and commit the charter. `check` resolves
+  from the current directory, and a failed resolve warns nothing.
 - Upgrade the CLI first (`make install`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
