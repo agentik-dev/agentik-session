@@ -72,11 +72,14 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "wake: one fallback of {fallback} s or more, never re-armed on a hand-back",
         "an act ready: the minimum delay",
         "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to "
-        "tell>`, a long delay, n the wakes in a row with nothing changed, the loop stopping "
-        "at n = {waiting} (a respawn reads n from the charter)",
+        "tell>`, n the wakes in a row with nothing changed; from n = {waiting} the wake is "
+        "the longest idle wait the cache allows (item 6) and the charter is brought current "
+        "and committed; a wait never stops the loop, since under `agentik session run` a "
+        "stopped loop only idles until a hand, and only the checkpoint ends a sitting (a "
+        "respawn reads n from the charter)",
         "waiting on the usage meter (room for 0, or a usage limit hit) is not WAITING: the "
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
-        "first, and it never counts toward the stop")
+        "first, and it never counts toward n")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "
          "none; no hook enforces them")
 
@@ -208,8 +211,8 @@ def clause(session, ttl=None) -> str:
         out.append(f"priority: {labels}; the Next act takes the highest ready")
     if pa["enabled"]:
         out.append(f"pacing: wake in the act's last tool call, a pending helper is the wake "
-                   f"(one fallback, {pa['fallback']}s+), WAITING {pa['waiting']} stops the "
-                   "loop, a meter wait never")
+                   f"(one fallback, {pa['fallback']}s+), no wait stops the loop; WAITING "
+                   f"{pa['waiting']}+: idle limit")
     if not out:
         return ""
     if pa["enabled"] and ttl in CLAUSE:

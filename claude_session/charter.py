@@ -97,9 +97,10 @@ def waiting(line: str | None) -> int | None:
 def warnings(raw: bytes, session: dict) -> list[str]:
     """What `check` and `close` print on stderr, their exit unchanged (S21): no
     `- open by level:` line under Handover (priority on); a Next act opening WAITING
-    misshapen, or at n of `pacing.waiting` or more (pacing on). A well-formed WAITING
-    whose <what> names the usage meter (S29) gets its own line at any n, never the
-    stop's: a meter wait is not WAITING."""
+    misshapen, or at n of `pacing.waiting` or more (pacing on), whose line says to wake
+    at the cache's idle limit and commit the charter: a wait never stops the loop (S36).
+    A well-formed WAITING whose <what> names the usage meter (S29) gets its own line at
+    any n, never the idle limit's: a meter wait is not WAITING."""
     text = raw.decode("utf-8", "replace")
     priority, pacing = rules.parts(session)
     out = []
@@ -119,7 +120,9 @@ def warnings(raw: bytes, session: dict) -> list[str]:
                    "'WAITING <n>: <what>; <how to tell>' (session.pacing is on)")
     elif n is not None and n >= pacing["waiting"]:
         out.append(f"WAITING {n} is at session.pacing.waiting ({pacing['waiting']}) or past "
-                   "it: the loop stops; close the sitting, the outside party unchanged")
+                   "it: wake at the cache's idle limit, bring the charter current and commit "
+                   "it; a wait never stops the loop or closes the sitting, only the checkpoint "
+                   "does")
     return out
 
 
