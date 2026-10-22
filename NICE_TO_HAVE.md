@@ -188,9 +188,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - F2: `r <= e` drops a session that reads in the same second as its end line; unseen live (resumes took 16 s and 23 s).
 - `fit` takes m at each interval's end, so an interval in which a session ended counts it out for the whole span and may bias a upward; not reproduced as harmful.
 
-## A wait on the meter counts as WAITING and stops the loop (2026-10-14, the observer; S3)
-- example-ops's umbrella waited on `room for N` three wakes in a row and stopped its loop at WAITING 3 (20:48, 2026-10-13), as the rules say (`claude_session/rules.py:62`, the pacing line). Room opened at 21:47 (33) and the window reset at 00:30, but nothing restarts a stopped loop, so example-ops sat idle about four hours until the owner's hand. WAITING is for an outside party; the meter frees itself at a known time (band.json's `resetsAt`, and room as the rate falls). Proposal: the rules say a wait on the meter is not WAITING: wake at the reset, or after a fallback, and continue, never counting it toward the stop. (the observer, from the umbrella's charter and the band readings)
-
 ## band-target's notes (2026-10-14, the builder; S4)
 - `plugin/skills/session/SKILL.md` (the window paragraph) and `RUNBOOK.md` (the band paragraph) still give the band line with `resets <HH:MM>` only; neither says it reads `week resets` when the seven-day reset bounds the horizon (outside the change's named files).
 - The ledger's `verdict` line records `T` but not `bound` (`VERDICT_KEYS`), so a T cut short by the weekly reset reads unexplained in an audit of the ledger; adding the key changes the ledger's verdict shape (conventions §7).
@@ -243,3 +240,7 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## README line 135 lost its commit clause to the source ceiling (2026-10-22, S36; S4)
 - `design/readme/source.md` sat 5 bytes under `SOURCE_CEILING` (16384) and S36's ruling 5 adds 53 to line 113, so line 135 now reads only "on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`" and line 113 "on in every shipped profile" (was "both on in"); source.md is 16381. Restoring "wake at the idle limit, commit the charter" there needs a trim elsewhere in source.md or a higher ceiling; RUNBOOK §4 and SKILL.md carry the whole rule.
+
+## S36's adversary round 1 (2026-10-22, the adversary; S4): PASS, two notes
+- F1: the packet's grep acceptance line uses `\|` under `-E`; ugrep and BSD grep both read it as a literal pipe, so the line reads 0 on dce04b9 too. With a bare `|` it reads 10 before and 0 after. No test reads SKILL.md, RUNBOOK.md or README.md for "never stops the loop": a docs test should.
+- F2: `claude_session/rules.py:75`, `PACE` item 4, says "the longest idle wait the cache allows (item 6)"; on a 5m or off cache item 6 gives the long fallback (1800 s or more), not `WARM`'s 270 s, so item 4 should name the long fallback there. The code follows ruling 1; the gap is the ruling's.
