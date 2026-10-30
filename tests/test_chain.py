@@ -448,7 +448,7 @@ def test_s20a_guards_hold(case, fake, monkeypatch):
         ledger.path(_state()).write_text(
             json.dumps({"kind": "restart", "chain": "c1", "at": _iso(T0 - 60)}) + "\n")
     elif case == "floor":
-        g["floor"] = 600
+        g["floor"] = 7200                   # S37: past the child's life, so it never clears
     elif case == "stop-in-settle":
         made = [one]
         seq.append((40, touch(one)))
@@ -1152,3 +1152,96 @@ def test_s34_f_each_restart_compares_with_the_start_line(fake, monkeypatch):
     assert [(r["model"], r["start_model"]) for r in rs] == [
         (f"{OPUS}[1m]", "fable"), (f"{OPUS}[1m]", "fable"), (None, "fable")]
     assert c.args == args
+
+
+# ---- S37: a hold is re-checked every poll, and said in held.json -----------------------
+
+def _held(name="c1"):
+    p = _state() / "respawn" / name / "held.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def _peek(box):
+    return lambda fx, p: box.append(_held())
+
+
+def test_s37_floor_hold_clears_when_the_floor_passes(fake, monkeypatch):
+    """A marker confirmed before `floor` holds; re-checked every poll, the hold clears once
+    the clock passes `floor`, and the launcher ends the sitting and restarts it."""
+    fx = _fx(monkeypatch, [respawn_seq(fake.charter) + [end(7200)], [end(1)]])
+    assert _frun(fx, {**G, "floor": 600}) == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 600 <= t - T0 <= 602, t - T0
+    assert len(fx.procs) == 2 and len(_lines("restart")) == 1 and _stops() == ["no-marker"]
+
+
+def test_s37_not_respawn_hold_clears_on_a_later_respawn(fake, monkeypatch):
+    """A charter whose Next act left RESPAWN holds at `not-respawn`; once it opens on
+    RESPAWN again and a new marker is confirmed, the hold clears and the sitting restarts."""
+    seq = (respawn_seq(fake.charter) + [(20, write(fake.charter, DONE_TEXT)),
+                                        (299, hook("PreToolUse", tool_name="Write"))]
+           + respawn_seq(fake.charter, at=300) + [end(7200)])
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _frun(fx, G) == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 304 + 60 <= t - T0 <= 304 + 60 + 2, t - T0
+    assert len(fx.procs) == 2 and _stops() == ["no-marker"]
+
+
+def test_s37_held_json_written_on_the_hold_and_removed_on_the_clear(fake, monkeypatch):
+    """held.json names the reason, since when and the session; a changed reason rewrites
+    it, and the clear removes it before the signal."""
+    one, seen = _state() / "respawn" / "c1" / "STOP", []
+    seq = ([(5, touch(one))] + respawn_seq(fake.charter)
+           + [(100, _peek(seen)), (200, lambda fx, p: one.unlink()), (300, _peek(seen)),
+              end(7200)])
+    fx = _fx(monkeypatch, [seq, [(0, _peek(seen)), end(1)]])
+    assert _frun(fx, {**G, "floor": 600}) == 0
+    sid = fx.procs[0].sid
+    assert seen[0] == {"reason": "stop-file", "since": T0 + 14, "session": sid}, seen
+    assert seen[1] == {"reason": "floor", "since": T0 + 200, "session": sid}, seen
+    assert seen[2] is None and _held() is None
+    assert [s for _, s in fx.procs[0].signals] == [TERM] and len(fx.procs) == 2
+
+
+def test_s37_cap_hold_stays_while_the_count_stays(fake, monkeypatch):
+    """A cap hold is re-checked every poll and stays while the count stays; the file
+    keeps its first `since`, and goes when the child ends."""
+    seen = []
+    ledger.path(_state()).parent.mkdir(parents=True, exist_ok=True)
+    ledger.path(_state()).write_text(
+        json.dumps({"kind": "restart", "chain": "c1", "at": _iso(T0 - 60)}) + "\n")
+    seq = respawn_seq(fake.charter) + [(300, _peek(seen)), (3000, _peek(seen)), end(3600)]
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _frun(fx, {**G, "cap": 1}) == 0
+    assert [p.signals for p in fx.procs] == [[]] and _stops() == ["cap"]
+    assert [s and s["reason"] for s in seen] == ["cap", "cap"] and seen[0] == seen[1]
+    assert seen[0]["since"] == T0 + 14 and _held() is None
+
+
+def test_s37_not_respawn_waits_for_a_new_marker(fake, monkeypatch):
+    """Amendment 1, F1: a charter rewritten to RESPAWN with no new marker stays held at
+    `not-respawn`, the turn ended and stood; the main thread's new confirm clears it."""
+    seen = []
+    seq = (respawn_seq(fake.charter) + [(20, write(fake.charter, DONE_TEXT)),
+                                        (199, hook("PreToolUse", tool_name="Write")),
+                                        (200, write(fake.charter, RESPAWN_TEXT)),
+                                        (201, hook("Stop")), (500, _peek(seen))]
+           + respawn_seq(fake.charter, at=1000) + [end(7200)])
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _frun(fx, G) == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 1004 + 60 <= t - T0 <= 1004 + 60 + 2, t - T0
+    assert seen[0]["reason"] == "not-respawn" and len(fx.procs) == 2
+
+
+def test_s37_config_edit_lowering_the_floor_lifts_the_hold(fake, monkeypatch):
+    """Amendment 1, F4: the guards are re-resolved before a held sitting is re-checked,
+    so a floor lowered by a config edit at 100 s clears the hold at that poll."""
+    box = {**G, "floor": 600}
+    seq = respawn_seq(fake.charter) + [(100, lambda fx, p: box.update(floor=50)), end(7200)]
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _chain(fx, lambda: dict(box)).run() == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 100 <= t - T0 <= 102, t - T0
+    assert len(fx.procs) == 2 and _held() is None

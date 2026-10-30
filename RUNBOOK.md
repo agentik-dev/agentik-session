@@ -366,6 +366,14 @@ hang-up the launcher writes nothing more to the terminal).
   `agentik session doctor`). Touch one and the running sitting finishes
   without a restart; a STOP older than the chain's start is ignored, and the
   launcher never deletes one.
+- A hold is checked again at every poll, so it lifts when its reason does:
+  the sitting passes the floor, the charter opens on `RESPAWN` again under a
+  new mark, the STOP file goes, or the 24 h count falls under the cap. While
+  it stands, `respawn/<chain>/held.json` under the state root names the
+  reason, since when and the session, and `agentik session status` prints
+  `respawn held: <reason> since <HH:MM>`; the terminal stays silent. A hold
+  that never lifts ends with the sitting: exit it, and the chain stops with
+  that reason.
 - Give a `/loop` an interval under 60m, or none. A `/loop` of 60 minutes or
   more asks its question before it arms, so every restarted sitting would
   wait there; `run` warns once before the first start.

@@ -50,6 +50,7 @@ _BARE = frozenset({"--strict-mcp-config", "--verbose"})
 _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 12, "floor": 600, "settle": 60}
+HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
 _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overlay is read
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
 _EVERY = re.compile(r"\bevery\s+(\d+)\s*([smhd])[a-z]*\s*$", re.I)   # `/loop <p> every 2h`
@@ -207,6 +208,23 @@ def prompt_gap(args) -> str | None:
     return gap
 
 
+def held_line(state, name: str, sid: str) -> str | None:
+    """S37 ruling 2: `respawn held: <reason> since <HH:MM>` when the chain `name`'s home
+    holds held.json naming the session `sid`; None otherwise, or for a name that is not a
+    chain's (hooks.CHAIN_RE)."""
+    if not (name and sid and hooks.CHAIN_RE.match(name)):
+        return None
+    d = _json(Path(state) / "respawn" / name / HELD) or {}
+    reason, since = d.get("reason"), d.get("since")
+    if d.get("session") != sid or not isinstance(reason, str) or not reason:
+        return None
+    try:
+        at = time.strftime("%H:%M", time.localtime(since)) if _num(since) else "?"
+    except (OverflowError, OSError, ValueError):
+        at = "?"
+    return f"respawn held: {reason} since {at}"
+
+
 def _json(path: Path):
     """The file's JSON object; None when it is absent; {} when it is not an object."""
     try:
@@ -303,6 +321,7 @@ class Chain:
         self.g = dict(DEFAULTS)
         self.started = 0.0
         self.config_error: str | None = None   # a resolve that failed while a child ran
+        self._said: str | None = None   # the reason held.json names; "" before a watch (S37)
 
     # ---- the run -----------------------------------------------------------------------
 
@@ -411,48 +430,98 @@ class Chain:
 
     def _watch(self, proc, sid, start):
         """Wait for the child; end it only when a confirmed marker passes the checks and
-        the turn has ended and stood. Returns (status, ended_by, held reason)."""
+        the turn has ended and stood. A hold is re-checked every poll and said in the
+        chain home's held.json, which goes when the child ends (S37). Returns (status,
+        ended_by, held reason)."""
         sdir = resolver.session_dir(self.state, sid)
         held = ended_by = term_at = seen = None
         forwarded = False
-        while True:
-            rc = self.fx.wait(proc, self.poll)
-            if rc is not None:
-                return rc, ended_by, held
-            if signal.SIGTERM in self.got and not forwarded:
-                self.fx.send(proc, signal.SIGTERM)          # §3.7: forwarded, the chain stops
-                forwarded = True
-            now = self.fx.now()
-            if term_at is not None:              # §3.3 step 5 holds through a hang-up (A-F4)
-                if ended_by == "launcher" and now - term_at >= self.kill_grace:
-                    self.fx.send(proc, signal.SIGKILL)
-                    ended_by = "kill"
-                continue
-            if self._stopping():
-                continue
-            if held is not None:
-                continue
-            conf = _json(sdir / hooks.CONFIRMED)
-            if conf is None:
-                continue
-            if conf != seen:                                 # a confirmed marker appears
-                seen = conf
-                held = self._checks(sdir, sid, start, now)
-                if held:
+        self._said = ""                      # a file a past watch left goes at the first say
+        try:
+            while True:
+                rc = self.fx.wait(proc, self.poll)
+                if rc is not None:
+                    return rc, ended_by, held
+                if signal.SIGTERM in self.got and not forwarded:
+                    self.fx.send(proc, signal.SIGTERM)      # §3.7: forwarded, the chain stops
+                    forwarded = True
+                now = self.fx.now()
+                if term_at is not None:          # §3.3 step 5 holds through a hang-up (A-F4)
+                    if ended_by == "launcher" and now - term_at >= self.kill_grace:
+                        self.fx.send(proc, signal.SIGKILL)
+                        ended_by = "kill"
                     continue
-            if not self._ready(sdir, now):
-                continue
-            try:
-                self.g = self.guards()           # §4: a config edit counts before the signal
-            except resolver.ResolveError as e:
-                held = "config"                  # §3.7: nothing printed while a child runs;
-                self.config_error = str(e)       # the error prints at the stop (N1)
-                continue
-            held = self._checks(sdir, sid, start, now)       # N4: again, right before
+                if self._stopping():
+                    continue
+                conf = _json(sdir / hooks.CONFIRMED)
+                if conf is None:
+                    continue
+                held, seen, end = self._step(sdir, sid, start, now, conf, seen, held)
+                self._say_held(held, sid, now)
+                if end:
+                    self.fx.send(proc, signal.SIGTERM)
+                    term_at, ended_by = now, "launcher"
+        finally:
+            self._say_held(None, sid, None)          # the child ended: the file goes
+
+    def _step(self, sdir, sid, start, now, conf, seen, held):
+        """One poll past a confirmed marker: (held, seen, end the child). A new marker or
+        a hold runs the checks again, `None` clearing the hold (S37 ruling 1); a held
+        `not-respawn` waits for a new confirmed marker, and a hold re-resolves the guards
+        first (Amendment 1, F1 and F4). Then the ready condition, the guards re-resolved
+        and the checks right before the signal."""
+        fresh, seen = conf != seen, conf
+        if held == "not-respawn" and not fresh:
+            return held, seen, False             # F1: only the main thread's confirm lifts it
+        if held is not None and not self._resolve():
+            return "config", seen, False         # F4: a config edit counts on a hold
+        if fresh or held is not None:
+            held = self._checks(sdir, sid, start, now)
             if held:
-                continue
-            self.fx.send(proc, signal.SIGTERM)
-            term_at, ended_by = now, "launcher"
+                return held, seen, False
+        if not self._ready(sdir, now):
+            return None, seen, False
+        if not self._resolve():                  # §4: a config edit counts before the signal
+            return "config", seen, False
+        held = self._checks(sdir, sid, start, now)           # N4: again, right before
+        return held, seen, held is None
+
+    def _resolve(self) -> bool:
+        """The guards resolved again (§4); False on a ResolveError. Its text is kept when
+        it first appears and cleared once the config resolves again (Amendment 1, F4);
+        §3.7: nothing printed while a child runs, the error prints at the stop (N1)."""
+        try:
+            self.g = self.guards()
+        except resolver.ResolveError as e:
+            if self.config_error is None:
+                self.config_error = str(e)
+            return False
+        self.config_error = None
+        return True
+
+    def _say_held(self, reason, sid, now):
+        """S37 ruling 2: a hold is said through the state, never the terminal (§3.7). The
+        chain home's held.json, `{reason, since, session}`, is written when a hold begins
+        or its reason changes and removed when it clears or the child ends. A write that
+        fails is tried again at the next poll; the hold holds either way."""
+        if reason == self._said:
+            return
+        path = self.home / HELD
+        try:
+            if reason is None:
+                path.unlink(missing_ok=True)
+            else:
+                tmp = path.with_name(f".{HELD}.{os.getpid()}")
+                try:
+                    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump({"reason": reason, "since": now, "session": sid}, f)
+                    os.replace(tmp, path)
+                finally:
+                    tmp.unlink(missing_ok=True)     # a failed replace leaves nothing behind
+        except OSError:
+            return
+        self._said = reason
 
     def _ready(self, sdir: Path, now: float) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,

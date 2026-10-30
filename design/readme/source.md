@@ -104,7 +104,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
 - A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`, whose first line must open on `RESPAWN`; otherwise it exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. The PostToolUse hook confirms the mark only for the main thread's own Bash call. PreToolUse and UserPromptSubmit stamp the main thread's activity, and the Stop hook stamps each turn end; it prints nothing and never blocks.
 - The `respawn` key (`cap: 12`, `floor: 600`, `settle: 60`) holds a respawn chain's guards and layers like every session key.
-- `agentik session run` is the respawn chain. It starts `claude` with the same arguments at every start, each behind a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn has stood `settle` seconds with no helper call open, `run` ends the sitting, waits 10 s, writes a restart line and starts the next. It never compacts or resumes, and it never restarts a crash. It holds the restart at the cap (restarts in any 24 h), at the floor (a sitting's minimum age) and at a STOP file, `respawn/STOP` or `respawn/<chain>/STOP` under the state root. Ctrl-C in the 10 s ends the chain. Every stop but a hang-up prints a start line that runs as printed. Give a `/loop` an interval under 60m, or none: a longer one asks its question at every start, so `run` warns once.
+- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, behind a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn has stood `settle` seconds with no helper call open, `run` ends it, waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file, `respawn/STOP` or `respawn/<chain>/STOP` in the state root; `status` names a hold, re-checked each poll. Ctrl-C in the 10 s ends the chain. Every stop but a hang-up prints a start line that runs as printed. Give a `/loop` an interval under 60m, or none: a longer one asks its question at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
 - `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead.
 
@@ -168,7 +168,7 @@ Five parts: the title line; the table (goal, budget, pin, window, agents); `## D
 
 ## Status
 
-Status: version `v2.0.0-alpha.19`, rendered `2026-10-14`, `1338` tests in the suite.
+Status: version `v2.0.0-alpha.20`, rendered `2026-10-14`, `1348` tests in the suite.
 
 ## Credit
 

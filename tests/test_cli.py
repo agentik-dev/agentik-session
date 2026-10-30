@@ -543,3 +543,32 @@ def test_s22_respawn_git_unknown_goes_on(tmp_path, monkeypatch, stub):
     assert rc == 0 and _marker().exists() and _counter() == 0, err
     named = [l for l in err.splitlines() if "unknown" in l]
     assert len(named) == 1 and str(f) in named[0] and "not committed" not in err, err
+
+
+# ---- S37: status says a respawn hold -------------------------------------------------
+
+@pytest.mark.parametrize("case", ["held", "no-file", "other-session", "no-chain"])
+def test_s37_status_says_a_respawn_hold(case, tmp_path, monkeypatch):
+    """`status` prints `respawn held: <reason> since <HH:MM>` when this session's chain
+    has held.json naming this session, and nothing otherwise."""
+    from claude_session import hooks
+    env = dict(os.environ)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    hooks.session_start({"session_id": SID, "cwd": str(repo)}, env)
+    fixture = os.path.join(os.path.dirname(__file__), "fixtures", "meter", "under-80.jsonl")
+    hooks.post_tool_use({"session_id": SID, "transcript_path": fixture}, env)
+    if case != "no-chain":
+        monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "c1")
+    since = time.mktime((2026, 10, 29, 7, 5, 0, 0, 0, -1))
+    if case != "no-file":
+        home = resolver.state_dir(env) / "respawn" / "c1"
+        home.mkdir(parents=True, exist_ok=True)
+        who = "someone-else" if case == "other-session" else SID
+        (home / "held.json").write_text(json.dumps(
+            {"reason": "floor", "since": since, "session": who}))
+    rc, out, _ = run("status")
+    lines = out.splitlines()
+    assert rc == 0 and lines[0].startswith(f"session {SID}"), out
+    held = [line for line in lines if line.startswith("respawn held")]
+    assert held == (["respawn held: floor since 07:05"] if case == "held" else []), out

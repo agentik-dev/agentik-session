@@ -81,7 +81,10 @@ Two lines arrive as hook context; act on them, do not argue with them:
   committed, the loop is deleted, and every helper and background job has finished,
   run `agentik-session checkpoint --respawn --charter <file>` through Bash, then end
   the turn. Its last line says whether a launcher restarts the sitting; without one,
-  print your start line and stop.
+  print your start line and stop. When the restart does not come,
+  `agentik session status` names the hold, `respawn held: <reason> since <HH:MM>`:
+  a `floor` or a `cap` lifts with time, a `not-respawn` when the charter opens on
+  `RESPAWN` again and the verb runs again; otherwise exit, and the chain stops.
 
 The **posture** decides how loud the budget is. `off` says nothing (`scratch`,
 `local-only`); `signal` (the default) speaks on the prompt and after tools and
