@@ -40,7 +40,7 @@ def check(text: str) -> list[str]:
         faults.append(f"{size} bytes, at or over the {CEILING}-byte ceiling: move text out")
     lines = text.splitlines()
     for n, line in enumerate(lines, 1):
-        if "—" in line:
+        if "\u2014" in line:
             faults.append(f"an em-dash (U+2014) at line {n}: write a colon, a comma or a "
                           "semicolon")
             break

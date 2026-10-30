@@ -199,7 +199,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "permissionDecisionReason": _wrap_up(zone),
             },
             "systemMessage": (
-                f"agentik-session [{cfg.name}]: blocked a {tool} spawn — "
+                f"agentik-session [{cfg.name}]: blocked a {tool} spawn: "
                 "the rest is reserved for wrapping up."),
         }
 
@@ -291,7 +291,7 @@ def user_prompt_submit(payload: dict) -> dict:
         bits.append(
             f"{count} prompts since the last checkpoint (cadence is {cadence} in "
             f"the '{zone}' zone). Commit or durably record what is done, then "
-            "run `agentik-session checkpoint` — so this session can be handed off "
+            "run `agentik-session checkpoint`, so this session can be handed off "
             "at any moment rather than only when it is convenient.")
 
     if not bits:

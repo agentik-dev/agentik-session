@@ -73,14 +73,17 @@ Two lines arrive as hook context; act on them, do not argue with them:
   every tenth tool: bring the charter current, commit, and run
   `agentik-session checkpoint`. The session must be handed off at any moment
   from here. Under `agentik session run`, the sitting runs
-  `agentik session checkpoint --respawn --charter <file>` and ends the turn,
+  `agentik session checkpoint --respawn --charter <file> --state <s>` and ends the turn,
   and the launcher restarts it.
 - **`EXIT: ...`** at or past 100%: land the act in flight at a checkpoint, then
   exit; respawn, never compact. A RESPAWN close (the charter's Next act opens on
   `RESPAWN`) is marked as the sitting's last act: once the charter is current and
   committed, the loop is deleted, and every helper and background job has finished,
-  run `agentik-session checkpoint --respawn --charter <file>` through Bash, then end
-  the turn. Its last line says whether a launcher restarts the sitting; without one,
+  write the state file (a title line, then `## Helpers`, `## Gates`, `## Last acts`
+  and `## Read first`, each bulleted or `- none`, under 8,192 bytes; see RUNBOOK
+  "Restarting a sitting"), run `agentik-session checkpoint --respawn --charter <file>
+  --state <s>` through Bash, then end the turn. The successor's SessionStart line
+  names the copy: read it first, then the charter's Next act. Its last line says whether a launcher restarts the sitting; without one,
   print your start line and stop. When the restart does not come,
   `agentik session status` names the hold, `respawn held: <reason> since <HH:MM>`:
   a `floor` or a `cap` lifts with time, a `not-respawn` when the charter opens on

@@ -1,4 +1,4 @@
-"""agentik-session — verbs, argument parsing, and all the printing.
+"""agentik-session: verbs, argument parsing, and all the printing.
 
 Every sys.exit lives in this module; everything below it returns values.
 """

@@ -51,7 +51,7 @@ BAD = [
     (GOOD.replace(LAST, ""), "read nothing else"),
     (GOOD.replace("- history/sittings/2026-10-29-2-s39.md lines 1-30\n" + LAST,
                   LAST + "- history/x.md lines 1-9\n"), "read nothing else"),
-    (GOOD.replace("the packet", "the packet — act 0"), "em-dash"),
+    (GOOD.replace("the packet", "the packet \u2014 act 0"), "em-dash"),
 ]
 
 
@@ -60,7 +60,7 @@ BAD = [
 def test_a_fault_is_named(text, named):
     faults = state.check(text)
     assert any(named in f for f in faults), faults
-    assert all("\n" not in f and "—" not in f for f in faults)
+    assert all("\n" not in f and "\u2014" not in f for f in faults)
 
 
 def test_the_ceiling_is_8192_bytes():
