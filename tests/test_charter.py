@@ -293,6 +293,7 @@ S21_HEAD = ("# Sitting 2026-10-10-4: r, c\n\n| item | value |\n|---|---|\n| goal
             "## Done-ness\n- [x] a\n\n")
 S21_LISTED = "## Handover\n- open by level: S2 the remedy; S4 a note\n\n"
 S21_OFF = "session:\n  priority: {enabled: false}\n  pacing: {enabled: false}\n"
+S40_NONE = "## While waiting\n- none\n\n"
 
 
 def _s21_repo(tmp_path, monkeypatch, config=None):
@@ -304,9 +305,9 @@ def _s21_repo(tmp_path, monkeypatch, config=None):
     monkeypatch.chdir(tmp_path)
 
 
-def _s21_charter(tmp_path, handover=S21_LISTED, next_act="the next act"):
+def _s21_charter(tmp_path, handover=S21_LISTED, next_act="the next act", waiting=S40_NONE):
     p = tmp_path / "c.md"
-    p.write_text(S21_HEAD + handover + "## Next act\n" + next_act + "\n")
+    p.write_text(S21_HEAD + handover + waiting + "## Next act\n" + next_act + "\n")
     assert charter.check(p) == []
     return p
 
@@ -412,8 +413,8 @@ S29_METER = ("a wait on the usage meter is not WAITING (session.pacing): keep th
 S29_STOP = "never stops the loop"
 
 
-def _s29_warns(next_act, session=SECTION):
-    raw = (S21_HEAD + S21_LISTED + "## Next act\n" + next_act + "\n").encode()
+def _s29_warns(next_act, session=SECTION, waiting=S40_NONE):
+    raw = (S21_HEAD + S21_LISTED + waiting + "## Next act\n" + next_act + "\n").encode()
     return charter.warnings(raw, session)
 
 
@@ -598,3 +599,130 @@ def test_s36_waiting_at_n_never_stops_the_loop(n, w, warned):
     got = _s29_warns(f"WAITING {n}: CI; the run's status", {**SECTION, "pacing": {"waiting": w}})
     assert got == ([S36_LINE.format(n=n, w=w)] if warned else [])
     assert not any("the loop stops" in g or "close the sitting" in g for g in got)
+
+
+# ---- S40: the While waiting section, and the red of a WAITING beside it -----
+
+S40_READY = "- ready: r1 (repo, S3)"
+S40_OWED = "- owed: the runsheet for r2; a draft, no gate"
+S40_OLD = "no While waiting section (opened before alpha.23): add it with - none"
+
+
+def test_s40_open_writes_the_section(tmp_path):
+    p = charter.open(tmp_path, "g", SECTION, "abc1234", repo="r")
+    text = p.read_text()
+    assert "## Handover\n- open by level: none yet\n\n## While waiting\n- none\n\n## Next act\n" in text
+    assert charter.WHILE_WAITING == "## While waiting" and charter.RED == "WAITING while ready"
+    assert (5, charter.WHILE_WAITING) in charter.PARTS
+    assert [h for _, h in charter.PARTS].index(charter.WHILE_WAITING) == 2
+    raw = p.read_bytes()
+    assert charter.check_text(raw) == [] and charter.warnings(raw, SECTION) == []
+    assert charter.while_waiting(raw) == ["- none"]
+    off = charter.open(tmp_path, "g", {**SECTION, "priority": {"enabled": False}}, "h", repo="r")
+    assert "## Handover\n\n## While waiting\n- none\n\n## Next act" in off.read_text()
+
+
+def test_s40_while_waiting_reads_the_section():
+    head = (S21_HEAD + S21_LISTED).encode()
+    tail = b"## Next act\nthe next act\n"
+    assert charter.while_waiting(head + tail) is None
+    assert charter.while_waiting(head + S40_NONE.encode() + tail) == ["- none"]
+    body = ("## While waiting\n%s\n\n%s  \n\n" % (S40_READY, S40_OWED)).encode()
+    assert charter.while_waiting(head + body + tail) == [S40_READY, S40_OWED]
+    assert charter.while_waiting(head + b"## While waiting\n\n" + tail) == []
+
+
+def test_s40_a_charter_before_alpha23_passes_with_one_warning(tmp_path, monkeypatch):
+    raw = (S21_HEAD + S21_LISTED + "## Next act\nthe next act\n").encode()
+    assert charter.check_text(raw) == []
+    assert charter.warnings(raw, SECTION) == [S40_OLD]
+    assert charter.warnings(raw, {**SECTION, "pacing": {"enabled": False}}) == []
+    _s21_repo(tmp_path, monkeypatch)
+    p = _s21_charter(tmp_path, waiting="")
+    rc, out, err = run("charter", "check", str(p))
+    assert (rc, out) == (0, "") and err.count("\n") == 1 and S40_OLD in err
+
+
+@pytest.mark.parametrize("lines,want", [
+    (["- ready r1"], "- ready r1"),
+    (["- ready: r1 (repo)"], "- ready: r1 (repo)"),
+    (["- owed: a draft"], "- owed: a draft"),
+    (["a line"], "a line"),
+    (["- none", S40_READY], "- none"),
+    ([S40_READY, "- none"], "- none"),
+    ([S40_READY] * 4, "4 ready rows"),
+], ids=["no-colon", "no-level", "no-need", "prose", "none-first", "none-after", "four-ready"])
+def test_s40_a_line_of_another_shape_warns(lines, want):
+    body = "## While waiting\n" + "".join(l + "\n" for l in lines) + "\n"
+    got = _s29_warns("the next act", waiting=body)
+    assert len(got) == 1 and want in got[0] and charter.RED not in got[0], got
+    assert charter.check_text((S21_HEAD + S21_LISTED + body + "## Next act\nx\n").encode()) == []
+
+
+@pytest.mark.parametrize("lines", [[S40_READY], [S40_READY] * 3, [S40_OWED],
+                                   [S40_READY, S40_OWED]], ids=["ready", "three", "owed", "both"])
+def test_s40_shapes_without_waiting_warn_nothing(lines):
+    body = "## While waiting\n" + "".join(l + "\n" for l in lines) + "\n"
+    assert _s29_warns("the next act", waiting=body) == []
+    assert _s29_warns("the next act") == []                            # the control
+
+
+@pytest.mark.parametrize("next_act", [
+    "WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md",
+    "WAITING 3: CI; the run's status",
+    "WAITING: the owner",
+], ids=["one", "at-the-stop", "misshapen"])
+@pytest.mark.parametrize("lines,first", [
+    ([S40_READY], S40_READY), ([S40_OWED], S40_OWED), ([S40_OWED, S40_READY], S40_OWED),
+    (["a line", S40_READY], S40_READY),
+], ids=["ready", "owed", "owed-first", "other-then-ready"])
+def test_s40_waiting_while_ready_is_red_first(next_act, lines, first):
+    body = "## While waiting\n" + "".join(l + "\n" for l in lines) + "\n"
+    assert not any(charter.RED in g for g in _s29_warns(next_act))   # the control: - none
+    got = _s29_warns(next_act, waiting=body)
+    assert got[0] == (f"WAITING while ready: {first}; take it, since WAITING is legal only "
+                      "when While waiting reads - none")
+    assert sum(charter.RED in g for g in got) == 1
+
+
+def test_s40_the_meter_wait_stays_exempt():
+    body = "## While waiting\n%s\n\n" % S40_READY
+    assert _s29_warns("WAITING 2: room for 0; band.json's resetsAt", waiting=body) == [S29_METER]
+    assert _s29_warns("WAITING 2: CI; the run's status",
+                      {**SECTION, "pacing": {"enabled": False}}, waiting=body) == []
+
+
+@pytest.mark.parametrize("next_act,want", [
+    ("WAITING 1: CI; the run's status", 1), ("the next act", 0),
+    ("WAITING 1: room for 0; band.json's resetsAt", 0),
+], ids=["red", "no-waiting", "meter"])
+def test_s40_check_exits_1_on_the_red(tmp_path, monkeypatch, next_act, want):
+    _s21_repo(tmp_path, monkeypatch)
+    ok = _s21_charter(tmp_path, next_act=next_act)
+    assert run("charter", "check", str(ok))[0] == 0                    # the control: - none
+    p = _s21_charter(tmp_path, next_act=next_act, waiting="## While waiting\n%s\n\n" % S40_READY)
+    rc, out, err = run("charter", "check", str(p))
+    assert (rc, out) == (want, "")
+    assert (charter.RED in err) == bool(want)
+    bad = tmp_path / "bad.md"
+    bad.write_bytes((FIX / "missing-handover.md").read_bytes())
+    assert run("charter", "check", str(p), str(bad))[0] == 2           # a refusal wins
+    _s21_repo(tmp_path, monkeypatch, S21_OFF)
+    assert run("charter", "check", str(p)) == (0, "", "")
+
+
+def test_s40_close_keeps_its_exit_on_the_red(tmp_path, monkeypatch):
+    _s21_repo(tmp_path, monkeypatch)
+    p = _s21_charter(tmp_path, next_act="WAITING 1: CI; the run's status",
+                     waiting="## While waiting\n%s\n\n" % S40_READY)
+    rc, out, err = run("charter", "close", "--exit", "goal met", str(p))
+    assert rc == 0 and out.splitlines()[0] == str(p) and charter.RED in err
+    assert p.read_text().count("- exit taken: goal met") == 1
+
+
+def test_s40_docs_say_the_section():
+    for rel in ("RUNBOOK.md", "plugin/skills/session/SKILL.md", "README.md",
+                "design/readme/source.md"):
+        text = (ROOT / rel).read_text()
+        assert "While waiting" in text and "- none" in text, rel
+    assert "While waiting" in (ROOT / "design" / "overhaul-r1.md").read_text()
