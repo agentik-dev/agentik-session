@@ -37,7 +37,7 @@ plugin/skills/session/SKILL.md: sibling
 # The README and its source: the dependency ids and the marketplace name.
 README.md: sibling
 design/readme/source.md: sibling
-RUNBOOK.md: sibling
+RUNBOOK.md: sibling,renamed
 # The render script names the renderer it calls; the README test names the repo's tokens.
 scripts/readme-render: sibling
 tests/test_readme.py: sibling
