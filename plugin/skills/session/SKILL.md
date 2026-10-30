@@ -205,7 +205,7 @@ kills background tasks: list each open gate id in the state file's `## Gates`, a
 successor re-arms `gate wait <id>`. `wait` exits 0 whatever the gate's code; 124 is the
 wall's cut, 125 a runner that died, 126 a lock held past the wall.
 
-The band: the plugin's hooks module draws `session: ctx <c>% · turns <t>% · <zone>` above the prompt and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
+The band: the plugin's hooks module draws `session: <model> · <window> · ctx <c>% · turns <t>% · <zone>` above the prompt (e.g. `session: opus 5.5 · 200k (engine 1M) · ctx 64% · turns 6% · clear`: the window the ceilings apply, the engine's measured one in brackets when it differs; `status` prints the same as `model: …`, with the id and the window's source) and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
 
 Admission, in `observe` (it records and never refuses): the same module hands each session's start, rate-limit readings, helper spawns, SendMessage resumes, helper turns and end to `agentik-session admission record --session <id>` (one JSON object on stdin; exit 0, 2 refused, 3 the lock held past 2 s), one line each in the machine's `<state>/admission/ledger.jsonl` (rotated past 29 h to `ledger.1.jsonl`). An `end` marks that session's open spawns done (`swept`). No prompt or message text is sent; a failed record is one debug-log line.
 
