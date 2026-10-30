@@ -208,13 +208,22 @@ def prompt_gap(args) -> str | None:
     return gap
 
 
+def home(state, name: str) -> Path | None:
+    """The chain `name`'s home, `<state>/respawn/<name>/` (its lock, STOP, held.json and,
+    since S39, state.md with state.json); None for a name that is not a chain's."""
+    if not (isinstance(name, str) and hooks.CHAIN_RE.match(name)):
+        return None
+    return Path(state) / "respawn" / name
+
+
 def held_line(state, name: str, sid: str) -> str | None:
     """S37 ruling 2: `respawn held: <reason> since <HH:MM>` when the chain `name`'s home
     holds held.json naming the session `sid`; None otherwise, or for a name that is not a
     chain's (hooks.CHAIN_RE)."""
-    if not (name and sid and hooks.CHAIN_RE.match(name)):
+    where = home(state, name)
+    if not (sid and where):
         return None
-    d = _json(Path(state) / "respawn" / name / HELD) or {}
+    d = _json(where / HELD) or {}
     reason, since = d.get("reason"), d.get("since")
     if d.get("session") != sid or not isinstance(reason, str) or not reason:
         return None

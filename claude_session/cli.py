@@ -16,6 +16,7 @@ import time
 
 from . import (admission, charter, doctor, gitinfo, hooks, launch, ledger, measure, meter, mod,
                resolver, rules, sessionconfig, store)
+from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
 from .sessionconfig import (IN_SESSION_EQUIVALENT, LAUNCH_ONLY, LIVE,
@@ -350,6 +351,11 @@ def cmd_charter(args) -> int:
     if line is not None and charter.RESPAWN.match(line):
         print("then: agentik-session checkpoint --respawn --charter "
               + shlex.quote(os.path.abspath(path)))
+        # S39: the then: line stays byte-stable for its callers; the optional state is said
+        # beside it, on stderr.
+        print("note: add --state <file> to that checkpoint to hand the successor its state "
+              "(optional; the four sections are in agentik-session checkpoint --help)",
+              file=sys.stderr)
     return 0
 
 
@@ -644,12 +650,15 @@ def _record_charter(path, section: dict) -> None:
               file=sys.stderr)
 
 
-def _respawn_check(args) -> tuple[str, str, str] | None:
+def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
     """respawn-r1 §3.2's steps 1 to 3, before anything is written: (session id, the
-    charter's absolute path, the sha256 of the bytes read), or None without either flag.
+    charter's absolute path, the sha256 of the bytes read, the checked state file's
+    absolute path or None), or None without any of the three flags.
     Every refusal exits 2 with one line and writes nothing."""
-    if not (args.respawn or args.charter):
+    if not (args.respawn or args.charter or args.state):
         return None
+    if args.state and not args.respawn:
+        _die("checkpoint --state FILE is read only with --respawn; add --respawn", 2)
     if not args.charter:
         _die("checkpoint --respawn needs --charter FILE, the sitting's charter "
              "(there is no default)", 2)
@@ -689,13 +698,70 @@ def _respawn_check(args) -> tuple[str, str, str] | None:
     elif st and st is not gitinfo._NOT_A_REPO and (st == "??" or not args.commit):
         _die(f"checkpoint --respawn: {path} is not committed; commit it first: "
              f"{_commit_line(path)}", 2)
-    return sid, path, hashlib.sha256(raw).hexdigest()
+    src = _state_check(args.state) if args.state else None
+    return sid, path, hashlib.sha256(raw).hexdigest(), src
+
+
+def _state_check(arg: str) -> str:
+    """Packet S39 ruling 2: the state file is read and checked before anything is
+    written; a fault refuses the checkpoint (exit 2, every fault on stderr)."""
+    src = os.path.abspath(arg)
+    try:
+        with open(src, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        _die(f"checkpoint --respawn --state: cannot read {src}: "
+             f"{e.strerror or type(e).__name__}", 2)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        _die(f"checkpoint --respawn --state: {src} is not UTF-8 text", 2)
+    faults = statefile.check(text)
+    for f in faults:
+        print(f"error: checkpoint --respawn --state: {src}: {f}", file=sys.stderr)
+    if faults:
+        raise SystemExit(2)
+    return src
+
+
+def _chain_name() -> str | None:
+    """The launcher's chain, from CLAUDE_SESSION_CHAIN, when it is a chain's name."""
+    chain = os.environ.get(hooks.CHAIN_VAR) or ""
+    return chain if hooks.CHAIN_RE.match(chain) else None
+
+
+def _state_handoff(sid: str, src: str | None) -> None:
+    """Packet S39 ruling 2, before the marker: copy the checked state to the chain home
+    (with no chain, to the session's own directory, where no successor looks), or, with
+    no --state, clear a predecessor's copy so no later successor reads it; say which."""
+    from . import chain
+    state = resolver.state_dir(os.environ)
+    name = _chain_name()
+    home = chain.home(state, name) if name else None
+    if src is None:
+        if home is not None:
+            try:
+                statefile.clear(home)
+            except OSError as e:
+                print(f"note: an older state in {home} was not cleared: {e}", file=sys.stderr)
+        print("no --state: the successor orients from the charter alone", file=sys.stderr)
+        return
+    where = home or resolver.session_dir(state, sid)
+    try:
+        d = statefile.write(where, src, sid, time.time())
+    except OSError as e:
+        _die(f"checkpoint recorded, but the state was not copied: {e}")
+    copy = where / statefile.FILE
+    if home is not None:
+        print(f"state copied to {copy} ({d['bytes']} B); the successor reads it first")
+    else:
+        print(f"note: state copied to {copy} ({d['bytes']} B), but no launcher runs this "
+              "sitting, so the successor will not find it", file=sys.stderr)
 
 
 def _respawn_mark(sid: str, path: str, sha: str) -> str:
     """Write `sessions/<sid>/respawn.json` (exactly its five keys); return the line to print."""
-    chain = os.environ.get(hooks.CHAIN_VAR) or ""
-    chain = chain if hooks.CHAIN_RE.match(chain) else None
+    chain = _chain_name()
     marker = {"session": sid, "charter": path, "charter_sha256": sha,
               "written": time.time(), "chain": chain}
     sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
@@ -749,7 +815,9 @@ def cmd_checkpoint(args) -> int:
                  else "  (tree is dirty)" if dirty else "  (tree is clean)")
     print(line)
     if mark:
-        print(_respawn_mark(*mark))
+        sid, path, sha, src = mark
+        _state_handoff(sid, src)
+        print(_respawn_mark(sid, path, sha))
     return 0
 
 
@@ -862,6 +930,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "Next act must open on RESPAWN (needs --charter)")
     cp.add_argument("--charter", metavar="FILE",
                     help="the sitting's charter, read for --respawn")
+    cp.add_argument("--state", metavar="FILE",
+                    help="with --respawn, optional: the sitting's state for its successor "
+                         "(a title line, then ## Helpers, ## Gates, ## Last acts and ## Read "
+                         "first, under 8192 bytes), checked, then copied to the chain home")
     cp.set_defaults(func=cmd_checkpoint)
 
     sm = sub.add_parser("status", help="this session's meter: context, turns, zone")
