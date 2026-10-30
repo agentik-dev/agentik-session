@@ -126,8 +126,9 @@ def _alive(pid) -> bool:
 
 
 def _config(env) -> dict:
-    """The gate section's user layer (packet ruling 4); act 3 reads it."""
-    return dict(GATE_DEFAULTS)
+    """The gate section's user layer (packet ruling 4): ntfy_url, ntfy_topic, wall."""
+    from . import resolver
+    return resolver.gate_config(env)
 
 
 # ---- the queue ---------------------------------------------------------------

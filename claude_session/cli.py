@@ -906,7 +906,7 @@ def cmd_gate(args) -> int:
 
 
 def _gate_wall(env) -> int:
-    """`run`'s default wall: the gate section's user layer (act 3), else 5400."""
+    """`run`'s default wall: the gate section's user layer, else 5400."""
     from . import gate
     return gate._config(env)["wall"]
 

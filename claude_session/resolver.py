@@ -49,7 +49,10 @@ from . import models, rules
 from .yamlsubset import dump, load
 
 PLUGIN = "session"
-SECTIONS = ("session", "respeak", "decisions", "relay")
+# S38 ruling 4: `gate` (ntfy_url, ntfy_topic, wall) is a section; the runner reads its user
+# layer alone (gate_config), since it serves every repo.
+SECTIONS = ("session", "respeak", "decisions", "relay", "gate")
+GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
 DEPENDENT = ("respeak", "decisions", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
 # `relay`, and `relay` wins over it in one layer, with a warning; the resolved file carries
@@ -286,6 +289,28 @@ def _user_file(env) -> Path:
     home = Path(env.get("HOME") or Path.home())
     return cfgmod.pick(home / ".claude" / "agentik" / "profiles.yaml",
                        home / OLD_REPO_DIR / "profiles.yaml")
+
+
+def gate_config(env) -> dict:
+    """The gate section's user layer (design/gate-r1.md ruling 4): the top-level `gate:`
+    mapping of the user's profiles.yaml, read alone. A key unset, mistyped or unreadable
+    reads as its default (no ntfy, a 5400 s wall); it never raises."""
+    out = dict(GATE_DEFAULTS)
+    try:
+        doc = _read(_user_file(env), [])
+    except (ResolveError, OSError):
+        return out
+    g = doc.get("gate") if isinstance(doc, dict) else None
+    if not isinstance(g, dict):
+        return out
+    for k in ("ntfy_url", "ntfy_topic"):
+        v = g.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()
+    w = g.get("wall")
+    if isinstance(w, int) and not isinstance(w, bool) and w > 0:
+        out["wall"] = w
+    return out
 
 
 def _validate(s: dict) -> None:
