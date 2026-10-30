@@ -123,6 +123,7 @@ def cmd_status(args) -> int:
         if not args.json:
             print(meter.one_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
+            print(f"model: {mod.model_line(d, measure.load(sdir))}")   # S41: the band's facts
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
             from . import chain
             held = chain.held_line(state, env.get(hooks.CHAIN_VAR) or "", sid)

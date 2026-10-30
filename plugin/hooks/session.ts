@@ -1,9 +1,10 @@
 // The session plugin's hooks module (design/mod-r1.md §6 S1, packet M1): one read-only band
 // above the prompt. At session.start it runs `agentik-session mod start` (5 s), which writes
 // mod.json and prints the session's directory; the band reads meter.json and respawn.json
-// there and draws one line, and admission's band.json a second (packet S27b). It writes no
-// file, keeps no figure a decision reads, and needs no sibling plugin. The classic hooks in
-// hooks.json decide everything; this only shows.
+// there (and measure.json's window, packet S41) and draws one line, and admission's
+// band.json a second (packet S27b). It writes no file, keeps no figure a decision reads,
+// and needs no sibling plugin. The classic hooks in hooks.json decide everything; this
+// only shows.
 //
 // It is the plugin's one module (2.1.296 loads one per plugin and one unmatched hook per
 // event), and it carries admission's code too, under its own heading below (packet S25
@@ -58,13 +59,45 @@ export const limitNote = (limited: string | null, turnEnded: string | null): str
   return at === null || (ended !== null && at <= ended) ? null : LIMIT_NOTE
 }
 
+// Packet S41: the model and the window at the head of the line, the twin of mod.py's
+// model_name, window_label and facts (one fixture in session.test.ts pins both). The model
+// is meter.json's, `claude-<family>-<major>-<minor>` shortened, any other id as given and
+// clipped; the window is meter.json's (the one its ceilings apply), `1M` or `<n>k`, and the
+// engine's (measure.json's context.window) beside it in brackets when the two labels differ.
+const MODEL_ID = /^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/
+const MODEL_CLIP = 24
+export const modelName = (v: unknown): string | null => {
+  if (typeof v !== 'string' || v === '') return null
+  const m = MODEL_ID.exec(v)
+  if (m) return `${m[1]} ${m[2]}.${m[3]}`
+  return v.length > MODEL_CLIP ? v.slice(0, MODEL_CLIP - 1) + '…' : v
+}
+export const windowLabel = (v: unknown): string | null => {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return null
+  return v === 1000000 ? '1M' : `${Math.floor(v / 1000)}k`
+}
+const obj = (v: unknown): any => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
+export const lineFacts = (m: any, measure: any): string | null => {
+  const meter = obj(m)
+  const name = modelName(meter?.model)
+  const w = windowLabel(meter?.window)
+  const e = windowLabel(obj(obj(measure)?.context)?.window)
+  const win = w !== null && e !== null && e !== w ? `${w} (engine ${e})` : w ?? (e !== null ? `engine ${e}` : null)
+  const parts = [name, win].filter((p): p is string => p !== null)
+  return parts.length ? parts.join(' · ') : null
+}
+
 export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
-                         limited: string | null = null, turnEnded: string | null = null): string => {
+                         limited: string | null = null, turnEnded: string | null = null,
+                         measure: string | null = null): string => {
   let m: any = null
   try { m = meter === null ? null : JSON.parse(meter) } catch { m = null }
   const note = limitNote(limited, turnEnded)
   if (!m || typeof m !== 'object' || m.zone === undefined) return note ? `session: ${note}` : NO_METER
-  let line = `session: ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${note ?? m.zone}`
+  let x: any = null
+  try { x = measure === null ? null : JSON.parse(measure) } catch { x = null }
+  const facts = lineFacts(m, x)
+  let line = `session: ${facts ? `${facts} · ` : ''}ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${note ?? m.zone}`
   if (respawn) line += ' · respawn marked'
   const age = Math.floor((nowMs - Date.parse(String(m.ts))) / 1000)
   if (Number.isFinite(age) && age > STALE_S) line += ` · ${age}s old`
@@ -351,10 +384,12 @@ export const register: Register = on => {
       if (limited !== null) {
         try { ended = String(await $.fs.read(`${dir}/turn-ended.json`)) } catch { ended = null }
       }
+      let measure: string | null = null    // S41: the engine's window, display only
+      try { measure = String(await $.fs.read(`${dir}/measure.json`)) } catch { measure = null }
       const at = bandPath(dir)
       if (at) { try { band = String(await $.fs.read(at)) } catch { band = null } }
       const now = Number(await $.clock.now())
-      rows.push(bandLine(meter, respawn, now, limited, ended))
+      rows.push(bandLine(meter, respawn, now, limited, ended, measure))
       const line = admissionLine(band, now, /\/sessions\/([^/]+)\/?$/.exec(dir)?.[1] ?? '')
       if (line !== null) rows.push(line)
     }
