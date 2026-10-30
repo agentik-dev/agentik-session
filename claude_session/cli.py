@@ -267,16 +267,19 @@ def _rules_section(cwd: str) -> dict | None:
         return None
 
 
-def _warn(path, section: dict | None) -> None:
+def _warn(path, section: dict | None) -> bool:
+    """Print the charter's warnings; True when the first is the red (S40)."""
     if section is None:
-        return
+        return False
     try:
         with open(path, "rb") as fh:
             raw = fh.read()
     except OSError:
-        return
-    for w in charter.warnings(raw, section):
+        return False
+    found = charter.warnings(raw, section)
+    for w in found:
         print(f"{path}: warning: {w}", file=sys.stderr)
+    return bool(found) and found[0].startswith(charter.RED)
 
 
 def cmd_rules(args) -> int:
@@ -295,7 +298,7 @@ def cmd_charter(args) -> int:
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
-        bad = 0
+        bad = red = 0
         section = _rules_section(os.getcwd())
         for f in args.args:
             try:
@@ -305,8 +308,9 @@ def cmd_charter(args) -> int:
             for r in refusals:
                 print(f"{f}: refused: {r}", file=sys.stderr)
             bad += bool(refusals)
-            _warn(f, section)
-        return 2 if bad else 0
+            red += _warn(f, section)
+        # S40: 2 a refusal, 1 the red (a WAITING Next act beside a ready row), 0 otherwise.
+        return 2 if bad else 1 if red else 0
     cwd = os.getcwd()
     if args.action == "open":
         if len(args.args) != 1:

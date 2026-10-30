@@ -1,15 +1,20 @@
 """The sitting's charter: open one, check its shape, close it (overhaul-r1 D10).
 
-The port of the `charter-close` shape check (overhaul-r1 D10). The charter has five
+The port of the `charter-close` shape check (overhaul-r1 D10). The charter has six
 parts and nothing else:
   1. the title line        # Sitting <date>-<n>: <repo>, <component>
   2. the table             goal, budget, pin, window, agents
   3. ## Done-ness
   4. ## Handover
-  5. ## Next act
-Refusals, the part named: a charter of 4,096 bytes or more (doclint's `>=`); a missing part; a table
-missing one of its five rows. An empty Done-ness or Handover is not refused
-here: `open` seeds the Handover's open-by-level line (none with priority off); `close` fills it.
+  5. ## While waiting      (S40; a charter opened before alpha.23 has none)
+  6. ## Next act
+Refusals, the part named: a charter of 4,096 bytes or more (doclint's `>=`); a missing part
+other than While waiting; a table missing one of its five rows. An empty Done-ness or Handover
+is not refused here: `open` seeds the Handover's open-by-level line (none with priority off)
+and While waiting's `- none`; `close` fills the Handover. While waiting's lines are
+`- ready: <row> (<repo>, S<n>)` (at most three), `- owed: <item>; <what it needs>`, or
+`- none` alone; a Next act of WAITING beside any other line is the red (`RED`), which
+`charter check` exits 1 on.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ CEILING = 4096
 TABLE_ROWS = ("goal", "budget", "pin", "window", "agents")
 ROW_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 TITLE_RE = re.compile(r"^# Sitting (\d{4}-\d{2}-\d{2})-(\d+): (.+)$")
-PARTS = ((3, "## Done-ness"), (4, "## Handover"), (5, "## Next act"))
+WHILE_WAITING = "## While waiting"
+PARTS = ((3, "## Done-ness"), (4, "## Handover"), (5, WHILE_WAITING), (6, "## Next act"))
 DEFAULT_DIR = "history/sittings"
 # A RESPAWN close (respawn-r1 §3.2): the Next act's first non-blank line opens on it.
 RESPAWN = re.compile(r"^RESPAWN(?=[:.\s]|$)")
@@ -32,6 +38,12 @@ RESPAWN = re.compile(r"^RESPAWN(?=[:.\s]|$)")
 WAITING = re.compile(r"^WAITING(?=[:.\s]|$)")
 WAITING_LINE = re.compile(r"^WAITING ([1-9][0-9]*): ([^;]*\S[^;]*); (.*\S.*)$")
 NEXT_ACT = "## Next act"
+# The While waiting section (S40): its three line shapes, and the red of a WAITING beside it.
+NONE = "- none"
+READY_LINE = re.compile(r"^- ready: (\S+) \(([^,()]*\S[^,()]*), S([1-9][0-9]*)\)$")
+OWED_LINE = re.compile(r"^- owed: ([^;]*\S[^;]*); (.*\S.*)$")
+MAX_READY = 3
+RED = "WAITING while ready"
 
 
 class CharterError(ValueError):
@@ -66,8 +78,57 @@ def check_text(raw: bytes) -> list[str]:
         out.extend("part 2 (the table) is missing its '%s' row" % row
                    for row in TABLE_ROWS if row not in table)
     heads = {line.rstrip() for line in lines}
-    out.extend("part %d (%s) is missing" % (n, h) for n, h in PARTS if h not in heads)
+    out.extend("part %d (%s) is missing" % (n, h) for n, h in PARTS
+               if h not in heads and h != WHILE_WAITING)
     return out
+
+
+def while_waiting(raw: bytes) -> list[str] | None:
+    """The While waiting section's non-blank lines, their trailing blanks cut; None when
+    the charter has no such section (opened before alpha.23)."""
+    lines = raw.decode("utf-8", "replace").splitlines()
+    start = next((i for i, l in enumerate(lines) if l.rstrip() == WHILE_WAITING), None)
+    if start is None:
+        return None
+    out = []
+    for line in lines[start + 1:]:
+        if line.startswith("## "):
+            break
+        if line.strip():
+            out.append(line.rstrip())
+    return out
+
+
+def _while_waiting_shape(lines: list[str] | None) -> list[str]:
+    """The section's shape warnings (S40 ruling 1), each naming its line."""
+    if lines is None:
+        return ["no While waiting section (opened before alpha.23): add it with - none"]
+    if not lines:
+        return ["While waiting is empty: write - none, or the ready rows and owed items"]
+    out = []
+    if NONE in lines and len(lines) > 1:
+        out.append(f"While waiting has '{NONE}' beside other lines: drop '{NONE}' "
+                   "or the others")
+    shape = ("'- ready: <row> (<repo>, S<n>)', '- owed: <item>; <what it needs>' "
+             f"or '{NONE}' alone")
+    out.extend(f"While waiting line is not {shape}: {line}" for line in lines
+               if line != NONE and not READY_LINE.match(line) and not OWED_LINE.match(line))
+    ready = sum(bool(READY_LINE.match(line)) for line in lines)
+    if ready > MAX_READY:
+        out.append(f"While waiting lists {ready} ready rows, at most {MAX_READY}: keep the "
+                   "next three")
+    return out
+
+
+def _red(lines: list[str] | None) -> str | None:
+    """The red of a WAITING Next act beside a While waiting line other than `- none`."""
+    others = [line for line in lines or () if line != NONE]
+    if not others:
+        return None
+    first = next((line for line in others if READY_LINE.match(line) or OWED_LINE.match(line)),
+                 others[0])
+    return (f"{RED}: {first}; take it, since WAITING is legal only when While waiting "
+            f"reads {NONE}")
 
 
 def next_act_line(text: str) -> str | None:
@@ -95,12 +156,15 @@ def waiting(line: str | None) -> int | None:
 
 
 def warnings(raw: bytes, session: dict) -> list[str]:
-    """What `check` and `close` print on stderr, their exit unchanged (S21): no
-    `- open by level:` line under Handover (priority on); a Next act opening WAITING
-    misshapen, or at n of `pacing.waiting` or more (pacing on), whose line says to wake
-    at the cache's idle limit and commit the charter: a wait never stops the loop (S36).
-    A well-formed WAITING whose <what> names the usage meter (S29) gets its own line at
-    any n, never the idle limit's: a meter wait is not WAITING."""
+    """What `check` and `close` print on stderr (S21): no `- open by level:` line under
+    Handover (priority on); a Next act opening WAITING misshapen, or at n of
+    `pacing.waiting` or more (pacing on), whose line says to wake at the cache's idle
+    limit and commit the charter: a wait never stops the loop (S36). A well-formed
+    WAITING whose <what> names the usage meter (S29) gets its own line at any n, never
+    the idle limit's: a meter wait is not WAITING. With pacing on (S40): the While
+    waiting section's shape, and the red, first in the list: a Next act of WAITING
+    (n of 1 or more, or misshapen) beside a line other than `- none`. `check` exits 1
+    on the red; every other line, and `close`, leave the exit alone."""
     text = raw.decode("utf-8", "replace")
     priority, pacing = rules.parts(session)
     out = []
@@ -109,6 +173,9 @@ def warnings(raw: bytes, session: dict) -> list[str]:
                    f"list the open items by level, highest first, or '{rules.SEED}'")
     line = next_act_line(text)
     n = waiting(line) if pacing["enabled"] else None
+    lines = while_waiting(raw) if pacing["enabled"] else []
+    if pacing["enabled"]:
+        out.extend(_while_waiting_shape(lines))
     if n:
         what = WAITING_LINE.match(line.rstrip()).group(2)
         if re.search(r"\b(room for|meter|usage limit|five-hour|5h)", what, re.I):
@@ -123,7 +190,8 @@ def warnings(raw: bytes, session: dict) -> list[str]:
                    "it: wake at the cache's idle limit, bring the charter current and commit "
                    "it; a wait never stops the loop or closes the sitting, only the checkpoint "
                    "does")
-    return out
+    red = _red(lines) if n is not None else None
+    return [red] + out if red else out
 
 
 def check(path) -> list[str]:
@@ -201,6 +269,9 @@ def open(dir, goal: str, section: dict, head: str | None,
         "",
         "## Handover",
         *([rules.SEED] if rules.parts(section)[0]["enabled"] else []),
+        "",
+        WHILE_WAITING,
+        NONE,
         "",
         "## Next act",
         "The first act toward the goal; bring this charter current at every commit.",
