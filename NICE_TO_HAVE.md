@@ -252,4 +252,4 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - Packet S38's runner has five unreproduced windows, no code for them yet: a runner dying between `popen` and the `runner.json` write runs its entry twice; dying after `result.json` but before the inbox write and ntfy drops the message; `_recover` kills the recorded pgid even when a result exists (pid reuse); `inbox/read/` is never pruned; `runner.log` is 0644.
 
 ## doclint's docstring still says five parts (2026-10-30, packet S40's refuter round 1; S4)
-- `scripts/doclint:5` says "five-part shape", but since packet S40 the charter has six parts (`## While waiting`, optional before alpha.23); doclint is outside S40's may touch, so no code was changed.
+- `scripts/doclint:5` says "five-part shape", but since packet S40 the charter has six parts (`## While waiting`, optional before alpha.24); doclint is outside S40's may touch, so no code was changed.

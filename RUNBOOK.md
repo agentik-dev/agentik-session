@@ -323,7 +323,7 @@ prompt cache's lifetime.
   on stderr, their exit unchanged, when the Handover line is missing or the
   Next act's WAITING is misshapen or at `waiting` or past it, where the line
   says to wake at the idle limit and commit the charter, and on a While
-  waiting line of another shape. A charter opened before 2.0.0-alpha.23 has
+  waiting line of another shape. A charter opened before 2.0.0-alpha.24 has
   no While waiting section: `check` passes it with one warning to add it
   with `- none`. One line is red, with `session.pacing` on: a Next act of
   WAITING while While waiting holds any line but `- none` prints `WAITING

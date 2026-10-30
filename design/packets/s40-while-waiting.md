@@ -38,3 +38,5 @@ Transcripts under `~/.claude/projects`; `~/.local/state` beyond reading; the pri
 ## 6. Report (one table, at most five bullets, under 600 words)
 
 Acts with commit shas; acceptance output verbatim with the measured baseline; the red-before evidence; anything filed outside the packet, with its NICE line.
+
+Amendment 2 (2026-10-30, the hq sitting's ruling, reversible): the five pins, README and its source read 2.0.0-alpha.24, and alpha.23 is skipped; the acceptance row's two version greps read alpha.24 for alpha.23. Reason: Amendment 1 (c5266f9) changed `plugin/skills/session/SKILL.md` after act 4 (a011966) set alpha.23, so `scripts/plugin-version-check` asks for a bump, and alpha.23 was never installed or published.

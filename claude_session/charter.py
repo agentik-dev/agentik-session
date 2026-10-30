@@ -6,7 +6,7 @@ parts and nothing else:
   2. the table             goal, budget, pin, window, agents
   3. ## Done-ness
   4. ## Handover
-  5. ## While waiting      (S40; a charter opened before alpha.23 has none)
+  5. ## While waiting      (S40; a charter opened before alpha.24 has none)
   6. ## Next act
 Refusals, the part named: a charter of 4,096 bytes or more (doclint's `>=`); a missing part
 other than While waiting; a table missing one of its five rows. An empty Done-ness or Handover
@@ -85,7 +85,7 @@ def check_text(raw: bytes) -> list[str]:
 
 def while_waiting(raw: bytes) -> list[str] | None:
     """The While waiting section's non-blank lines, their trailing blanks cut; None when
-    the charter has no such section (opened before alpha.23)."""
+    the charter has no such section (opened before alpha.24)."""
     lines = raw.decode("utf-8", "replace").splitlines()
     start = next((i for i, l in enumerate(lines) if l.rstrip() == WHILE_WAITING), None)
     if start is None:
@@ -114,7 +114,7 @@ def _while_waiting_shape(lines: list[str] | None, text: str = "") -> list[str]:
         near = _near_miss(text)
         if near is not None:
             return [f"heading '{near}' is not '{WHILE_WAITING}'"]
-        return ["no While waiting section (opened before alpha.23): add it with - none"]
+        return ["no While waiting section (opened before alpha.24): add it with - none"]
     if not lines:
         return ["While waiting is empty: write - none, or the ready rows and owed items"]
     out = []

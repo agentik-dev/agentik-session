@@ -130,7 +130,7 @@ WAITING is legal only when While waiting reads `- none`: with a ready row or
 an owed item there, the Next act is that item, and, with `session.pacing` on,
 `check` exits 1 on a Next act of WAITING beside any line but `- none`
 (`WAITING while ready: <the line>`). A charter
-opened before 2.0.0-alpha.23 has no While waiting section; `check` passes it
+opened before 2.0.0-alpha.24 has no While waiting section; `check` passes it
 and warns: add it with `- none`.
 
 The file stays under 4,096 bytes: move text out, never widen the ceiling.

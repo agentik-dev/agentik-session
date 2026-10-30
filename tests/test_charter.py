@@ -605,7 +605,7 @@ def test_s36_waiting_at_n_never_stops_the_loop(n, w, warned):
 
 S40_READY = "- ready: r1 (repo, S3)"
 S40_OWED = "- owed: the runsheet for r2; a draft, no gate"
-S40_OLD = "no While waiting section (opened before alpha.23): add it with - none"
+S40_OLD = "no While waiting section (opened before alpha.24): add it with - none"
 
 
 def test_s40_open_writes_the_section(tmp_path):
