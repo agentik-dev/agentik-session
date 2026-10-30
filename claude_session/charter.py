@@ -99,9 +99,21 @@ def while_waiting(raw: bytes) -> list[str] | None:
     return out
 
 
-def _while_waiting_shape(lines: list[str] | None) -> list[str]:
-    """The section's shape warnings (S40 ruling 1), each naming its line."""
+def _near_miss(text: str) -> str | None:
+    """A heading that is nearly `## While waiting` (its case, or a tail after it), or None."""
+    for line in text.splitlines():
+        s = line.strip()
+        if line.rstrip() != WHILE_WAITING and s.lower().startswith(WHILE_WAITING.lower()):
+            return line.rstrip()
+    return None
+
+
+def _while_waiting_shape(lines: list[str] | None, text: str = "") -> list[str]:
+    """The section's shape warnings (S40 ruling 1), each naming its line or heading."""
     if lines is None:
+        near = _near_miss(text)
+        if near is not None:
+            return [f"heading '{near}' is not '{WHILE_WAITING}'"]
         return ["no While waiting section (opened before alpha.23): add it with - none"]
     if not lines:
         return ["While waiting is empty: write - none, or the ready rows and owed items"]
@@ -126,7 +138,9 @@ def _red(lines: list[str] | None) -> str | None:
     if not others:
         return None
     first = next((line for line in others if READY_LINE.match(line) or OWED_LINE.match(line)),
-                 others[0])
+                 None)
+    if first is None:
+        return f"{RED}: {others[0]} (not a ready or owed shape: fix the line or take it)"
     return (f"{RED}: {first}; take it, since WAITING is legal only when While waiting "
             f"reads {NONE}")
 
@@ -161,10 +175,10 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     `pacing.waiting` or more (pacing on), whose line says to wake at the cache's idle
     limit and commit the charter: a wait never stops the loop (S36). A well-formed
     WAITING whose <what> names the usage meter (S29) gets its own line at any n, never
-    the idle limit's: a meter wait is not WAITING. With pacing on (S40): the While
-    waiting section's shape, and the red, first in the list: a Next act of WAITING
-    (n of 1 or more, or misshapen) beside a line other than `- none`. `check` exits 1
-    on the red; every other line, and `close`, leave the exit alone."""
+    the idle limit's: a meter wait is not WAITING. Whatever pacing says (S40): the
+    While waiting section's shape. With pacing on, the red, first in the list: a Next
+    act of WAITING (n of 1 or more, or misshapen) beside a line other than `- none`.
+    `check` exits 1 on the red; every other line, and `close`, leave the exit alone."""
     text = raw.decode("utf-8", "replace")
     priority, pacing = rules.parts(session)
     out = []
@@ -173,9 +187,8 @@ def warnings(raw: bytes, session: dict) -> list[str]:
                    f"list the open items by level, highest first, or '{rules.SEED}'")
     line = next_act_line(text)
     n = waiting(line) if pacing["enabled"] else None
-    lines = while_waiting(raw) if pacing["enabled"] else []
-    if pacing["enabled"]:
-        out.extend(_while_waiting_shape(lines))
+    lines = while_waiting(raw)
+    out.extend(_while_waiting_shape(lines, text))
     if n:
         what = WAITING_LINE.match(line.rstrip()).group(2)
         if re.search(r"\b(room for|meter|usage limit|five-hour|5h)", what, re.I):

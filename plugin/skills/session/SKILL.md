@@ -127,8 +127,9 @@ The shape, and nothing else:
 6. `## Next act`, one line.
 
 WAITING is legal only when While waiting reads `- none`: with a ready row or
-an owed item there, the Next act is that item, and `check` exits 1 on a Next
-act of WAITING beside one (`WAITING while ready: <the line>`). A charter
+an owed item there, the Next act is that item, and, with `session.pacing` on,
+`check` exits 1 on a Next act of WAITING beside any line but `- none`
+(`WAITING while ready: <the line>`). A charter
 opened before 2.0.0-alpha.23 has no While waiting section; `check` passes it
 and warns: add it with `- none`.
 
@@ -180,7 +181,8 @@ whole, as resolved.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
   the Handover line is missing or a WAITING is misshapen or at `waiting` or
-  past it, and their exit is unchanged.
+  past it, and their exit is unchanged except the red of a WAITING Next act
+  beside a While waiting line, which exits 1.
 - Any layer overrides them, never `set`: `priority: {enabled: false}`, one
   level's quoted text under `priority.levels`, `pacing: {fallback: 2400}`.
 

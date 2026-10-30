@@ -636,7 +636,7 @@ def test_s40_a_charter_before_alpha23_passes_with_one_warning(tmp_path, monkeypa
     raw = (S21_HEAD + S21_LISTED + "## Next act\nthe next act\n").encode()
     assert charter.check_text(raw) == []
     assert charter.warnings(raw, SECTION) == [S40_OLD]
-    assert charter.warnings(raw, {**SECTION, "pacing": {"enabled": False}}) == []
+    assert charter.warnings(raw, {**SECTION, "pacing": {"enabled": False}}) == [S40_OLD]
     _s21_repo(tmp_path, monkeypatch)
     p = _s21_charter(tmp_path, waiting="")
     rc, out, err = run("charter", "check", str(p))
@@ -726,3 +726,31 @@ def test_s40_docs_say_the_section():
         text = (ROOT / rel).read_text()
         assert "While waiting" in text and "- none" in text, rel
     assert "While waiting" in (ROOT / "design" / "overhaul-r1.md").read_text()
+
+
+# ---- S40 Amendment 1: the shapes whatever pacing says, a near-miss heading, the red's words
+
+def test_s40_shape_warnings_whatever_pacing_says():
+    body = "## While waiting\n- none\n- prose\n\n"
+    off = {**SECTION, "pacing": {"enabled": False}}
+    got = _s29_warns("WAITING 1: CI; the run's status", off, waiting=body)
+    assert len(got) == 2 and "'- none' beside other lines" in got[0] and got[1].endswith(": - prose")
+    assert not any(charter.RED in g for g in got)
+    assert charter.RED in _s29_warns("WAITING 1: CI; the run's status", waiting=body)[0]
+
+
+@pytest.mark.parametrize("head", ["## While Waiting", "## While waiting (S40)", "## while waiting"])
+def test_s40_a_near_miss_heading_is_named(head):
+    body = head + "\n- none\n\n"
+    assert _s29_warns("the next act", waiting=body) == [f"heading '{head}' is not '## While waiting'"]
+
+
+def test_s40_a_misshapen_line_reds_and_says_so():
+    got = _s29_warns("WAITING 1: CI; the run's status", waiting="## While waiting\na line\n\n")
+    assert got[0] == ("WAITING while ready: a line (not a ready or owed shape: fix the line or "
+                      "take it)")
+    assert len(got) == 2 and got[1].endswith(": a line")
+
+
+def test_s40_no_section_under_waiting_is_no_red():
+    assert _s29_warns("WAITING 1: CI; the run's status", waiting="") == [S40_OLD]

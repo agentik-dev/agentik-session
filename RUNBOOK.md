@@ -325,9 +325,10 @@ prompt cache's lifetime.
   says to wake at the idle limit and commit the charter, and on a While
   waiting line of another shape. A charter opened before 2.0.0-alpha.23 has
   no While waiting section: `check` passes it with one warning to add it
-  with `- none`. One line is red: a Next act of WAITING while While waiting
-  lists a ready row or an owed item prints `WAITING while ready: <the
-  line>` first, and `charter check` exits 1 on it (2 on a refusal); `close`
+  with `- none`. One line is red, with `session.pacing` on: a Next act of
+  WAITING while While waiting holds any line but `- none` prints `WAITING
+  while ready: <the line>` first, and `charter check` exits 1 on it (2 on
+  a refusal); `close`
   keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
 - Upgrade the CLI first (`make install`): it prints the block. The plugin's

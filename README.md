@@ -136,7 +136,7 @@ One file per sitting, `history/sittings/<date>-<n>.md` (the profile's `charter.d
 - With `session.priority` on, `open` writes `- open by level: none yet` under Handover: open items by level, highest first.
 - `check` and `close` warn on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`.
 
-Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## While waiting`, `- none` or ready rows and owed items (WAITING beside one is red); `## Next act`.
+Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## While waiting`, `- none` or ready/owed lines (WAITING beside any other line is red); `## Next act`.
 
 ## Reading records
 
@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue: one at a time per sta
 
 ## Status
 
-Status: version `v2.0.0-alpha.23`, rendered `2026-10-14`, `1478` tests in the suite.
+Status: version `v2.0.0-alpha.23`, rendered `2026-10-14`, `1484` tests in the suite.
 
 ## Credit
 
