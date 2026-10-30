@@ -870,6 +870,60 @@ def cmd_run(args) -> int:
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
 
+def cmd_gate(args) -> int:
+    """`agentik session gate run|wait|status` (design/gate-r1.md): the per-Mac gate queue.
+    `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (entry 25),
+    1 past --timeout; `serve` is the runner, internal."""
+    from pathlib import Path
+    from . import gate
+    env = os.environ
+    root = Path(args.root) if getattr(args, "root", None) else resolver.state_dir(env)
+    verb = args.gate_verb
+    if verb == "serve":
+        return gate.serve(root)
+    if verb == "wait":
+        return _gate_wait(root, args.id, args.timeout, args.json)
+    if verb == "status":
+        gate.spawn_serve(root)
+        st = gate.status(root, time.time())
+        print(json.dumps(st, indent=2) if args.json else "\n".join(gate.status_lines(st)))
+        return 0
+    command = list(args.command)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    try:
+        caller = gate.resolve_caller(args, env)
+        wall = args.wall if args.wall is not None else _gate_wall(env)
+        e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
+                         args.label or "", caller, time.time())
+    except gate.GateError as err:
+        _die(f"gate run: {err}", 2)
+    gate.spawn_serve(root)
+    print(f"queued {e['id']} position {gate.position(root, e['id'])} repo {e['repo']} "
+          f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
+          flush=True)
+    return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _gate_wall(env) -> int:
+    """`run`'s default wall: the gate section's user layer (act 3), else 5400."""
+    from . import gate
+    return gate._config(env)["wall"]
+
+
+def _gate_wait(root, gid: str, timeout, as_json: bool) -> int:
+    from . import gate
+    rc, result = gate.wait(root, gid, timeout=timeout)
+    if rc == 2:
+        _die(f"gate wait: no gate {gid[:40]!r} under {gate.gate_dir(root)}; "
+             "agentik session gate status lists them", 2)
+    if rc == 1:
+        _die(f"gate wait: {gid} is still queued or running after {timeout:g} s; "
+             "agentik session gate status shows it", 1)
+    print(json.dumps(result, indent=2) if as_json else gate.wait_line(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="agentik session",
@@ -1004,6 +1058,31 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("claude_args", nargs="*",
                     help="claude's arguments after --, sent the same at every start")
     rn.set_defaults(func=cmd_run)
+
+    gt = sub.add_parser("gate", help="the gate queue: one gate command at a time per Mac, "
+                                      "its result to the caller")
+    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status")
+    gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
+    gr.add_argument("repo", help="the repo the command runs in")
+    gr.add_argument("--session", metavar="SID",
+                    help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
+    gr.add_argument("--lock", action="append", metavar="PATH",
+                    help="wait while PATH exists (repeatable)")
+    gr.add_argument("--wall", type=_positive_int, metavar="SECONDS",
+                    help="cut the command after SECONDS (default: gate.wall, 5400)")
+    gr.add_argument("--label", metavar="TEXT", help="a label for status")
+    gr.add_argument("--wait", action="store_true", help="then wait for the result")
+    gr.add_argument("command", nargs="*", help="the command after --, run as argv")
+    gw = gsub.add_parser("wait", help="wait for a gate's result and print its line")
+    gw.add_argument("id")
+    gw.add_argument("--timeout", type=float, metavar="SECONDS",
+                    help="give up after SECONDS (exit 1)")
+    gw.add_argument("--json", action="store_true", help="print result.json")
+    gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
+    gs.add_argument("--json", action="store_true")
+    gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
+    gv.add_argument("--root", help=argparse.SUPPRESS)
+    gt.set_defaults(func=cmd_gate)
 
     hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks
     hk.add_argument("event", choices=sorted(hooks.HANDLERS))

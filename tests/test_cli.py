@@ -695,6 +695,7 @@ def test_gate_run_wait_status_in_process(tmp_path, monkeypatch):
     import pathlib
     from claude_session import gate, resolver
     monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     rc, out, _ = run("gate", "run", str(tmp_path), "--label", "t", "--",
                      "sh", "-c", "echo hi; exit 3")
     assert rc == 0 and out.startswith("queued ")
