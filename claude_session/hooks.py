@@ -356,6 +356,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
+    line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return {"hookSpecificOutput": {"hookEventName": "SessionStart",
                                    "additionalContext": line}}
 
@@ -370,6 +371,27 @@ def _charter_reminder(session: dict, cwd) -> str:
         return ""
     return (f"; charter: none open today under {d}, run "
             f'agentik-session charter open "<goal>"')
+
+
+def _state_reminder(env, now, sid=None) -> str:
+    """S39 ruling 3: under a launcher's chain, a predecessor's state copied to the chain
+    home within 24 h is named, to be read first; "" otherwise, and on any error. A helper
+    (CLAUDE_SESSION_HELPER=1) inherits the chain's variable but is not the successor."""
+    name = str(env.get(CHAIN_VAR) or "")
+    if not CHAIN_RE.match(name) or env.get("CLAUDE_SESSION_HELPER") == "1":
+        return ""
+    try:
+        from . import chain, state
+        home = chain.home(resolver.state_dir(env), name)
+        d = state.fresh(home, sid or env.get("CLAUDE_CODE_SESSION_ID"), now) if home else None
+        if d is None:
+            return ""
+        at = time.strftime("%H:%M", time.localtime(d["written"]))
+    except Exception:                                   # noqa: BLE001
+        return ""
+    return (f"; state: {home / state.FILE} ({d['bytes']} B from {d['from_session'][:8]}, "
+            f"{at}): read it first, then the charter's Next act, nothing else before the "
+            "first act")
 
 
 def _charter(resolved: dict) -> str:
