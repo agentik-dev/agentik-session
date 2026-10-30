@@ -1245,3 +1245,36 @@ def test_s37_config_edit_lowering_the_floor_lifts_the_hold(fake, monkeypatch):
     ((t, sig),) = fx.procs[0].signals
     assert sig == TERM and 100 <= t - T0 <= 102, t - T0
     assert len(fx.procs) == 2 and _held() is None
+
+
+# ---- S39 Amendment 1: the launcher hands the state to its successor ------------------
+
+S39_TEXT = ("# State for the successor of x, 2026-10-29 21:40\n\n## Helpers\n- none\n\n"
+            "## Gates\n- none\n\n## Last acts\n- none\n\n## Read first\n"
+            "- README.md lines 1-9\n- read nothing else before the first act\n")
+
+
+def test_s39_the_launcher_hands_the_state_on_and_deletes_a_stale_one(tmp_path, monkeypatch):
+    from claude_session import state
+    home, src, seen = _state() / "respawn" / "c1", tmp_path / "s.md", []
+    src.write_text(S39_TEXT)
+    state.write(home, src, "an-earlier-sitting", T0 - 60)              # a stale state
+    look = lambda fx, p: seen.append(json.loads((home / "state.json").read_text())
+                                     if (home / "state.json").exists() else None)
+    put = lambda fx, p: state.write(home, src, p.sid, fx.t)             # the sitting's own
+    charter_ = tmp_path / "c.md"
+    fx = _fx(monkeypatch, [[(1, look), (5, put)] + respawn_seq(charter_) + [end(3600)],
+                           [(1, look), end(2)]])
+    _frun(fx, FAST)
+    a, b = fx.procs[0].sid, fx.procs[1].sid
+    assert seen[0] is None                                   # deleted at the first start
+    assert (seen[1]["from_session"], seen[1]["to_session"]) == (a, b)
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CLAUDE_SESSION_DEPTH", "RELAY_ROW", "CLAUDE_SESSION_HELPER")}
+    env["CLAUDE_SESSION_CHAIN"] = "c1"
+    assert hooks._state_reminder(env, T0, sid=b).startswith(f"; state: {home / 'state.md'}")
+    assert hooks._state_reminder(env, T0, sid=a) == ""
+    assert hooks._state_reminder(env, T0, sid="a-third-session") == ""
+    fx2 = _fx(monkeypatch, [[(1, look), end(2)]])            # a later chain, the same name
+    _frun(fx2, FAST)
+    assert seen[2] is None and not (home / "state.md").exists()

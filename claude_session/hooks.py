@@ -199,7 +199,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "permissionDecisionReason": _wrap_up(zone),
             },
             "systemMessage": (
-                f"agentik-session [{cfg.name}]: blocked a {tool} spawn — "
+                f"agentik-session [{cfg.name}]: blocked a {tool} spawn: "
                 "the rest is reserved for wrapping up."),
         }
 
@@ -291,7 +291,7 @@ def user_prompt_submit(payload: dict) -> dict:
         bits.append(
             f"{count} prompts since the last checkpoint (cadence is {cadence} in "
             f"the '{zone}' zone). Commit or durably record what is done, then "
-            "run `agentik-session checkpoint` — so this session can be handed off "
+            "run `agentik-session checkpoint`, so this session can be handed off "
             "at any moment rather than only when it is convenient.")
 
     if not bits:
@@ -356,6 +356,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
+    line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return {"hookSpecificOutput": {"hookEventName": "SessionStart",
                                    "additionalContext": line}}
 
@@ -370,6 +371,32 @@ def _charter_reminder(session: dict, cwd) -> str:
         return ""
     return (f"; charter: none open today under {d}, run "
             f'agentik-session charter open "<goal>"')
+
+
+def _state_reminder(env, now, sid=None) -> str:
+    """S39 ruling 3 and Amendment 1: under a launcher's chain, in a main-thread sitting
+    (state.main_sitting), the state the launcher handed to this session is named, to be
+    read first, and a copy that does not match its record is said; "" otherwise, and on
+    any error. `now` is kept for the interface: no clock rule since Amendment 1."""
+    name = str(env.get(CHAIN_VAR) or "")
+    if not CHAIN_RE.match(name):
+        return ""
+    try:
+        from . import chain, state
+        if not state.main_sitting(env):
+            return ""
+        home = chain.home(resolver.state_dir(env), name)
+        how, d = state.handed(home, sid or env.get("CLAUDE_CODE_SESSION_ID"))
+        if how == "mismatch":
+            return f"; state: {home / state.FILE} does not match its record"
+        if how != "ok":
+            return ""
+        at = time.strftime("%H:%M", time.localtime(d["written"]))
+    except Exception:                                   # noqa: BLE001
+        return ""
+    return (f"; state: {home / state.FILE} ({d['bytes']} B from {d['from_session'][:8]}, "
+            f"{at}): read it first, then the charter's Next act, nothing else before the "
+            "first act")
 
 
 def _charter(resolved: dict) -> str:

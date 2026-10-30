@@ -572,3 +572,118 @@ def test_s37_status_says_a_respawn_hold(case, tmp_path, monkeypatch):
     assert rc == 0 and lines[0].startswith(f"session {SID}"), out
     held = [line for line in lines if line.startswith("respawn held")]
     assert held == (["respawn held: floor since 07:05"] if case == "held" else []), out
+
+
+# ---- S39: `checkpoint --respawn --state` -------------------------------------
+
+S39_STATE = ("# State for the successor of cli-sess, 2026-10-29 21:40\n\n## Helpers\n- none\n\n"
+             "## Gates\n- none\n\n## Last acts\n- e3d82cb the packet\n\n## Read first\n"
+             "- RUNBOOK.md lines 320-380\n- read nothing else before the first act\n")
+S39_NONE = "no --state: the successor orients from the charter alone"
+
+
+def _s39_home(name="s39-chain"):
+    return resolver.state_dir(os.environ) / "respawn" / name
+
+
+def _s39_files(tmp_path, monkeypatch, text=S39_STATE):
+    for k in ("CLAUDE_SESSION_DEPTH", "RELAY_ROW", "CLAUDE_SESSION_HELPER"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.chdir(tmp_path)
+    f = _charter_file(tmp_path / "c.md")
+    s = tmp_path / "s.md"
+    s.write_text(text)
+    sessionconfig.save_overlay({"_prompts_since_checkpoint": 5})
+    return str(f), str(s)
+
+
+def test_s39_state_is_copied_to_the_chain_home(tmp_path, monkeypatch):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "s39-chain")
+    rc, out, err = run("checkpoint", "--respawn", "--charter", f, "--state", s)
+    assert rc == 0, err
+    home, raw = _s39_home(), S39_STATE.encode()
+    assert (home / "state.md").read_bytes() == raw
+    d = json.loads((home / "state.json").read_text())
+    assert list(d) == ["from_session", "written", "sha256", "bytes"]
+    assert (d["from_session"], d["sha256"], d["bytes"]) == (
+        SID, hashlib.sha256(raw).hexdigest(), len(raw))
+    assert abs(d["written"] - time.time()) < 60
+    m = json.loads(_marker().read_text())                   # the marker's keys stand
+    assert list(m) == ["session", "charter", "charter_sha256", "written", "chain"]
+    assert out.splitlines()[-1] == LAUNCHER and S39_NONE not in err
+    assert f"state copied to {home / 'state.md'} ({len(raw)} B)" in out
+
+
+@pytest.mark.parametrize("text,named", [
+    (S39_STATE.replace("## Gates\n- none\n\n", ""), "sections"),
+    (S39_STATE.replace("- e3d82cb the packet", "- the packet"), "commit sha"),
+    (S39_STATE + "- " + "x" * 8192 + "\n", "ceiling"),
+], ids=["sections", "sha", "ceiling"])
+def test_s39_a_faulty_state_refuses_the_checkpoint(tmp_path, monkeypatch, text, named):
+    f, s = _s39_files(tmp_path, monkeypatch, text)
+    monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "s39-chain")
+    rc, out, err = run("checkpoint", "--respawn", "--charter", f, "--state", s)
+    assert rc == 2 and named in err and out == "", err
+    assert not _marker().exists() and not _s39_home().exists() and _counter() == 5
+
+
+def test_s39_state_refusals_write_nothing(tmp_path, monkeypatch):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    rc, _, err = run("checkpoint", "--state", s)
+    assert rc == 2 and "--respawn" in err and len(err.splitlines()) == 1, err
+    rc, _, err = run("checkpoint", "--respawn", "--charter", f, "--state",
+                     str(tmp_path / "missing.md"))
+    assert rc == 2 and "missing.md" in err and len(err.splitlines()) == 1, err
+    (tmp_path / "bin.md").write_bytes(b"\xff\xfe")
+    rc, _, err = run("checkpoint", "--respawn", "--charter", f, "--state",
+                     str(tmp_path / "bin.md"))
+    assert rc == 2 and "UTF-8" in err, err
+    assert not _marker().exists() and _counter() == 5
+
+
+def test_s39_without_state_says_so_and_clears_a_stale_one(tmp_path, monkeypatch):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "s39-chain")
+    assert run("checkpoint", "--respawn", "--charter", f, "--state", s)[0] == 0
+    assert (_s39_home() / "state.json").exists()
+    rc, out, err = run("checkpoint", "--respawn", "--charter", f)
+    assert rc == 0 and out.splitlines()[-1] == LAUNCHER, err
+    assert err.splitlines().count(S39_NONE) == 1
+    assert not (_s39_home() / "state.json").exists()
+    assert not (_s39_home() / "state.md").exists()
+
+
+@pytest.mark.parametrize("k,v", [("RELAY_ROW", "s39"), ("CLAUDE_SESSION_DEPTH", "1")])
+def test_s39_a_relay_or_started_sitting_clears_nothing(tmp_path, monkeypatch, k, v):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "s39-chain")
+    assert run("checkpoint", "--respawn", "--charter", f, "--state", s)[0] == 0
+    monkeypatch.setenv(k, v)
+    rc, _, err = run("checkpoint", "--respawn", "--charter", f)
+    assert rc == 0 and err.splitlines().count(S39_NONE) == 1, err
+    assert (_s39_home() / "state.json").exists() and (_s39_home() / "state.md").exists()
+
+
+def test_s39_state_without_a_chain_stays_with_the_session(tmp_path, monkeypatch):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    monkeypatch.delenv("CLAUDE_SESSION_CHAIN", raising=False)
+    rc, out, err = run("checkpoint", "--respawn", "--charter", f, "--state", s)
+    assert rc == 0 and out.splitlines()[-1] == NO_LAUNCHER, err
+    copy = resolver.session_dir(resolver.state_dir(os.environ), SID) / "state.md"
+    assert copy.read_bytes() == S39_STATE.encode()
+    assert "will not find it" in err and str(copy) in err
+    assert not (resolver.state_dir(os.environ) / "respawn").exists()
+
+
+def test_s39_a_respawn_close_names_the_state_as_optional(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.chdir(tmp_path)
+    p = _charter_file(tmp_path / "c.md")
+    rc, out, err = run("charter", "close", "--exit", "RESPAWN", "c.md")
+    assert rc == 0, err
+    assert out.splitlines()[-1] == ("then: agentik-session checkpoint --respawn --charter "
+                                    + str(p.resolve()))
+    assert "--state <file>" in err and "optional" in err
+    assert 'RUNBOOK "Restarting a sitting"' in err and "--help" not in err

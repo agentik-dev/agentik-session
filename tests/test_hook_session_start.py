@@ -272,3 +272,66 @@ def test_s36_block_says_no_wait_stops_the_loop(tmp_path):
     assert block.endswith("no wait stops the loop; WAITING 3+: idle limit, cache 1h: idle wakes "
                           "<=3300s" + S30_TAIL)
     assert len(block.encode()) == 318 <= 320
+
+
+# ---- S39: the successor's state line ------------------------------------------
+import time
+
+S39_READ = "): read it first, then the charter's Next act, nothing else before the first act"
+
+
+def _s39_state(tmp_path, to="test-session", name="s39-chain"):
+    """A predecessor's state in the chain home, handed by the launcher to `to`."""
+    from claude_session import state
+    home = tmp_path / "state/agentik-session/respawn" / name
+    src = tmp_path / "s.md"
+    src.write_text("# State for the successor of pred-ses, 2026-10-29 21:40\n\n## Helpers\n"
+                   "- none\n\n## Gates\n- none\n\n## Last acts\n- none\n\n## Read first\n"
+                   "- README.md lines 1-9\n- read nothing else before the first act\n")
+    d = state.write(home, src, "pred-session-0001", time.time() - 600)
+    if to:
+        assert state.hand(home, "pred-session-0001", to)
+    return home, d
+
+
+def _s39_ctx(tmp_path, **extra):
+    env = env_for(tmp_path, **{"CLAUDE_SESSION_CHAIN": "s39-chain", **extra})
+    return hooks.session_start(payload(), env)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_s39_the_line_names_the_state_handed_to_this_session(tmp_path):
+    home, d = _s39_state(tmp_path)
+    ctx = _s39_ctx(tmp_path)
+    at = time.strftime("%H:%M", time.localtime(d["written"]))
+    want = f"; state: {home / 'state.md'} ({d['bytes']} B from pred-ses, {at}" + S39_READ
+    assert ctx.endswith(want) and "\n" not in ctx
+    assert ctx.index("; charter: none open today") < ctx.index("; state: ")
+
+
+@pytest.mark.parametrize("case", ["third-session", "not-handed", "no-chain", "helper",
+                                  "other-chain", "depth-1", "relay-row"])
+def test_s39_no_line_otherwise(tmp_path, case):
+    _s39_state(tmp_path, to={"third-session": "third-session-3", "not-handed": None}.get(
+        case, "test-session"))
+    extra = {"helper": {"CLAUDE_SESSION_HELPER": "1"}, "other-chain": {
+        "CLAUDE_SESSION_CHAIN": "another"}, "depth-1": {"CLAUDE_SESSION_DEPTH": "1"},
+        "relay-row": {"RELAY_ROW": "s39"}}.get(case, {})
+    if case == "no-chain":
+        ctx = hooks.session_start(payload(), env_for(tmp_path))[
+            "hookSpecificOutput"]["additionalContext"]
+    else:
+        ctx = _s39_ctx(tmp_path, **extra)
+    assert "; state:" not in ctx and ctx.startswith("agentik-session: profile")
+
+
+@pytest.mark.parametrize("case", ["altered", "missing", "bad-record"])
+def test_s39_a_copy_that_does_not_match_is_said(tmp_path, case):
+    home, _ = _s39_state(tmp_path)
+    if case == "altered":
+        (home / "state.md").write_text("x")
+    elif case == "missing":
+        (home / "state.md").unlink()
+    else:
+        (home / "state.json").write_text("{")
+    ctx = _s39_ctx(tmp_path)
+    assert ctx.endswith(f"; state: {home / 'state.md'} does not match its record")

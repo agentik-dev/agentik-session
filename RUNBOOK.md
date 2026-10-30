@@ -350,14 +350,37 @@ hang-up the launcher writes nothing more to the terminal).
   "<text>" <file>`, then commit the charter (close prints the line, which
   runs as is from any cwd: `next: git -C <dir> add -- <name> && git -C <dir>
   commit -m "charter: the exit taken" -- <name>`, `<dir>` the charter's
-  absolute directory), then `agentik session
-  checkpoint --respawn --charter <file>` (close prints it as its `then:`
-  line). The checkpoint refuses, exit 2 and nothing written, a charter that
+  absolute directory), then write the state file, then `agentik session
+  checkpoint --respawn --charter <file> --state <s>` (close prints it as its
+  `then:` line, without the optional `--state`). The checkpoint refuses, exit 2 and nothing written, a charter that
   `git status --porcelain` reads as modified, staged or untracked: `<file> is
   not committed; commit it first: <the same line>`. With `--commit` a tracked charter passes,
   an untracked one never; a git call that fails or times out goes on with a
   note. An exit line left uncommitted leaves main dirty, and holds every
   sibling that merges only into a clean main.
+- The state file is the sitting's own word to its successor, since no hook
+  sees a helper return or a gate finish. The checkpoint checks its shape:
+  - the first line is `# State for the successor of <sid-short>, <YYYY-MM-DD>
+    <HH:MM>`, a date and time that parse;
+  - then exactly four sections, in this order, each a bulleted list (every
+    line opens on `- `) or the one line `- none`: `## Helpers` (each open
+    helper: its name, its scratch directory, what it is doing, what wakes the
+    sitting), `## Gates` (each gate in flight: id, repo, result path), `## Last
+    acts` (at most three lines, each opening on a commit sha: `- <sha> what it
+    did`) and `## Read first` (at least one path line, `- <path> lines <a>-<b>`,
+    in reading order, then the closing line `- read nothing else before the
+    first act`, once and last);
+  - under 8,192 bytes, and no em-dash.
+
+  A fault refuses the checkpoint, exit 2, the faults on stderr. The copy lands
+  in `respawn/<chain>/state.md`, `state.json` beside it. At the next start the
+  launcher stamps the record with the successor's session id and deletes a
+  state any other session left; only that successor's SessionStart line names
+  it, and a copy that does not match its record is said so. A main-thread
+  sitting's checkpoint without `--state` says `no --state: the successor
+  orients from the charter alone` and clears an older copy (a helper, a relay
+  row or a started session clears nothing); with no chain the copy stays in
+  the session's own directory, where no successor looks.
 - The guards are `session: {respawn: {cap, floor, settle}}` in the config
   layers (defaults 12 restarts in any 24 h, 600 s, 60 s); `--cap`,
   `--floor` and `--settle` override them for one chain.
