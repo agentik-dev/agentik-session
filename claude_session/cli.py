@@ -123,6 +123,10 @@ def cmd_status(args) -> int:
             print(meter.one_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
+            from . import chain
+            held = chain.held_line(state, env.get(hooks.CHAIN_VAR) or "", sid)
+            if held:                            # S37: a respawn hold, said while it stands
+                print(held)
             return 0
     print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
     return 0
