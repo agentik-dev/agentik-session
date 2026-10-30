@@ -466,23 +466,38 @@ class Chain:
 
     def _step(self, sdir, sid, start, now, conf, seen, held):
         """One poll past a confirmed marker: (held, seen, end the child). A new marker or
-        a hold runs the checks again, `None` clearing the hold (S37 ruling 1); then the
-        ready condition, the guards re-resolved and the checks right before the signal."""
-        if conf != seen or held is not None:
-            seen = conf
+        a hold runs the checks again, `None` clearing the hold (S37 ruling 1); a held
+        `not-respawn` waits for a new confirmed marker, and a hold re-resolves the guards
+        first (Amendment 1, F1 and F4). Then the ready condition, the guards re-resolved
+        and the checks right before the signal."""
+        fresh, seen = conf != seen, conf
+        if held == "not-respawn" and not fresh:
+            return held, seen, False             # F1: only the main thread's confirm lifts it
+        if held is not None and not self._resolve():
+            return "config", seen, False         # F4: a config edit counts on a hold
+        if fresh or held is not None:
             held = self._checks(sdir, sid, start, now)
             if held:
                 return held, seen, False
         if not self._ready(sdir, now):
             return None, seen, False
-        try:
-            self.g = self.guards()               # §4: a config edit counts before the signal
-        except resolver.ResolveError as e:
-            if str(e) != self.config_error:      # §3.7: nothing printed while a child runs;
-                self.config_error = str(e)       # the error prints at the stop (N1)
+        if not self._resolve():                  # §4: a config edit counts before the signal
             return "config", seen, False
         held = self._checks(sdir, sid, start, now)           # N4: again, right before
         return held, seen, held is None
+
+    def _resolve(self) -> bool:
+        """The guards resolved again (§4); False on a ResolveError. Its text is kept when
+        it first appears and cleared once the config resolves again (Amendment 1, F4);
+        §3.7: nothing printed while a child runs, the error prints at the stop (N1)."""
+        try:
+            self.g = self.guards()
+        except resolver.ResolveError as e:
+            if self.config_error is None:
+                self.config_error = str(e)
+            return False
+        self.config_error = None
+        return True
 
     def _say_held(self, reason, sid, now):
         """S37 ruling 2: a hold is said through the state, never the terminal (§3.7). The
@@ -497,10 +512,13 @@ class Chain:
                 path.unlink(missing_ok=True)
             else:
                 tmp = path.with_name(f".{HELD}.{os.getpid()}")
-                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump({"reason": reason, "since": now, "session": sid}, f)
-                os.replace(tmp, path)
+                try:
+                    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump({"reason": reason, "since": now, "session": sid}, f)
+                    os.replace(tmp, path)
+                finally:
+                    tmp.unlink(missing_ok=True)     # a failed replace leaves nothing behind
         except OSError:
             return
         self._said = reason

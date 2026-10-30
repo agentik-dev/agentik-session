@@ -68,7 +68,7 @@ A sitting cannot end Claude Code itself: no tool exits the interactive session, 
 The launcher's steps:
 
 1. While its child runs, the launcher stats these files and the marker every 2 s.
-2. When a confirmed marker appears, it runs checks (a) to (e) of §3.4. If any of them holds the sitting back, it records that reason and signals nothing. The sitting stays open exactly as it does today, and the chain stops when the sitting exits.
+2. When a confirmed marker appears, it runs checks (a) to (e) of §3.4. If any of them holds the sitting back, it records that reason and signals nothing. The sitting stays open exactly as it does today, and the chain stops when the sitting exits. The hold is re-checked while the sitting runs (S37), a `not-respawn` at the next confirmed marker and every other reason at every poll, so a hold that lifts delays the restart rather than ending the chain, and the cap bounds the restarts.
 3. The sitting is **ready** when `turn-ended.json` is newer than the marker, and no `activity.json` is newer than that turn end. Both must stand unchanged for `settle` seconds (default 60). A new turn, tool or prompt starts the wait again. The cases it waits through:
    - the main thread's own long tool call: PreToolUse has stamped and the turn has not ended (the refuter measured Bash calls of 380, 394 and 602 s that wrote nothing);
    - an AskUserQuestion dialog waiting on the owner, which is a tool call too (measured at 6,543 s);
@@ -234,7 +234,7 @@ These are measured on the installed `claude` by an attended sitting or by the ow
 - **C1. Who ends the sitting.** The launcher sends SIGTERM to its own child, because a sitting cannot leave the interactive session itself. It does so only after the main thread's turn has ended and nothing has started since (§3.3).
 - **C2. How a RESPAWN exit is detected.** By a marker that `checkpoint --respawn` writes after checking the Next act. The main thread's PostToolUse confirms it, and it is keyed by the session id the launcher minted. The charter must be touched in this sitting, and the launcher reads the Next act again before signalling. It never parses a transcript (§3.2, §3.4).
 - **C3. The cap.** It is 12 per chain in any rolling 24 h, counted from the ledger and failing closed. A calendar day would allow twice the cap across midnight (§3.5).
-- **C4. The floor holds rather than delays.** A sitting that reaches RESPAWN in under 600 s ends the chain at its exit (§3.5).
+- **C4. The floor holds rather than delays.** A sitting that reaches RESPAWN in under 600 s ends the chain at its exit (§3.5). Since S37 the hold is re-checked every poll, so the floor delays the restart until the sitting is `floor` seconds old rather than ending the chain, and the cap bounds a fault loop.
 - **C5. The stop file.** There is a global path and a per-chain path. A stop file counts by its mtime against the chain's start and is never deleted (§3.5).
 - **C6. Degrade to today.** Any check that holds the sitting leaves it open for the owner, as it is today, and the launcher ends only a sitting it will restart (§3.3).
 - **C7. The grace.** 10 s of grace before each restart, in which Ctrl-C ends the chain (§3.4).

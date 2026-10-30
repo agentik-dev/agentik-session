@@ -136,9 +136,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## The band could say a respawn hold (2026-10-29, packet S37; S4)
 - S37 says a hold in the chain home's `held.json` (`{reason, since, session}`), and `agentik session status` prints `respawn held: <reason> since <HH:MM>`; the band prints nothing of it. The next band packet could read the same file through `chain.held_line(state, chain, session)` and show the reason beside the mark (this line takes the place of 2026-10-12's "A floor-held respawn is silent", which S37 landed).
 
-## respawn-r1 §9 C4 still says the floor holds rather than delays (2026-10-29, packet S37; S4)
-- S37 ruling 1 re-checks a hold every poll, so a `floor` hold clears once the sitting is `floor` seconds old and a fault loop restarts at most once a `floor`, held at the cap; §3.5 says so, but §9's C4 ("A sitting that reaches RESPAWN in under 600 s ends the chain at its exit") sat outside the packet's `may touch`. The next edit of respawn-r1 brings C4 to §3.5.
-
 ## `admission record` on undecodable stdin (2026-10-12, the S25 fix round; S4)
 - Stdin that is not UTF-8 raises UnicodeDecodeError in `sys.stdin.read()` (`cli.cmd_admission`), a traceback and exit 1, outside the 0/2/3 interface that F4 closed for OSError; a refusal (exit 2, nothing written) is the matching class. Only `session.ts` writes that stdin, always as `JSON.stringify`, so it is not reachable from the module. Fixed on branch m2-measure (M2's fix round, F2): `cli._stdin` refuses stdin that is not UTF-8 with exit 2 for both record verbs, and `admission.decode` refuses a lone surrogate (`test_f4_stdin_that_is_not_utf8_exits_2_and_writes_nothing`).
 

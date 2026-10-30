@@ -1217,3 +1217,31 @@ def test_s37_cap_hold_stays_while_the_count_stays(fake, monkeypatch):
     assert [p.signals for p in fx.procs] == [[]] and _stops() == ["cap"]
     assert [s and s["reason"] for s in seen] == ["cap", "cap"] and seen[0] == seen[1]
     assert seen[0]["since"] == T0 + 14 and _held() is None
+
+
+def test_s37_not_respawn_waits_for_a_new_marker(fake, monkeypatch):
+    """Amendment 1, F1: a charter rewritten to RESPAWN with no new marker stays held at
+    `not-respawn`, the turn ended and stood; the main thread's new confirm clears it."""
+    seen = []
+    seq = (respawn_seq(fake.charter) + [(20, write(fake.charter, DONE_TEXT)),
+                                        (199, hook("PreToolUse", tool_name="Write")),
+                                        (200, write(fake.charter, RESPAWN_TEXT)),
+                                        (201, hook("Stop")), (500, _peek(seen))]
+           + respawn_seq(fake.charter, at=1000) + [end(7200)])
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _frun(fx, G) == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 1004 + 60 <= t - T0 <= 1004 + 60 + 2, t - T0
+    assert seen[0]["reason"] == "not-respawn" and len(fx.procs) == 2
+
+
+def test_s37_config_edit_lowering_the_floor_lifts_the_hold(fake, monkeypatch):
+    """Amendment 1, F4: the guards are re-resolved before a held sitting is re-checked,
+    so a floor lowered by a config edit at 100 s clears the hold at that poll."""
+    box = {**G, "floor": 600}
+    seq = respawn_seq(fake.charter) + [(100, lambda fx, p: box.update(floor=50)), end(7200)]
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    assert _chain(fx, lambda: dict(box)).run() == 0
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 100 <= t - T0 <= 102, t - T0
+    assert len(fx.procs) == 2 and _held() is None
