@@ -75,8 +75,12 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "tell>`, n the wakes in a row with nothing changed; from n = {waiting} the wake is "
         "the longest idle wait the cache allows (item 6) and the charter is brought current "
         "and committed; a wait never stops the loop, since under `agentik session run` a "
-        "stopped loop only idles until a hand, and only the checkpoint ends a sitting (a "
-        "respawn reads n from the charter)",
+        "stopped loop only idles until a hand, and only the checkpoint ends a sitting; "
+        "WAITING is legal only when the charter's While waiting section reads `- none`, and "
+        "with a ready row or an owed item the Next act is that item (a respawn reads n from "
+        "the charter); what the owner must see goes in a file under `history/`, a "
+        "PushNotification, or a turn that ends on text and calls no ScheduleWakeup (text "
+        "before a ScheduleWakeup call was not shown on 2026-10-21)",
         "waiting on the usage meter (room for 0, or a usage limit hit) is not WAITING: the "
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
         "first, and it never counts toward n")

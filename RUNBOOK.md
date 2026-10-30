@@ -277,7 +277,11 @@ prompt cache's lifetime.
 - Priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest. A
   bug ranks by harm and what it blocks, never by how sure or cheap its fix
   is. Each Handover lists the open items by level, highest first, and
-  `charter open` writes `- open by level: none yet`.
+  `charter open` writes `- open by level: none yet`. Below the Handover,
+  `charter open` writes `## While waiting` with the one line `- none`. Its
+  other lines are `- ready: <row> (<repo>, S<n>)`, an off-path row built
+  without a gate, at most three, and `- owed: <item>; <what it needs>`, an
+  owed item that needs no gate (a runsheet, a refuter round, a draft).
 - Pacing: the fallback wakeup rides the act's last tool call. A pending
   helper, Monitor or background task is the wake, with one fallback of
   `fallback` seconds, never re-armed on a hand-back. An act ready takes the
@@ -287,7 +291,13 @@ prompt cache's lifetime.
   allows (the next bullet), and the charter is brought current and
   committed. A wait never stops the loop: under `agentik session run` a
   stopped loop only idles until a hand, and only the checkpoint ends a
-  sitting. A respawn reads n from the charter. A wait on the usage meter
+  sitting. A respawn reads n from the charter. WAITING is legal only when
+  the charter's While waiting section reads `- none`: with a ready row or
+  an owed item listed there, the Next act is that item. What the owner must
+  see goes in a file under `history/`, a PushNotification, or a turn that
+  ends on text and calls no ScheduleWakeup, since text written before a
+  ScheduleWakeup call was not shown at the terminal on 2026-10-21. A wait on
+  the usage meter
   (room for 0, or a usage limit hit) is not WAITING: the Next act stays the
   act, the wake is the band's reset or one fallback, whichever is first, and
   it never counts toward n.
@@ -312,7 +322,13 @@ prompt cache's lifetime.
   takes none. No hook enforces them. `charter check` and `charter close` warn
   on stderr, their exit unchanged, when the Handover line is missing or the
   Next act's WAITING is misshapen or at `waiting` or past it, where the line
-  says to wake at the idle limit and commit the charter. `check` resolves
+  says to wake at the idle limit and commit the charter, and on a While
+  waiting line of another shape. A charter opened before 2.0.0-alpha.23 has
+  no While waiting section: `check` passes it with one warning to add it
+  with `- none`. One line is red: a Next act of WAITING while While waiting
+  lists a ready row or an owed item prints `WAITING while ready: <the
+  line>` first, and `charter check` exits 1 on it (2 on a refusal); `close`
+  keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
 - Upgrade the CLI first (`make install`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
