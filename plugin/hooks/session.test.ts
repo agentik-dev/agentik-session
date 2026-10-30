@@ -175,8 +175,37 @@ test('s41: the line with both windows still fits bodyColumns', async (t: any, on
   expect(line).toStartWith('session: opus 5.5 · 200k')
 })
 
+// ---- Packet S41 Amendment 1: the cases both twins read ----
+// tests/test_mod.py reads these two lines and asserts mod.py's model_name and window_label
+// give each; here the line shows each. A dated id with no minor, full-width digits and 13
+// astral characters are shown as given; 25 are clipped to 23 and the ellipsis.
+const NAME_CASES = '[["claude-opus-5-5", "opus 5.5"], ["claude-opus-4-1-20250805", "opus 4.1"], ["claude-opus-4-20250514", "claude-opus-4-20250514"], ["claude-sonnet-4-20250514", "claude-sonnet-4-20250514"], ["claude-opus-５-５", "claude-opus-５-５"], ["claude-opus-5-5[1m]", "claude-opus-5-5[1m]"], ["𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚", "𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚"], ["𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚", "𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚𝐚…"]]'
+const WINDOW_CASES = '[[1000000, "1M"], [200000, "200k"], [200500, "200k"], [1000, "1k"], [999.9, "999"], [500, "500"], [1, "1"], [0.5, null], [0, null], [1e400, null]]'
+
+for (const [id, name] of JSON.parse(NAME_CASES) as [string, string][]) {
+  test(`s41 a1: the model ${JSON.stringify(id)} reads ${JSON.stringify(name)}`, async (t: any, on: any) => {
+    expect(await s41(t, on, meterWith({ model: id }))).toBe(`session: ${name} · 200k · ${REST}`)
+  })
+}
+
+for (const [w, label] of JSON.parse(WINDOW_CASES) as [number, string | null][]) {
+  test(`s41 a1: a window of ${w} reads ${label}`, async (t: any, on: any) => {
+    expect(await s41(t, on, meterWith({ window: w })))
+      .toBe(`session: opus 5.5 · ${label === null ? '' : `${label} · `}${REST}`)
+  })
+}
+
+test('s41 a1: an integer past a double, in the meter and the measure: no window part', async (t: any, on: any) => {
+  const huge = '1' + '0'.repeat(400)
+  const m = FACTS_METER.replace('"window": 200000', `"window": ${huge}`)
+  const x = FACTS_MEASURE.replace('"window": 1000000', `"window": ${huge}`)
+  expect(m).not.toBe(FACTS_METER)
+  expect(x).not.toBe(FACTS_MEASURE)
+  expect(await s41(t, on, m, x)).toBe(`session: opus 5.5 · ${REST}`)
+})
+
 // ---- Packet S27b: admission's line under the session's, from band.json ----
-const lines =async (t: any, on: any, files: Record<string, string>, columns = 120,
+const lines = async (t: any, on: any, files: Record<string, string>, columns = 120,
                      hasSurvey = false, below: any = undefined) => {
   if (below !== undefined) on('ui.render', () => below)
   await band(t, on, files, columns)

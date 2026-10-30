@@ -62,19 +62,21 @@ export const limitNote = (limited: string | null, turnEnded: string | null): str
 // Packet S41: the model and the window at the head of the line, the twin of mod.py's
 // model_name, window_label and facts (one fixture in session.test.ts pins both). The model
 // is meter.json's, `claude-<family>-<major>-<minor>` shortened, any other id as given and
-// clipped; the window is meter.json's (the one its ceilings apply), `1M` or `<n>k`, and the
-// engine's (measure.json's context.window) beside it in brackets when the two labels differ.
-const MODEL_ID = /^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/
+// clipped; the window is meter.json's (the one its ceilings apply), `1M`, `<n>k`, or under
+// 1000 the figure, and the engine's (measure.json's context.window) beside it in brackets
+// when the two labels differ.
+const MODEL_ID = /^claude-([a-z]+)-(\d+)-(\d{1,2})(?:-\d{8})?$/   // a dated id with no minor: as given
 const MODEL_CLIP = 24
 export const modelName = (v: unknown): string | null => {
   if (typeof v !== 'string' || v === '') return null
   const m = MODEL_ID.exec(v)
   if (m) return `${m[1]} ${m[2]}.${m[3]}`
-  return v.length > MODEL_CLIP ? v.slice(0, MODEL_CLIP - 1) + '…' : v
+  const cs = Array.from(v)              // code points, as mod.py counts them: never half a pair
+  return cs.length > MODEL_CLIP ? cs.slice(0, MODEL_CLIP - 1).join('') + '…' : v
 }
 export const windowLabel = (v: unknown): string | null => {
-  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return null
-  return v === 1000000 ? '1M' : `${Math.floor(v / 1000)}k`
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 1) return null
+  return v === 1000000 ? '1M' : v < 1000 ? `${Math.floor(v)}` : `${Math.floor(v / 1000)}k`
 }
 const obj = (v: unknown): any => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
 export const lineFacts = (m: any, measure: any): string | null => {

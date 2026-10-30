@@ -339,3 +339,41 @@ def test_s41_status_model_line_leaves_out_what_is_missing(state, tmp_path):
     _s41_meter(sdir, model=None, window=1000000, window_source="model:claude-fable-5-1")
     rc, out, _ = run("status")
     assert rc == 0 and out.splitlines()[2] == "model: 1M; window from model:claude-fable-5-1", out
+
+
+# ---- Packet S41 Amendment 1: the cases both twins read ------------------------------------
+
+def _twin_cases(name: str) -> list:
+    """One of session.test.ts's case lists (NAME_CASES, WINDOW_CASES), [input, text] each."""
+    p = HOOKS_DIR / ("session.test." + "ts")
+    if not p.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    return json.loads(re.search(rf"^const {name} = '(.*)'$", p.read_text(), re.M).group(1))
+
+
+def test_s41_a1_python_names_the_module_s_model_cases():
+    from claude_session import mod
+    cases = _twin_cases("NAME_CASES")
+    assert ["claude-opus-4-20250514", "claude-opus-4-20250514"] in cases      # no 8-digit minor
+    assert ["claude-opus-５-５", "claude-opus-５-５"] in cases  # ASCII digits only
+    assert [mod.model_name(v) for v, _ in cases] == [n for _, n in cases]
+
+
+def test_s41_a1_python_labels_the_module_s_window_cases():
+    from claude_session import mod
+    cases = _twin_cases("WINDOW_CASES")
+    assert [500, "500"] in cases and [0.5, None] in cases
+    assert [mod.window_label(v) for v, _ in cases] == [t for _, t in cases]
+
+
+def test_s41_a1_an_int_past_a_double_is_no_part_and_status_prints(state, tmp_path):
+    from claude_session import mod
+    huge = 10 ** 400
+    assert mod.window_label(huge) is None
+    assert mod.facts({"model": "claude-opus-5-5", "window": huge},
+                     {"context": {"window": huge}}) == "opus 5.5"
+    sdir = _metered(tmp_path)
+    _s41_meter(sdir, model="claude-opus-5-5", window=huge, window_source="session:claude-opus-5-5")
+    rc, out, err = run("status")
+    assert rc == 0 and "Traceback" not in err, err
+    assert out.splitlines()[2] == "model: opus 5.5; claude-opus-5-5, window from session:claude-opus-5-5", out

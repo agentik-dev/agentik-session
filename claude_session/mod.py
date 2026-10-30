@@ -105,7 +105,9 @@ def limit_note(limited, turn_ended) -> str | None:
 # ---- The model and the window (packet S41) ----------------------------------------------
 # The twin of modelName, windowLabel and lineFacts in session.ts; one fixture in
 # session.test.ts pins both (tests/test_mod.py). Display only: nothing that decides reads it.
-MODEL_ID = re.compile(r"^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$")
+# A minor of one or two ASCII digits (Amendment 1): a dated id with no minor
+# (`claude-opus-4-20250514`) is shown as given, and `\d` reads as session.ts reads it.
+MODEL_ID = re.compile(r"^claude-([a-z]+)-(\d+)-(\d{1,2})(?:-\d{8})?$", re.ASCII)
 MODEL_CLIP = 24
 SOURCE_CLIP = 64
 
@@ -121,10 +123,18 @@ def model_name(v) -> str | None:
 
 
 def window_label(v) -> str | None:
-    """A positive finite window: `1M` for exactly 1,000,000, else `<floor(n/1000)>k`."""
-    if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v <= 0:
+    """A finite window of 1 or more, read as JSON.parse reads it in the twin (a double, so
+    an int past its range is no part): `1M` for exactly 1,000,000, under 1000 the figure
+    itself, else `<floor(n/1000)>k`."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
         return None
-    return "1M" if v == 1_000_000 else f"{math.floor(v / 1000)}k"
+    try:
+        v = float(v)
+    except OverflowError:
+        return None
+    if not math.isfinite(v) or v < 1:
+        return None
+    return "1M" if v == 1_000_000 else f"{math.floor(v)}" if v < 1000 else f"{math.floor(v / 1000)}k"
 
 
 def _obj(v) -> dict | None:
