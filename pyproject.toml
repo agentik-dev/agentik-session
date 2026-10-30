@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentik-session"
-version = "2.0.0a22"
+version = "2.0.0a23"
 description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
 readme = "README.md"
 license = { file = "LICENSE" }

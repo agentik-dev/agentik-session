@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue: one at a time per sta
 
 ## Status
 
-Status: version `v2.0.0-alpha.22`, rendered `2026-10-14`, `1445` tests in the suite.
+Status: version `v2.0.0-alpha.23`, rendered `2026-10-14`, `1478` tests in the suite.
 
 ## Credit
 
