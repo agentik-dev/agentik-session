@@ -292,9 +292,12 @@ const retrying = async (t: any, on: any, failures: number) => {
     ? new Promise(resolve => { sleepers.push(resolve) }) : new Promise(() => {}))
   on('ui.invalidate', () => ({ value: undefined }))
   await t.session.start({ cwd: '/repo' })
+  // A tick ends when the loop is parked on its next 5 s sleep (S41 Amendment 1): a fixed
+  // 20 ms let a loaded machine end the test first, and the loop's late clock.sleep, with
+  // the test's handlers gone, was a rejection nothing handled (the file did not run to its end).
   const tick = async () => {
     sleepers.shift()?.({ value: undefined })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    for (let i = 0; i < 400 && sleepers.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
   }
   const draw = async () => ((await t.ui.render(PROPS(120))) as any).children[0].children[0] as string
   return { argvs, tick, draw }
