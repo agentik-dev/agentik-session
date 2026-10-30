@@ -18,7 +18,7 @@ from claude_session import cli, config, hooks, meter, models, resolver
 from claude_session.yamlsubset import load as yaml_load
 
 ROOT = Path(__file__).resolve().parents[1]
-SID = "sess-1"
+SID = "cli-sess-0000-1111-2222"
 OPUS = "claude-opus-5-5"
 FOUR = ("window", "ceilings", "window_source", "limits_source")
 
@@ -531,7 +531,7 @@ def test_a11_the_twin(repo, monkeypatch):
     row = next(l for l in next((repo / "charters").glob("*.md")).read_text().splitlines()
                if l.startswith("| budget |"))
     assert "400k context" in row
-    rc, out, err = run("config", "show")
+    rc, out, err = run("config", "show", "--resolved")
     assert rc == 0, err
     assert yaml_load(out)["session"]["window"] == 1000000
 

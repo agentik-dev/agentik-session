@@ -602,8 +602,9 @@ def cmd_set(args) -> int:
 def _rewrite_resolved(model_set: bool = False) -> None:
     """`set` is the one other writer of resolved.json (§2.3): same request, new overlay.
     A model set here is newer than the SessionStart payload's (round 2 F1): the request
-    drops that model, so the declared one (the overlay's) decides the window until the
-    next SessionStart names the model in force."""
+    drops that model, so with no reading of the engine's the declared one (the overlay's)
+    decides the window until the next SessionStart names the model in force; with a reading,
+    the reading keeps it (window-r1 R4)."""
     sid = sessionconfig.session_id()
     state = resolver.state_dir(os.environ)
     sdir = resolver.session_dir(state, sid) if sid else None

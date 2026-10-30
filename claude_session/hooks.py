@@ -390,9 +390,12 @@ def session_start(payload: dict, env=None) -> dict:
     c = s["ceilings"]
     src = s.get("ceilings_source")
     capped = f" ({src})" if src and src != "profile" else ""
+    whence = _WSRC.sub('', str(s.get('window_source')))[:64]
+    if not whence.startswith("engine:"):        # before the first measure (window-r1 R6)
+        whence = f"table, {whence}; the engine's first reading replaces this"
     line = (f"agentik-session: profile '{_token(s['profile'])}', ceilings "
             f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
-            f"window ({_WSRC.sub('', str(s.get('window_source')))[:64]}), checkpoint at "
+            f"window ({whence}), checkpoint at "
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
