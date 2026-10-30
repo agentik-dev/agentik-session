@@ -1,4 +1,5 @@
-"""plugin/commands: six files, each one verb, under thirty lines (§2.5)."""
+"""plugin/commands: seven files, each one verb, under thirty lines (§2.5); gate.md runs
+`gate status` (S38)."""
 import re
 from pathlib import Path
 
@@ -8,11 +9,12 @@ from claude_session import cli
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = ROOT / "plugin" / "commands"
-VERBS = ("status", "profile", "set", "checkpoint", "doctor", "report")
+VERBS = ("status", "profile", "set", "checkpoint", "doctor", "report", "gate")
+RUNS = {"gate": "gate status"}         # a verb whose command runs one of its sub-verbs
 SKILL = ROOT / "plugin" / "skills" / "session" / "SKILL.md"
 
 
-def test_exactly_the_six_commands():
+def test_exactly_the_seven_commands():
     assert sorted(p.stem for p in COMMANDS.glob("*.md")) == sorted(VERBS)
 
 
@@ -25,9 +27,10 @@ def test_command_runs_one_verb_under_thirty_lines(verb):
     head = text.split("---")[1]
     assert re.search(r'^description: "[^"]+"$', head, re.M)
     assert "allowed-tools: [Bash(agentik-session *)]" in head
-    runs = re.findall(r"agentik-session (\S+) \$ARGUMENTS", text)
-    assert runs == [verb]
-    assert f"!`agentik-session {verb} $ARGUMENTS`" in lines
+    run = RUNS.get(verb, verb)
+    runs = re.findall(r"agentik-session (\S+(?: \S+)?) \$ARGUMENTS", text)
+    assert runs == [run]
+    assert f"!`agentik-session {run} $ARGUMENTS`" in lines
 
 
 def test_every_command_verb_is_a_cli_verb():

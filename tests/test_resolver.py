@@ -41,8 +41,10 @@ def test_defaults_alone(world):
     assert r.sections["relay"]["enabled"] == "auto"
     assert r.sections["decisions"] == {"dir": "decisions"}
     # agentik-r1 ruling 5: the section is `relay`, with a copy under the old key until r2
+    # S38 ruling 4: `gate` joins the sections, empty until a repo layer sets it
     assert list(r.as_dict()) == ["provider", "session", "respeak", "decisions", "relay",
-                                 "agent-relay"]
+                                 "gate", "agent-relay"]
+    assert r.sections["gate"] == {}
     assert r.as_dict()["agent-relay"] == r.sections["relay"] and r.renamed == []
     assert r.provider["version"] == SEMVER and r.provider["plugin"] == "session"
 
@@ -399,3 +401,21 @@ def test_f8_missing_shipped_file_names_itself(world, monkeypatch, tmp_path):
     r = run(world, profile="orchestrator")
     assert r.sections["session"]["profile"] == "orchestrator"
     assert [h for _, h in r.inputs][1:4] == [None, None, None]
+
+
+def test_gate_joins_the_sections_from_the_repo_layers(world):
+    _, _, put = world
+    assert "gate" in resolver.SECTIONS
+    put("repo", "gate:\n  wall: 60\n")
+    r = run(world)
+    assert r.sections["gate"] == {"wall": 60} and r.unknown == []
+
+
+def test_gate_config_reads_the_user_layer_alone(world):
+    env, _, put = world
+    assert resolver.gate_config(env) == {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
+    put("repo", "gate:\n  ntfy_url: https://repo.invalid\n  ntfy_topic: r\n")
+    assert resolver.gate_config(env)["ntfy_url"] is None
+    put("user", "gate:\n  ntfy_url: https://ntfy.invalid\n  ntfy_topic: gates\n  wall: 600\n")
+    assert resolver.gate_config(env) == {"ntfy_url": "https://ntfy.invalid",
+                                         "ntfy_topic": "gates", "wall": 600}

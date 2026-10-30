@@ -27,8 +27,8 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import (budget, charter, ledger, meter, policystore, resolver, rules, sessionconfig,
-               store)
+from . import (budget, charter, gate, ledger, meter, policystore, resolver, rules,
+               sessionconfig, store)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
@@ -253,15 +253,49 @@ def _cache_line(payload: dict) -> str | None:
         return None
 
 
+def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool) -> list[str]:
+    """S38 ruling 3: the main thread's inbox of gate results, whatever the posture. At most
+    three files are taken (an atomic rename into `inbox/read/`), each one line (the `wait`
+    line), then `<n> more: ...` when any remain. The lines stop where the output would pass
+    MAX_OUT: the whole output on PostToolUse (`alone` False, `out` the handler's), the
+    inbox block alone on UserPromptSubmit. A helper's payload (agent_id) takes nothing.
+    Never raises: a failure is no lines, and the files wait for the next hook."""
+    try:
+        sid = payload.get("session_id")
+        if payload.get("agent_id") or not isinstance(sid, str) or not _SID.match(sid):
+            return []
+        base = {} if alone else out
+
+        def fits(text: str) -> bool:
+            return len(json.dumps(_with_gate(base, event, [text]))) <= MAX_OUT
+        return gate.inbox_take(resolver.state_dir(env), sid, fits=fits)
+    except Exception:                                   # noqa: BLE001
+        return []
+
+
+def _with_gate(out: dict, event: str, lines: list[str]) -> dict:
+    """The gate's lines before the handler's own context; `out` itself without lines."""
+    if not lines:
+        return out
+    new = json.loads(json.dumps(out)) if out else {}
+    hso = new.setdefault("hookSpecificOutput", {})
+    ctx = hso.get("additionalContext") or ""
+    hso["hookEventName"] = event
+    hso["additionalContext"] = "\n".join(lines) + (f"\n\n{ctx}" if ctx else "")
+    return new
+
+
 def user_prompt_submit(payload: dict) -> dict:
-    """Budget context, and the checkpoint nudge that is the real mechanism."""
+    """Budget context, and the checkpoint nudge that is the real mechanism. The gate's
+    inbox lines (S38 ruling 3) are taken at each return, the posture-off one included,
+    after the body, so a body that raises leaves the files for the next hook (F3)."""
     sid = payload.get("session_id")
     if not payload.get("agent_id"):                     # before the posture (respawn-r1 §3.3)
         _stamp(payload, os.environ, ACTIVITY,
                {"event": "UserPromptSubmit", "tool": None, "at": time.time()})
     cfg, zone = state(sid)
     if cfg.posture == "off":
-        return {}
+        return _gate_ups(payload, {})
 
     ov = sessionconfig.load_overlay()
     count = int(ov.get(COUNTER) or 0) + 1
@@ -295,9 +329,15 @@ def user_prompt_submit(payload: dict) -> dict:
             "at any moment rather than only when it is convenient.")
 
     if not bits:
-        return {}
-    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                   "additionalContext": "\n\n".join(bits)}}
+        return _gate_ups(payload, {})
+    return _gate_ups(payload, {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                      "additionalContext": "\n\n".join(bits)}})
+
+
+def _gate_ups(payload: dict, out: dict) -> dict:
+    """UserPromptSubmit's output with the inbox lines first, the block alone under MAX_OUT."""
+    return _with_gate(out, "UserPromptSubmit",
+                      _gate_lines(payload, os.environ, "UserPromptSubmit", out, alone=True))
 
 
 HELPER_PROFILE = "builder"
@@ -515,10 +555,16 @@ def _confirm(payload: dict, sdir: Path) -> None:
 
 
 def post_tool_use(payload: dict, env=None) -> dict:
+    """The handler below, then the gate's inbox lines, the whole under MAX_OUT (S38)."""
+    env = os.environ if env is None else env
+    out = _post_tool_use(payload, env)
+    return _with_gate(out, "PostToolUse", _gate_lines(payload, env, "PostToolUse", out, False))
+
+
+def _post_tool_use(payload: dict, env) -> dict:
     """The meter (§2.2): fold the transcript's new bytes into meter.json, and
     speak by D13. A subagent's run (agent_id) writes only `helper-activity.json`, never
     the meter, and says nothing. A main-thread call confirms a respawn marker first (§3.2)."""
-    env = os.environ if env is None else env
     if payload.get("agent_id"):
         _tool_stamp(payload, env, "PostToolUse")          # the stamp, then the close (B-F1)
         _close_call(payload, env)

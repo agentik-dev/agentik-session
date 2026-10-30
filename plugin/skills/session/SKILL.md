@@ -176,7 +176,17 @@ agentik-session doctor          # the setup, the plugin, its dependencies; exit 
 agentik-session budget          # the zone and checkpoint cadence
 agentik-session checkpoint      # mark a handoff-ready point (`-m`, `--commit` stages tracked files only)
 agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, through Bash
+agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>
+agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
+agentik-session gate status     # what runs, what waits, the last five done
 ```
+
+The gate queue runs one gate at a time per Mac. Its result reaches the caller two ways:
+`gate wait <id>` in a background Bash with a timeout past the gate's length, or the
+UserPromptSubmit and PostToolUse hooks' line at the next prompt or tool call. A respawn
+kills background tasks: list each open gate id in the state file's `## Gates`, and the
+successor re-arms `gate wait <id>`. `wait` exits 0 whatever the gate's code; 124 is the
+wall's cut, 125 a runner that died, 126 a lock held past the wall.
 
 The band: the plugin's hooks module draws `session: ctx <c>% · turns <t>% · <zone>` above the prompt and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
 
@@ -189,4 +199,4 @@ The window: `record` and `admit` rewrite `<state>/admission/band.json`, and the 
 The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `agentik-session measure record --session <id>` (exit 0, 1 no session, 2 refused), which writes `measure.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. The budget never reads it.
 
 Each has a command: `/session:status`, `/session:profile`, `/session:set`,
-`/session:checkpoint`, `/session:doctor`, `/session:report`.
+`/session:checkpoint`, `/session:doctor`, `/session:report`, `/session:gate`.

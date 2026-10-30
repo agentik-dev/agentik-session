@@ -687,3 +687,39 @@ def test_s39_a_respawn_close_names_the_state_as_optional(tmp_path, monkeypatch):
                                     + str(p.resolve()))
     assert "--state <file>" in err and "optional" in err
     assert 'RUNBOOK "Restarting a sitting"' in err and "--help" not in err
+
+
+# ---- gate run, wait, status (S38) --------------------------------------------
+
+def test_gate_run_wait_status_in_process(tmp_path, monkeypatch):
+    import pathlib
+    from claude_session import gate, resolver
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    rc, out, _ = run("gate", "run", str(tmp_path), "--label", "t", "--",
+                     "sh", "-c", "echo hi; exit 3")
+    assert rc == 0 and out.startswith("queued ")
+    gid = out.split()[1]
+    root = resolver.state_dir(os.environ)
+    assert out.strip() == (f"queued {gid} position 1 repo {os.path.realpath(tmp_path)} caller "
+                           f"none; result {root / 'gate' / gid / 'result.json'}")
+    rc, out, _ = run("gate", "status")
+    assert rc == 0 and out.splitlines()[0].startswith(f"queued {gid} ")
+    assert out.splitlines()[-1] == "runner: none"
+    assert gate.serve(root, gate.Fx(idle=0, poll=0.01, grace=0.01)) == 0
+    rc, out, _ = run("gate", "wait", gid)
+    assert rc == 0 and out.startswith(f"gate {gid} {os.path.realpath(tmp_path)}: exit 3 in 0 min; log ")
+    assert "hi" in pathlib.Path(root / "gate" / gid / "log").read_text()
+    rc, out, _ = run("gate", "wait", gid, "--json")
+    assert rc == 0 and json.loads(out)["exit"] == 3
+    rc, out, _ = run("gate", "status", "--json")
+    assert rc == 0 and json.loads(out)["done"][0]["id"] == gid
+
+
+def test_gate_refusals_exit_2(tmp_path, monkeypatch):
+    from claude_session import gate
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    assert run("gate", "wait", "nosuch")[0] == 2
+    assert run("gate", "run", str(tmp_path / "gone"), "--", "true")[0] == 2
+    assert run("gate", "run", str(tmp_path), "--session", "../x", "--", "true")[0] == 2
+    assert run("gate", "run", str(tmp_path))[0] == 2

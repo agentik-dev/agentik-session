@@ -483,3 +483,84 @@ def test_s22_batch_stamps_before_it_closes(monkeypatch):
         {"tool_name": "Bash", "tool_use_id": "toolu_01"}]})
     assert order == ["stamp", "close"]
     assert json.loads((_sdir() / hooks.HELPER_ACTIVITY).read_text())["event"] == "PostToolBatch"
+
+
+# --- the gate's inbox (S38 ruling 3) ------------------------------------------
+
+def _gate_results(n, repo="/r/x", log="/s"):
+    return [{"id": f"20261029-120000-{i}", "repo": repo, "exit": 0, "seconds": 60.0,
+             "log": f"{log}/gate/20261029-120000-{i}/log", "ended": 1.0 + i}
+            for i in range(1, n + 1)]
+
+
+def _inbox(results):
+    import os
+    from claude_session import gate, resolver
+    root = resolver.state_dir(os.environ)
+    for r in results:
+        gate.inbox_write(root, SID, r)
+    return root / "sessions" / SID / "inbox"
+
+
+def test_gate_inbox_ten_files_stay_under_max_out(tmp_path):
+    # F4: real-length paths (a temp repo, the temp state root's log), so three lines would
+    # pass MAX_OUT and the take must stop short of them
+    import os
+    from claude_session import gate, resolver
+    root = resolver.state_dir(os.environ)
+    rs = _gate_results(10, repo=str(tmp_path / "code" / "agentik-session"), log=str(root))
+    box = _inbox(rs)
+    three = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                    "additionalContext": "\n".join(gate.wait_line(r)
+                                                                   for r in rs[:3])}}
+    assert len(json.dumps(three)) > hooks.MAX_OUT          # the ceiling binds here
+    seen = []
+    for event in (hooks.user_prompt_submit, hooks.post_tool_use):
+        out = event({"session_id": SID})
+        assert len(json.dumps(out)) <= hooks.MAX_OUT
+        lines = out["hookSpecificOutput"]["additionalContext"].split("\n\n")[0].splitlines()
+        left = len(list(box.glob("*.json")))
+        assert lines[-1] == f"{left} more: agentik session gate status"
+        seen += lines[:-1]
+    assert seen and seen == [gate.wait_line(r) for r in rs[:len(seen)]]
+    assert len(seen) + left == 10
+
+
+def test_gate_inbox_long_paths_take_fewer_and_still_fit_max_out():
+    box = _inbox(_gate_results(10, repo="/r/" + "x" * 150, log="/s/" + "y" * 150))
+    for event in (hooks.user_prompt_submit, hooks.post_tool_use):
+        out = event({"session_id": SID})
+        assert len(json.dumps(out)) <= hooks.MAX_OUT
+        lines = out["hookSpecificOutput"]["additionalContext"].split("\n\n")[0].splitlines()
+        left = len(list(box.glob("*.json")))
+        assert lines[-1] == f"{left} more: agentik session gate status"
+    assert len(list((box / "read").glob("*.json"))) + left == 10
+
+
+def test_gate_inbox_is_read_whatever_the_posture_and_never_by_a_helper():
+    from claude_session import gate
+    use("off")
+    rs = _gate_results(1)
+    box = _inbox(rs)
+    assert hooks.user_prompt_submit({"session_id": SID, "agent_id": "a1"}) == {}
+    assert hooks.post_tool_use({"session_id": SID, "agent_id": "a1"}) == {}
+    assert len(list(box.glob("*.json"))) == 1
+    out = hooks.user_prompt_submit({"session_id": SID})
+    assert out["hookSpecificOutput"]["additionalContext"] == gate.wait_line(rs[0])
+    assert hooks.user_prompt_submit({"session_id": SID}) == {}
+
+
+def test_gate_inbox_waits_when_user_prompt_submit_raises():
+    # F3: the body raises (a counter that is not a number) after the posture; the files
+    # stay in the inbox, and the next PostToolUse shows them
+    from claude_session import gate
+    use("signal")
+    rs = _gate_results(2)
+    box = _inbox(rs)
+    sessionconfig.save_overlay({hooks.COUNTER: "x"})
+    with pytest.raises(ValueError):
+        hooks.user_prompt_submit({"session_id": SID})
+    assert len(list(box.glob("*.json"))) == 2
+    out = hooks.post_tool_use({"session_id": SID})
+    assert out["hookSpecificOutput"]["additionalContext"].splitlines() == \
+        [gate.wait_line(r) for r in rs]
