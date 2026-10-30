@@ -33,6 +33,7 @@ Each command wraps one CLI verb.
 | `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only (`git add -u`) |
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
+| `/session:gate` | `/session:gate --json` | the gate queue: running, queued, the last five done |
 
 Skills:
 
@@ -55,6 +56,7 @@ CLI verbs (`agentik session --help`):
 | `budget` | `agentik session budget` |
 | `rules` | `agentik session rules` |
 | `run` | `agentik session run --chain night -- --model 'opus[1m]' "/loop 30m check in"` |
+| `gate` | `agentik session gate run . -- make check`; `agentik session gate wait <id>` |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
 
@@ -94,7 +96,7 @@ CLAUDE_SESSION_PROFILE=orchestrator claude --model fable               # Fable 5
 CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'     # Opus 5.5, 1M
 ```
 
-For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window; `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`. `agentik session start` knows the legacy configurations only, not these two roles.
+For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window; `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
 
 ## Budget
 
@@ -102,9 +104,9 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - Zones, by the larger share: clear from 0%, notice from 80%, wind-down from 90%, reserve from 92%, exhausted at 100%.
 - `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80%), then every tenth tool: bring the charter current, commit, run `agentik session checkpoint`.
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
-- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`. Its first line must open on `RESPAWN`, or the verb exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call. PreToolUse and UserPromptSubmit stamp the main thread's activity. The Stop hook stamps each turn end; it prints nothing and never blocks.
+- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`. Its first line must open on `RESPAWN`, or the verb exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
 - The `respawn` key (`cap: 12`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
-- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. Ctrl-C in the 10 s ends the chain. Every stop but a hang-up prints a start line that runs as printed. A `/loop` of 60m or more asks at every start, so `run` warns once.
+- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
 - `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead.
 
@@ -142,19 +144,26 @@ Five parts: the title line; the table (goal, budget, pin, window, agents); `## D
 - Exit 3 past `--max-bytes` (8192) without `--force`; the refusal names the subsections to ask for instead. Stdlib, read-only.
 - `/session:read <file> [SPEC]` wraps it: with no SPEC it prints the map and stops; it never reads the whole file.
 
+## The gate queue
+
+A full gate can run an hour behind a lock, so gates queue: one at a time per state root (per Mac), each in its repo, cut at `gate.wall` (5400 s).
+
+- `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`; a lock path that exists holds it.
+- Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
+- `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
+
 ## Design of record
 
-- `design/overhaul-r1.md`: the design of this version (read it with `scripts/record design/overhaul-r1.md --sections`).
+- `design/overhaul-r1.md`: the design of this version.
 - `design/conventions.md`: the conventions shared by the sibling plugins.
 - `design/packets/`: one packet per build row, each with its acceptance lines.
 - Each sitting's decisions: the `## Handover` of its charter under `history/sittings/`.
-- Rulings: the `decisions` plugin's records.
 
 ## Tests
 
 - `make test`: the whole suite, with a fake `claude` on the PATH and no quota spent.
-- Targeted lines, by file: `.venv/bin/python -m pytest -q tests/test_meter.py tests/test_hook_meter.py tests/test_budget.py` (the meter and the zones); `tests/test_hooks.py tests/test_hook_session_start.py` (the hooks per event); `tests/test_resolver.py tests/test_sessionconfig.py` (the layers and `resolved.json`); `tests/test_charter.py`; `tests/test_record.py`; `tests/test_readme.py` (this README).
-- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness. It prints `readme: fresh` when `design/readme/rendered.sha256` holds the sha256 of `design/readme/source.md` and of `README.md`; otherwise `readme: stale` and exit 2. It is bounded: one run per tree (`.check.lock`), an 840 s wall, held off above load 4 x cores.
+- Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
+- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), an 840 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 
 ## Conventions shared with the sibling plugins
@@ -168,7 +177,7 @@ Five parts: the title line; the table (goal, budget, pin, window, agents); `## D
 
 ## Status
 
-Status: version `v2.0.0-alpha.21`, rendered `2026-10-14`, `1407` tests in the suite.
+Status: version `v2.0.0-alpha.22`, rendered `2026-10-14`, `1441` tests in the suite.
 
 ## Credit
 

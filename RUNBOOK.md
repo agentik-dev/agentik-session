@@ -405,3 +405,53 @@ hang-up the launcher writes nothing more to the terminal).
   step 2). Until both are current a helper's failed call, or one another
   PreToolUse hook blocked, stays open and holds the sitting.
 - `agentik session report --chains` lists the chain's restart and stop lines.
+
+## 5. The gate queue
+
+A full gate can take an hour behind one lock (the TLC lock is a directory with
+a pid file). `agentik session gate` queues gate commands: one runs at a time
+per state root, so one per Mac unless `XDG_STATE_HOME` differs, each in its
+repo as argv under the environment `run` saw.
+
+```bash
+agentik session gate run . --lock <tlc-lock-dir> --label "land s38" -- make check
+# queued <id> position 1 repo <realpath> caller <sid-short>; result <state>/gate/<id>/result.json
+agentik session gate wait <id> --timeout 6000     # in a background Bash
+agentik session gate status                       # running, queued, the last five done, the runner
+```
+
+- The caller is `--session SID`, else `$CLAUDE_CODE_SESSION_ID`, else none.
+  Its result reaches that session two ways: `gate wait <id>` in a background
+  Bash with a timeout past the gate's length prints `gate <id> <repo>: exit
+  <code> in <m> min; log <path>`, and the UserPromptSubmit and PostToolUse
+  hooks print the same line at the next prompt or tool call (main thread only,
+  at most three, then `<n> more: agentik session gate status`).
+- The Bash tool's background tasks die when their session respawns: list each
+  open gate id in the state file's `## Gates` section, and the successor
+  re-arms `gate wait <id>` from there.
+- `--lock PATH` (repeatable) holds the entry while PATH exists; a younger entry
+  with no lock may run first. `--wall SECONDS` cuts the command (default
+  `gate.wall`, 5400). `--wait` waits after queueing.
+- Exit codes. `wait` exits 0 whatever the gate's code, 2 for an unknown id, 1
+  past `--timeout`. A result holds the command's own code, or 124 (the wall cut
+  its process group, SIGTERM then SIGKILL), 125 (its runner died; the next
+  runner killed the group), 126 (a lock held past the wall; never run) or 127
+  (it could not start).
+- ntfy: with `gate: {ntfy_url: <url>, ntfy_topic: <topic>}` in
+  `~/.claude/agentik/profiles.yaml` the runner POSTs each result line to
+  `<url>/<topic>`, `Title: gate <repo>: exit <code>`; a failure is one line in
+  `runner.log`. The runner reads that user layer alone, since it serves every
+  repo.
+
+The runner (`gate serve`, internal) is spawned detached by `run`, `wait` and
+`status` while the queue is not empty, and exits after 60 s idle. The state,
+under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`):
+
+| path | what |
+|---|---|
+| `gate/queue/<id>.json` | an entry: id, repo, command, env, locks, wall, label, caller, queued (0600) |
+| `gate/queue.lock`, `gate/counter` | the id's counter, taken under flock |
+| `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running, pgid |
+| `gate/runner.log` | the runner's stdout and stderr |
+| `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days |
+| `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |
