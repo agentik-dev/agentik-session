@@ -9,6 +9,8 @@ Nothing that decides (chain, hooks, budget) reads mod.json: the classic path sta
 from __future__ import annotations
 
 import json
+import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -98,3 +100,69 @@ def limit_note(limited, turn_ended) -> str | None:
     if at is None or (ended is not None and at <= ended):
         return None
     return LIMIT_NOTE
+
+
+# ---- The model and the window (packet S41) ----------------------------------------------
+# The twin of modelName, windowLabel and lineFacts in session.ts; one fixture in
+# session.test.ts pins both (tests/test_mod.py). Display only: nothing that decides reads it.
+# A minor of one or two ASCII digits (Amendment 1): a dated id with no minor
+# (`claude-opus-4-20250514`) is shown as given, and `\d` reads as session.ts reads it.
+MODEL_ID = re.compile(r"^claude-([a-z]+)-(\d+)-(\d{1,2})(?:-\d{8})?$", re.ASCII)
+MODEL_CLIP = 24
+SOURCE_CLIP = 64
+
+
+def model_name(v) -> str | None:
+    """`claude-opus-5-5` -> `opus 5.5`; any other id as given, clipped to MODEL_CLIP."""
+    if not isinstance(v, str) or not v:
+        return None
+    m = MODEL_ID.fullmatch(v)            # whole: `$` alone also matches before a final newline
+    if m:
+        return f"{m[1]} {m[2]}.{m[3]}"
+    return v[:MODEL_CLIP - 1] + "…" if len(v) > MODEL_CLIP else v
+
+
+def window_label(v) -> str | None:
+    """A finite window of 1 or more, read as JSON.parse reads it in the twin (a double, so
+    an int past its range is no part): `1M` for exactly 1,000,000, under 1000 the figure
+    itself, else `<floor(n/1000)>k`."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return None
+    try:
+        v = float(v)
+    except OverflowError:
+        return None
+    if not math.isfinite(v) or v < 1:
+        return None
+    return "1M" if v == 1_000_000 else f"{math.floor(v)}" if v < 1000 else f"{math.floor(v / 1000)}k"
+
+
+def _obj(v) -> dict | None:
+    return v if isinstance(v, dict) else None
+
+
+def facts(meter: dict | None, measure: dict | None) -> str | None:
+    """`<model> · <window>`, the window `<resolved> (engine <E>)` when the two labels differ,
+    `engine <E>` with no resolved one; each part only when readable; None with neither."""
+    m = _obj(meter) or {}
+    name = model_name(m.get("model"))
+    w = window_label(m.get("window"))
+    e = window_label((_obj((_obj(measure) or {}).get("context")) or {}).get("window"))
+    win = f"{w} (engine {e})" if w is not None and e is not None and e != w \
+        else w if w is not None else f"engine {e}" if e is not None else None
+    parts = [p for p in (name, win) if p is not None]
+    return " · ".join(parts) if parts else None
+
+
+def model_line(meter: dict, measure: dict | None) -> str:
+    """What `status` prints after `model:`: the band's facts, then the id and the window's
+    source when the meter has them; `none` when it has nothing to say."""
+    head = facts(meter, measure)
+    m = _obj(meter) or {}
+    model, src = m.get("model"), m.get("window_source")
+    tail = [str(model)[:SOURCE_CLIP]] if isinstance(model, str) and model else []
+    if isinstance(src, str) and src:
+        tail.append(f"window from {src[:SOURCE_CLIP]}")
+    if head is None and not tail:
+        return "none"
+    return "; ".join(x for x in (head, ", ".join(tail)) if x)

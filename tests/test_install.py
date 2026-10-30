@@ -219,7 +219,7 @@ def test_r1_install_writes_the_new_name_the_link_and_the_front_door(repo, tmp_pa
     assert [p.name for p in (home / ".local" / "share").iterdir()] == ["agentik-session"]
     v = subprocess.run([str(bin_ / "agentik-session"), "--version"], env=_env(home),
                        capture_output=True, text=True, timeout=30)
-    assert (v.returncode, v.stdout, v.stderr) == (0, "agentik-session 2.0.0-alpha.24\n", "")
+    assert (v.returncode, v.stdout, v.stderr) == (0, "agentik-session 2.0.0-alpha.27\n", "")
     # a reinstall replaces the link in place
     assert _install(repo, home).returncode == 0
     assert os.readlink(bin_ / "claude-session") == "agentik-session"
