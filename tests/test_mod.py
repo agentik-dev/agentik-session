@@ -247,3 +247,95 @@ def test_criterion_5_no_test_or_module_but_this_one_reads_the_ts_files():
     assert readers == []
     this = Path(__file__).read_text()
     assert 'pytest.skip("no plugin/hooks/*.ts' in this      # this file's readers skip without them
+
+
+# ---- Packet S41: the model and the window, in the band and in `status` ----------------
+
+def _facts_fixture() -> tuple:
+    """The one fixture both twins read (session.test.ts's FACTS_METER, FACTS_MEASURE and
+    FACTS_LINE)."""
+    p = HOOKS_DIR / ("session.test." + "ts")
+    if not p.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    text = p.read_text()
+    get = lambda name: re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1)  # noqa: E731
+    return json.loads(get("FACTS_METER")), json.loads(get("FACTS_MEASURE")), get("FACTS_LINE")
+
+
+def test_s41_python_draws_the_module_s_facts_fixture():
+    from claude_session import mod
+    m, x, line = _facts_fixture()
+    assert line == "opus 5.5 · 200k (engine 1M)"
+    assert mod.facts(m, x) == line
+
+
+@pytest.mark.parametrize("model,name", [
+    ("claude-opus-5-5", "opus 5.5"), ("claude-fable-5-1", "fable 5.1"),
+    ("claude-sonnet-5-5", "sonnet 5.5"), ("claude-haiku-4-5-20251001", "haiku 4.5"),
+    ("local-model", "local-model"), ("claude-opus-5-5[1m]", "claude-opus-5-5[1m]"),
+    ("a-local-model-with-a-long-name-v2", "a-local-model-with-a-lo…"),
+    ("", None), (None, None), (7, None), (["x"], None), (True, None),
+])
+def test_s41_model_name(model, name):
+    from claude_session import mod
+    assert mod.model_name(model) == name
+    assert name is None or len(name) <= 24
+
+
+@pytest.mark.parametrize("window,label", [
+    (200000, "200k"), (1000000, "1M"), (128000, "128k"), (2000000, "2000k"), (200500.0, "200k"),
+    (0, None), (-1, None), (None, None), ("200000", None), (True, None), (float("nan"), None),
+    (float("inf"), None),
+])
+def test_s41_window_label(window, label):
+    from claude_session import mod
+    assert mod.window_label(window) == label
+
+
+@pytest.mark.parametrize("meter,measure,text", [
+    ({"model": "claude-opus-5-5", "window": 200000}, None, "opus 5.5 · 200k"),
+    ({"model": "claude-opus-5-5", "window": 200000}, {"context": {"window": 200000}}, "opus 5.5 · 200k"),
+    ({"model": "claude-opus-5-5", "window": 200000}, {"context": {"window": 200400}}, "opus 5.5 · 200k"),
+    ({"model": "claude-opus-5-5", "window": 200000}, {"context": {"window": 1000000}},
+     "opus 5.5 · 200k (engine 1M)"),
+    ({"model": "claude-opus-5-5"}, {"context": {"window": 1000000}}, "opus 5.5 · engine 1M"),
+    ({"window": 1000000}, {"context": None}, "1M"),
+    ({"model": 5, "window": "x"}, {"context": "x"}, None),
+    ({}, None, None), (None, None, None), ("not a dict", ["x"], None),
+])
+def test_s41_facts(meter, measure, text):
+    from claude_session import mod
+    assert mod.facts(meter, measure) == text
+
+
+def _s41_meter(sdir, **over):
+    d = json.loads((sdir / "meter.json").read_text())
+    d.update(over)
+    (sdir / "meter.json").write_text(json.dumps(d))
+
+
+def test_s41_status_prints_the_model_line_between_measure_and_mod(state, tmp_path):
+    sdir = _metered(tmp_path)
+    _s41_meter(sdir, model="claude-opus-5-5", window=200000, window_source="session:claude-opus-5-5")
+    rc, out, _ = run("status")
+    lines = out.splitlines()
+    assert rc == 0 and lines[1].startswith("measure: ") and lines[-1].startswith("mod: "), out
+    assert lines[2] == "model: opus 5.5 · 200k; claude-opus-5-5, window from session:claude-opus-5-5"
+    (sdir / "measure.json").write_text(json.dumps(
+        {"at": "2026-10-30T10:00:00+00:00", "context": {"tokens": 9, "window": 1000000}}))
+    rc, out, _ = run("status")
+    assert rc == 0 and out.splitlines()[2] == ("model: opus 5.5 · 200k (engine 1M); claude-opus-5-5, "
+                                               "window from session:claude-opus-5-5"), out
+    rc, out, _ = run("status", "--json")
+    assert json.loads(out)["model"] == "claude-opus-5-5"            # --json stays meter.json
+
+
+def test_s41_status_model_line_leaves_out_what_is_missing(state, tmp_path):
+    sdir = _metered(tmp_path)
+    _s41_meter(sdir, model=None, window=None, window_source=None)
+    (sdir / "measure.json").write_text("{torn")
+    rc, out, _ = run("status")
+    assert rc == 0 and out.splitlines()[2] == "model: none", out
+    _s41_meter(sdir, model=None, window=1000000, window_source="model:claude-fable-5-1")
+    rc, out, _ = run("status")
+    assert rc == 0 and out.splitlines()[2] == "model: 1M; window from model:claude-fable-5-1", out

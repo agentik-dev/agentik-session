@@ -102,8 +102,81 @@ test('overloaded is not the model\'s limit: the zone stands', async (t: any, on:
     .toBe('session: ctx 62% · turns 31% · notice')
 })
 
+// ---- Packet S41: the model and the window, the engine's beside it when they differ ----
+// The one fixture both twins read: tests/test_mod.py reads these three lines and asserts
+// mod.py's facts gives FACTS_LINE for FACTS_METER and FACTS_MEASURE.
+const FACTS_METER = '{"pct_context": 64.2, "pct_turns": 6, "zone": "clear", "ts": "2026-10-12T11:56:33+00:00", "model": "claude-opus-5-5", "window": 200000, "window_source": "session:claude-opus-5-5"}'
+const FACTS_MEASURE = '{"at": "2026-10-12T11:59:50+00:00", "context": {"tokens": 128000, "window": 1000000, "percent": 12.8}, "rateLimits": [], "cost": null, "changed": ["context"]}'
+const FACTS_LINE = 'opus 5.5 · 200k (engine 1M)'
+const REST = 'ctx 64% · turns 6% · clear · 207s old'
+const meterWith = (o: Record<string, unknown>): string => JSON.stringify({ ...JSON.parse(FACTS_METER), ...o })
+const measureWith = (w: unknown): string => JSON.stringify({ ...JSON.parse(FACTS_MEASURE), context: { tokens: 1, window: w } })
+const s41 = (t: any, on: any, m: string | null, x: string | null = null, columns = 120) =>
+  band(t, on, { ...(m === null ? {} : { [`${DIR}/meter.json`]: m }), ...(x === null ? {} : { [`${DIR}/measure.json`]: x }) }, columns)
+
+test('s41: the line names the model and the resolved window', async (t: any, on: any) => {
+  expect(await s41(t, on, FACTS_METER)).toBe(`session: opus 5.5 · 200k · ${REST}`)
+})
+
+test('s41: the engine measuring another window: both, the engine in brackets', async (t: any, on: any) => {
+  expect(await s41(t, on, FACTS_METER, FACTS_MEASURE)).toBe(`session: ${FACTS_LINE} · ${REST}`)
+})
+
+test('s41: the engine measuring the same window: the window once', async (t: any, on: any) => {
+  expect(await s41(t, on, FACTS_METER, measureWith(200000))).toBe(`session: opus 5.5 · 200k · ${REST}`)
+})
+
+test('s41: fable on 1M, shortened', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: 'claude-fable-5-1', window: 1000000 }), measureWith(1000000)))
+    .toBe(`session: fable 5.1 · 1M · ${REST}`)
+})
+
+test('s41: sonnet, and a window of another size as Nk', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: 'claude-sonnet-5-5', window: 128000 })))
+    .toBe(`session: sonnet 5.5 · 128k · ${REST}`)
+})
+
+test('s41: an unknown id is shown as given', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: 'local-model' }))).toBe(`session: local-model · 200k · ${REST}`)
+})
+
+test('s41: an unknown long id is clipped to 24 characters', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: 'a-local-model-with-a-long-name-v2' })))
+    .toBe(`session: a-local-model-with-a-lo… · 200k · ${REST}`)
+})
+
+test('s41: no model: the window alone', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: null }), FACTS_MEASURE)).toBe(`session: 200k (engine 1M) · ${REST}`)
+})
+
+test('s41: no resolved window: the engine\'s alone', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ window: null }), FACTS_MEASURE)).toBe(`session: opus 5.5 · engine 1M · ${REST}`)
+})
+
+test('s41: a wrong-typed model and window, an unparseable measure: no part, the rest unchanged', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: 7, window: '200000' }), '{not json')).toBe(`session: ${REST}`)
+})
+
+test('s41: an empty model, a zero window, a measure with no context: no part', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: '', window: 0 }), JSON.stringify({ context: null }))).toBe(`session: ${REST}`)
+})
+
+test('s41: a list for a model, a negative window, a string engine window: no part', async (t: any, on: any) => {
+  expect(await s41(t, on, meterWith({ model: ['x'], window: -1 }), measureWith('1000000'))).toBe(`session: ${REST}`)
+})
+
+test('s41: a measure and no meter: no meter, as before', async (t: any, on: any) => {
+  expect(await s41(t, on, null, FACTS_MEASURE)).toBe(NO_METER)
+})
+
+test('s41: the line with both windows still fits bodyColumns', async (t: any, on: any) => {
+  const line = await s41(t, on, FACTS_METER, FACTS_MEASURE, 30)
+  expect(line.length).toBeLessThanOrEqual(30)
+  expect(line).toStartWith('session: opus 5.5 · 200k')
+})
+
 // ---- Packet S27b: admission's line under the session's, from band.json ----
-const lines = async (t: any, on: any, files: Record<string, string>, columns = 120,
+const lines =async (t: any, on: any, files: Record<string, string>, columns = 120,
                      hasSurvey = false, below: any = undefined) => {
   if (below !== undefined) on('ui.render', () => below)
   await band(t, on, files, columns)
