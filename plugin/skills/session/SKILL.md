@@ -109,7 +109,7 @@ open one before the first act.
 
 ```bash
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
-agentik-session charter check <file>...        # exit 2 names the part that fails
+agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to today's newest
 ```
 
@@ -120,7 +120,18 @@ The shape, and nothing else:
 3. `## Done-ness`, a checklist whose first item is the charter itself;
 4. `## Handover`, each decision for the owner in plain language with its
    consumer;
-5. `## Next act`, one line.
+5. `## While waiting`, `open` writes `- none`; else up to three
+   `- ready: <row> (<repo>, S<n>)` lines, off-path rows built without a gate,
+   and `- owed: <item>; <what it needs>` lines, owed items that need no gate
+   (a runsheet, a refuter round, a draft);
+6. `## Next act`, one line.
+
+WAITING is legal only when While waiting reads `- none`: with a ready row or
+an owed item there, the Next act is that item, and, with `session.pacing` on,
+`check` exits 1 on a Next act of WAITING beside any line but `- none`
+(`WAITING while ready: <the line>`). A charter
+opened before 2.0.0-alpha.24 has no While waiting section; `check` passes it
+and warns: add it with `- none`.
 
 The file stays under 4,096 bytes: move text out, never widen the ceiling.
 Bring it current at every commit and at every CHECKPOINT line. `close` appends
@@ -152,7 +163,12 @@ whole, as resolved.
   nothing changed. From n = `waiting` (3) the wake is the longest idle wait
   the cache allows, and the charter is brought current and committed. A wait
   never stops the loop: under `agentik session run` a stopped loop only
-  idles until a hand, and only the checkpoint ends a sitting. A wait on the
+  idles until a hand, and only the checkpoint ends a sitting. WAITING is
+  legal only when the charter's While waiting section reads `- none`; with
+  a ready row or an owed item there, the Next act is that item. What the
+  owner must see goes in a file under `history/`, a PushNotification, or a
+  turn that ends on text and calls no ScheduleWakeup: text written before a
+  ScheduleWakeup call was not shown at the terminal on 2026-10-21. A wait on the
   usage meter (room for 0, or a usage limit hit) is not WAITING: the Next
   act stays the act, the wake is the band's reset or one fallback, whichever
   is first, and it never counts toward n.
@@ -165,7 +181,8 @@ whole, as resolved.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
   the Handover line is missing or a WAITING is misshapen or at `waiting` or
-  past it, and their exit is unchanged.
+  past it, and their exit is unchanged except the red of a WAITING Next act
+  beside a While waiting line, which exits 1.
 - Any layer overrides them, never `set`: `priority: {enabled: false}`, one
   level's quoted text under `priority.levels`, `pacing: {fallback: 2400}`.
 

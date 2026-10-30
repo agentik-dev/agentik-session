@@ -390,7 +390,12 @@ S36_WAITING = ("waiting on an outside party: the Next act says `WAITING <n>: <wh
                "is the longest idle wait the cache allows (item 6) and the charter is brought "
                "current and committed; a wait never stops the loop, since under `agentik "
                "session run` a stopped loop only idles until a hand, and only the checkpoint "
-               "ends a sitting (a respawn reads n from the charter)")
+               "ends a sitting; WAITING is legal only when the charter's While waiting "
+               "section reads `- none`, and with a ready row or an owed item the Next act is "
+               "that item (a respawn reads n from the charter); what the owner must see goes "
+               "in a file under `history/`, a PushNotification, or a turn that ends on text "
+               "and calls no ScheduleWakeup (text before a ScheduleWakeup call was not shown "
+               "on 2026-10-21)")
 
 
 def test_s36_pace_says_a_wait_never_stops_the_loop():
@@ -402,3 +407,18 @@ def test_s36_pace_says_a_wait_never_stops_the_loop():
     line = r.clause(session(), "1h")
     assert line.endswith("no wait stops the loop; WAITING 3+: idle limit" + S30_1H + S30_TAIL)
     assert len(line.encode()) == 318 <= r.BLOCK_MAX                # the 1h tail still fits
+
+
+# ---- S40: item 4 names the While waiting section and what the owner sees -----
+
+def test_s40_pace_item_4_says_while_waiting_and_what_the_owner_sees():
+    r = rules()
+    item = r.PACE[3]
+    legal = item.index("WAITING is legal only when the charter's While waiting section reads "
+                       "`- none`")
+    assert legal < item.index("(a respawn reads n from the charter)") < item.index(
+        "PushNotification")
+    assert item.endswith("calls no ScheduleWakeup (text before a ScheduleWakeup call was not "
+                         "shown on 2026-10-21)")
+    assert "While waiting" not in r.clause(session()) and len(BLOCK.encode()) == 288
+    assert "WAITING is legal only when" in r.render(session())

@@ -131,12 +131,12 @@ The sibling plugins, `decisions`, `respeak` and `relay`, are optional: this plug
 One file per sitting, `history/sittings/<date>-<n>.md` (the profile's `charter.dir`).
 
 - `agentik session charter open "<goal>"` writes it.
-- `agentik session charter check <file>` exits 2 naming the failing part.
+- `agentik session charter check <file>` exits 2 naming the failing part, 1 on the red.
 - `agentik session charter close --exit "<text>"` appends the exit line from the meter.
-- While `session.priority` is on, `open` writes `- open by level: none yet` under Handover. Each Handover lists the open items by level, highest first.
-- `check` and `close` warn, exit unchanged, on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`.
+- With `session.priority` on, `open` writes `- open by level: none yet` under Handover: open items by level, highest first.
+- `check` and `close` warn on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`.
 
-Five parts: the title line; the table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## Next act`. A charter stays under 4,096 bytes.
+Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## While waiting`, `- none` or ready/owed lines (WAITING beside any other line is red); `## Next act`.
 
 ## Reading records
 
@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue: one at a time per sta
 
 ## Status
 
-Status: version `v2.0.0-alpha.22`, rendered `2026-10-14`, `1445` tests in the suite.
+Status: version `v2.0.0-alpha.24`, rendered `2026-10-14`, `1484` tests in the suite.
 
 ## Credit
 
