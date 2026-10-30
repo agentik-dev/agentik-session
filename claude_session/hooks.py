@@ -287,15 +287,15 @@ def _with_gate(out: dict, event: str, lines: list[str]) -> dict:
 
 def user_prompt_submit(payload: dict) -> dict:
     """Budget context, and the checkpoint nudge that is the real mechanism. The gate's
-    inbox lines (S38 ruling 3) are taken before the posture and go first at every return."""
+    inbox lines (S38 ruling 3) are taken at each return, the posture-off one included,
+    after the body, so a body that raises leaves the files for the next hook (F3)."""
     sid = payload.get("session_id")
     if not payload.get("agent_id"):                     # before the posture (respawn-r1 §3.3)
         _stamp(payload, os.environ, ACTIVITY,
                {"event": "UserPromptSubmit", "tool": None, "at": time.time()})
-    lines = _gate_lines(payload, os.environ, "UserPromptSubmit", {}, alone=True)
     cfg, zone = state(sid)
     if cfg.posture == "off":
-        return _with_gate({}, "UserPromptSubmit", lines)
+        return _gate_ups(payload, {})
 
     ov = sessionconfig.load_overlay()
     count = int(ov.get(COUNTER) or 0) + 1
@@ -329,10 +329,15 @@ def user_prompt_submit(payload: dict) -> dict:
             "at any moment rather than only when it is convenient.")
 
     if not bits:
-        return _with_gate({}, "UserPromptSubmit", lines)
-    return _with_gate({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                              "additionalContext": "\n\n".join(bits)}},
-                      "UserPromptSubmit", lines)
+        return _gate_ups(payload, {})
+    return _gate_ups(payload, {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                      "additionalContext": "\n\n".join(bits)}})
+
+
+def _gate_ups(payload: dict, out: dict) -> dict:
+    """UserPromptSubmit's output with the inbox lines first, the block alone under MAX_OUT."""
+    return _with_gate(out, "UserPromptSubmit",
+                      _gate_lines(payload, os.environ, "UserPromptSubmit", out, alone=True))
 
 
 HELPER_PROFILE = "builder"

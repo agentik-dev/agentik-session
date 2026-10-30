@@ -502,19 +502,28 @@ def _inbox(results):
     return root / "sessions" / SID / "inbox"
 
 
-def test_gate_inbox_ten_files_stay_under_max_out():
-    from claude_session import gate
-    rs = _gate_results(10)
-    _inbox(rs)
-    out = hooks.user_prompt_submit({"session_id": SID})
-    block = out["hookSpecificOutput"]["additionalContext"].split("\n\n")[0]
-    assert block.splitlines() == [gate.wait_line(r) for r in rs[:3]] + \
-        ["7 more: agentik session gate status"]
-    assert len(json.dumps(out)) <= hooks.MAX_OUT
-    out = hooks.post_tool_use({"session_id": SID})
-    assert out["hookSpecificOutput"]["additionalContext"].splitlines() == \
-        [gate.wait_line(r) for r in rs[3:6]] + ["4 more: agentik session gate status"]
-    assert len(json.dumps(out)) <= hooks.MAX_OUT
+def test_gate_inbox_ten_files_stay_under_max_out(tmp_path):
+    # F4: real-length paths (a temp repo, the temp state root's log), so three lines would
+    # pass MAX_OUT and the take must stop short of them
+    import os
+    from claude_session import gate, resolver
+    root = resolver.state_dir(os.environ)
+    rs = _gate_results(10, repo=str(tmp_path / "code" / "agentik-session"), log=str(root))
+    box = _inbox(rs)
+    three = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                    "additionalContext": "\n".join(gate.wait_line(r)
+                                                                   for r in rs[:3])}}
+    assert len(json.dumps(three)) > hooks.MAX_OUT          # the ceiling binds here
+    seen = []
+    for event in (hooks.user_prompt_submit, hooks.post_tool_use):
+        out = event({"session_id": SID})
+        assert len(json.dumps(out)) <= hooks.MAX_OUT
+        lines = out["hookSpecificOutput"]["additionalContext"].split("\n\n")[0].splitlines()
+        left = len(list(box.glob("*.json")))
+        assert lines[-1] == f"{left} more: agentik session gate status"
+        seen += lines[:-1]
+    assert seen and seen == [gate.wait_line(r) for r in rs[:len(seen)]]
+    assert len(seen) + left == 10
 
 
 def test_gate_inbox_long_paths_take_fewer_and_still_fit_max_out():
@@ -539,3 +548,19 @@ def test_gate_inbox_is_read_whatever_the_posture_and_never_by_a_helper():
     out = hooks.user_prompt_submit({"session_id": SID})
     assert out["hookSpecificOutput"]["additionalContext"] == gate.wait_line(rs[0])
     assert hooks.user_prompt_submit({"session_id": SID}) == {}
+
+
+def test_gate_inbox_waits_when_user_prompt_submit_raises():
+    # F3: the body raises (a counter that is not a number) after the posture; the files
+    # stay in the inbox, and the next PostToolUse shows them
+    from claude_session import gate
+    use("signal")
+    rs = _gate_results(2)
+    box = _inbox(rs)
+    sessionconfig.save_overlay({hooks.COUNTER: "x"})
+    with pytest.raises(ValueError):
+        hooks.user_prompt_submit({"session_id": SID})
+    assert len(list(box.glob("*.json"))) == 2
+    out = hooks.post_tool_use({"session_id": SID})
+    assert out["hookSpecificOutput"]["additionalContext"].splitlines() == \
+        [gate.wait_line(r) for r in rs]

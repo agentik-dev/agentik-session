@@ -430,3 +430,35 @@ def test_spawn_serve_runs_this_python_detached_and_only_for_a_queue(w):
     assert kw["stdout"].name == str(w.root / "gate" / "runner.log")
     assert kw["env"]["PYTHONPATH"].split(os.pathsep)[0] == \
         str(Path(gate.__file__).resolve().parent.parent)
+
+
+# ---- Amendment 1 (refuter round 1) -------------------------------------------
+
+def test_the_lock_wait_counts_from_the_locked_head_not_from_queued(w, tmp_path):
+    # F1's repro: A sleeps 6 s; B (--lock L --wall 3) waits behind it; L is made at 5 s and
+    # gone at 7 s, so B's lock was held about 2 s as the head: B runs, never cut.
+    lock = tmp_path / "tlc.lock"
+    w.plan = {"a": (6, 0), "b": (1, 0)}
+    w.put("a")
+    b = w.put("b", locks=[str(lock)], wall=3)
+
+    def tlc(world):
+        if T0 + 5 <= world.t < T0 + 7 and not lock.exists():
+            lock.mkdir()
+        elif world.t >= T0 + 7 and lock.exists():
+            lock.rmdir()
+    w.hooks.append(tlc)
+    gate.serve(w.root, w.fx())
+    assert [s[0][0] for s in w.spawned] == ["a", "b"]
+    assert (w.result(b["id"])["exit"], w.result(b["id"])["cut"]) == (0, None)
+
+
+def test_a_dead_child_runner_reads_as_dead_not_as_its_zombie():
+    # F2: a runner the waiter spawned is its child; dead, it is a zombie that kill(0)
+    # still finds, so _alive reaps it to tell.
+    p = subprocess.Popen(["sh", "-c", "exit 0"])
+    deadline = time.time() + 5
+    while gate._alive(p.pid) and time.time() < deadline:
+        time.sleep(0.05)
+    assert gate._alive(p.pid) is False
+    assert gate._alive(os.getpid()) is True

@@ -247,3 +247,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## The README source gave eight passages to the gate queue's section (2026-10-29, S38; S4)
 - `design/readme/source.md` sat 2 bytes under `SOURCE_CEILING` (16384) and S38's ruling 5 adds the gate rows and "The gate queue" (about 800 bytes), so eight passages were tightened or cut in both files to land at 16354: the targeted-tests line, `make check`'s freshness clause, the legacy-roles note, the Stop and stamp sentences of the RESPAWN close, the record-tool hint, `run`'s start-line and Ctrl-C sentences, and the Rulings row; the next README render or a ceiling raise may restore them (packet S38).
+
+## S38's refuter round 1: windows not reproduced (2026-10-29, the refuter; S4)
+- Packet S38's runner has five unreproduced windows, no code for them yet: a runner dying between `popen` and the `runner.json` write runs its entry twice; dying after `result.json` but before the inbox write and ntfy drops the message; `_recover` kills the recorded pgid even when a result exists (pid reuse); `inbox/read/` is never pruned; `runner.log` is 0644.

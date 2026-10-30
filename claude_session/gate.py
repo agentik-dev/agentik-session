@@ -122,7 +122,13 @@ def _alive(pid) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    try:                            # a runner that is our own child is a zombie once dead
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:       # not our child: kill(0) said enough
+        return True
+    except OSError:
+        return True
+    return reaped == 0
 
 
 def _config(env) -> dict:
@@ -403,8 +409,11 @@ def _recover(root, fx: Fx, cfg: dict) -> None:
     fx.log(f"gate: a stale runner.json (pid {r.get('pid')}) was recovered")
 
 
-def _step(root, fx: Fx, cfg: dict, since: float) -> bool:
-    """One pass: True when it ran or closed an entry."""
+def _step(root, fx: Fx, cfg: dict, since: float, seen: dict | None = None) -> bool:
+    """One pass: True when it ran or closed an entry. `seen` is the runner's memory of
+    when it first saw each head locked: the 126 cut counts the wall from there, never
+    from `queued`, and a head seen unlocked starts again (Amendment 1, F1)."""
+    seen = {} if seen is None else seen
     es = entries(root)
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
@@ -415,10 +424,15 @@ def _step(root, fx: Fx, cfg: dict, since: float) -> bool:
     head, now = es[0], fx.now()
     held = _locked(head)
     wall = head.get("wall") if isinstance(head.get("wall"), int) else WALL
-    if held and now - float(head.get("queued") or 0) > wall:
-        _finish(root, fx, cfg, head, 126, head.get("queued"), now, CUT_LOCK,
-                note=f"lock {held} held past the wall ({wall} s); not run")
-        return True
+    for gid in [k for k in seen if k != head["id"] or not held]:
+        del seen[gid]
+    if held:
+        first = seen.setdefault(head["id"], now)
+        if now - first > wall:
+            del seen[head["id"]]
+            _finish(root, fx, cfg, head, 126, first, now, CUT_LOCK,
+                    note=f"lock {held} held past the wall ({wall} s); not run")
+            return True
     for e in es:
         if not _locked(e):
             _run(root, fx, cfg, e, since)
@@ -442,9 +456,9 @@ def serve(root, fx: Fx | None = None) -> int:
         while True:
             since = fx.now()
             _runner_write(root, fx, since, None, None)
-            idle_at = fx.now()
+            idle_at, seen = fx.now(), {}
             while True:
-                if _step(root, fx, cfg, since):
+                if _step(root, fx, cfg, since, seen):
                     idle_at = fx.now()
                     continue
                 if not entries(root) and fx.now() - idle_at >= fx.idle:

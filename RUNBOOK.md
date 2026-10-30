@@ -445,7 +445,8 @@ agentik session gate status                       # running, queued, the last fi
 
 The runner (`gate serve`, internal) is spawned detached by `run`, `wait` and
 `status` while the queue is not empty, and exits after 60 s idle. The state,
-under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`):
+under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
+`claude-code-session` there when only that pre-rename folder exists):
 
 | path | what |
 |---|---|
