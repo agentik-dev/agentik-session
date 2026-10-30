@@ -1,0 +1,41 @@
+# Packet S41: the session line names the model and the window
+
+| item | value |
+|---|---|
+| from | the owner's ask of 2026-10-30, relayed by the hq sitting: "adding the model into this menu: `session: ctx 64% · turns 6% · clear · 207s old` along with the context size (200K vs 1M for example). I think we might have some Opus sessions running supervisor/orchestration settings on the lower context size and I want to confirm that." The hq probe the same day (18 live sessions on one Mac, ids not kept): every meter reads `claude-opus-5-5`; every `measure.json` reads `context.window` 1000000; `resolved.json`'s `session.window` reads 200000 for 14 (`window_source session:claude-opus-5-5`) and 1000000 for 4 (`session:claude-fable-5-1`, switched later with `/model`) |
+| pin | 9cced7f (main, alpha.24); worktree `.claude/worktrees/s41-line-model`, branch `s41-line-model` off it; this packet is on the branch |
+| wall | this repo; no push, `--amend`, rebase, merge, device, `agentik session run`, `claude plugin install/update/marketplace`, `make readme`, `make install` or `make check`; never write under `~/.local/state`; never run `relay` or `agentik relay` `run`, `plan`, `gate`, `stop`, `kill`, `clean` or `resume`; never build or run a relay binary; never write in another repo or its worktrees |
+| may touch | `plugin/hooks/session.ts`, `plugin/hooks/session.test.ts`, `claude_session/mod.py`, `claude_session/cli.py` (`cmd_status` only), `claude_session/__init__.py` (lines 3 and 5), `pyproject.toml` (line 7), `plugin/.claude-plugin/plugin.json` (`version` only), `tests/test_mod.py`, `tests/test_doctor.py` (the SEMVER pin), `tests/test_install.py` (the version pin), `README.md` and `design/readme/source.md` (the status line, byte-identical) with `design/readme/rendered.sha256` re-hashed, `RUNBOOK.md` (§4's band line), `plugin/skills/session/SKILL.md` (the band and the measure lines), `design/packets/s41-line-model.md`, `NICE_TO_HAVE.md` (what is filed outside), `history/sittings/*.md`, `history/sessions/NEXT` |
+| acceptance | `.venv/bin/python -B -m pytest tests/test_mod.py tests/test_measure.py tests/test_hook_meter.py tests/test_cli.py tests/test_doctor.py tests/test_install.py tests/test_readme.py tests/test_s34.py tests/test_band.py -q 2>&1 \| tail -1` reads `passed`, no `failed` (on 9cced7f: 431 passed); the act-1 tests fail before act 2 (quote the tail); `grep -c 'engine 1M' plugin/hooks/session.test.ts` reads 1 or more (on 9cced7f: 0); `grep -cF '${dir}/measure.json' plugin/hooks/session.ts` reads 1 (on 9cced7f: 0); `grep -c 'opus 5.5 · 200k' RUNBOOK.md plugin/skills/session/SKILL.md` reads 1 and 1 (on 9cced7f: 0 and 0); `git diff 9cced7f -- claude_session/resolver.py claude_session/meter.py claude_session/models.py claude_session/hooks.py \| wc -l` reads 0; `grep -c '"version": "2.0.0-alpha.25"' plugin/.claude-plugin/plugin.json` reads 1 (on 9cced7f: 0); `grep -c 'v2.0.0-alpha.25' README.md design/readme/source.md` reads 1 and 1 (on 9cced7f: 0 and 0); `grep -c "$(printf '\342\200\224')" claude_session/mod.py plugin/hooks/session.ts design/packets/s41-line-model.md` reads 0 on each |
+| verify | `make check`, by the coordinator (the hq sitting), one `make` at a time on this Mac; it runs `claude plugin test plugin`, the module's tests (on 9cced7f: 56 pass) |
+| budget | acts: 0 this packet; 1 tests, red; 2 the twins and `status`; 3 the docs; 4 the version, the README count, the sidecar (last, after every change under `plugin/`). 40 turns, stop at 32 (commit the act in flight), 180k, `claude-opus-5-5`; one commit per act |
+
+## 1. What the source says (quoted)
+
+`session.ts` `bandLine(meter, respawn, nowMs, limited, turnEnded)` (61-71): `session: ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${note ?? m.zone}`, then ` · respawn marked`, then ` · <age>s old` past `STALE_S` (120); no meter: `NO_METER`, or `session: <limit note>`. The `ui.render` hook (337-366) reads `meter.json`, `respawn.json`, `limited.json`, `turn-ended.json` and `band.json`, and clips each line to `bodyColumns`. `meter.json` carries `model` (the transcript's last known model), `window` and `window_source` (`meter.py` 44-68; `_limits` 225-240 re-picks the window by `models.pick` from the resolved file, so the ceilings and `window` agree). `measure.json` is `{at, context: {tokens, window, percent}, rateLimits, cost, changed}` (`measure.py` 78-89). `cli.cmd_status` (104-133) prints `meter.one_line`, `measure: …`, `mod: …`, then the hold line.
+
+## 2. Rulings (the hq sitting's, reversible)
+
+1. **The model part**: `meter.json`'s `model`. An id matching `^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$` reads `<family> <major>.<minor>` (`claude-opus-5-5` -> `opus 5.5`, `claude-fable-5-1` -> `fable 5.1`, `claude-sonnet-5-5` -> `sonnet 5.5`); any other string is shown as given, clipped to 24 characters (23 and `…`); a non-string or empty value is no part.
+2. **The window part**: `meter.json`'s `window`, the window the meter's ceilings apply. A positive finite number of exactly 1,000,000 reads `1M`, any other `<floor(n/1000)>k`. The engine's is `measure.json`'s `context.window`, labelled the same way. When both labels are there and differ, the part reads `<resolved> (engine <E>)`; with the resolved one alone, `<resolved>`; with the engine's alone, `engine <E>`; with neither, no part. Labels are compared, not tokens, so the line never reads `200k (engine 200k)`.
+3. **The line**: `session: <model> · <window> · ctx …`, each part only when present, in that order; the rest of the line is unchanged in content and order. The no-meter line and the limit note before the first meter are unchanged. Nothing throws: an unreadable file is no part. The line is clipped as before.
+4. **`status`** prints `model: <the band's two parts>; <id>, window from <window_source>` between `measure:` and `mod:` (the id and source left out when absent, `model: none` with no part); `--json` stays `meter.json`.
+5. **Twins**: `session.ts` `modelName`, `windowLabel`, `lineFacts` and `mod.py` `model_name`, `window_label`, `facts`; one fixture in `session.test.ts` (`FACTS_METER`, `FACTS_MEASURE`, `FACTS_LINE`) is read by `tests/test_mod.py`, which asserts Python draws the same text.
+6. **Nothing that decides reads it**: `resolver.py`, `meter.py`, `models.py`, `hooks.py`, `chain.py` and `budget.py` are untouched; the window and the ceilings resolve as on 9cced7f. The fix that lets an orchestrator take the engine's window is a separate row the coordinator places; the builder names its lead in the hand-back.
+7. **The version**: 2.0.0-alpha.25 in all five pins, the bump act last; the README status line reads the new version and the suite's new count, the sidecar re-hashed. The marketplace line in commons moves at the install, by the hq sitting.
+
+## 3. Interfaces (signatures, not prose)
+
+`bandLine(meter, respawn, nowMs, limited = null, turnEnded = null, measure: string | null = null): string`; `modelName(v: unknown): string | null`; `windowLabel(v: unknown): string | null`; `lineFacts(m: any, measure: any): string | null`. `mod.model_name(v) -> str | None`, `mod.window_label(v) -> str | None`, `mod.facts(meter: dict | None, measure: dict | None) -> str | None`, `mod.model_line(meter: dict, measure: dict | None) -> str` (the text after `model: `).
+
+## 4. Findings that name this row
+
+None names it. `NICE_TO_HAVE.md:136` (the band could say a respawn hold) stays its own row; `NICE_TO_HAVE.md:31` (a child reading 400k on a 200k window) is the resolution's, not this row's.
+
+## 5. Forbidden reads
+
+Transcripts under `~/.claude/projects`; `~/.local/state` (the probe is quoted above); the private hq, the observer repo and every other repo.
+
+## 6. Report (one table, at most five bullets, under 600 words)
+
+Acts with commit shas; acceptance output verbatim with the measured baseline; the red-before evidence; the resolution's file:line and the smallest change that makes an orchestrator take the engine's measured window, with its risks; anything filed outside the packet, with its NICE line.
