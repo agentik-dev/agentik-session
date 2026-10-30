@@ -272,3 +272,52 @@ def test_s36_block_says_no_wait_stops_the_loop(tmp_path):
     assert block.endswith("no wait stops the loop; WAITING 3+: idle limit, cache 1h: idle wakes "
                           "<=3300s" + S30_TAIL)
     assert len(block.encode()) == 318 <= 320
+
+
+# ---- S39: the successor's state line ------------------------------------------
+import time
+
+S39_READ = "): read it first, then the charter's Next act, nothing else before the first act"
+
+
+def _s39_state(tmp_path, sid="pred-session-0001", age=600.0, name="s39-chain"):
+    from claude_session import state
+    home = tmp_path / "state/agentik-session/respawn" / name
+    src = tmp_path / "s.md"
+    src.write_text("# State for the successor of pred-ses, 2026-10-29 21:40\n\n## Helpers\n"
+                   "- none\n\n## Gates\n- none\n\n## Last acts\n- none\n\n## Read first\n"
+                   "- read nothing else before the first act\n")
+    return home, state.write(home, src, sid, time.time() - age)
+
+
+def test_s39_the_line_names_the_predecessor_s_state(tmp_path):
+    home, d = _s39_state(tmp_path)
+    env = env_for(tmp_path, CLAUDE_SESSION_CHAIN="s39-chain")
+    ctx = hooks.session_start(payload(), env)["hookSpecificOutput"]["additionalContext"]
+    at = time.strftime("%H:%M", time.localtime(d["written"]))
+    want = f"; state: {home / 'state.md'} ({d['bytes']} B from pred-ses, {at}" + S39_READ
+    assert ctx.endswith(want) and "\n" not in ctx
+    assert ctx.index("; charter: none open today") < ctx.index("; state: ")
+
+
+@pytest.mark.parametrize("case", ["own", "old", "no-chain", "helper", "other-chain", "no-copy"])
+def test_s39_no_line_otherwise(tmp_path, case):
+    home, _ = _s39_state(tmp_path, sid="test-session" if case == "own" else "pred-session-0001",
+                         age=86401.0 if case == "old" else 600.0)
+    extra = {} if case == "no-chain" else {"CLAUDE_SESSION_CHAIN": "s39-chain"}
+    if case == "helper":
+        extra["CLAUDE_SESSION_HELPER"] = "1"
+    if case == "other-chain":
+        extra["CLAUDE_SESSION_CHAIN"] = "another"
+    if case == "no-copy":
+        (home / "state.md").unlink()
+    out = hooks.session_start(payload(), env_for(tmp_path, **extra))
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "; state:" not in ctx and ctx.startswith("agentik-session: profile")
+
+
+def test_s39_the_reminder_reads_its_clock(tmp_path):
+    home, d = _s39_state(tmp_path, age=0.0)
+    env = env_for(tmp_path, CLAUDE_SESSION_CHAIN="s39-chain")
+    assert hooks._state_reminder(env, d["written"] + 86400, sid="succ").startswith("; state: ")
+    assert hooks._state_reminder(env, d["written"] + 86401, sid="succ") == ""
