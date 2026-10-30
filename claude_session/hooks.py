@@ -374,17 +374,22 @@ def _charter_reminder(session: dict, cwd) -> str:
 
 
 def _state_reminder(env, now, sid=None) -> str:
-    """S39 ruling 3: under a launcher's chain, a predecessor's state copied to the chain
-    home within 24 h is named, to be read first; "" otherwise, and on any error. A helper
-    (CLAUDE_SESSION_HELPER=1) inherits the chain's variable but is not the successor."""
+    """S39 ruling 3 and Amendment 1: under a launcher's chain, in a main-thread sitting
+    (state.main_sitting), the state the launcher handed to this session is named, to be
+    read first, and a copy that does not match its record is said; "" otherwise, and on
+    any error. `now` is kept for the interface: no clock rule since Amendment 1."""
     name = str(env.get(CHAIN_VAR) or "")
-    if not CHAIN_RE.match(name) or env.get("CLAUDE_SESSION_HELPER") == "1":
+    if not CHAIN_RE.match(name):
         return ""
     try:
         from . import chain, state
+        if not state.main_sitting(env):
+            return ""
         home = chain.home(resolver.state_dir(env), name)
-        d = state.fresh(home, sid or env.get("CLAUDE_CODE_SESSION_ID"), now) if home else None
-        if d is None:
+        how, d = state.handed(home, sid or env.get("CLAUDE_CODE_SESSION_ID"))
+        if how == "mismatch":
+            return f"; state: {home / state.FILE} does not match its record"
+        if how != "ok":
             return ""
         at = time.strftime("%H:%M", time.localtime(d["written"]))
     except Exception:                                   # noqa: BLE001

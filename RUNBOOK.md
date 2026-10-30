@@ -359,19 +359,28 @@ hang-up the launcher writes nothing more to the terminal).
   note. An exit line left uncommitted leaves main dirty, and holds every
   sibling that merges only into a clean main.
 - The state file is the sitting's own word to its successor, since no hook
-  sees a helper return or a gate finish: a title line `# State for the
-  successor of <sid-short>, <date> <HH:MM>`, then `## Helpers` (each open
-  helper: its name, its scratch directory, what it is doing, what wakes the
-  sitting), `## Gates` (each gate in flight: id, repo, result path), `## Last
-  acts` (at most three: a sha and what it did) and `## Read first` (paths with
-  line ranges, in order, ending on `- read nothing else before the first
-  act`), each a bulleted list or `- none`, under 8,192 bytes, no em-dash. A
-  fault refuses the checkpoint, exit 2, the faults on stderr. The copy lands
-  in `respawn/<chain>/state.md`, `state.json` beside it, and the successor's
-  SessionStart line names it when another session wrote it under 24 h ago.
-  Without `--state` the checkpoint says `no --state: the successor orients
-  from the charter alone` and clears an older copy; with no chain the copy
-  stays in the session's own directory, where no successor looks.
+  sees a helper return or a gate finish. The checkpoint checks its shape:
+  - the first line is `# State for the successor of <sid-short>, <YYYY-MM-DD>
+    <HH:MM>`, a date and time that parse;
+  - then exactly four sections, in this order, each a bulleted list (every
+    line opens on `- `) or the one line `- none`: `## Helpers` (each open
+    helper: its name, its scratch directory, what it is doing, what wakes the
+    sitting), `## Gates` (each gate in flight: id, repo, result path), `## Last
+    acts` (at most three lines, each opening on a commit sha: `- <sha> what it
+    did`) and `## Read first` (at least one path line, `- <path> lines <a>-<b>`,
+    in reading order, then the closing line `- read nothing else before the
+    first act`, once and last);
+  - under 8,192 bytes, and no em-dash.
+
+  A fault refuses the checkpoint, exit 2, the faults on stderr. The copy lands
+  in `respawn/<chain>/state.md`, `state.json` beside it. At the next start the
+  launcher stamps the record with the successor's session id and deletes a
+  state any other session left; only that successor's SessionStart line names
+  it, and a copy that does not match its record is said so. A main-thread
+  sitting's checkpoint without `--state` says `no --state: the successor
+  orients from the charter alone` and clears an older copy (a helper, a relay
+  row or a started session clears nothing); with no chain the copy stays in
+  the session's own directory, where no successor looks.
 - The guards are `session: {respawn: {cap, floor, settle}}` in the config
   layers (defaults 12 restarts in any 24 h, 600 s, 60 s); `--cap`,
   `--floor` and `--settle` override them for one chain.

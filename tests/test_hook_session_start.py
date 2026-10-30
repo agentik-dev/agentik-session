@@ -280,44 +280,58 @@ import time
 S39_READ = "): read it first, then the charter's Next act, nothing else before the first act"
 
 
-def _s39_state(tmp_path, sid="pred-session-0001", age=600.0, name="s39-chain"):
+def _s39_state(tmp_path, to="test-session", name="s39-chain"):
+    """A predecessor's state in the chain home, handed by the launcher to `to`."""
     from claude_session import state
     home = tmp_path / "state/agentik-session/respawn" / name
     src = tmp_path / "s.md"
     src.write_text("# State for the successor of pred-ses, 2026-10-29 21:40\n\n## Helpers\n"
                    "- none\n\n## Gates\n- none\n\n## Last acts\n- none\n\n## Read first\n"
-                   "- read nothing else before the first act\n")
-    return home, state.write(home, src, sid, time.time() - age)
+                   "- README.md lines 1-9\n- read nothing else before the first act\n")
+    d = state.write(home, src, "pred-session-0001", time.time() - 600)
+    if to:
+        assert state.hand(home, "pred-session-0001", to)
+    return home, d
 
 
-def test_s39_the_line_names_the_predecessor_s_state(tmp_path):
+def _s39_ctx(tmp_path, **extra):
+    env = env_for(tmp_path, **{"CLAUDE_SESSION_CHAIN": "s39-chain", **extra})
+    return hooks.session_start(payload(), env)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_s39_the_line_names_the_state_handed_to_this_session(tmp_path):
     home, d = _s39_state(tmp_path)
-    env = env_for(tmp_path, CLAUDE_SESSION_CHAIN="s39-chain")
-    ctx = hooks.session_start(payload(), env)["hookSpecificOutput"]["additionalContext"]
+    ctx = _s39_ctx(tmp_path)
     at = time.strftime("%H:%M", time.localtime(d["written"]))
     want = f"; state: {home / 'state.md'} ({d['bytes']} B from pred-ses, {at}" + S39_READ
     assert ctx.endswith(want) and "\n" not in ctx
     assert ctx.index("; charter: none open today") < ctx.index("; state: ")
 
 
-@pytest.mark.parametrize("case", ["own", "old", "no-chain", "helper", "other-chain", "no-copy"])
+@pytest.mark.parametrize("case", ["third-session", "not-handed", "no-chain", "helper",
+                                  "other-chain", "depth-1", "relay-row"])
 def test_s39_no_line_otherwise(tmp_path, case):
-    home, _ = _s39_state(tmp_path, sid="test-session" if case == "own" else "pred-session-0001",
-                         age=86401.0 if case == "old" else 600.0)
-    extra = {} if case == "no-chain" else {"CLAUDE_SESSION_CHAIN": "s39-chain"}
-    if case == "helper":
-        extra["CLAUDE_SESSION_HELPER"] = "1"
-    if case == "other-chain":
-        extra["CLAUDE_SESSION_CHAIN"] = "another"
-    if case == "no-copy":
-        (home / "state.md").unlink()
-    out = hooks.session_start(payload(), env_for(tmp_path, **extra))
-    ctx = out["hookSpecificOutput"]["additionalContext"]
+    _s39_state(tmp_path, to={"third-session": "third-session-3", "not-handed": None}.get(
+        case, "test-session"))
+    extra = {"helper": {"CLAUDE_SESSION_HELPER": "1"}, "other-chain": {
+        "CLAUDE_SESSION_CHAIN": "another"}, "depth-1": {"CLAUDE_SESSION_DEPTH": "1"},
+        "relay-row": {"RELAY_ROW": "s39"}}.get(case, {})
+    if case == "no-chain":
+        ctx = hooks.session_start(payload(), env_for(tmp_path))[
+            "hookSpecificOutput"]["additionalContext"]
+    else:
+        ctx = _s39_ctx(tmp_path, **extra)
     assert "; state:" not in ctx and ctx.startswith("agentik-session: profile")
 
 
-def test_s39_the_reminder_reads_its_clock(tmp_path):
-    home, d = _s39_state(tmp_path, age=0.0)
-    env = env_for(tmp_path, CLAUDE_SESSION_CHAIN="s39-chain")
-    assert hooks._state_reminder(env, d["written"] + 86400, sid="succ").startswith("; state: ")
-    assert hooks._state_reminder(env, d["written"] + 86401, sid="succ") == ""
+@pytest.mark.parametrize("case", ["altered", "missing", "bad-record"])
+def test_s39_a_copy_that_does_not_match_is_said(tmp_path, case):
+    home, _ = _s39_state(tmp_path)
+    if case == "altered":
+        (home / "state.md").write_text("x")
+    elif case == "missing":
+        (home / "state.md").unlink()
+    else:
+        (home / "state.json").write_text("{")
+    ctx = _s39_ctx(tmp_path)
+    assert ctx.endswith(f"; state: {home / 'state.md'} does not match its record")

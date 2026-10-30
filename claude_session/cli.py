@@ -354,8 +354,7 @@ def cmd_charter(args) -> int:
         # S39: the then: line stays byte-stable for its callers; the optional state is said
         # beside it, on stderr.
         print("note: add --state <file> to that checkpoint to hand the successor its state "
-              "(optional; the four sections are in agentik-session checkpoint --help)",
-              file=sys.stderr)
+              "(optional; its shape is in RUNBOOK \"Restarting a sitting\")", file=sys.stderr)
     return 0
 
 
@@ -739,7 +738,7 @@ def _state_handoff(sid: str, src: str | None) -> None:
     name = _chain_name()
     home = chain.home(state, name) if name else None
     if src is None:
-        if home is not None:
+        if home is not None and statefile.main_sitting(os.environ):     # Amendment 1 (P5)
             try:
                 statefile.clear(home)
             except OSError as e:
@@ -749,7 +748,7 @@ def _state_handoff(sid: str, src: str | None) -> None:
     where = home or resolver.session_dir(state, sid)
     try:
         d = statefile.write(where, src, sid, time.time())
-    except OSError as e:
+    except (OSError, ValueError) as e:
         _die(f"checkpoint recorded, but the state was not copied: {e}")
     copy = where / statefile.FILE
     if home is not None:

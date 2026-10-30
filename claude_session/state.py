@@ -3,8 +3,9 @@
 A RESPAWN close may hand its successor one compact file: who is still out (helpers,
 gates), what just landed, and what to read first. No hook sees a helper return or a
 gate finish, so the tool writes none of the content; it checks the shape, copies the
-bytes to the chain home as `state.md` and records them in `state.json`. SessionStart
-names the copy to a successor in the same chain (`hooks._state_reminder`).
+bytes to the chain home as `state.md` and records them in `state.json`. At the next
+start the launcher stamps the record with the successor's id (`hand`), and SessionStart
+names the copy to that session alone (`hooks._state_reminder`; Amendment 1).
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from . import store
@@ -24,10 +26,11 @@ RECORD = "state.json"
 NONE = "- none"
 LAST = "- read nothing else before the first act"
 MAX_ACTS = 3
-DAY = 86400.0
 TITLE = re.compile(r"^# State for the successor of [A-Za-z0-9_-]{1,128}, "
-                   r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}\Z")
+                   r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\Z")
 _ACT = re.compile(r"^- [0-9a-f]{7,40}\b\W*\S")
+_PATH = re.compile(r"^- \S*[/.]\S*")          # a path line: its first word holds / or .
+_HEX = re.compile(r"^[0-9a-f]{64}\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 _SHAPE = "'# State for the successor of <sid-short>, <YYYY-MM-DD> <HH:MM>'"
 
@@ -44,8 +47,14 @@ def check(text: str) -> list[str]:
             faults.append(f"an em-dash (U+2014) at line {n}: write a colon, a comma or a "
                           "semicolon")
             break
-    if not lines or not TITLE.match(lines[0]):
+    title = TITLE.match(lines[0]) if lines else None
+    if title is None:
         faults.append(f"the first line is not {_SHAPE}")
+    else:
+        try:
+            datetime.strptime(title.group(1), "%Y-%m-%d %H:%M")
+        except ValueError:
+            faults.append(f"the first line's date and time do not parse: {title.group(1)}")
     found: list[str] = []
     body: dict[int, list[tuple[int, str]]] = {}
     for n, line in enumerate(lines[1:], 2):
@@ -81,8 +90,12 @@ def _section(name: str, rows: list[tuple[int, str]]) -> list[str]:
             out.append(f"{name} holds {len(lines)} lines, at most {MAX_ACTS}")
         out += [f"{name}, line {n}: open on a commit sha ('- <sha> what it did')"
                 for n, l in rows if l.startswith("- ") and not _ACT.match(l)]
-    if name == "## Read first" and (lines[-1] != LAST or lines.count(LAST) != 1):
-        out.append(f"{name} must end on '{LAST}', once")
+    if name == "## Read first":
+        if lines[-1] != LAST or lines.count(LAST) != 1:
+            out.append(f"{name} must end on '{LAST}', once")
+        if not any(_PATH.match(l) for l in lines if l != LAST):
+            out.append(f"{name} holds no path line ('- <path> lines <a>-<b>') before its "
+                       "closing line")
     return out
 
 
@@ -106,9 +119,16 @@ def _write_bytes(path: Path, raw: bytes) -> None:
 
 
 def write(home: Path, src: Path, sid: str, now) -> dict:
-    """Copy `src`'s bytes to `<home>/state.md`, then describe them in `<home>/state.json`;
-    return that record. The caller has checked the text."""
+    """Read `src` once, check those bytes (a fault raises ValueError and writes nothing),
+    copy the same bytes to `<home>/state.md`, then describe them in `<home>/state.json`;
+    return that record."""
     home, raw = Path(home), Path(src).read_bytes()
+    try:
+        faults = check(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        faults = ["not UTF-8 text"]
+    if faults:
+        raise ValueError("; ".join(faults))
     record = {"from_session": sid, "written": now,
               "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
     _write_bytes(home / FILE, raw)
@@ -116,24 +136,77 @@ def write(home: Path, src: Path, sid: str, now) -> dict:
     return record
 
 
-def fresh(home: Path, sid, now) -> dict | None:
-    """The record in `home` when it is another session's, written within 24 h, and its
-    copy still holds the recorded size; None otherwise, and on any unreadable part."""
-    try:
-        d = json.loads((Path(home) / RECORD).read_text(encoding="utf-8"))
-        size = (Path(home) / FILE).stat().st_size
-    except (OSError, ValueError):
-        return None
+def _good(d) -> bool:
+    """A record's shape: its four keys typed, and `to_session` a session id when set."""
     if not isinstance(d, dict):
-        return None
-    who, at, n = d.get("from_session"), d.get("written"), d.get("bytes")
-    if not (isinstance(who, str) and _SID.match(who) and who != sid):
-        return None
-    if isinstance(at, bool) or not isinstance(at, (int, float)) or not 0 <= now - at <= DAY:
-        return None
-    if isinstance(n, bool) or not isinstance(n, int) or n != size:
-        return None
-    return d
+        return False
+    who, at, sha, n = (d.get(k) for k in ("from_session", "written", "sha256", "bytes"))
+    to = d.get("to_session")
+    return (isinstance(who, str) and bool(_SID.match(who))
+            and not isinstance(at, bool) and isinstance(at, (int, float))
+            and isinstance(sha, str) and bool(_HEX.match(sha))
+            and not isinstance(n, bool) and isinstance(n, int)
+            and (to is None or (isinstance(to, str) and bool(_SID.match(to)))))
+
+
+def hand(home: Path, prev, sid: str) -> bool:
+    """Amendment 1, at a start: when the record in `home` is the one `prev` (the session
+    that just ended) wrote, stamp it `to_session: sid`; delete any other state, an earlier
+    chain's or sitting's. True when stamped."""
+    home = Path(home)
+    try:
+        d = json.loads((home / RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = None
+    if prev and isinstance(d, dict) and d.get("from_session") == prev:
+        d["to_session"] = sid
+        store._write_private(home / RECORD, json.dumps(d) + "\n")
+        return True
+    clear(home)
+    return False
+
+
+def handed(home: Path, sid) -> tuple[str, dict | None]:
+    """("ok", record) when `home` holds a state handed to `sid` whose copy matches its
+    record; ("mismatch", None) for a bad record, or a missing or altered copy of one
+    handed to `sid`; ("", None) when nothing is handed to `sid`."""
+    home = Path(home)
+    try:
+        text = (home / RECORD).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "", None
+    except OSError:
+        return "mismatch", None
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return "mismatch", None
+    if not _good(d):
+        return "mismatch", None
+    if not sid or d.get("to_session") != sid:
+        return "", None
+    try:
+        raw = (home / FILE).read_bytes()
+    except OSError:
+        return "mismatch", None
+    if len(raw) != d["bytes"] or hashlib.sha256(raw).hexdigest() != d["sha256"]:
+        return "mismatch", None
+    return "ok", d
+
+
+def main_sitting(env) -> bool:
+    """A main-thread sitting: not a helper (CLAUDE_SESSION_HELPER=1), and neither a
+    started nor a relay sitting (CLAUDE_SESSION_DEPTH 1 or more, or unparsable, or
+    RELAY_ROW set), as chain.py reads a chain sitting (respawn-r1 §3.8)."""
+    if env.get("CLAUDE_SESSION_HELPER") == "1" or env.get("RELAY_ROW"):
+        return False
+    raw = env.get("CLAUDE_SESSION_DEPTH")
+    if raw is None or raw == "":
+        return True
+    try:
+        return int(raw) < 1
+    except ValueError:
+        return False
 
 
 def clear(home: Path) -> None:

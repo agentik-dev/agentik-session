@@ -22,6 +22,8 @@
 4. Docs say rulings 1 to 3 in their own words: RUNBOOK's RESPAWN close order (339-357) gains the step "write the state file, then `checkpoint --respawn --charter <c> --state <s>`" with the four sections named; SKILL.md's `--respawn` lines (72-84) likewise; README and source's "Restarting a sitting" one sentence; respawn-r1 §3.2 one paragraph and the change log one line.
 5. The version is 2.0.0-alpha.21 in all five pins; the README status line (171, both files) reads the new version and the suite's new count, the sidecar re-hashed. The marketplace line in commons moves at the install, by the hq sitting.
 
+Amendment 1 (2026-10-29, the hq sitting): (1) at each start the launcher stamps `state.json` `to_session: <new sid>` when its `from_session` is the session that just ended, else deletes both; the line prints only for `to_session`, no 24 h rule. (2) No line, and no clear without `--state`, under `CLAUDE_SESSION_DEPTH` 1+ or `RELAY_ROW`. (3) A sha mismatch, a bad record or a missing copy prints `; state: <path> does not match its record`; `write` checks the bytes it copies. (4) The note points at RUNBOOK, which holds the shape. (5) source.md:105 is README's, trims elsewhere. (6) Read first needs a path line; the title's date parses. May-touch adds `chain.py` (spawn) and `tests/test_chain.py`.
+
 ## 3. Interfaces (signatures, not prose)
 
 `state.check(text: str) -> list[str]`, `state.SECTIONS = ("## Helpers", "## Gates", "## Last acts", "## Read first")`, `state.CEILING = 8192`, `state.write(home: Path, src: Path, sid: str, now) -> dict` (the `state.json` dict); `cli.cmd_checkpoint` with `args.state`; `hooks._state_reminder(env, now) -> str`; the chain home function in `chain.py`.

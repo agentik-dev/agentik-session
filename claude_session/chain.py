@@ -31,6 +31,7 @@ except ImportError:                                     # pragma: no cover  (not
     termios = None
 
 from . import charter, hooks, launch, ledger, meter, models, resolver
+from . import state as statefile
 
 # §3.1's allowlist; a refused flag is named, and adding one is a one-line change.
 ALLOWED = frozenset({
@@ -334,6 +335,15 @@ class Chain:
 
     # ---- the run -----------------------------------------------------------------------
 
+    def _hand_state(self, prev, sid) -> None:
+        """S39 Amendment 1, before each start: the state the session that just ended
+        copied here is stamped for `sid`; any other (an earlier chain's or sitting's) is
+        deleted."""
+        try:
+            statefile.hand(self.home, prev, sid)
+        except OSError as e:
+            self.fx.say(f"{self.name}: the successor's state was not handed on ({e})")
+
     def run(self) -> int:
         try:
             self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -378,9 +388,11 @@ class Chain:
         self.started = self.fx.now()
         attrs = self.fx.tty_save()
         sid, n, args = self.fx.uuid(), 0, list(self.args)
+        prev = None                              # the session that just ended, if any
         while True:
             n += 1
             start = self.fx.now()
+            self._hand_state(prev, sid)
             try:
                 proc = self.fx.spawn([program, "--session-id", sid, *args], child_env)
             except OSError as e:                 # A-F6: a stop line, never a traceback
@@ -419,7 +431,7 @@ class Chain:
                         self.fx.say(f"{self.name}: the successor runs on --model {carried}, "
                                     "the model the sitting ended on; the start line says "
                                     f"--model {start_model}")
-                    sid, args = nxt, succ
+                    prev, sid, args = sid, nxt, succ
                     continue
             self._stop(sid, reason, code, seconds)
             return code

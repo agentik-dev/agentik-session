@@ -578,7 +578,7 @@ def test_s37_status_says_a_respawn_hold(case, tmp_path, monkeypatch):
 
 S39_STATE = ("# State for the successor of cli-sess, 2026-10-29 21:40\n\n## Helpers\n- none\n\n"
              "## Gates\n- none\n\n## Last acts\n- e3d82cb the packet\n\n## Read first\n"
-             "- read nothing else before the first act\n")
+             "- RUNBOOK.md lines 320-380\n- read nothing else before the first act\n")
 S39_NONE = "no --state: the successor orients from the charter alone"
 
 
@@ -587,6 +587,8 @@ def _s39_home(name="s39-chain"):
 
 
 def _s39_files(tmp_path, monkeypatch, text=S39_STATE):
+    for k in ("CLAUDE_SESSION_DEPTH", "RELAY_ROW", "CLAUDE_SESSION_HELPER"):
+        monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     monkeypatch.chdir(tmp_path)
     f = _charter_file(tmp_path / "c.md")
@@ -653,6 +655,17 @@ def test_s39_without_state_says_so_and_clears_a_stale_one(tmp_path, monkeypatch)
     assert not (_s39_home() / "state.md").exists()
 
 
+@pytest.mark.parametrize("k,v", [("RELAY_ROW", "s39"), ("CLAUDE_SESSION_DEPTH", "1")])
+def test_s39_a_relay_or_started_sitting_clears_nothing(tmp_path, monkeypatch, k, v):
+    f, s = _s39_files(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_SESSION_CHAIN", "s39-chain")
+    assert run("checkpoint", "--respawn", "--charter", f, "--state", s)[0] == 0
+    monkeypatch.setenv(k, v)
+    rc, _, err = run("checkpoint", "--respawn", "--charter", f)
+    assert rc == 0 and err.splitlines().count(S39_NONE) == 1, err
+    assert (_s39_home() / "state.json").exists() and (_s39_home() / "state.md").exists()
+
+
 def test_s39_state_without_a_chain_stays_with_the_session(tmp_path, monkeypatch):
     f, s = _s39_files(tmp_path, monkeypatch)
     monkeypatch.delenv("CLAUDE_SESSION_CHAIN", raising=False)
@@ -673,3 +686,4 @@ def test_s39_a_respawn_close_names_the_state_as_optional(tmp_path, monkeypatch):
     assert out.splitlines()[-1] == ("then: agentik-session checkpoint --respawn --charter "
                                     + str(p.resolve()))
     assert "--state <file>" in err and "optional" in err
+    assert 'RUNBOOK "Restarting a sitting"' in err and "--help" not in err
