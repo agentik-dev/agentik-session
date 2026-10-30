@@ -64,7 +64,8 @@ export const limitNote = (limited: string | null, turnEnded: string | null): str
 // is meter.json's, `claude-<family>-<major>-<minor>` shortened, any other id as given and
 // clipped; the window is meter.json's (the one its ceilings apply), `1M`, `<n>k`, or under
 // 1000 the figure, and the engine's (measure.json's context.window) beside it in brackets
-// when the two labels differ.
+// when the two labels differ: the meter takes the engine's window, so the brackets mean it
+// has not caught up with the latest reading, and its next tool closes them (window-r1 R8).
 const MODEL_ID = /^claude-([a-z]+)-(\d+)-(\d{1,2})(?:-\d{8})?$/   // a dated id with no minor: as given
 const MODEL_CLIP = 24
 export const modelName = (v: unknown): string | null => {
@@ -281,7 +282,8 @@ async function usageNow($: EngineInterface): Promise<any> {
 // ---- The measure (design/mod-r1.md §2 row M2, §6 S2; packet M2): it records. ----
 // Every session.measure hands the engine's figures to `agentik-session measure record`
 // (5 s), which writes measure.json beside meter.json; `status` and `doctor` print the drift.
-// Nothing that decides reads it. Only the four figures are sent, never a message's text.
+// What decides reads its context.window alone (design/window-r1.md §2), in Python: this module
+// only carries the figure. Only the four figures are sent, never a message's text.
 const measureArgv = (id: unknown): string[] =>
   [TOOL, 'measure', 'record', '--session', String(id)]
 

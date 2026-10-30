@@ -45,11 +45,13 @@ the spawn gate reads it from the resolved file.
 
 ## Budget
 
-A sitting has two ceilings, context and turns. The model decides the window and
-the profile (the role) the ceilings within it: 180k context and 400 turns on
+A sitting has two ceilings, context and turns. Claude Code's measured window decides
+the window (the `models:` table only before the engine's first measure), and the
+profile (the role) the ceilings within it: 180k context and 400 turns on
 either window for every role but the orchestrators, which get 400k and 400 on a
-1M window (`orchestrator` on Fable, `orchestrator-opus` on `opus[1m]`). A helper
-(`CLAUDE_SESSION_HELPER=1`) resolves as `builder` whatever role it inherits.
+1M window. A model change moves the window, the ceilings and ctx % at the engine's
+next measure. A helper (`CLAUDE_SESSION_HELPER=1`) resolves as `builder` whatever
+role it inherits, and keeps its 200k ceilings on either window.
 `meter.json` names the source (`limits_source`, e.g.
 `role:orchestrator window:1000000`). The **meter** is the PostToolUse hook: it reads the
 transcript's new lines after every tool and writes `meter.json`, the used share
@@ -205,7 +207,7 @@ kills background tasks: list each open gate id in the state file's `## Gates`, a
 successor re-arms `gate wait <id>`. `wait` exits 0 whatever the gate's code; 124 is the
 wall's cut, 125 a runner that died, 126 a lock held past the wall.
 
-The band: the plugin's hooks module draws `session: <model> · <window> · ctx <c>% · turns <t>% · <zone>` above the prompt (e.g. `session: opus 5.5 · 200k (engine 1M) · ctx 64% · turns 6% · clear`: the window the ceilings apply, the engine's measured one in brackets when it differs; `status` prints the same as `model: …`, with the id and the window's source) and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
+The band: the plugin's hooks module draws `session: <model> · <window> · ctx <c>% · turns <t>% · <zone>` above the prompt (e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`: the window the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading, and its next tool closes it; `status` prints the same as `model: …`, with the id and the window's source) and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
 
 Admission, in `observe` (it records and never refuses): the same module hands each session's start, rate-limit readings, helper spawns, SendMessage resumes, helper turns and end to `agentik-session admission record --session <id>` (one JSON object on stdin; exit 0, 2 refused, 3 the lock held past 2 s), one line each in the machine's `<state>/admission/ledger.jsonl` (rotated past 29 h to `ledger.1.jsonl`). An `end` marks that session's open spawns done (`swept`). No prompt or message text is sent; a failed record is one debug-log line.
 
@@ -213,7 +215,7 @@ Before each spawn and each SendMessage resume the module also runs `agentik-sess
 
 The window: `record` and `admit` rewrite `<state>/admission/band.json`, and the band draws it as a second line, `5h <P>% → <peak>% · ceiling <c> · resets <HH:MM> (<h>h<mm>) · <n> helpers, room for <r> · <d> deferred · 7d <P7>%` (then `observe`); the prompt hook adds the same line to the budget context. `Room for N` means N more helpers fit under the ceiling: pull work forward. `agentik-session report` ends with each five-hour window `held` or `idle`, `under 90` marked.
 
-The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `agentik-session measure record --session <id>` (exit 0, 1 no session, 2 refused), which writes `measure.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. The budget never reads it.
+The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `agentik-session measure record --session <id>` (exit 0, 1 no session, 2 refused, an unreadable window included), which writes `measure.json` and, when the window has moved, rewrites `resolved.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. Its `context.window` is the window pick's first source; its other figures decide nothing, and the budget never reads it.
 
 Each has a command: `/session:status`, `/session:profile`, `/session:set`,
 `/session:checkpoint`, `/session:doctor`, `/session:report`, `/session:gate`.

@@ -253,3 +253,18 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## doclint's docstring still says five parts (2026-10-30, packet S40's refuter round 1; S4)
 - `scripts/doclint:5` says "five-part shape", but since packet S40 the charter has six parts (`## While waiting`, optional before alpha.24); doclint is outside S40's may touch, so no code was changed.
+
+## S41's leftovers (2026-10-30, packet S41's builder and refuter round 2; S4)
+- The band's width: with the model and window at the head, the line with both windows, `respawn marked` and the age is 82 to 93 characters, so an 80-column band loses the age and under 65 columns the zone is cut (the limit-note line is 119). Lead: drop the model part first, or put it after the zone, when the line overflows bodyColumns (`session.ts` bandLine, `mod.py` facts).
+- The band and `status` never check measure.json's `at`, so `(engine 1M)` can come from an old measure, from before a /model switch, or from a resumed session's old one. Lead: leave out the engine part past the meter's STALE_S, or show its age.
+- The band's 5 s loop (`session.ts`, about line 343) has no catch around `$.clock.sleep`, so a refused clock is an unhandled rejection. Lead: `try { await $.clock.sleep(EVERY_MS) } catch { return }`.
+- The twins disagree on windows of 1e24 or more: `windowLabel(1e24)` gives `1e+21k`, `mod.window_label(1e24)` gives `1000000000000000000000k`, and WINDOW_CASES pins only 1e400. Lead: no part from 1e21 up, in both twins.
+- Ruling 4's `model: none` is never reached from a real meter: `mod.model_line({"model":None,"window":None,"window_source":"default"},None)` returns `window from default`, and the meter always writes `window_source`; the test reaches `none` only with `window_source` None.
+- Control characters in a model id pass into the band and `status`: `modelName("claude-opus-5-5\n")` keeps the newline, and `models.family` accepts such an id. The id comes from the API, so this is unlikely.
+- `plugin/commands/status.md` still describes one line ("The line above is this session's meter") and says nothing of the `model:` line.
+
+## S45's leftovers (2026-10-30, packet S45; S4)
+- `ceilings_source` is left alone by `resolver.rewindow` (design/window-r1.md R4). Only `hooks.session_start` reads it, from its fresh resolve, never from the file; it can be wrong in the file only if a layer gives the two classes different turns and a launch cap falls between them. Lead: move it with the other four when a consumer reads it from the file.
+- No clamp on a ceiling above a small measured window (design/window-r1.md §5): a local model behind the router reading 32000 gets `window: 32000` and the 200k class's 180k, so the ceiling never trips, today as after. Lead: `min(ceiling, window)` in `meter._limits` and `resolver`, if a local sitting ever needs it.
+- `scripts/p1-proof` no longer runs from a checkout: it reads `.claude-plugin/marketplace.json` at import, and the marketplace line lives in commons now (FileNotFoundError, seen 2026-10-30 when `scripts/window-proof` first loaded it). Outside S45's may touch. Lead: name the marketplace as a constant, as `scripts/window-proof` does.
+- `scripts/window-proof` has no `--tty` path, which the record's L1 named for a `-p` child that writes no measure; on 2.1.314 a `-p` child wrote one, so it was not needed.

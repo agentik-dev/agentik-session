@@ -1,0 +1,219 @@
+#!/usr/bin/python3 -B
+"""window-proof: run proofs L1 and L2 of design/window-r1.md §7: a real engine reading decides
+the window, on a session the table would have put elsewhere.
+
+Usage: scripts/window-proof OUT [--case disable-1m] [--model M] [--cwd DIR]
+
+It lays out, under OUT: a scratch git repo (`repo/`), `XDG_STATE_HOME=OUT/state`, a copy of
+plugin/ as `--plugin-dir`, the installed session plugin switched off for that run only
+(`--settings`), and `bin/agentik-session` first on PATH, which runs this checkout's code with
+`HOME=OUT/home`, so the tool sees no user `models:` layer while `claude` keeps its login. The
+child's environment drops every CLAUDE* and RELAY_* variable, a helper's mark included, then
+sets `CLAUDE_SESSION_PROFILE=orchestrator-opus` and `CLAUDE_SESSION_MODEL`, which only the tool
+reads. It runs one `claude -p` on a prompt that reads a file, then reads it again, since the
+meter writes at PostToolUse and the measure fires after a turn.
+
+Cases:
+  (none)       L1: `CLAUDE_SESSION_MODEL=claude-opus-5-5`, the table's 200000, 180000. Pass:
+               meter.json and resolved.json read 1000000, 400000, `engine:1000000`.
+  disable-1m   L2: adds `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, with
+               `CLAUDE_SESSION_MODEL=claude-opus-5-5[1m]`, the table's 1000000, 400000, so a
+               move is visible. A gate only where it reads 200000: then both files must read
+               200000, 180000, `engine:200000`. At 1000000 nothing fails.
+
+`--model` is claude's own `--model` (default claude-opus-5-5, the record's); a cheaper one
+spends less and leaves `CLAUDE_SESSION_MODEL` as above. `--cwd` runs the child in a trusted
+checkout instead of the scratch repo.
+
+It prints the readings and the control (the same inputs with no measure resolve by the table),
+and writes report.json. One claude child, a little quota; writes only under OUT, but for the
+child's own transcript. Exit 0 when the case's gate holds or does not apply, 1 when it fails,
+2 on a usage error.
+"""
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+PROMPT = "Read the file README.md, then read it again, then reply with the word ok"
+OPUS = "claude-opus-5-5"
+PROFILE = "orchestrator-opus"
+ONE_M, TWO_K, C1M, C200K = 1000000, 200000, 400000, 180000
+PLUGIN = json.loads((REPO / "plugin" / ".claude-plugin" / "plugin.json").read_text())["name"]
+APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "claude_session" / "config.py").read_text())[1]
+SETTINGS = json.dumps({"enabledPlugins": {f"{PLUGIN}@agentik": False}})
+CONTROL = """
+import json, os, sys
+from claude_session import resolver
+r = resolver.resolve(sys.argv[1], "window-proof-control", os.environ, profile=sys.argv[2],
+                     session_model=sys.argv[3], session_model_source="CLAUDE_SESSION_MODEL")
+s = r.sections["session"]
+print(json.dumps({"window": s["window"], "ceilings": s["ceilings"],
+                  "window_source": s["window_source"], "limits_source": s["limits_source"]}))
+"""
+
+
+def fresh_repo(dest):
+    dest.mkdir(parents=True)
+    git = ["git", "-c", "user.name=window-proof", "-c", "user.email=window-proof@invalid",
+           "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]
+    subprocess.run(git + ["init", "-q"], cwd=dest, check=True)
+    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "window-proof"], cwd=dest, check=True)
+    (dest / "README.md").write_text("window-proof scratch repo\n")
+
+
+def child_env(state):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("CLAUDE", "RELAY_")) and k not in ("TMUX", "TMUX_PANE")}
+    env["XDG_STATE_HOME"] = str(state)
+    return env
+
+
+def die(msg):
+    sys.stderr.write(f"window-proof: {msg}\n")
+    sys.exit(2)
+
+
+def args_of(argv):
+    a = {"out": None, "case": None, "model": OPUS, "cwd": None}
+    it = iter(argv)
+    for x in it:
+        if x in ("--case", "--model", "--cwd"):
+            a[x[2:]] = next(it, None)
+            if a[x[2:]] is None:
+                die(f"{x} wants a value")
+        elif x.startswith("-") or a["out"]:
+            die(f"unknown argument {x!r}")
+        else:
+            a["out"] = x
+    if not a["out"]:
+        die("usage: window-proof OUT [--case disable-1m] [--model M] [--cwd DIR]")
+    if a["case"] not in (None, "disable-1m"):
+        die(f"unknown case {a['case']!r}")
+    return a
+
+
+def tool_python():
+    py = REPO / ".venv" / "bin" / "python"
+    return str(py if py.exists() else sys.executable)
+
+
+def lay(out):
+    """The plugin's copy and the tool on PATH: this checkout's code, a HOME with no layer."""
+    if out.exists() and any(out.iterdir()):
+        die(f"{out} is not empty")
+    (out / "home").mkdir(parents=True)
+    shutil.copytree(REPO / "plugin", out / "plugin",
+                    ignore=shutil.ignore_patterns("types", "__pycache__"))
+    tool = out / "bin" / "agentik-session"
+    tool.parent.mkdir()
+    tool.write_text(f"""#!/bin/sh
+HOME='{out / "home"}' PYTHONPATH='{REPO}' exec '{tool_python()}' -B -P -m claude_session "$@"
+""")
+    tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+
+
+def control(out, cwd, session_model):
+    """The same inputs with no measure file: a state root no session has written."""
+    env = {**os.environ, "HOME": str(out / "home"), "XDG_STATE_HOME": str(out / "control-state"),
+           "PYTHONPATH": str(REPO)}
+    for k in list(env):
+        if k.startswith(("CLAUDE", "RELAY_")):
+            del env[k]
+    p = subprocess.run([tool_python(), "-B", "-P", "-c", CONTROL, str(cwd), PROFILE, session_model],
+                       env=env, capture_output=True, text=True)
+    return json.loads(p.stdout) if p.returncode == 0 else {"error": p.stderr[-300:]}
+
+
+def read(path):
+    try:
+        d = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        return {"unreadable": str(e)[:120]}
+    return d if isinstance(d, dict) else {"unreadable": "not an object"}
+
+
+def readings(state, app):
+    """Each session's measure, resolved and meter figures, as written."""
+    out = {}
+    root = state / app / "sessions"
+    for d in sorted(root.glob("*")) if root.is_dir() else []:
+        measure, res, met = read(d / "measure.json"), read(d / "resolved.json"), read(d / "meter.json")
+        s = res.get("session") or {}
+        out[d.name] = {
+            "measure": {"context": measure.get("context"), "at": measure.get("at"),
+                        **({"unreadable": measure["unreadable"]} if "unreadable" in measure else {})},
+            "resolved": {k: s.get(k) for k in ("window", "ceilings", "window_source", "limits_source")},
+            "meter": {k: met.get(k) for k in ("model", "context", "window", "ceilings", "window_source",
+                                              "limits_source", "pct_context", "zone")},
+        }
+    return out
+
+
+def holds(r, window, context):
+    want = (window, context, f"engine:{window}")
+    return all((f.get("window"), (f.get("ceilings") or {}).get("context"), f.get("window_source")) == want
+               for f in (r["resolved"], r["meter"]))
+
+
+def verdict(case, sessions):
+    """L1's pass; L2's gate only where the engine read 200000."""
+    if not sessions:
+        return "no session directory: the child's SessionStart never ran", False
+    r = next(iter(sessions.values()))
+    seen = (r["measure"].get("context") or {}).get("window")
+    if seen is None:
+        return "no measure: a -p child wrote none", False
+    if case is None:
+        ok = holds(r, ONE_M, C1M)
+        return f"L1 {'PASS' if ok else 'FAIL'}: the engine read {seen}", ok
+    if seen == TWO_K:
+        ok = holds(r, TWO_K, C200K)
+        return (f"L2 {'PASS' if ok else 'FAIL'}: the engine read 200000, "
+                "the first live sight of a value other than 1M"), ok
+    return f"L2 not a gate: the engine read {seen}, no live value other than 1M; the proof rests on the links", True
+
+
+def main(argv):
+    a = args_of(argv)
+    out = Path(a["out"]).resolve()
+    lay(out)
+    state = out / "state"
+    repo = out / "repo"
+    fresh_repo(repo)
+    session_model = OPUS if a["case"] is None else f"{OPUS}[1m]"
+    env = child_env(state)
+    env["PATH"] = f"{out / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    env["CLAUDE_SESSION_PROFILE"] = PROFILE
+    env["CLAUDE_SESSION_MODEL"] = session_model
+    if a["case"]:
+        env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
+    tail = ["--plugin-dir", str(out / "plugin"), "--settings", SETTINGS, "--model", a["model"],
+            "--max-turns", "4", "--debug-file", str(out / "debug.log")]
+    cwd = a["cwd"] or repo
+    try:
+        p = subprocess.run(["claude", "-p", PROMPT, *tail], cwd=cwd, env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+        run = {"rc": p.returncode, "stdout": p.stdout[-400:], "stderr": p.stderr[-400:]}
+    except subprocess.TimeoutExpired:
+        run = {"rc": "timeout"}
+    sessions = readings(state, APP)
+    ctl = control(out, cwd, session_model)
+    line, ok = verdict(a["case"], sessions)
+    report = {"case": a["case"] or "L1", "model": a["model"], "session_model": session_model,
+              "run": run, "readings": sessions, "control": ctl, "verdict": line}
+    (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps({k: report[k] for k in ("case", "model", "session_model", "readings", "control")},
+                     indent=2))
+    print(f"run: {str(run)[:300]}")
+    print(line)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
