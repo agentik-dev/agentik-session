@@ -399,3 +399,21 @@ def test_f8_missing_shipped_file_names_itself(world, monkeypatch, tmp_path):
     r = run(world, profile="orchestrator")
     assert r.sections["session"]["profile"] == "orchestrator"
     assert [h for _, h in r.inputs][1:4] == [None, None, None]
+
+
+def test_gate_joins_the_sections_from_the_repo_layers(world):
+    _, _, put = world
+    assert "gate" in resolver.SECTIONS
+    put("repo", "gate:\n  wall: 60\n")
+    r = run(world)
+    assert r.sections["gate"] == {"wall": 60} and r.unknown == []
+
+
+def test_gate_config_reads_the_user_layer_alone(world):
+    env, _, put = world
+    assert resolver.gate_config(env) == {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
+    put("repo", "gate:\n  ntfy_url: https://repo.invalid\n  ntfy_topic: r\n")
+    assert resolver.gate_config(env)["ntfy_url"] is None
+    put("user", "gate:\n  ntfy_url: https://ntfy.invalid\n  ntfy_topic: gates\n  wall: 600\n")
+    assert resolver.gate_config(env) == {"ntfy_url": "https://ntfy.invalid",
+                                         "ntfy_topic": "gates", "wall": 600}
