@@ -108,7 +108,7 @@ The checks bind the marker to this sitting (F2):
   - *How it counts.* The count comes from the ledger's restart lines for that chain.
   - *Why twelve.* On the measured night the sittings ran 3 h 34 min (20:30 to 00:04), 1 h 33 min (01:57 to 03:30) and 1 h 41 min (06:31 to 08:12). Once the gaps are gone, a busy orchestrator could restart up to about fifteen times a day. Twelve covers a night and most of a day before the owner's word is needed again. A slow runaway costs at most twelve sittings, and the floor catches a fast one. A cap of 0 means the chain never restarts, so `run` is then a plain wrapper.
   - *It fails closed (N6).* An unreadable ledger (any error but its absence) holds the chain at `cap`. A line that fails to parse but holds the chain's quoted name counts as a restart. The count is never below the launcher's own tally of the restarts it made in the past 24 h, so a deleted or truncated ledger never resets it. The restart line is written before the successor starts. If the write fails, no successor starts, the chain stops at `cap`, and the write's error is printed.
-- **Floor** (default 600 s). A sitting that reaches RESPAWN in under ten minutes has done no work. The launcher holds such a sitting rather than delaying it, so a fault loop ends at its first sitting, not at the cap.
+- **Floor** (default 600 s). A sitting that reaches RESPAWN in under ten minutes has done no work. The launcher holds such a sitting until it is `floor` seconds old, so a fault loop restarts at most once a `floor` and is held at the cap. A hold is re-checked every poll and said in `held.json`; S37.
 - **Stop file.** `<state>/respawn/STOP` ends every chain, and `<state>/respawn/<chain>/STOP` ends one. A stop file counts only when its mtime is at or after the chain's start. So `touch` is the whole verb, a stale file is harmless, and a chain started afterwards ignores it. The launcher never deletes a stop file. A fresh stop file means the launcher does not end the current sitting. The sitting runs on as it does today, and when it exits the chain stops.
 
 ### §3.6 The ledger
@@ -242,3 +242,7 @@ These are measured on the installed `claude` by an attended sitting or by the ow
 - **C9. One launcher per chain.** A `flock` enforces it, so two orchestrators never run one chain (§3.1).
 - **C10. Allow claude flags, do not deny them.** The launcher passes only an allowlist of `claude` flags, so a new resume or detach flag is refused until someone adds it (§3.1).
 - **C11. Nesting is read, never set.** The launcher detects nesting from `CLAUDE_SESSION_CHAIN`, `CLAUDECODE` and `CLAUDE_SESSION_DEPTH`, and exports only `CLAUDE_SESSION_CHAIN` (§3.1).
+
+## Change log
+
+- 2026-10-29, packet S37 (the agentik-hq sitting 2026-10-29-1's rulings): §3.5, a hold is re-checked every poll, said in the chain home's `held.json` and printed by `status`, so a floor read too early delays the sitting rather than holding it for good.
