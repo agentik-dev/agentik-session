@@ -15,6 +15,8 @@ fi
 # anything to say. StopFailure (a turn an API error ended) is fire-and-forget, as Stop. PreCompact keeps the tool's stdout (its block) but never its exit: an
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
 # owner's typed /compact too. Other events keep the tool's exit (PreToolUse may block).
+# Measure (packet S49, Amendment 1): the start, empty if `date` fails. The CLI ends the row.
+export AGENTIK_SESSION_HOOK_T0="$(date +%s%N 2>/dev/null)"
 case "$1" in
   Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
   PreCompact) "$tool" hook "$1"; exit 0 ;;

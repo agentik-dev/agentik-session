@@ -27,7 +27,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import (budget, charter, gate, ledger, meter, policystore, resolver, rules,
+from . import (budget, charter, gate, harness, ledger, meter, policystore, resolver, rules,
                sessionconfig, store)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
@@ -657,9 +657,20 @@ def _ledger_line(payload: dict, env) -> None:
     resolved = _load_json(sdir / "resolved.json")
     profile = ((resolved.get("provider") or {}).get("profile")
                or (resolved.get("session") or {}).get("profile"))
+    limits, limits_at = _measured(lambda: harness.stated_limits(sdir)) or (None, None)
     ledger.append(state, ledger.entry_for(
         m.as_dict(), project=Path(tp).parent.name, profile=profile,
-        cwd=payload.get("cwd"), exit_reason=payload.get("reason")))
+        cwd=payload.get("cwd"), exit_reason=payload.get("reason"),
+        claude_md_bytes=_measured(lambda: harness.claude_md_bytes(payload.get("cwd"), env)),
+        rate_limits=limits, rate_limits_at=limits_at))
+
+
+def _measured(read) -> object:
+    """A measure on the ledger's row, null on any failure: it never loses the row (S49)."""
+    try:
+        return read()
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def stop(payload: dict, env=None) -> dict:
@@ -737,7 +748,12 @@ def dispatch(event: str) -> int:
     tool call it was inspecting, and a budget advisor is never worth breaking a
     session over. Stop (SILENT) exits 0 with nothing on stdout, even when it fails;
     PreCompact (QUIET_PASS) prints only a block, and nothing when it passes or fails.
+    Every call first bounds hooks.jsonl: one lstat (S49).
     """
+    try:
+        harness.rotate(resolver.state_dir(os.environ))
+    except Exception:            # noqa: BLE001 - a measure never fails a hook
+        pass
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw or "{}")

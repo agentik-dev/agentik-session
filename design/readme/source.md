@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Several plugins cooperate in unattended relay runs: a driver spawns builder sessions, each builder may spawn agents, and nobody watches the terminal. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter that says what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget a swarm can fork past its means; with them, every session winds down at a known point and leaves a record a person can read.
+Several plugins cooperate in unattended relay runs: a driver spawns builder sessions, each builder may spawn agents, and nobody watches the terminal. Each sitting needs four things: one resolved configuration every plugin reads alike, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter that says what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget a swarm can fork past its means; with them, every session winds down at a known point and leaves a record a person can read.
 
 ## Install
 
@@ -18,7 +18,7 @@ make install
 
 - `make install` (from a clone) freezes the committed `claude_session/` package under `~/.local/share/agentik-session/<tree>/` and writes the launcher `~/.local/bin/agentik-session`, which runs that frozen copy with `python -P` (Python 3.11 or newer). A dirty `claude_session/` exits 2: the install is always one committed tree.
 - Then run `agentik session doctor` (or `/session:doctor` inside Claude Code). It checks the tool, the plugin and its hooks, one line per check, and notes each optional sibling that is absent; exit 2 names the failing check and its remedy.
-- To upgrade, install the CLI first: `make install`, then `claude plugin update session@agentik`. That order is what keeps the CLI current with its plugin's hooks. A CLI older than its plugin exits 2 on a hook event it does not know, and the hook shim keeps that from blocking a turn. The older CLI's own doctor reads green; only a `agentik session doctor` of 2.0.0-alpha.4 or later names an event its CLI does not handle.
+- To upgrade, install the CLI first: `make install`, then `claude plugin update session@agentik`. That order keeps the CLI current with its plugin's hooks. A CLI older than its plugin exits 2 on a hook event it does not know, and the hook shim keeps that from blocking a turn. The older CLI's own doctor reads green; only a `agentik session doctor` of 2.0.0-alpha.4 or later names an event its CLI does not handle.
 - At run time the tool is stdlib Python only.
 
 ## Commands and skills
@@ -84,16 +84,16 @@ Profiles ship in `claude_session/profiles.yaml`. The `defaults` entry carries ev
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 
-The two orchestrator roles ship in `2.0.0-alpha.2`. Install that version of the launcher and of the plugin first, then restart Claude Code; until then `agentik session profile orchestrator` prints `unknown profile` and the meter falls back to `frontier`.
+The two orchestrator roles ship in `2.0.0-alpha.2`. Install that launcher and plugin first, then restart Claude Code; until then `agentik session profile orchestrator` prints `unknown profile` and the meter falls back to `frontier`.
 
 Start an orchestrator session (quote `opus[1m]`: zsh reads brackets as a glob):
 
 ```sh
-make install                                          # from the clone: the launcher
-claude plugin update session@agentik      # the plugin; restart Claude Code
-agentik session profile orchestrator-opus              # prints the role, not unknown profile
-CLAUDE_SESSION_PROFILE=orchestrator claude --model fable               # Fable 5.1, 1M
-CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'     # Opus 5.5, 1M
+make install  # from the clone: the launcher
+claude plugin update session@agentik  # the plugin; restart Claude Code
+agentik session profile orchestrator-opus  # prints the role, not unknown profile
+CLAUDE_SESSION_PROFILE=orchestrator claude --model fable  # Fable 5.1, 1M
+CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'  # Opus 5.5, 1M
 ```
 
 For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window. A bare `opus` reads the table's 200k only until the first measure. `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
@@ -104,11 +104,11 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - Zones, by the larger share: clear from 0%, notice from 80%, wind-down from 90%, reserve from 92%, exhausted at 100%.
 - `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80%), then every tenth tool: bring the charter current, commit, run `agentik session checkpoint`.
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
-- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`. Its first line must open on `RESPAWN`, or the verb exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
+- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only its `## Next act`, whose first line must open on `RESPAWN`, or it exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
-- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
+- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it, waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
-- `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead.
+- `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, from the SessionEnd hook. `report --chains` prints a chain's restart and stop lines. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured; another's are invisible to it.
 
 ## Priority and pacing
 
@@ -141,7 +141,7 @@ Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); 
 ## Reading records
 
 - `scripts/record FILE --sections` lists a markdown record's sections. `scripts/record FILE --section SPEC` prints the named ones: an index `3`, a list `3,5`, a range `3-5`, or a heading prefix `'§5'`.
-- Exit 3 past `--max-bytes` (8192) without `--force`; the refusal names the subsections to ask for instead. Stdlib, read-only.
+- Exit 3 past `--max-bytes` (8192) without `--force`; the refusal names the subsections to ask for. Stdlib, read-only.
 - `/session:read <file> [SPEC]` wraps it: with no SPEC it prints the map and stops; it never reads the whole file.
 
 ## The gate queue
@@ -161,23 +161,23 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 
 ## Tests
 
-- `make test`: the whole suite, with a fake `claude` on the PATH and no quota spent.
+- `make test`: the whole suite, with a fake `claude` on PATH and no quota spent.
 - Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
 - `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), an 840 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 
 ## Conventions shared with the sibling plugins
 
-`session`, `decisions`, `respeak` and `relay` each work alone; a shared set of conventions keeps them consistent.
+`session`, `decisions`, `respeak` and `relay` each work alone; shared conventions keep them consistent.
 
 - `scripts/hygiene` (the public-hygiene scan) and `scripts/doclint` (the doc gate) are byte-identical across the four repos.
 - The README sidecar: `design/readme/rendered.sha256`, two `shasum -a 256` lines, written only by `make readme`.
-- The packet shape: six sections, a `verify` row that is the gate line, targeted acceptance lines.
+- The packet shape: six sections, a `verify` row, the gate line, targeted acceptance lines.
 - Siblings are named by plugin id only.
 
 ## Status
 
-Status: version `v2.0.0-alpha.33`, rendered `2026-10-14`, `2002` tests in the suite.
+Status: version `v2.0.0-alpha.35`, rendered `2026-10-14`, `2177` tests in the suite.
 
 ## Credit
 

@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 
-from . import (admission, charter, doctor, gitinfo, hooks, launch, ledger, measure, meter, mod,
+from . import (admission, charter, doctor, gitinfo, harness, hooks, launch, ledger, measure, meter, mod,
                resolver, rules, sessionconfig, store)
 from . import state as statefile
 from . import SEMVER
@@ -41,7 +41,23 @@ def cmd_budget(args) -> int:
 
 
 def cmd_hook(args) -> int:
-    return hooks.dispatch(args.event)
+    """The hook, and last the row of what it did (S49 Amendment 1): `code` is what this process
+    will exit with, whichever way the handler leaves. A KeyboardInterrupt dies by the signal, so
+    it has no row. Nothing after the row but the interpreter's teardown, which record_hook's
+    flush keeps from moving the exit."""
+    t0 = harness.take_t0(os.environ)
+    code = 1                        # an uncaught exception's exit
+    try:
+        code = hooks.dispatch(args.event)
+        return code
+    except SystemExit as e:
+        code = harness.exit_status(e.code)
+        raise
+    except KeyboardInterrupt:
+        code = None
+        raise
+    finally:
+        harness.record_hook(t0, args.event, code, os.environ)
 
 
 
@@ -207,6 +223,8 @@ def cmd_report(args) -> int:
             time.strptime(args.since, "%Y-%m-%d")
         except ValueError:
             _die(f"--since wants YYYY-MM-DD, not {args.since!r}")
+    if args.hooks:
+        return _report_hooks(args)
     if args.chains:
         rows = ledger.read_chains(resolver.state_dir(os.environ), args.since)
         if not rows:
@@ -230,6 +248,29 @@ def cmd_report(args) -> int:
     print(ledger.table(rows))
     print()
     print(admission.report(os.environ))
+    return 0
+
+
+def _report_hooks(args) -> int:
+    """`report --hooks` (packet S49): this plugin's hooks per event, then claude_md_bytes.
+    `--since` filters the ledger's rows only, and the output says so: a hook row has no time."""
+    state = resolver.state_dir(os.environ)
+    stats = harness.hook_stats(harness.read_hooks(state))
+    rows = ledger.read(state, args.since)
+    md = harness.claude_md_stats(rows)
+    line = harness.claude_md_line(rows, args.since)
+    if not stats and md is None:
+        print(f"no hook rows; {line}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps({"events": stats, "events_filtered": False, "since": args.since,
+                          "ledger_rows": len(rows), "claude_md_bytes": md}, indent=2))
+        return 0
+    print(harness.hooks_table(stats))
+    if args.since:
+        print("hook rows: all of them, unfiltered; a hook row has no time, so --since "
+              "filters the ledger only")
+    print(line)
     return 0
 
 
@@ -1041,8 +1082,12 @@ def build_parser() -> argparse.ArgumentParser:
     rp = sub.add_parser("report", help="the ledger: one row per ended session")
     rp.add_argument("--since", metavar="YYYY-MM-DD")
     rp.add_argument("--json", action="store_true")
-    rp.add_argument("--chains", action="store_true",
+    rw = rp.add_mutually_exclusive_group()
+    rw.add_argument("--chains", action="store_true",
                     help="the launcher's restart and stop lines instead (--since reads their at)")
+    rw.add_argument("--hooks", action="store_true",
+                    help="this plugin's hooks instead: count, p50, p95 and nonzero exits per event, "
+                         "then claude_md_bytes (--since reads the rows only; a hook row has no time)")
     rp.set_defaults(func=cmd_report)
 
     ch = sub.add_parser("charter", help="the sitting's charter: open, check, close")
