@@ -456,14 +456,20 @@ agentik session gate status                       # running, queued, the last fi
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.
-- The key is the realpath of `git -C <repo> rev-parse --git-common-dir`, taken
-  at `run`, so a repo and all its worktrees are one key; not a git tree, or git
-  failing, the repo's realpath, and an older queue's entry, with no key, reads
-  that too. A younger entry of a key never passes an older one of that key.
+- The key is the device and inode of `git -C <repo> rev-parse
+  --git-common-dir`, taken at `run` and written as `<st_dev>:<st_ino>` with the
+  repo's basename beside it, so a repo and all its worktrees are one key however
+  they are spelled, on a case-insensitive disk too. Git failing or timing out,
+  or an older queue's entry with no key, computes it the same way from
+  `<repo>/.git`, a worktree's `gitdir:` followed to its common dir, else from
+  the repo itself; a path that cannot be statted keeps its realpath. A younger
+  entry of a key never passes an older one of that key.
 - `--lock PATH` (repeatable) holds the entry while PATH exists, and while a
   running entry names PATH, whatever its key, since that command may not have
-  made it yet: one TLC at a time passes its lock this way. A younger entry of
-  another key with no lock may run first. `--wall SECONDS` cuts the command
+  made it yet: one TLC at a time passes its lock this way. One lock spelled two
+  ways is one lock: `run` stores its realpath, and running entries compare by
+  its nearest existing parent's device and inode plus the rest of its path. A
+  younger entry of another key with no lock may run first. `--wall SECONDS` cuts the command
   (default `gate.wall`, 5400). `--wait` waits after queueing.
 - The ceiling. With nothing running, the oldest free entry starts whatever the
   load. With one or more running, another starts only when all three hold:
@@ -481,9 +487,22 @@ agentik session gate status                       # running, queued, the last fi
 - Exit codes. `wait` exits 0 whatever the gate's code, 2 for an unknown id, 1
   past `--timeout`. A result holds the command's own code, or 124 (the wall cut
   its process group, SIGTERM then SIGKILL), 125 (its runner died; the next
-  runner killed each running group), 126 (a lock held past the wall; never run:
+  runner killed each running group it names, and with a `pgid` of null kills
+  nothing), 126 (a lock held past the wall; never run:
   the wall counts while the lock alone holds the oldest waiting entry, not behind
   its own key or a running entry naming that path) or 127 (it could not start).
+- A finish. Before the key frees, the runner sends SIGKILL to the child's
+  process group, a group already gone being no error, so what the command left
+  in the background does not overlap the next of that key; a process that left
+  the group with `setsid` is out of reach. The code stays the command's.
+- A start. The entry's id reaches `runner.json` before the spawn, its `pgid`
+  null until the spawn answers, so a runner dying there leaves the entry named:
+  the next runner closes it 125 and never runs it twice.
+- An install. An alpha.31 runner keeps serving until it idles out, and its
+  `status` may misread a wait.
+- A downgrade while a set runs is unsafe: an alpha.31 `_recover` cannot read the
+  list form of `running`, so it kills nothing and runs those entries again. Let
+  the queue drain first.
 - ntfy: with `gate: {ntfy_url: <url>, ntfy_topic: <topic>}` in
   `~/.claude/agentik/profiles.yaml` the runner POSTs each result line to
   `<url>/<topic>`, `Title: gate <repo>: exit <code>`; a failure is one line in
@@ -498,9 +517,9 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 
 | path | what |
 |---|---|
-| `gate/queue/<id>.json` | an entry: id, repo, command, env, locks, wall, label, caller, queued, key (0600) |
+| `gate/queue/<id>.json` | an entry: id, repo, command, env, locks, wall, label, caller, queued, key, key_name (0600) |
 | `gate/queue.lock`, `gate/counter` | the id's counter, taken under flock |
-| `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running (a list of `{id, pgid}`) |
+| `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running (a list of `{id, pgid}`, `pgid` null before the spawn) |
 | `gate/runner.log` | the runner's stdout and stderr |
 | `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |

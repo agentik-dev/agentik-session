@@ -1072,8 +1072,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="claude's arguments after --, sent the same at every start")
     rn.set_defaults(func=cmd_run)
 
-    gt = sub.add_parser("gate", help="the gate queue: one gate command at a time per Mac, "
-                                      "its result to the caller")
+    gt = sub.add_parser("gate", help="the gate queue: one running per repo under a load "
+                                      "ceiling, its result to the caller")
     gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")

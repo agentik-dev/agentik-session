@@ -311,8 +311,15 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## S47's leftovers (2026-10-30, packet S47; S4)
 
-- `cli.py`'s `gate` help says "one gate command at a time per Mac" and `plugin/commands/gate.md` says "the running gate", both past the packet's may-touch. Reword both to one per repo under a load ceiling.
-- An entry queued by alpha.31 keys on its repo's realpath and a new one in that repo on its `.git`, so the two may run together once, across the upgrade. Ruling 1 reads it so; it ends with the old queue.
-- `notify`'s POST holds the runner's loop up to its 5 s timeout, so another child's wall cut can land 5 s late. Post from a thread if a late cut ever matters.
+- `plugin/commands/gate.md` says "the running gate" and one at a time; a plugin edit needs a version step, so it waits for the next that moves `plugin/`. Reword it to one per repo under a load ceiling. `cli.py`'s help, one string, moved with Amendment 1.
+- `notify`'s POST holds the runner's loop up to its 5 s timeout, against the letter of ruling 5, so another child's wall cut can land 5 s late. Post from a thread if a late cut ever matters.
 - A hand-written entry with no `repo` or `command` raises in `_start`, as in S38's `_run`; the respawned runner then kills the running set each time. Close such an entry with 127.
 - `_recover` kills a dead runner's groups in turn, a grace each, up to 15 s at three. Signal them together if a cold start ever feels it.
+- A crash after the result and before the inbox loses the inbox line, though the result stays readable (same on main).
+- `start_settle` with a clock set back an hour waits that hour while something runs.
+- A corrupt runner.json with a live child double-runs (same on main).
+- A stale pgid after a reboot could hit another group, by reading only.
+- A crash after the spawn and before the second runner.json write leaves the child running, unnamed: its entry closes 125 and never runs twice, but its key frees under it. Amendment 1 narrows the double run to this.
+- A lock's own name, and a directory under its parent not made yet, compare as typed, so `TLC.lock` and `tlc.lock` on a case-insensitive disk are two locks until one exists, when the existing-path rule holds both.
+- A finish's SIGKILL follows the reap, so an empty group's id could in that instant be another's; pids run in sequence, so a wrap would have to land between two lines.
+- With git failing in a subdirectory of a repo, `<repo>/.git` is absent and the entry keys on the subdirectory itself, apart from its siblings until git answers again.
