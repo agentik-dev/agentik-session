@@ -79,9 +79,12 @@ DENIED = ("admission: not started. The seven-day window is at 98% and resets Mon
 
 
 def test_no_five_hour_reading_is_unread():
-    rows = [reading(at(13), 98, at(0, day=19), kind="seven_day")]
-    v = decide(rows, at(13, 20))
+    v = decide([], at(13, 20))                                  # neither window stays unread
     assert (v["verdict"], v["mode"], v["text"], v["peak"]) == ("unread", "observe", "", None)
+    rows = [reading(at(13), 98, at(0, day=19), kind="seven_day")]   # a spent week alone is denied
+    v = decide(rows, at(13, 20))
+    assert (v["verdict"], v["mode"], v["peak"]) == ("denied", "observe", None)
+    assert v["text"].startswith("admission: not started. The seven-day window is at 98%")
 
 
 def test_a_reading_past_its_reset_is_stale_and_admitted():

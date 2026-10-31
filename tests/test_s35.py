@@ -83,7 +83,7 @@ def test_s35_two_accounts_each_session_draws_its_own_window():
     assert a["room"] != b["room"]
     top = admission.bands(rows, NOW, settings(), tz=UTC)
     assert {k: v for k, v in top.items() if k not in ("accounts", "sessions")} == \
-        admission.band(rows, NOW, settings(), tz=UTC)                    # the old top level
+        top["accounts"][KB]                                              # the current login's: B wrote last
     assert top["sessions"] == {SA: KA, SB: KB} and set(top["accounts"]) == {KA, KB}
 
 
@@ -113,7 +113,7 @@ def test_s35_a_session_with_no_account_draws_the_top_level():
     rows = two() + [reading(at(2), SU, 50, A5), spawn(at(1), SC, "h4")]
     b = admission.bands(rows, NOW, settings(), tz=UTC)
     top = {k: v for k, v in b.items() if k not in ("accounts", "sessions")}
-    assert top["P"] == 50                                                # newest overall, as today
+    assert top["P"] == 12                                                # the current login's, B's
     for sid in (SC, SU, "never-seen", None):
         assert admission.session_band(b, sid) is b
     assert admission.band_line(admission.session_band(b, SC), NOW) == admission.band_line(top, NOW)

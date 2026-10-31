@@ -88,7 +88,7 @@ def test_band_on_a_synthetic_ledger_matches_a_hand_count():
     assert (round(peak, 2), room) == (81.75, 5)
     assert b == {"P": 72, "peak": 81.75, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
                  "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
-                 "at": iso(NOW)}
+                 "at": iso(NOW), "window": "five_hour", "slot": "Thu-2300Z"}
 
 
 def test_room_is_never_below_zero():
@@ -98,8 +98,8 @@ def test_room_is_never_below_zero():
 
 @pytest.mark.parametrize("rows", [[], [reading(at(9), 50, at(10))]], ids=["none", "past-reset"])
 def test_no_five_hour_reading_is_mode_and_at_only(rows):
-    assert admission.band(rows, NOW, rules.admission({}), tz=UTC) == {"mode": "observe",
-                                                                         "at": iso(NOW)}
+    assert admission.band(rows, NOW, rules.admission({}), tz=UTC) == {
+        "mode": "observe", "at": iso(NOW), "window": "five_hour", "slot": None}
 
 
 # ---- band.json: rewritten by record and by admit, atomic, 0600, inside the lock ----
@@ -126,7 +126,7 @@ def lim(pct, resets=RESETS):
 
 def test_record_rewrites_band_json_atomically_and_0600():
     record({"kind": "start", "interactive": True}, at(12))
-    assert band_file() == {"mode": "observe", "at": iso(at(12))}
+    assert band_file() == {"mode": "observe", "at": iso(at(12)), "window": "five_hour", "slot": None}
     ino = (adir() / "band.json").stat().st_ino
     record({"kind": "reading", "rateLimits": lim(72)}, at(12, 1))
     b = band_file()
