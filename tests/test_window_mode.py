@@ -479,3 +479,178 @@ def test_none_line_reads_as_today_until_s43():
     assert admission.band_line(b, NOW) == ("5h no reading · week resets 21:00 (169h00), 5h 21:00 · "
                                            "3 helpers · 7d 62% · observe")
     assert rules.lifetime({}, "/nonexistent", b, now=NOW)[0] is None
+
+
+# ---- Amendment 1, F1: the stale gate holds a relay ask across logins ----------------------------
+
+def _past_reset_logins(env, two=True):
+    """The current login's reading past its reset; with `two`, another login's before it."""
+    if two:
+        admission.record(S2, json.dumps({"kind": "reading", "rateLimits": L5(10, 20, NOW + timedelta(hours=1), OTHER)}),
+                         env, at(180))
+    admission.record(SID, json.dumps({"kind": "reading", "rateLimits": L5(50, 30, at(5))}), env, at(20))
+
+
+def relay_ask(n):
+    return json.dumps({"model": "claude-opus-5-5", "subagentType": "relay-row", "background": True,
+                       "fork": False, "tool_use_id": f"n/{n}/1"})
+
+
+@pytest.mark.parametrize("two", [False, True], ids=["one-login", "two-logins"])
+def test_stale_gate_holds_relay_asks_on_any_number_of_logins(two):
+    """admission-r1's one spawn at a time: a row's ask has no key, and neither has its verdict
+    line, so that line counts for the login the ask was judged on."""
+    env = dict(os.environ)
+    _past_reset_logins(env, two)
+    got = [admission.admit(f"row-{i}-1111", relay_ask(i), env, NOW + timedelta(seconds=5 * i))["verdict"]
+           for i in range(4)]
+    assert got == ["stale", "wait", "wait", "wait"]
+
+
+def _verdict(t, sid, tid, v="stale"):
+    return {"ts": iso(t), "session": sid, "kind": "verdict", "tool_use_id": tid, "verdict": v,
+            "mode": "observe", "peak": None, "P": None, "T": None, "family": "opus", "type": "relay-row"}
+
+
+def _stale_two():
+    return [reading(at(180), L5(10, 20, NOW + timedelta(hours=1), OTHER), S2),
+            reading(at(20), L5(50, 30, at(5)), SID)]
+
+
+def test_stale_gate_a_row_with_a_run_in_flight_holds_past_the_grace():
+    row = dict(spawn(at(4), "r1", sid="row-1"), tool_use_id="n/1/1")
+    rows = _stale_two() + [_verdict(at(4), "row-1", "n/1/1"), row]
+    assert decide(rows, ask(tool_use_id="n/2/1"), "row-2")["verdict"] == "wait"
+
+
+def test_stale_gate_another_login_s_stale_verdict_holds_no_relay_ask():
+    """Corner 3 stands: the ask is judged on the current login, not on every line."""
+    rows = _stale_two() + [_verdict(NOW - timedelta(seconds=30), S2, "n/9/1")]
+    assert decide(rows, ask(tool_use_id="n/2/1"), "row-2")["verdict"] == "stale"
+
+
+def test_stale_gate_a_keyed_session_is_as_before():
+    """A session with its own key never read the rows' lines: no five-hour verdict moves."""
+    rows = _stale_two() + [_verdict(NOW - timedelta(seconds=30), "row-1", "n/1/1")]
+    assert decide(rows, ask(tool_use_id="toolu_x"), SID)["verdict"] == "stale"
+    given = ask(tool_use_id="toolu_x", rateLimits=L5(50, 30, at(5)))
+    assert decide(rows, given, FRESH)["verdict"] == "stale"
+
+
+def test_a_row_s_lines_stay_out_of_the_projection():
+    """Corner 3's other half: only the gate reads a keyless session's lines."""
+    rows = _two_logins()
+    keyless = [spawn(at(3), f"k{i}", sid="row-1") for i in range(14)]
+    alone = decide(rows, ask(), FRESH)
+    both = decide(rows + keyless, ask(), FRESH)
+    assert both["peak"] == alone["peak"] and both["verdict"] == "admitted"
+
+
+# ---- Amendment 1, F2: a session with no resolved.json reads the user layer's override -----------
+
+def user_layer(text):
+    home = config.Path(os.environ["HOME"]) / ".claude" / "agentik"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "profiles.yaml").write_text(text)
+
+
+def band_file(env):
+    return json.loads((admission.directory(env) / admission.BAND).read_text())
+
+
+def _frozen(env):
+    admission.record(SID, json.dumps({"kind": "reading", "rateLimits": L5(50, 50, at(30))}), env, at(60))
+
+
+def test_no_resolved_file_reads_the_user_layer_window(tmp_path):
+    user_layer("defaults:\n  admission:\n    window: none\n")
+    env = world(tmp_path, "")
+    _frozen(env)
+    assert answer(env, [])["window"] == "none"
+    assert band_file(env)["window"] == "none"
+    row = admission.admit("row-sess-1111", relay_ask(1), env, NOW)
+    assert (row["verdict"], row["window"]) == ("admitted", "none")
+    assert band_file(env)["window"] == "none"                            # no flip, either writer
+
+
+def test_no_resolved_file_a_record_writes_the_band_under_it(tmp_path):
+    user_layer("defaults:\n  admission:\n    window: none\n")
+    env = world(tmp_path, "")
+    _frozen(env)
+    admission.record("row-sess-1111", json.dumps({"kind": "start", "interactive": False}), env, NOW)
+    assert band_file(env)["window"] == "none"
+
+
+def test_no_resolved_file_reads_the_user_layer_slot_and_brake(tmp_path):
+    user_layer("defaults:\n  admission:\n    window: five_hour\n    windows: {Wed-1500Z: none}\n")
+    env = dict(os.environ)
+    for t, p in ((60, 90), (20, 91)):
+        admission.record(SID, json.dumps({"kind": "reading", "rateLimits": L7(p)}), env, at(t))
+    assert window(admission._rows(admission.directory(env) / admission.LEDGER)) == "none"
+    row = admission.admit("row-sess-1111", relay_ask(1), env, NOW)
+    assert row["window"] == "five_hour"                                  # the owner's brake binds the ask
+    ask_other = json.dumps({"rateLimits": L7(50, OTHER)})
+    assert admission.admit("row-sess-1111", ask_other, env, NOW)["window"] == "none"
+
+
+def test_no_resolved_file_reads_only_the_override():
+    """The other knobs stay as they were on such an ask, so no five-hour verdict moves."""
+    user_layer("defaults:\n  admission:\n    ceiling: 50\n    ceiling_7d: 10\n")
+    env = dict(os.environ)
+    a = answer(env, L5(40, 50))
+    assert a["verdict"] == "admitted"
+
+
+def test_no_resolved_file_does_not_guess_a_repo_layer(tmp_path):
+    env = world(tmp_path, "session:\n  admission:\n    window: none\n")
+    assert answer(env, L7(50))["window"] == "none"                       # the resolved session
+    row = admission.admit("row-sess-1111", json.dumps({"rateLimits": L7(50)}), env, NOW)
+    assert row["window"] == "five_hour"                                  # a row has no repo to read
+
+
+@pytest.mark.parametrize("text", ["defaults: [", "defaults: 5\n", "defaults:\n  admission: 5\n", "- a\n"])
+def test_no_resolved_file_a_bad_user_layer_reads_as_auto(text):
+    user_layer(text)
+    env = dict(os.environ)
+    a = admission.admit("row-sess-1111", json.dumps({"rateLimits": L5(40, 50)}), env, NOW)
+    assert (a["verdict"], a["window"]) == ("admitted", "five_hour")
+
+
+def test_a_resolved_file_beats_the_user_layer_reading_alone(tmp_path):
+    """The session's resolved file already holds the merged layers: a repo over the user's."""
+    user_layer("defaults:\n  admission:\n    window: none\n")
+    env = world(tmp_path, "session:\n  admission:\n    window: five_hour\n")
+    assert answer(env, L7(50))["window"] == "five_hour"
+
+
+# ---- Amendment 1: the refuter's surviving mutants, §3's rule ------------------------------------
+
+def test_window_last_is_the_newest_five_hour_list_not_the_last_in_the_file():
+    rows = [reading(at(20), L5(1, 41)), reading(at(100), L5(1, 39)),
+            reading(at(61), L7(40)), reading(at(30), L7(41))]
+    assert window(rows) == "five_hour"                                   # the pair is before at(20)
+
+
+def test_window_observations_are_taken_in_time_not_file_order():
+    assert window([reading(at(30), L7(41)), reading(at(61), L7(40))]) == "none"
+    assert window([reading(at(30), L7(40)), reading(at(61), L7(41))]) == "five_hour"
+
+
+def test_window_the_earlier_figure_is_the_lowest_past_the_span():
+    rows = [reading(at(120), L7(40)), reading(at(100), L7(41.5)), reading(at(30), L7(41.5))]
+    assert window(rows) == "none"                                        # 40 to 41.5, not 41.5 to 41.5
+
+
+def test_accounts_read_the_mode_over_every_line_not_the_split():
+    """A spawn row keyed to one login, its session's newest reading on another: `_split` files
+    the line under the session's key, and the rule still counts it for its own."""
+    rows = [spawn(at(61), "h1", L7(40), S2), spawn(at(30), "h2", L7(41), S2),
+            reading(at(25), L7(41), SID), reading(at(20), L5(30, 10, week=OTHER), S2)]
+    assert window(rows) == "none"
+    assert admission.bands(rows, NOW, settings(), tz=UTC)["accounts"][KEY]["window"] == "none"
+
+
+def test_none_entry_reads_only_a_fresh_week():
+    rows = [reading(at(60), L7(50, at(10)))]
+    b = admission.band(rows, NOW, settings(window="none"), tz=UTC)
+    assert (b["window"], b["P7"], b["resetsAt"], b["until"]) == ("none", None, None, None)
