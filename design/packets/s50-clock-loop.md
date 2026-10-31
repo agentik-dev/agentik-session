@@ -42,3 +42,16 @@ Transcripts; `~/.local/state`, every part; relay ledgers.
 ## 6. Report (at most ten lines)
 
 The branch and sha; the gate id and exit; the quoted red; anything decided or left over.
+
+## 7. Amendment 1: the refuter's round 1 on c6947b9, the coordinator's ruling
+
+The refuter passed the acceptance row; the coordinator rules its F1 a blocker, since ruling 4(b) is unmet. Test-only: same worktree and wall, one commit per act, no merge or push. The rulings above stand.
+
+**The wall, ruled.** `claude plugin test plugin`, the Makefile's mod line, is allowed in this packet. The refuter found it uses no model or quota. Every other `claude` verb stays barred but `claude plugin validate`.
+
+1. **F1, the blocker.** Test (b) never makes `ui.invalidate` reject, so ruling 2's catch has no test. A test calls the module's `register` directly with a fake `$`, whose `ui.invalidate` rejects on a tick, and asserts a later tick still runs. Test (b) stays only if it still says something true, and its comment does not claim the catch. Acceptance: in a scratch copy, never the worktree, remove session.ts's `try` on that line, and separately change its catch to `return`; each goes red; the report quotes both.
+2. **F3.** The comment at session.test.ts:375-376 is corrected: a `catch { continue }` mutant hits the wall (rc 124) rather than failing the count, because earlier tests' loops spin once their handlers are gone. It is still red, and the comment says that.
+3. **F2 and one more**, to NICE_TO_HAVE.md as S4: session.ts:395's redraw inside the outer catch, reproduced with a fake `$`; the tick's missing bound, read and not run.
+4. **The version.** If `plugin-version-check` refuses a change under plugin/ after the alpha.36 commit, alpha.37 in the same pins, the README count from the suite, the sidecar re-hashed; alpha.36 is then skipped, as alpha.23 was.
+
+Acts: 0 this amendment; 1 F1; 2 F3; 3 the NICE lines; 4 the version, last. Verify as the parent's row. The report is at most eight lines: the head sha, the gate id and exit, the two quoted reds, the version, anything left over.
