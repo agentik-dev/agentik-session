@@ -320,6 +320,10 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - A corrupt runner.json with a live child double-runs (same on main).
 - A stale pgid after a reboot could hit another group, by reading only.
 - A crash after the spawn and before the second runner.json write leaves the child running, unnamed: its entry closes 125 and never runs twice, but its key frees under it. Amendment 1 narrows the double run to this.
-- A lock's own name, and a directory under its parent not made yet, compare as typed, so `TLC.lock` and `tlc.lock` on a case-insensitive disk are two locks until one exists, when the existing-path rule holds both.
 - A finish's SIGKILL follows the reap, so an empty group's id could in that instant be another's; pids run in sequence, so a wrap would have to land between two lines.
 - With git failing in a subdirectory of a repo, `<repo>/.git` is absent and the entry keys on the subdirectory itself, apart from its siblings until git answers again.
+- A finish kills a deliberate same-group helper with no log line, and a `setsid` helper survives it.
+- A 61fd2ad-form string key beside a new key does not hold; unreachable, since that form was never merged.
+- With git hung, `main/sub` keys apart from `main`.
+- A lock's `..` through a symlink collapses lexically.
+- The pid is free between `poll` and `killpg` on an empty group, needing a pid wrap between adjacent lines.

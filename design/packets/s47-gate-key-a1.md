@@ -46,3 +46,5 @@ Transcripts; `~/.local/state`; every other repo, but `GUIDE.md`.
 ## 6. Report (under 10 lines)
 
 Commits; the acceptance lines; forks; anything unmet.
+
+**Amendment 2**, the last review round's rulings on a1a5e69, no further review, same wall and may-touch; budget 20 tool calls; acts: 1 the tests, red; 2 the code; 3 NICE, this paragraph and the count. F2: a lock that is a live symlink at enqueue was stored as its target and waited on it for good, exit 126, so `enqueue` and `lock_key` resolve the parent only and keep the leaf as typed; this moves section 3's `locks` from realpaths to that form. F1: in `lock_key` only, what lies below the deepest existing directory reads NFC and casefolded when `os.pathconf(<that directory>, 11)` reads 0 (`_PC_CASE_SENSITIVE` on Darwin); on OSError or another platform it compares as typed; the stored path and the exists test are unchanged. F7: `_named` also holds the raw strings, so a parent made mid-pass cannot read one spelling as free. Five S4s to `NICE_TO_HAVE.md`, and its line on a lock's case goes. No version bump.

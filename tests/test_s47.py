@@ -1140,6 +1140,7 @@ def test_s47_a2_the_volume_is_asked_at_the_deepest_existing_dir(tmp_path, monkey
     key = gate.lock_key(str(tmp_path / "NOPE" / "Deep" / "L"))
     assert key == f"{st.st_dev}:{st.st_ino}/nope/deep/l"
     assert asked == [(os.path.realpath(tmp_path), 11)]
+    assert gate.lock_key(str(tmp_path / "CAFE\u0301")) == f"{st.st_dev}:{st.st_ino}/caf\u00e9"
 
 
 def test_s47_a2_the_stored_lock_and_its_exists_test_stay_as_typed(w, tmp_path, monkeypatch):

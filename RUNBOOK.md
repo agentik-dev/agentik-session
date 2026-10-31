@@ -467,8 +467,10 @@ agentik session gate status                       # running, queued, the last fi
 - `--lock PATH` (repeatable) holds the entry while PATH exists, and while a
   running entry names PATH, whatever its key, since that command may not have
   made it yet: one TLC at a time passes its lock this way. One lock spelled two
-  ways is one lock: `run` stores its realpath, and running entries compare by
-  its nearest existing parent's device and inode plus the rest of its path. A
+  ways is one lock: `run` stores it with its parent resolved and its own name as
+  typed, so a lock that is a symlink holds until the link goes, and running
+  entries compare by its parent's nearest existing part's device and inode plus
+  the rest of its path, in one case on a case-insensitive volume. A
   younger entry of another key with no lock may run first. `--wall SECONDS` cuts the command
   (default `gate.wall`, 5400). `--wait` waits after queueing.
 - The ceiling. With nothing running, the oldest free entry starts whatever the
