@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -149,6 +150,9 @@ def _config(env, log=None) -> dict:
 
 # ---- the key -----------------------------------------------------------------
 
+_PC_CASE_SENSITIVE = 11
+
+
 def _real(path: str) -> str:
     try:
         return os.path.realpath(path)
@@ -235,12 +239,32 @@ def key_name(e: dict) -> str:
     return os.path.basename(repo) if isinstance(repo, str) else ""
 
 
+def lock_path(path: str) -> str:
+    """A lock as an entry stores it and `os.path.exists` tests it: its parent resolved, its
+    own name as typed, so a lock that is a symlink is the path named, never its target."""
+    parent, name = os.path.split(os.path.abspath(path))
+    return os.path.join(_real(parent), name)
+
+
+def _folds(at: str) -> bool:
+    """Whether the volume of the existing directory `at` is case-insensitive. Darwin's
+    `_PC_CASE_SENSITIVE`, a number no other OS means the same by: elsewhere, or on a failed
+    read, False, so a name compares as typed."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        return os.pathconf(at, _PC_CASE_SENSITIVE) == 0
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 def lock_key(path: str) -> str:
-    """One lock's identity, for comparing: its realpath's nearest parent that exists, as
-    device and inode, then the rest of the path by name. So a lock reads the same however
-    it is spelled, its parent's case too on a case-insensitive disk, and the same before
-    and after it exists, as the parent is what is statted, never the lock. Never raises."""
-    real = _real(os.path.abspath(path))
+    """One lock's identity, for comparing: its parent's realpath's nearest part that exists,
+    as device and inode, then the rest of the path by name, in NFC and casefolded on a
+    case-insensitive volume. So a lock reads the same however it is spelled and the same
+    before and after it exists, as a parent is what is statted, never the lock. Comparing
+    only: the stored path keeps its case. Never raises."""
+    real = lock_path(path)
     at, rest = os.path.dirname(real), [os.path.basename(real)]
     while True:
         try:
@@ -251,7 +275,10 @@ def lock_key(path: str) -> str:
                 return real
             at, rest = up, [os.path.basename(at), *rest]
             continue
-        return f"{st.st_dev}:{st.st_ino}/" + "/".join(rest)
+        tail = "/".join(rest)
+        if _folds(at):
+            tail = unicodedata.normalize("NFC", tail).casefold()
+        return f"{st.st_dev}:{st.st_ino}/{tail}"
 
 
 # ---- the queue ---------------------------------------------------------------
@@ -292,7 +319,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
         _write_private(g / "counter", f"{n}\n")
         gid = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}"
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
-                 "locks": [_real(os.path.abspath(p)) for p in locks], "wall": wall,
+                 "locks": [lock_path(p) for p in locks], "wall": wall,
                  "label": label or "", "caller": caller, "queued": now, "key": key,
                  "key_name": os.path.basename(real)}
         _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
@@ -368,7 +395,13 @@ def _locks(e: dict) -> list[str]:
 
 
 def _named(running: list[dict]) -> set[str]:
-    return {lock_key(p) for x in running for p in _locks(x)}
+    """What running entries' locks read as: each `lock_key` and its raw string, so a parent
+    made between this read and a later one cannot read the same spelling as free."""
+    return {s for x in running for p in _locks(x) for s in (p, lock_key(p))}
+
+
+def _is_named(path: str, named: set[str]) -> bool:
+    return path in named or lock_key(path) in named
 
 
 def _holds(es: list[dict], running: list[dict]):
@@ -384,7 +417,7 @@ def _holds(es: list[dict], running: list[dict]):
     named = _named(running)
     for e in es:
         k = entry_key(e)
-        path = _locked(e) or next((p for p in _locks(e) if lock_key(p) in named), None)
+        path = _locked(e) or next((p for p in _locks(e) if _is_named(p, named)), None)
         if path:
             yield e, ("lock", path)
         elif k in keys:
@@ -692,7 +725,7 @@ def _lock_wait(head: dict, running: list[dict]) -> str | None:
     if entry_key(head) in {entry_key(x) for x in running}:
         return None
     named = _named(running)
-    return next((p for p in _locks(head) if lock_key(p) not in named and os.path.exists(p)), None)
+    return next((p for p in _locks(head) if not _is_named(p, named) and os.path.exists(p)), None)
 
 
 def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
