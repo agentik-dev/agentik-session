@@ -2,7 +2,7 @@
 
 | item | value |
 |---|---|
-| from | agentik-hq HANDOFF 17, build 2 of the Fable review; `~/code/agentik-hq/design/04-self-contained-plugins.md` §7 item 1, the record of the change, refuted once; hq entry 6 at a 3.9 floor |
+| from | agentik-hq HANDOFF 17, build 2 of the Fable review; agentik-hq `design/04-self-contained-plugins.md` §7 item 1, the record of the change, refuted once; hq entry 6 at a 3.9 floor |
 | pin | 8ed5667 (main, alpha.37); worktree `.claude/worktrees/sc1-proof`, branch `sc1-proof`, cut, its `.venv` a link |
 | wall | this repo; no push, `--amend`, rebase, merge, device, `make install`, `make readme`, `claude` but `claude plugin validate`; a test or proof never writes under the live `~/.local/state` or the real `~/.claude`; no relay verb, no relay binary built or run; no `pkill` by name or pattern; a Python probe needs PYTHONPATH=<worktree>; **no code moves, no plugin bump, no install** |
 | may touch | `claude_session/cli.py` (the argparse fix), `claude_session/doctor.py` (the floor), other non-test code only under §4's count, `tests/` (tests passing `-P` or expecting the baked venv), `Makefile`, `.gitignore`, `scripts/bare-proof` (new), `NICE_TO_HAVE.md`, `README.md` and the sidecar only if the suite's count moves them, this packet, the charter |
@@ -10,7 +10,7 @@
 | verify | `agentik session gate run <absolute worktree path> -- make check`, then `agentik session gate wait <id>`, last |
 | budget | acts: 0 this packet as `design/packets/sc1-proof.md`, committed first; 1 the argparse bug, a test first; 2 the doctor's floor and the tests; 3 `.venv-floor`; 4 `scripts/bare-proof` and its run. 120 tool calls, stop at 80% (commit the act in flight), 180k, `claude-opus-5-5`; one commit per act; the charter opens with doclint's five rows |
 
-Read first, by sections, never whole (`/session:read`): design/04 §2, §7 (its first paragraph, the bare-machine test and item 1), §8, §9, §12; then `~/code/agentik-research/research/synthesis/tools-session.md`.
+Read first, by sections, never whole (`/session:read`): design/04 §2, §7 (its first paragraph, the bare-machine test and item 1), §8, §9, §12; then agentik-research `research/synthesis/tools-session.md`.
 
 ## 1. What the source says: what is already measured (design/04 §2), not to be taken on trust
 
@@ -40,7 +40,7 @@ Session under 3.9.6: 1953 pass, 49 fail: 20 the doctor's floor, 14 one argparse 
 | bytecode | under the prefix after the first run, and none beside the sources |
 | latency | median and p95, 3.9 against 3.12; the proof exits nonzero past §8's bar: median over 1.25 times, or p95 over 2.5 s |
 | validate | `claude plugin validate` of the mock reads as the live plugin's: today 10 warnings on both; the two outputs diffed |
-| live state | a snapshot of `ls -la ~/.local/state/claude-code-session/` is not needed: the proof asserts `HOME=$T` reached every child by a sentinel test, and fails if anything wrote outside `$T` |
+| live state | a snapshot of `ls -la` of the live state folder is not needed: the proof asserts `HOME=$T` reached every child by a sentinel test, and fails if anything wrote outside `$T` |
 
 ## 4. Findings that name this row: the stop (design/04 §8)
 

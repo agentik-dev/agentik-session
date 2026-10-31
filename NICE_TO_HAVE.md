@@ -349,3 +349,8 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## S50's refuter, round 1 (2026-10-31, S4)
 - `session.ts:395`: if session.start's own redraw rejects or throws, the outer catch skips the loop, so no tick ever runs. It predates S50, the kit's engine never reaches it, and only `turn.complete` retries; reproduced with a fake `$`.
 - `await start()` and the invalidate have no bound, so a never-answering `$.process.run` should park the loop; read, not run.
+
+## sc1, the bare-machine proof (2026-10-31, S4)
+- Until sc3 the doctor passes 3.9 while `make install`'s launcher still runs `python -P` and its interpreter search wants 3.11 (`Makefile`, `install-wrapper.sh`), so `make install PYTHON=<a 3.9>` writes a launcher that exits 2. Named for sc3; two install tests wait for 3.11 under the floor.
+- `-- -- budget`: 3.12 reads it, 3.9 refuses it. A form with no use, left out of the table.
+- `scripts/bare-proof`'s write detector is a Python audit hook: it sees the tool's own process, and a child's HOME, not what `git` or the gate's detached runner write themselves. The runner's state is read under `$T` and its job's HOME is asserted.
