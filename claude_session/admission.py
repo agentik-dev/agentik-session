@@ -1276,12 +1276,52 @@ def clip(line: str, columns: int) -> str:
     return line if columns <= 0 or len(line) <= columns else line[:max(1, columns - 1)] + "…"
 
 
+# Fixed English names, by `datetime.weekday()`: no locale reaches the line.
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _weekday(v: str) -> str:
+    """The weekday of a stamp `_wall` took, from its own date digits: no system zone."""
+    return _WEEKDAYS[datetime(int(v[:4]), int(v[5:7]), int(v[8:10])).weekday()]
+
+
+def _line_end(b: dict, now: datetime) -> list:
+    """The line's last parts in either mode: `observe`, then the age past STALE_S."""
+    parts = ["observe"] if b.get("mode") == "observe" else []
+    a = _wall(b.get("at"))
+    age = math.floor((now - a[2]).total_seconds()) if a is not None else None
+    if age is not None and age > STALE_S:
+        parts.append(f"{age}s old")
+    return parts
+
+
+def _line_none(b: dict, now: datetime) -> list:
+    """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · week resets Ddd HH:MM ·
+    n helpers`, each left out with no figure; `until` first, else `resetsAt`, both the
+    week's. No countdown, ceiling, room or deferred."""
+    parts = ["no 5h window"]
+    p7, running = _real(b.get("P7")), _real(b.get("running"))
+    if p7 is not None:
+        parts.append(f"7d {_pct(p7)}%")
+    for v in (b.get("until"), b.get("resetsAt")):
+        w = _wall(v)
+        if w is not None:
+            parts.append(f"week resets {_weekday(v)} {w[0]}:{w[1]}")
+            break
+    if running is not None:
+        parts.append(_count(running, "helper", "helpers"))
+    return parts + _line_end(b, now)
+
+
 def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
     """§3.5's line from band.json: `5h P% → peak% · ceiling c · resets HH:MM (h:mm) ·
     n helpers, room for r · d deferred · 7d P7%`, then `observe` and the age past 120 s; a
     part with no figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` when the
-    seven-day reset bounds the background term (`until`). admissionLine is its twin."""
+    seven-day reset bounds the background term (`until`). An entry whose `window` is the
+    string `none` draws `_line_none` instead. admissionLine is its twin."""
     now = now or datetime.now(timezone.utc)
+    if b.get("window") == "none":
+        return clip(" · ".join(_line_none(b, now)), columns)
     P, peak, c = _real(b.get("P")), _real(b.get("peak")), _real(b.get("ceiling"))
     parts = ["5h no reading" if P is None
              else f"5h {_pct(P)}%" + (f" → {_pct(peak)}%" if peak is not None else "")]
@@ -1307,13 +1347,7 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
         parts.append(f"{_pct(d)} deferred")
     if p7 is not None:
         parts.append(f"7d {_pct(p7)}%")
-    if b.get("mode") == "observe":
-        parts.append("observe")
-    a = _wall(b.get("at"))
-    age = math.floor((now - a[2]).total_seconds()) if a is not None else None
-    if age is not None and age > STALE_S:
-        parts.append(f"{age}s old")
-    return clip(" · ".join(parts), columns)
+    return clip(" · ".join(parts + _line_end(b, now)), columns)
 
 
 # ---- `report`'s window use (design/admission-r1.md §3.6; packet S27b ruling 5) ----
