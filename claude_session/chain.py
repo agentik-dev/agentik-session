@@ -50,7 +50,7 @@ FORBIDDEN = ("-p", "--print", "-c", "--continue", "-r", "--resume", "--fork-sess
 _BARE = frozenset({"--strict-mcp-config", "--verbose"})
 _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
-DEFAULTS = {"cap": 12, "floor": 600, "settle": 60}
+DEFAULTS = {"cap": 20, "floor": 600, "settle": 60}
 HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
 _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overlay is read
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
