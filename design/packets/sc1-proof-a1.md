@@ -6,7 +6,7 @@
 | pin | 8b7297d (branch `sc1-proof`); worktree `.claude/worktrees/sc1-proof` |
 | wall | as the parent's, and `claude plugin test plugin` is allowed: it uses no model |
 | may touch | `scripts/bare-proof`, `claude_session/cli.py` (`_Parser` only), `tests/` (the parser's table, and any test of the proof), `NICE_TO_HAVE.md`, the parent packet (this amendment as its last section, or `design/packets/sc1-proof-a1.md` if doclint's ceiling needs it), the charter |
-| acceptance | §2's mutants each make `scripts/bare-proof` exit nonzero, each quoted by its failing row; the unmutated proof exits 0 with its last line `bare-proof: go`; §3's forms pinned by a test green under the floor and under `.venv`, by the verify row's gates; `make hygiene` exits 0 |
+| acceptance | §2's mutants each make `scripts/bare-proof` exit nonzero, each quoted by its failing row; the unmutated proof exits 0 with its last line the go; §3's forms pinned by a test green under the floor and under `.venv`, by the verify row's gates; `make hygiene` exits 0 |
 | verify | `agentik session gate run <absolute worktree path> -- make test-floor`, then the same with `make check`; each `agentik session gate wait <id>`. **`gate wait` exits 0 whatever the job's code: read the code from its line** |
 | budget | acts: 0 this amendment; 1 the parser, §3; 2 the proof's reach, §2; 3 the NICE lines, §4; 4 the rerun and the charter. 70 tool calls, stop at 80% (commit the act in flight), 180k, `claude-opus-5-5`; one commit per act |
 
