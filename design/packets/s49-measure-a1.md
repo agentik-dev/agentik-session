@@ -52,6 +52,7 @@ A real PreToolUse's row reads p50 47 ms against 60.9 ms of wall time: `ms` leave
 - `rate_limits`: `measure.json` carries its own `at`, so the row gains `rate_limits_at`, null when that is not a time (22 keys). `measure.stated_limits(sdir) -> (list | None, str | None)`.
 - `design/mod-r1.md` §7.3 gains the line that SessionEnd opens `measure.json` through `harness`: it copies, and decides nothing.
 - `.hygiene-allow` and `tests/test_s34.py` go back to main's: the shim no longer names the old folder.
+- The version: 2.0.0-alpha.35 in all five pins, overriding the parent's ruling 10: `make plugin-version-check` refuses a change to `plugin/hooks/run` after the commit that set alpha.34. alpha.34 never left this branch, and the marketplace line is hq's, at alpha.35.
 
 ## 3. Interfaces
 
