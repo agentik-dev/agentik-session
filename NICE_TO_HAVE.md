@@ -6,9 +6,20 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## S44, the demand bands (2026-10-30)
+- S4: `status --transcript` shows no band: it reads a transcript, not this session's band. A reader that wants one takes it from band.json.
+- S4: `grade` in `bands.yaml` is the source's text, and nothing reads it.
+- S4: the twins differ on stamps `_stamp` never writes, so `wall` could refuse what `_when` refuses.
+- S4: `status --json` passes a past-end `demand` raw, where the plain line leaves it out.
+- S4: a dangling symlink at the user's `bands.yaml` is silent: it reads as no file, with no `doctor` row.
+- S4: no real wheel was built offline; only the package-data line and the frozen tree are checked.
+
 ## S43, the lines on a login with no five-hour window (2026-10-30)
 - S4: `rules.py`'s rendered waiting rule still reads `(room for 0, or a usage limit hit)`, and `tests/test_rules.py` pins it, while the charter's pattern and the two docs now name the week and the band too; the packet allows only `lifetime` in that file. A packet that touches the rendered rules takes it.
 - S4: the twins differ on a stamp at datetime's very ends: Python's `_wall` refuses 0001-01-01 and 9999-12-31, `wall` in `session.ts` takes them. Older than this change and on both lines; `_stamp` never writes one.
+- S4: a `next week` wait hits the meter-wait return before `_red`, so a red charter with that wait exits 0; `test_s29_meter_wait_keeps_the_exit` is the pin to revisit.
+- S4: hyphens read as boundaries, so `mid-week`, `band-aid` and `7d-old` count as meter waits.
+- S4: numeric corners of `_pct` against `whole` differ (`7d 1e+21%`), unreachable from the writer.
 
 ## The research site's vendor-docs check (2026-10-14): one behaviour item left
 - S4: PreCompact's quiet pass rests on an undocumented reading, that a passing PreCompact's stdout becomes the compaction's custom instructions (observed on claude 2.1.296; `claude_session/hooks.py` `QUIET_PASS`). The "Hooks reference" of 2026-10-14 sends most events' passing stdout to the debug log and does not list PreCompact as an exception. Add a check that fails loudly when the behaviour changes, such as a `doctor` probe or a gated live test that runs a manual `/compact` under a PreCompact hook printing a marker and looks for it in the summary. It needs a real `claude`, so it waits for a sitting that may run one. Source: the research site's fix prompt, item 8.
@@ -290,3 +301,10 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `meter.py:248` keeps a fixed temp name.
 - README:83 "ctx % at its next measure" is loose: ctx % moves at the next tool; resolved.json moves at the measure.
 - Unseen live: a change of window within one session, and a non-1M reading on Opus.
+
+## S44's refuter round 2 (2026-10-30; S4)
+- A constant band's `until` is null, so a schedule that never changes shows no band in the line, `status` or the relay's plan. Decide whether a constant band shows.
+- `doctor` warns on a Max login too when the user's bands file is bad: every other Max output is byte-identical, and the ruling asks for it.
+- `admission.py:298-299`, `_rows` lets RecursionError out on a ledger line nested past the stack; `read_band`'s shape on the ledger. A hook path was not traced.
+- `demand.py:153`, `_shift`'s 1-second stop is unpinned: a mutant at 120 seconds passes. Pin a mid-gap stamp and a cut at the second pass's last minute.
+- `--`, `2026-10-30` and `1e3` bind as band names; `Good` binds and `next` never names it.

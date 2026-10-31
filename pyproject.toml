@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentik-session"
-version = "2.0.0a30"
+version = "2.0.0a31"
 description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -25,4 +25,4 @@ agentik-session = "claude_session.cli:main"
 include = ["claude_session*"]
 
 [tool.setuptools.package-data]
-claude_session = ["profiles.yaml"]
+claude_session = ["profiles.yaml", "bands.yaml"]

@@ -66,6 +66,8 @@ Amended 2026-10-30 by packet S42: each entry gains `window` and `slot`, band.jso
 
 Amended 2026-10-30 by packet S43: a `none` entry draws `no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe` in both twins, the weekday from the stamp's own date digits, and any other `window` draws the line above byte for byte. `rules.lifetime` reads a `none` entry's seven-day reading: 5m at PLAN or past, 1h below it, unknown with no reading or a passed reset. The charter's meter-wait pattern gains the whole words `week`, `weekly`, `7d`, `seven-day` and `band`, in every mode.
 
+Amended 2026-10-30 by packet S44: a `none` entry gains `demand` {`band`, `until`, `next`}, resolved at each band.json write from `claude_session/bands.yaml` or the user's whole replacement of it; `demand.band` and `demand.until` are a contract with the relay's plan. The line gains `band avoid to 11:00` after the week's reset, in both twins, left out with no band, a stamp the reader refuses, or an `until` not after now. A `none` answer gains `band`. A `five_hour` entry, answer and line are unchanged and never read the file. `decide` does not read it either: no verdict waits for a band.
+
 ### §3.6 Using 90% without crossing 100
 
 The target is a floor on use, and the ceiling is a cap. A spawn is refused only at the cap. A deferral ends as soon as it fits. "Room for N" tells the orchestrator to pull work forward. `report` prints each window's last reading as `held` (spawns waited) or `idle` (nothing waited). The Mod cannot make work, so an idle window under 90 is reported, never hidden.

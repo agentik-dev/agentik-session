@@ -120,6 +120,10 @@ def cmd_status(args) -> int:
             print("no meter for this session: PostToolUse has not run (see "
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
+        band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
+        if args.json and isinstance(band, dict) and band.get("window") == admission.NO_WINDOW:
+            dem = band.get("demand")           # under `band`: the meter's own `window` is its context
+            d = {**d, "band": {"window": band["window"], **({"demand": dem} if isinstance(dem, dict) else {})}}
         if not args.json:
             print(meter.one_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
@@ -129,6 +133,9 @@ def cmd_status(args) -> int:
             held = chain.held_line(state, env.get(hooks.CHAIN_VAR) or "", sid)
             if held:                            # S37: a respawn hold, said while it stands
                 print(held)
+            line = admission.band_status(band)
+            if line:
+                print(line)
             return 0
     print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
     return 0
