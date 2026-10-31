@@ -301,6 +301,20 @@ def _user_file(env) -> Path:
                        home / OLD_REPO_DIR / "profiles.yaml")
 
 
+def window_override(env) -> dict:
+    """`window` and `windows` from the user layer's `defaults.admission`, read alone, for a
+    session with no resolved file (a relay row's ask before its child starts: packet S42
+    Amendment 1). No other knob, no profile, and no repo layer, since such a session names no
+    directory. An unreadable file or field is unset; it never raises."""
+    try:
+        doc = _read(_user_file(env), [])
+    except (ResolveError, OSError):
+        return {}
+    d = doc.get("defaults") if isinstance(doc, dict) else None
+    ad = d.get("admission") if isinstance(d, dict) else None
+    return {k: ad[k] for k in ("window", "windows") if k in ad} if isinstance(ad, dict) else {}
+
+
 def gate_config(env) -> dict:
     """The gate section's user layer (design/gate-r1.md ruling 4): the top-level `gate:`
     mapping of the user's profiles.yaml, read alone. A key unset, mistyped or unreadable

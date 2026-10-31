@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import config, rules, store
+from . import config, resolver, rules, store
 from .hooks import _SID
 
 DIR = "admission"
@@ -805,6 +805,19 @@ def _split(rows, own: list, of: dict) -> dict:
     return out
 
 
+def _gate_lines(rows, lines: list, sid, key) -> list:
+    """The lines the stale gate reads: `lines`, the request's account's; for a request with no
+    key of its own (a relay ask) also those of every session with no key, its sibling rows,
+    whose verdicts were judged on the same login, so one spawn at a time holds across logins
+    (packet S42 Amendment 1). Only the gate reads them: the projection stays on `lines`."""
+    own, of = _keyed(rows)
+    if key or sid in of:
+        return lines
+    current = _current(of)
+    return [r for r, k in zip(rows, own)
+            if (k or of.get(_sid(r), (None, None))[1]) in (current, None)]
+
+
 def scoped(rows, sid, key=None) -> list:
     """The lines `sid` is judged on: its account's (`_login`'s) when the ledger holds two or
     more keys; else every line."""
@@ -985,7 +998,7 @@ def decide(rows, req: dict, sid, now: datetime, settings: dict, tz=None) -> dict
     account count (`scoped`, packet S35)."""
     given = account(req.get("rateLimits"))
     mode = window(rows, _login(_keyed(rows)[1], sid, given), now, settings)
-    rows = scoped(rows, sid, given)
+    whole, rows = rows, scoped(rows, sid, given)
     fam = family(req.get("model"), req.get("parentModel"))
     typ = helper_type(req.get("subagentType"), req.get("fork"))
     seeds = settings["seeds"]
@@ -1007,7 +1020,7 @@ def decide(rows, req: dict, sid, now: datetime, settings: dict, tz=None) -> dict
         return weekly(out) or {**out, "verdict": "unread"}
     newest = max(enumerate(five), key=lambda ix: (ix[1][0], ix[0]))[1]
     if newest[3] <= now:
-        wait = _stale_in_flight(rows, req, newest[3], now, seeds)
+        wait = _stale_in_flight(_gate_lines(whole, rows, sid, given), req, newest[3], now, seeds)
         return {**out, "verdict": "wait" if wait else "stale", "text": texts("wait") if wait else ""}
     p = project(rows, req, sid, now, seeds)
     out.update(peak=p["peak"], P=p["P"], T=p["T"], resume_at=_stamp(p["resets"], tz))
@@ -1055,11 +1068,13 @@ def parse_admit(sid, text_in: str) -> dict:
 
 
 def _session_config(env, sid: str) -> dict:
-    """The session's resolved `session` section, else {} (the defaults)."""
+    """The session's resolved `session` section; with no resolved file, as on a relay row's ask
+    before its child starts, the user layer's window override alone (packet S42 Amendment 1),
+    so its verdict and band.json read as a resolved session's; else {} (the defaults)."""
     try:
         d = json.loads((config.state_dir(env) / "sessions" / sid / "resolved.json").read_text())
     except (OSError, ValueError):
-        return {}
+        return {"admission": resolver.window_override(env)}
     return d.get("session") if isinstance(d, dict) and isinstance(d.get("session"), dict) else {}
 
 
