@@ -752,3 +752,76 @@ def test_f2_a_failed_write_leaves_no_temp(repo, tmp_path):
     with pytest.raises(OSError):
         resolver._write_atomic(target, "x\n")
     assert not list(sdir().glob("*.tmp"))
+
+
+HOLDER = """
+import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("held", flush=True)
+sys.stdin.read()                    # until the test closes it, or dies
+"""
+MODULE_BOUND = 5.0                  # session.ts's bound on `measure record`, in seconds
+HANG = 60                           # only a blocking lock ever waits this long
+
+
+class Clock:
+    """`resolver`'s own clock, so a 2 s bound takes no 2 s and a loaded Mac cannot move it:
+    each poll advances it, and only real seconds in `HANG` could fail a good lock."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.polls = 0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, s):
+        self.polls += 1
+        self.now += max(s, 0.05)
+
+
+@pytest.fixture
+def held(repo, monkeypatch):
+    """The session's lock held by another process; yields the clock `resolver` now reads."""
+    start(repo)
+    h = subprocess.Popen([sys.executable, "-B", "-c", HOLDER, str(sdir())], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, text=True)
+    assert h.stdout.readline().strip() == "held"
+    clock = Clock()
+    monkeypatch.setattr(resolver, "time", clock)
+    yield clock
+    h.stdin.close()
+    h.wait(timeout=120)
+
+
+def bounded(fn):
+    """fn() in a thread, so a lock that blocks is a failed assert here and not a hung suite."""
+    import threading
+    box = {}
+    t = threading.Thread(target=lambda: box.update(out=fn()), daemon=True)
+    t.start()
+    t.join(HANG)
+    assert not t.is_alive(), "the lock blocked: it has no bound"
+    return box["out"]
+
+
+def test_f3_rewindow_gives_up_within_the_bound_and_writes_nothing(held):
+    before = bytes_of("resolved.json", "resolved.yaml")
+    assert bounded(lambda: resolver.rewindow(sdir(), 1000000)) is False
+    assert held.polls > 0                               # it did wait, and then it gave up
+    assert 1000.0 + resolver.LOCK_WAIT <= held.now < 1000.0 + MODULE_BOUND
+    assert bytes_of("resolved.json", "resolved.yaml") == before
+
+
+def test_f3_write_goes_on_past_the_bound(held, repo):
+    r = resolver.resolve(repo, SID, env(), overlay={"posture": "deny"})
+    state = resolver.state_dir(os.environ)
+    bounded(lambda: resolver.write(r, state))
+    assert held.polls > 0
+    assert 1000.0 + resolver.LOCK_WAIT <= held.now < 1000.0 + MODULE_BOUND
+    assert session()["posture"] == "deny"
+
+
+def test_f3_the_bound_is_shorter_than_the_modules_own():
+    assert 0 < resolver.LOCK_WAIT < MODULE_BOUND
