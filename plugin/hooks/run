@@ -15,8 +15,27 @@ fi
 # anything to say. StopFailure (a turn an API error ended) is fire-and-forget, as Stop. PreCompact keeps the tool's stdout (its block) but never its exit: an
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
 # owner's typed /compact too. Other events keep the tool's exit (PreToolUse may block).
+# Measure (packet S49): the tool's wall time and exit, one line to <state>/hooks.jsonl after it
+# ends, the state root picked as config.state_dir picks it. Only this plugin's hooks. Two
+# `date`s and a printf: no lock, and any failure (no `date` or %N, no state folder, not a
+# regular file, an event that is not letters, an unwritable file) writes nothing and says
+# nothing. `exit` is the tool's own; the hook's exit and stdout are as they were. The CLI
+# bounds the file (harness.rotate): a size here would cost a fork.
+t0=$(date +%s%N 2>/dev/null)
 case "$1" in
-  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
-  PreCompact) "$tool" hook "$1"; exit 0 ;;
+  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; rc=$?; out=0 ;;
+  PreCompact) "$tool" hook "$1"; rc=$?; out=0 ;;
+  *) "$tool" hook "$1"; rc=$?; out=$rc ;;
 esac
-exec "$tool" hook "$1"
+t1=$(date +%s%N 2>/dev/null)
+s=${XDG_STATE_HOME:-$HOME/.local/state}
+d=$s/agentik-session
+[ -e "$d" ] || [ ! -e "$s/claude-code-session" ] || d=$s/claude-code-session
+f=$d/hooks.jsonl
+case "$t0$t1" in *[!0-9]*) t0= ;; esac
+case "$1" in ''|*[!A-Za-z]*) t0= ;; esac
+if [ "${#t0}" = 19 ] && [ "${#t1}" = 19 ] && [ "$t1" -ge "$t0" ] && [ -d "$d" ] && { [ ! -e "$f" ] || [ -f "$f" ]; }; then
+  umask 077
+  { printf '{"event":"%s","ms":%s,"exit":%s}\n' "$1" "$(( (t1 - t0) / 1000000 ))" "$rc" >>"$f"; } 2>/dev/null
+fi
+exit "$out"

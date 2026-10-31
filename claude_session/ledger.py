@@ -22,7 +22,9 @@ PER_SESSION_KEYS = ("session", "project", "turns", "sidechain_turns", "tokens",
 LEDGER_KEYS = ("session", "project", "repo", "turns", "sidechain_turns", "tokens",
                "median_context", "max_context", "profile", "model", "sha_at_end", "dirty",
                "started", "ended", "ceilings", "zone_at_end", "exit_reason", "builders",
-               "builders_source")
+               "builders_source",
+               # S49: the harness's measures, null when the session has none
+               "claude_md_bytes", "rate_limits")
 # The chain's line kinds (respawn-r1 §3.6), each a closed key set; `kind` names it.
 RESTART_KEYS = ("kind", "chain", "seq", "at", "from_session", "to_session", "profile", "repo",
                 "charter", "charter_sha256", "sitting_seconds", "ended_by", "restarts_24h",
@@ -198,7 +200,8 @@ def git_state(cwd) -> tuple[str | None, str | None, bool | None]:
             None if status is None else bool(status.strip()))
 
 
-def entry_for(m: dict, *, project, profile, cwd, exit_reason) -> dict:
+def entry_for(m: dict, *, project, profile, cwd, exit_reason, claude_md_bytes=None,
+              rate_limits=None) -> dict:
     """A ledger line from a meter dict (burn-report's numbers are the total's)."""
     repo, sha, dirty = git_state(cwd) if cwd else (None, None, None)
     t = m.get("total") or {}
@@ -214,6 +217,7 @@ def entry_for(m: dict, *, project, profile, cwd, exit_reason) -> dict:
         "builders": [{"agent": b.get("agent"), "turns": b.get("turns"),
                       "tokens": b.get("tokens")} for b in m.get("builders") or []],
         "builders_source": m.get("builders_source") or "none",
+        "claude_md_bytes": claude_md_bytes, "rate_limits": rate_limits,
     }
 
 

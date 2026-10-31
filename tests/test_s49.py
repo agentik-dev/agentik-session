@@ -422,7 +422,7 @@ def test_s49_a_failure_in_either_measure_never_loses_the_row(ended, tmp_path, mo
     def boom(*_a, **_k):
         raise RuntimeError("nope")
     monkeypatch.setattr(harness, "claude_md_bytes", boom)
-    monkeypatch.setattr(measure, "rate_limits", boom)
+    monkeypatch.setattr(measure, "stated_limits", boom)
     row = _end(env, tmp_path)[0]
     assert (row["claude_md_bytes"], row["rate_limits"], row["turns"]) == (None, None, 4)
 
@@ -576,3 +576,23 @@ def test_s49_the_readme_says_only_this_plugins_hooks_are_measured(name):
 
 def test_s49_the_command_names_the_flag():
     assert "--hooks" in (ROOT / "plugin" / "commands" / "report.md").read_text()
+
+
+def test_s49_an_import_that_is_not_text_does_not_count(tree):
+    (tree / "repo" / "logo.png").write_bytes(b"\x89PNG\0\0\0")
+    (tree / "repo" / "CLAUDE.md").write_text("@logo.png\n")
+    assert _md(tree) == 10
+
+
+def test_s49_a_rotation_costs_a_hook_nothing_on_the_shims_side(box):
+    # The shim writes on after a rename: the next row starts a new file, 0600.
+    p = box / "xdg" / config.APP / "hooks.jsonl"
+    _shim(box)
+    harness.HOOKS_CAP, cap = 1, harness.HOOKS_CAP
+    try:
+        harness.rotate(p.parent)
+    finally:
+        harness.HOOKS_CAP = cap
+    _shim(box)
+    assert len(harness.read_hooks(p.parent)) == 2 and (p.parent / "hooks.jsonl.1").exists()
+    assert p.stat().st_mode & 0o777 == 0o600
