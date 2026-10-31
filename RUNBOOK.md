@@ -57,8 +57,8 @@ file moves every session on this shim to the launcher on its next hook:
 3. `touch ~/.config/agentik/hooks-follow-launcher`.
 4. `rm ~/.config/agentik/hooks-follow-launcher` once sessions have respawned.
 
-The file's existence is the whole state: a regular file, not a link, under 24 h by mtime, with an
-executable `~/.local/bin/agentik-session`. It lapses by itself; a longer emergency touches it
+The file's existence is the whole state: a regular file, not a link, under 24 h by mtime and not
+in the future, with an executable regular file at `~/.local/bin/agentik-session`. It lapses by itself; a longer emergency touches it
 again. No verb, profile, `session set` key, config layer, `AGENTIK_*` or `XDG_CONFIG_HOME` turns
 it on. While it is on, the doctor warns and SessionStart's `systemMessage` says so, when the
 launcher's code is this version or later. Mixed versions are the cost, as before this plugin
