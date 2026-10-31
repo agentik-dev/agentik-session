@@ -1286,7 +1286,7 @@ def read_band(env):
         if len(data) > BAND_MAX:
             return None
         b = json.loads(data.decode("utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):      # deep nesting fits under BAND_MAX
         return None
     return b if isinstance(b, dict) else None
 

@@ -8,7 +8,7 @@ here raises. With the shipped file or its zone gone there is no band at all: `de
 
 The clock is the schedule's wall clock. A wall time a DST gap skips reads as the first
 instant after the gap; a wall time a fold repeats reads its first instant, so a cut inside a
-fold happens once, and `now` in the fold's second pass still takes its band from the wall.
+fold happens once, and `now` in the fold's second pass reads the band the first pass ended on.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ WALK_WEEKS = 3                         # every cut recurs in a week; a gap or a 
 REPORTED = ("good", "best")            # the bands `next` names
 _HM = re.compile(r"(\d{2}):(\d{2})\Z")
 _DAYS = re.compile(r"([A-Z][a-z]{2})(?:-([A-Z][a-z]{2}))?\Z")
+_BAND = re.compile(r"[A-Za-z0-9_-]{1,32}\Z")   # a name reaches the session line and `status` as written
 
 
 class _Bad(ValueError):
@@ -88,7 +89,7 @@ def _rule(r) -> dict:
     if start >= end:
         raise _Bad(f"from {r.get('from')} is not before to {r.get('to')}")
     band = r.get("band")
-    if not isinstance(band, str) or not band:
+    if not isinstance(band, str) or _BAND.match(band) is None:
         raise _Bad(f"band {band!r}")
     return {"days": _days(r.get("days")), "from": start, "to": end, "band": band}
 
@@ -146,13 +147,8 @@ def schedule(env) -> tuple:
         return [], None, [*notes, f"bands: the shipped file does not bind ({why}); no band is shown"]
 
 
-def _instant(naive: datetime, tz) -> datetime:
-    """A wall time as an instant: a fold's first; a gap's first instant after it."""
-    first = naive.replace(tzinfo=tz, fold=0).astimezone(timezone.utc)
-    if first.astimezone(tz).replace(tzinfo=None) == naive:
-        return first
-    lo = naive.replace(tzinfo=tz, fold=1).astimezone(timezone.utc)   # the offset after the gap: before it
-    hi = first                                                       # the offset before it: after it
+def _shift(lo: datetime, hi: datetime, tz) -> tuple:
+    """(lo, hi) within a second of the offset's change between them: lo before it, hi after."""
     before = lo.astimezone(tz).utcoffset()
     while hi - lo > timedelta(seconds=1):
         mid = lo + timedelta(seconds=(hi - lo).total_seconds() // 2)
@@ -160,7 +156,24 @@ def _instant(naive: datetime, tz) -> datetime:
             lo = mid
         else:
             hi = mid
-    return hi
+    return lo, hi
+
+
+def _instant(naive: datetime, tz) -> datetime:
+    """A wall time as an instant: a fold's first; a gap's first instant after it."""
+    first = naive.replace(tzinfo=tz, fold=0).astimezone(timezone.utc)
+    if first.astimezone(tz).replace(tzinfo=None) == naive:
+        return first
+    # fold=1 is the offset after the gap, so before it; fold=0 the offset before it, so after it
+    return _shift(naive.replace(tzinfo=tz, fold=1).astimezone(timezone.utc), first, tz)[1]
+
+
+def _read_wall(now: datetime, wall: datetime, tz) -> datetime:
+    """The wall the band is read at: `wall`, but in a fold's second pass the first pass's last
+    second, so a cut inside the fold happens once and every cut past `now` stays past."""
+    if not wall.fold:
+        return wall
+    return _shift(wall.replace(fold=0).astimezone(timezone.utc), now, tz)[0].astimezone(tz)
 
 
 def _of_week(t: datetime) -> int:
@@ -178,7 +191,7 @@ def demand(now: datetime, rules: list, tz, stamp_tz=None) -> dict | None:
     try:
         slots = _slots(rules)
         wall = now.astimezone(tz)
-        band = slots[_of_week(wall)]
+        band = slots[_of_week(_read_wall(now, wall, tz))]
         if band is None:
             return None
         cuts = [m for m in range(WEEK_M) if slots[m] != slots[m - 1]]
