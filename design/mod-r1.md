@@ -64,6 +64,7 @@ The classic path is unchanged in every row.
 2. `grep -nE 'fs\.write|store\.set' plugin/hooks/*.js` finds no write but a `pref.` key.
 3. A pytest proves `chain.py`, `hooks.py` and `budget.py` never open `measure.json` or `mod.json`.
    Amended 2026-10-30 by design/window-r1.md §2: context.window alone is read by what decides, as the window pick's first source; tokens, percent, the rate limits and the cost still are not.
+   Amended 2026-10-31 by packet S49 Amendment 1: SessionEnd opens `measure.json` through `harness.stated_limits`, after the session is over, to copy `rateLimits` and `at` to the ledger's row. It copies and decides nothing, so nothing that decides reads it; `hooks.py` still names no measure, and the test still scans it. The latency it adds to SessionEnd, with `claude_md_bytes` beside it and the shim's `date` included: 84.1 ms to 88.5 ms, p50.
 4. A pytest: `measure.json` at 99% beside `meter.json` at 10% gives zone `clear` and no CHECKPOINT.
 5. The pytest suite passes unchanged with `plugin/hooks/*.js` removed.
 6. Module tests: the band reads `ctx 62% · turns 31% · notice` from a fixture, `no meter` without one, its age past 120 s, and fits `bodyColumns`.

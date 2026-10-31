@@ -87,3 +87,20 @@ The branch and sha; the gate id and exit; the measured overhead per hook call; w
 - `.hygiene-allow` and `tests/test_s34.py` go back to main's: the shim no longer names the old folder.
 
 **Interfaces, added:** `harness.HOOK_T0 = "AGENTIK_SESSION_HOOK_T0"`; `harness.take_t0(env) -> str | None`; `harness.record_hook(t0, event, code, env) -> None`, never raises; `harness.exit_status(code) -> int`; `harness.claude_md_line(rows, since=None)`.
+
+**Measured** (the first form's method: the shim called from Python, temp state roots, alternating calls, p50; all trees compiled alike; load 4 to 7).
+
+| arm | main | this form | added | the first form added, same run |
+|---|---|---|---|---|
+| no-op tool, 400 calls | 10.8 ms | 13.7 ms | 2.9 ms | 8.1 ms |
+| real CLI, PreToolUse, 100 calls | 56.1 ms | 60.9 ms | 4.8 ms | 9.5 ms |
+| real CLI, Stop, 100 calls | 73.9 ms | 76.4 ms | 2.5 ms | |
+| real CLI, SessionEnd, 80 calls, three files and a measure.json | 84.1 ms | 88.5 ms | 4.4 ms | |
+
+A real PreToolUse's row reads p50 47 ms against 60.9 ms of wall time: `ms` leaves out the shim's start up to the `date`, and the interpreter's teardown after the append. `harness._walk` on the refuter's three 1 MiB files of `@zz `: 0.23 s against SessionEnd's 15 s; 63 files of 1 MiB of `@\n`: 0.09 s.
+
+**Children.** On the hook path the only spawn is `gitinfo`'s `git`, short-lived and bounded by its timeout; `gate.inbox_take` spawns nothing, and `chain`, `launch` and `doctor` are not on it. The pop in A5 holds whatever a hook comes to spawn, and `tests/test_s49.py` proves it on a real SessionEnd's `git` and on a nested `hook` call.
+
+**Wrong rather than absent.** Three, all reported, none fixable from the CLI: a kill in the teardown after the append reads the code the process would have exited with; a clock stepped forward between the `date` and the append inflates `ms` (one stepped back past the start leaves no row); a shim-only kill on a waiting branch (Stop's four, PreCompact) leaves the tool finishing alone, whose row is true of the tool, with an `ms` that can pass the hook's timeout.
+
+**The README** says nothing this changes: its line on `report --hooks` stands, and only the count moved, 2087 to 2177, at the same width; the source is still 16,377 bytes.

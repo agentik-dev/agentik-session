@@ -13,4 +13,5 @@ ledger is empty" means no session has ended with the plugin's hooks installed. S
 that ended in the reserve or exhausted zones.
 
 With `--hooks` the output is this plugin's hooks instead, a row per event (count, p50, p95, nonzero
-exits), then `claude_md_bytes`; another plugin's hooks are not in it.
+exits), then `claude_md_bytes`; another plugin's hooks are not in it. `--since` filters the ledger's rows only,
+never the hook table, and the output says so.

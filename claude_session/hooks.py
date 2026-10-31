@@ -748,7 +748,7 @@ def dispatch(event: str) -> int:
     tool call it was inspecting, and a budget advisor is never worth breaking a
     session over. Stop (SILENT) exits 0 with nothing on stdout, even when it fails;
     PreCompact (QUIET_PASS) prints only a block, and nothing when it passes or fails.
-    Every call first bounds the shim's hooks.jsonl: one stat (S49).
+    Every call first bounds hooks.jsonl: one lstat (S49).
     """
     try:
         harness.rotate(resolver.state_dir(os.environ))

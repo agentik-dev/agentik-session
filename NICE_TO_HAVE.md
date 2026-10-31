@@ -331,5 +331,8 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## S49's notes (2026-10-31, the builder; S4)
 
 - A lead, not confirmed: Claude Code's own per-hook timing may be readable from a debug log or a transcript, which would cover every plugin's hooks, not this one's alone. Not built; S49 read neither.
-- The shim's cost is its two `date` forks, 6.3 ms a call. Writing the row in a detached subshell would take the second off the hook's wall time, and sampling by `$$` would cut both, at the price of a racing row or of `count`. Worth it only if the numbers say so.
+- The shim's cost is its one `date` fork, 2.9 ms a call. Sampling by `$$` would cut it, at the price of `count`. Worth it only if the numbers say so.
 - A row has no time or session, by the packet, so `--since` cannot filter it and the owner's "per session" is not answerable from it. A session's own row would need a key the packet ruled out.
+- A `~` in XDG_STATE_HOME: `config.state_dir` expands it and a shell would not, so a tool that reads the variable by shell lands elsewhere. Amendment 1's row goes through `config`, which closes that split here (the first form's shim did not expand it); `scripts/p1-proof` and `scripts/window-proof` still read it by shell, proof scripts both. Read, not reproduced past the first form.
+- `session.test.ts`'s clock race, seen once at load 80: `no implementation for clock.sleep`, session.ts:397, the band's loop, on a tree that passed unchanged 3 min later. Reading only, not S49's; the line about the 5 s loop's missing catch, above, is its lead.
+- Amendment 1 says what `ms` leaves out, and a row written in the milliseconds of teardown before a kill reads the code it would have exited with. Absent would need a write after teardown, which only the shim can do, and the shim stopped being able to on the refuter's F1.
