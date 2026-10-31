@@ -370,3 +370,11 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - A 200,000-`[` `plugin.json` raises RecursionError past "Never raises", so hooks exit 1.
 - A `.claude-plugin/plugin.json` beside the frozen trees shadows a tree's own version.
 - A cold check's margin to the 840 s wall was 1.76 times under concurrent load; the wall has not been tested at the check's hold-off of load 64.
+
+## sc2's refuter, round 2 (2026-10-31, S4)
+- `plugin/bin/agentik-session`: a launcher cut mid-file is a shell syntax error, exit 2, a block on PreToolUse: 23 of 47 cuts at 44d79af, 11 of 19 at cba7d68. Left as is: `sh -n` costs a fork per hook, and a plugin install is not a partial write by anything seen.
+- `plugin/hooks/run`: the shim cut 30 bytes short exits 2 on all ten events, Stop included; no shell line can guard its own file.
+- `plugin/bin/agentik-session:23`: a Python wrapper that prints at start turns a real exit 2 into 0. Apple's path execs and cannot rewrite, and `hooks.py` has no deliberate 2 today: it denies by JSON.
+- `plugin/bin/agentik-session:21-25`: under any interpreter string other than `/usr/bin/python3`, a hook keeps a wrapper shell; stdin still arrives.
+- `hooks/run:12` against `hooks.py:374`: they disagree on an mtime under a second ahead, since find compares whole seconds: ahead 0.4 s read shim on, doctor off. At 0.9 s and past, both off.
+- `tests/test_bare_machine.py`: two mutants survive that file, Apple's hook 2 swallowed and `2|126|127` to `2|126`; other test files were not run on them. Lead: pin a hook's 2 through Apple's path.
