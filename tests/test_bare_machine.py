@@ -283,7 +283,10 @@ def _seed_state(box, old):
 
 
 def _readers_run(box):
-    """Every verb that reads state, and the ten events again, under the watch."""
+    """The ten events again, then every verb that reads state, under the watch."""
+    for event in EVENTS:
+        r = box.hook(event)
+        assert r.returncode == 0 and "Traceback" not in r.stderr, (event, r.stderr)
     said = {}
     for argv, stdin in ((("status", "--json"), ""), (("report",), ""),
                         (("report", "--hooks"), ""), (("doctor",), ""), (("rules",), ""),
@@ -300,9 +303,6 @@ def _readers_run(box):
             lambda ln: " ".join(re.sub(r"\d+", "N", ln).split()).rstrip(","))
         said[argv] = (r.returncode, {keep(ln) for ln in r.stdout.splitlines()
                                      if ln.strip() and FUTURE not in ln and '"a":' not in ln})
-    for event in EVENTS:
-        r = box.hook(event)
-        assert r.returncode == 0 and "Traceback" not in r.stderr, (event, r.stderr)
     return said
 
 

@@ -10,30 +10,29 @@ resolves to deny, even though Claude Code still reports success. Read section
 
 ## 1. One-time setup
 
-1. Install the launcher: `make install` from the repo root, with
-   `claude_session/` committed (a dirty package exits 2). It copies the
-   committed package to `~/.local/share/agentik-session/<tree>/` (`<tree>` is
-   `git rev-parse HEAD:claude_session`; an older copy is pruned unless a
-   running process names it or it is among the newest three) and writes
+1. Install the terminal's launcher: `make install` from the repo root, with
+   `plugin/lib/` and `plugin.json` committed (a dirty tree exits 2). It copies
+   the committed `plugin/lib/` and `plugin.json` to
+   `~/.local/share/agentik-session/<tree>/` (`<tree>` is hashed from both, so a
+   version bump alone is a new tree; an older copy is pruned unless a running
+   process names it or it is among the newest three) and writes
    `~/.local/bin/agentik-session`, which runs that copy with `python -P`, so
-   neither the directory a hook fires in nor the live checkout can change a
-   hook. The interpreter is baked in: the repo's `.venv/bin/python` by
+   neither the directory a command runs in nor the live checkout can change it.
+   The interpreter is baked in: the repo's `.venv/bin/python` by
    realpath, else homebrew's `python3`, else `python3`; python 3.11 or newer.
-   Re-run `make install` after each merge you want the hooks to run, and
+   Re-run `make install` after each merge you want the terminal to run, and
    after the baked interpreter is upgraded away. `PREFIX=<dir>` (default
-   `~/.local`) moves both paths. Do not `pip install -e .` into a venv
-   instead: the hooks spawn with Claude Code's PATH, not your shell's, and a
-   venv-only binary leaves every hook silently dead.
+   `~/.local`) moves both paths. Hooks do not use it, unless the switch below is on.
 2. Install the plugin: `claude plugin marketplace add <clone>`, then
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
    `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
-   `agentik-session hook <event>` and exits 0 silently when the CLI is not on
-   PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the CLI installs
-   first: `make install`, then `claude plugin update
-   session@agentik`, then restart Claude Code. That order is
-   what keeps the CLI current with its plugin's hooks. A CLI older than its
+   the plugin's own `bin/agentik-session hook <event>`, never one on
+   PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
+   first: `claude plugin update session@agentik`, which new sessions pick up and
+   live ones when they respawn or run `/reload-plugins`; then `make install`. With
+   the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
    on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
    PreCompact's stdout, its block), so no turn end, no helper's loop and no
@@ -46,6 +45,25 @@ resolves to deny, even though Claude Code still reports success. Read section
 
 Until the hooks fire, `agentik session status` and `budget` have no samples
 and say so.
+
+### The emergency: a bad hook in live sessions
+
+A live session's hooks stay on the plugin version it started with until it respawns or runs
+`/reload-plugins`. When a hook bug cannot wait for that (a PreToolUse bug denying tools), one
+file moves every session on this shim to the launcher on its next hook:
+
+1. Land the fix.
+2. `make install`, from that commit. Touching the file first runs the old launcher.
+3. `touch ~/.config/agentik/hooks-follow-launcher`.
+4. `rm ~/.config/agentik/hooks-follow-launcher` once sessions have respawned.
+
+The file's existence is the whole state: a regular file, not a link, under 24 h by mtime, with an
+executable `~/.local/bin/agentik-session`. It lapses by itself; a longer emergency touches it
+again. No verb, profile, `session set` key, config layer, `AGENTIK_*` or `XDG_CONFIG_HOME` turns
+it on. While it is on, the doctor warns and SessionStart's `systemMessage` says so, when the
+launcher's code is this version or later. Mixed versions are the cost, as before this plugin
+held its code. It cannot fix the shim itself, nor the mod, whose failure is a debug line. It has
+not yet run under a real session.
 
 ## 2. Choosing a profile
 
@@ -232,7 +250,7 @@ The band shows the window: at every `record` and `admit` the verb rewrites `admi
 
 Each login has a window mode, worked out from the readings at every call and stored nowhere (packet S42). `five_hour`, the default, is all of the above. `none` is a login with no five-hour window: after its newest list carrying a five-hour entry, whatever that entry's percent, one session holds two readings or spawns at least 30 minutes apart, each listing a fresh seven-day and no five-hour, with the week up at least one whole point. The pair stays in one session because an idle Max login lists the week alone from its five-hour reset to its next response. One list carrying a five-hour entry switches it back. An idle login whose pair has rotated out of the ledger reads `five_hour` until it is busy again, and a new weekly key detects afresh. On `none` a verdict is `denied` at `ceiling_7d`, else `admitted`, with `resume_at` the week's reset and earlier five-hour readings ignored; nothing waits for a band, attended or not. Its band entry has `P`, `peak` and `room` null, `P7`, `ceiling_7d` and `resetsAt` the week's. Every entry carries `window` and `slot`, the week's reset as weekday and minute (`Wed-1500Z`), and `accounts` is written whenever a key is `none`. To override the rule, set `session.admission.window` to `auto`, `five_hour` or `none`, or `windows: {Wed-1500Z: none}` per login, where a slot beats `window`; a slot it cannot read is one note in the answer and ignored, and a key spelled with a space or colon is refused by the config loader. Set a login's override in the user layer, `defaults.admission` in `~/.claude/agentik/profiles.yaml`: a session with no resolved file, as a relay row's ask is before its child starts, reads `window` and `windows` from there alone, and no other knob, profile or repo layer, so a repo-layer override binds only the sessions resolved with it, and band.json follows whichever session wrote it last; a user-layer override set after a session resolved still flips band.json until that session re-resolves. If a verified login reports five_hour at 0% rather than leaving it out, the rule never fires and the override is the switch. A `none` login's line reads `no 5h window · 7d 62% · week resets Fri 13:00 · band avoid to 11:00 · 3 helpers · observe` (packets S43, S44), each part left out with no figure, then the age past 120 s: no countdown, ceiling, room or deferred. The weekday and the time are the stamp's own digits, in fixed English names, so no locale or system zone moves them. Any other `window` draws the five-hour line, unchanged. Its prompt cache's lifetime reads the week while the week's reset is ahead: 1h under 100%, 5m at 100% or past, else unknown.
 
-A `none` login also reports when the account is in demand, and nothing waits for it (packet S44). The bands are a file, never code: the shipped `claude_session/bands.yaml`, which `$XDG_CONFIG_HOME/agentik/session/bands.yaml` (else `~/.config/...`) replaces whole. It names a `tz` and a list of rules, `{days: Mon-Fri, from: "05:00", to: "11:00", band: avoid}`, read on that zone's wall clock across DST; the first match wins, and each rule runs from `from` up to, not including, `to`. Only admission reads the file, at a band.json write on a `none` login; a `five_hour` login never reads it. The `none` entry gains `demand: {band, until, next: {good, best}}`: `until` is the next instant the band's name changes, null when it never does; each `next` is the start of that band's next stretch, past the one now is in, and is left out when the schedule has no such band; the stamps read in band.json's zone. A wall time a DST gap skips reads as the first instant after the gap, and a repeated one as its first instant. A cut inside a repeated hour therefore happens once: in the hour's second pass the band is the one its first pass ended on. An admit's answer on `none` gains `band`, the name or null. `status` adds `band: avoid to 11:00; next good 23:00, best 16:00` and `status --json` adds `band: {window, demand}`, both from band.json and only on `none`. A time on the line or in `status` is `HH:MM` within 24 hours of the entry's `at`, else `Ddd HH:MM`. Because `demand` is resolved only at a write, an idle login's can be past its end, and the line and `status` then leave the band out. A file that does not parse, names a zone that does not load, holds a bad rule (a band name is 1 to 32 letters, digits, `-` or `_`), leaves a minute of the week unmatched, is not a regular file or is past 64 KB is one `doctor` warning, never a failure, and the shipped file is used; with no user file or a good one `doctor` has no such row. There is no reserve: attended or not, all work runs to `ceiling_7d`.
+A `none` login also reports when the account is in demand, and nothing waits for it (packet S44). The bands are a file, never code: the shipped `plugin/lib/claude_session/bands.yaml`, which `$XDG_CONFIG_HOME/agentik/session/bands.yaml` (else `~/.config/...`) replaces whole. It names a `tz` and a list of rules, `{days: Mon-Fri, from: "05:00", to: "11:00", band: avoid}`, read on that zone's wall clock across DST; the first match wins, and each rule runs from `from` up to, not including, `to`. Only admission reads the file, at a band.json write on a `none` login; a `five_hour` login never reads it. The `none` entry gains `demand: {band, until, next: {good, best}}`: `until` is the next instant the band's name changes, null when it never does; each `next` is the start of that band's next stretch, past the one now is in, and is left out when the schedule has no such band; the stamps read in band.json's zone. A wall time a DST gap skips reads as the first instant after the gap, and a repeated one as its first instant. A cut inside a repeated hour therefore happens once: in the hour's second pass the band is the one its first pass ended on. An admit's answer on `none` gains `band`, the name or null. `status` adds `band: avoid to 11:00; next good 23:00, best 16:00` and `status --json` adds `band: {window, demand}`, both from band.json and only on `none`. A time on the line or in `status` is `HH:MM` within 24 hours of the entry's `at`, else `Ddd HH:MM`. Because `demand` is resolved only at a write, an idle login's can be past its end, and the line and `status` then leave the band out. A file that does not parse, names a zone that does not load, holds a bad rule (a band name is 1 to 32 letters, digits, `-` or `_`), leaves a minute of the week unmatched, is not a regular file or is past 64 KB is one `doctor` warning, never a failure, and the shipped file is used; with no user file or a good one `doctor` has no such row. There is no reserve: attended or not, all work runs to `ceiling_7d`.
 
 The same module records the engine's own measure beside the meter: every `session.measure` runs `agentik session measure record --session <id>` with `{context, rateLimits, cost, changed}` on stdin, which writes `measure.json` (0600) in the session's directory; it exits 2 on a refused key, number, id, JSON or a window that is not a whole number from 1 to 10**9, and 1 when the session's directory is absent, writing nothing then. When the window has moved it also rewrites `resolved.json` and `resolved.yaml` (`window`, `ceilings`, `window_source`, `limits_source`; a failure is silent and the next measure retries). That window is the first source of the window pick (`window_source` `engine:<n>`), and the meter takes it at the next tool; `set` keeps it, and a reading holds for the rest of the session. `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>% (<age>s apart)` when the two were written within 120 s, `measure: not comparable (…)` otherwise, and `measure: none` without the file; `doctor`'s `measure` row warns at a drift of 10% or more and never fails. A drift means the meter may parse the transcript wrong: the budget still reads only the meter, and the tokens, percent, rate limits and cost of a measure decide nothing.
 

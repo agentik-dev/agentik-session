@@ -358,3 +358,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `gate wait` exits 0 whatever the job's code, as the README states, so a background Bash's exit reads green on a red job. Lead: a `--code` flag that exits the job's code.
 - `_Parser._get_values` holds only `nargs=None`, so a synthetic `--o=--` with `?`, `*`, `+` or `1` still differs on 3.9. No CLI option has those nargs.
 - `scripts/bare-proof`'s write detector is a Python audit hook: it sees the tool's own process, and a child's HOME, not what `git` or the gate's detached runner write themselves. The runner's state is read under `$T` and its job's HOME is asserted.
+- sc2: `pyproject.toml` reads its version by setuptools' `attr`, which nothing has built since the move; `make install` does not read that file. A guess until someone builds it. (agentik-session, sc2)
+- sc2: `__init__._pin` opens one or two files at each import. The proof's median holds, and a hook's cost is the canary's to read. (agentik-session, sc2)
+- sc2: `git hash-object` names a frozen tree since sc2, so `prune-trees` and the README's `<tree>` no longer equal `git rev-parse HEAD:<path>`. Nothing reads them so, and sc3's `install-cli` chooses its own content hash. (agentik-session, sc2)
