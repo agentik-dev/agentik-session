@@ -423,7 +423,7 @@ test('a redraw denied on a tick, the engine dropping it: the next tick still run
 // Packet S50 Amendment 1 (the refuter's F1): the engine above never lets `$.ui.invalidate`
 // refuse the module, so ruling 2's catch is reached by calling `register` with a fake `$`.
 // Every fake answers in microtasks, so one turn of the event loop settles a tick.
-const faked = (invalidate: (n: number) => Promise<void>, root: unknown = ROOT) => {
+const faked = (invalidate: (n: number) => Promise<void>, plugin: any = { root: ROOT }) => {
   const handlers: Record<string, any> = {}
   // The module chains `.catch` on what `on` gives for its admission hooks.
   const on: any = (name: string, a: any, b: any) => { handlers[name] = b ?? a; return { catch: () => {} } }
@@ -443,7 +443,7 @@ const faked = (invalidate: (n: number) => Promise<void>, root: unknown = ROOT) =
       },
     },
     ui: { invalidate: () => { seen.redraws += 1; return invalidate(seen.redraws) } },
-    plugin: { root },
+    plugin,
     process: { run: async (argv: string[]) => {
       ran.push(argv)
       if (argv[1] !== 'mod') return { exitCode: 0, stdout: '', stderr: '' }
@@ -467,9 +467,9 @@ const faked = (invalidate: (n: number) => Promise<void>, root: unknown = ROOT) =
 }
 
 // sc2 Amendment 1: `undefined/bin/...` is a relative path, and could run a file in the cwd.
-const NO_ROOTS: Array<[string, unknown]> = [['absent', undefined], ['null', null], ['empty', ''], ['relative', 'plugins/session'], ['a number', 7]]
-for (const [how, root] of NO_ROOTS) test(`a plugin root that is ${how}: no process ran, and the band says no meter`, async () => {
-  const { seen, ran, start, tick, draw } = faked(() => Promise.resolve(), root)
+const NO_ROOTS: Array<[string, any]> = [['absent', {}], ['null', { root: null }], ['empty', { root: '' }], ['relative', { root: 'plugins/session' }], ['a number', { root: 7 }]]
+for (const [how, plugin] of NO_ROOTS) test(`a plugin root that is ${how}: no process ran, and the band says no meter`, async () => {
+  const { seen, ran, start, tick, draw } = faked(() => Promise.resolve(), plugin)
   await start()
   await tick()
   expect(ran).toEqual([])
