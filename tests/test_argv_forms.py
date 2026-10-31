@@ -106,6 +106,13 @@ ACCEPTED = [
     ("config new --from M N", {"action": "new", "From": "M", "name": "N"}),
     ("config new --from M --description D N", {"action": "new", "From": "M", "description": "D", "name": "N"}),
     ("config show -- N", {"action": "show", "name": "N"}),
+    # an option's own value is `--`, attached: before 3.11 argparse drops it, and the option
+    # reads as [] (Amendment 1, F3)
+    ("charter close --exit=-- F", {"action": "close", "exit": "--", "args": ["F"]}),
+    ("charter close F --exit=--", {"action": "close", "exit": "--", "args": ["F"]}),
+    ("gate run R --label=-- -- x", {"repo": "R", "label": "--", "command": ["x"]}),
+    ("gate run R --lock=-- --lock=b x", {"repo": "R", "lock": ["--", "b"], "command": ["x"]}),
+    ("gate wait --json I", {"id": "I", "json": True}),
 ]
 
 REFUSED = [
@@ -123,6 +130,20 @@ REFUSED = [
     "hook Bogus",
     "config",
     "gate",
+    "gate run R --wall=-- x",
+    "gate wait --timeout=-- I",
+    "config -- -x",
+    "config show N -- -x",
+    "charter -- -x",
+    "gate run --bogus=--",
+]
+
+# A refusal's message names the argument as it was typed, on every interpreter (F4).
+MESSAGES = [
+    ("config -- -x", "'-x'"),
+    ("charter -- -x", "'-x'"),
+    ("config show N -- -x", "-x"),
+    ("gate run R --wall=-- x", "'--'"),
 ]
 
 # Refused by 3.12's stock parser, a positional on both sides of an option, and read alike on
@@ -137,26 +158,38 @@ CHILD = """
 import contextlib, io, json, sys
 sys.path.insert(0, sys.argv[1])
 from claude_session import cli
-out = {}
+out, said = {}, {}
 for form in json.loads(sys.stdin.read()):
+    err = io.StringIO()
     try:
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(err):
             ns = cli.build_parser().parse_args(form.split())
         out[form] = {k: v for k, v in vars(ns).items() if k != "func"}
     except SystemExit as e:
         out[form] = e.code
-print(json.dumps(out))
+    said[form] = err.getvalue()
+print(json.dumps({"out": out, "said": said, "version": sys.version.split()[0]}))
 """
 
 
-def parse(form):
-    """The namespace as a dict, or the exit code of a refusal."""
+def said(form):
+    """(the namespace as a dict, or the exit code of a refusal; what it wrote on stderr)."""
+    err = io.StringIO()
     try:
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(err):
             ns = cli.build_parser().parse_args(form.split())
     except SystemExit as e:
-        return e.code
-    return vars(ns)
+        return e.code, err.getvalue()
+    return vars(ns), err.getvalue()
+
+
+def parse(form):
+    return said(form)[0]
+
+
+def marked(text):
+    """The parser's mark, raw or as a message's repr prints it."""
+    return "\0" in text or "\\x00" in text
 
 
 @pytest.mark.parametrize("form,want", ACCEPTED + WIDER, ids=[f for f, _ in ACCEPTED + WIDER])
@@ -174,16 +207,33 @@ def test_a_refused_form_exits_2(form):
 @pytest.mark.skipif(not os.access(FLOOR, os.X_OK), reason="no %s on this machine" % FLOOR)
 def test_the_table_holds_under_the_floor():
     """The whole table under /usr/bin/python3, whichever interpreter runs the suite."""
-    forms = [f for f, _ in ACCEPTED] + REFUSED
+    forms = [f for f, _ in ACCEPTED + WIDER] + REFUSED
     r = subprocess.run([FLOOR, "-I", "-B", "-c", CHILD, ROOT], input=json.dumps(forms),
                        capture_output=True, text=True, timeout=60,
                        cwd=os.path.dirname(ROOT))
     assert r.returncode == 0, r.stderr
-    got = json.loads(r.stdout)
-    wrong = {f: got[f] for f, want in ACCEPTED
+    child = json.loads(r.stdout)
+    got = child["out"]
+    wrong = {f: got[f] for f, want in ACCEPTED + WIDER
              if not isinstance(got[f], dict) or {k: got[f].get(k) for k in want} != want}
     wrong.update({f: got[f] for f in REFUSED if got[f] != 2})
+    wrong.update({f: child["said"][f] for f, text in MESSAGES if text not in child["said"][f]})
+    wrong.update({f: "the mark" for f in forms if marked(json.dumps(got[f])) or marked(child["said"][f])})
     assert not wrong
+
+
+@pytest.mark.parametrize("form", [f for f, _ in ACCEPTED + WIDER] + REFUSED)
+def test_no_value_or_message_holds_the_mark(form):
+    got, err = said(form)
+    if isinstance(got, dict):
+        got = {k: v for k, v in got.items() if k != "func"}
+    assert not marked(repr(got) + json.dumps(err))
+
+
+@pytest.mark.parametrize("form,text", MESSAGES)
+def test_a_refusal_names_the_argument_as_typed(form, text):
+    got, err = said(form)
+    assert got == 2 and text in err
 
 
 def test_help_names_the_positionals():
