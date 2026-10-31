@@ -1,0 +1,10 @@
+tz: America/Los_Angeles   # wall clock, across DST
+bands:                    # first match wins; [from, to)
+  - {days: Mon-Fri, from: "05:00", to: "11:00", band: avoid,  grade: A}
+  - {days: Mon-Fri, from: "11:00", to: "16:00", band: middle, grade: B}
+  - {days: Mon-Thu, from: "16:00", to: "23:00", band: best,   grade: B}
+  - {days: Fri,     from: "16:00", to: "24:00", band: best,   grade: B}
+  - {days: Sat,     from: "00:00", to: "24:00", band: best,   grade: A}
+  - {days: Sun,     from: "00:00", to: "20:00", band: best,   grade: A}
+  - {days: Sun,     from: "20:00", to: "24:00", band: middle, grade: C}
+  - {days: Mon-Sun, from: "00:00", to: "24:00", band: good,   grade: C}   # the nights

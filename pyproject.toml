@@ -25,4 +25,4 @@ agentik-session = "claude_session.cli:main"
 include = ["claude_session*"]
 
 [tool.setuptools.package-data]
-claude_session = ["profiles.yaml"]
+claude_session = ["profiles.yaml", "bands.yaml"]
