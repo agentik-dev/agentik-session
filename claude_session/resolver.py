@@ -308,7 +308,7 @@ def window_override(env) -> dict:
     directory. An unreadable file or field is unset; it never raises."""
     try:
         doc = _read(_user_file(env), [])
-    except (ResolveError, OSError):
+    except (ResolveError, OSError, RecursionError):     # a file nested past the stack
         return {}
     d = doc.get("defaults") if isinstance(doc, dict) else None
     ad = d.get("admission") if isinstance(d, dict) else None
