@@ -94,9 +94,9 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert code[:3] + code[4:] == [
         "tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session; o=$HOME/.local/bin/agentik-session; "
         "f=$HOME/.config/agentik/hooks-follow-launcher",
-        'if [ -e "$f" ] && [ -x "$o" ] && [ -n "$(find "$f" -type f -mmin -1440 2>/dev/null)" ]; '
-        'then tool=$o; fi',
-        '[ -x "$tool" ] || exit 0', *MAIN_FLOW.splitlines()]
+        'if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type f '
+        '-mmin -1440 ! -newermt now 2>/dev/null)" ]; then tool=$o; fi',
+        '[ -f "$tool" ] && [ -x "$tool" ] || exit 0', *MAIN_FLOW.splitlines()]
     assert sum("date" in ln for ln in code) == 1
 
 

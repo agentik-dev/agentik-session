@@ -24,7 +24,11 @@ const NO_METER = 'session: no meter · agentik-session doctor'
 // caller's one debug line, as every failure of the mod is.
 const TOOL = 'agentik-session'
 async function runTool($: EngineInterface, argv: string[], opts: any): Promise<any> {
-  return await $.process.run([`${$.plugin.root}/bin/${argv[0]}`, ...argv.slice(1)], opts)
+  // With no absolute root the path would be relative, `undefined/bin/...`, and could run a file
+  // in the cwd: no process, so the band says no meter, as on a refusal.
+  const root: unknown = $.plugin.root
+  if (typeof root !== 'string' || !root.startsWith('/')) throw new Error('no absolute plugin root')
+  return await $.process.run([`${root}/bin/${argv[0]}`, ...argv.slice(1)], opts)
 }
 
 const clip = (line: string, columns: number): string =>

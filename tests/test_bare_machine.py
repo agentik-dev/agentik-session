@@ -186,6 +186,66 @@ def test_a_damaged_plugin_other_verbs_exit_3_with_one_line(box, how, verb):
     assert len(r.stderr.splitlines()) == 1 and "no runner" in r.stderr
 
 
+def _not_python(box, kind):
+    if kind == "exits 2":
+        path = box.t / "bad" / "python3"
+        _exe(path, "#!/bin/sh\nexit 2\n")
+    elif kind == "no interpreter it can start":
+        path = box.t / "bad" / "python3"
+        _exe(path, "#!/nowhere/python\n")
+    else:
+        path = kind
+    return box.env(AGENTIK_PYTHON=str(path))
+
+
+def test_a_directory_at_the_plugins_launcher_is_no_launcher(box):
+    launcher = box.plugin / "bin" / "agentik-session"
+    launcher.unlink()
+    launcher.mkdir()
+    for event in EVENTS:
+        assert box.hook(event).returncode == 0, event
+
+
+@pytest.mark.parametrize("kind", ["/usr/bin/grep", "exits 2", "no interpreter it can start"])
+def test_a_bad_interpreter_never_blocks_a_hook(box, kind):
+    env = _not_python(box, kind)
+    for event in EVENTS:
+        r = box.hook(event, env=env)
+        assert r.returncode == 0, (event, r.stderr)
+        if event == "SessionStart":
+            assert "no python3 that starts" in json.loads(r.stdout)["systemMessage"]
+        else:
+            assert r.stdout == "", event
+
+
+def test_a_directory_as_the_interpreter_falls_to_the_one_on_path(box):
+    env = box.env(AGENTIK_PYTHON="/usr")
+    for event in EVENTS:
+        assert box.hook(event, env=env).returncode == 0, event
+    assert box.tool("--version", env=env).returncode == 0
+
+
+def test_an_empty_path_and_a_directory_as_the_interpreter_is_no_python(box, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    env = box.env(AGENTIK_PYTHON="/usr", PATH=str(empty))
+    assert "no python3" in json.loads(box.tool("hook", "SessionStart", env=env).stdout)["systemMessage"]
+    assert box.tool("hook", "PreToolUse", env=env).returncode == 0
+    assert box.tool("status", env=env).returncode == 3
+
+
+def test_a_real_pythons_own_exit_2_stands_under_another_interpreter(box):
+    r = box.tool("hook", "NoSuchEvent", env=box.env(AGENTIK_PYTHON=sys.executable))
+    assert r.returncode == 2, r.stderr
+    assert "invalid choice" in r.stderr
+
+
+def test_a_verbs_non_zero_exit_reaches_the_caller_through_the_shipped_runner(box):
+    """`main()`'s return, never only an argparse exit: a runner dropping it passes all else."""
+    r = box.tool("admission", "record", "--session", "sess-bare", stdin="not json\n")
+    assert r.returncode == 2 and r.stderr.startswith("agentik-session: "), (r.returncode, r.stderr)
+
+
 def test_a_root_with_a_space_runs(tmp_path):
     t = tmp_path / "t with a space"
     t.mkdir()
@@ -242,7 +302,24 @@ def test_switch_on_the_target_is_the_fixed_path_never_one_on_path(box):
     assert box.marks() == ["Stop"] and not Path(str(box.marker) + ".other").exists()
 
 
-@pytest.mark.parametrize("state", ["no launcher", "symlink", "dangling symlink", "directory", "25 h"])
+def _doctor_reads(box):
+    r = subprocess.run(["/usr/bin/python3", "-I", "-c",
+                        "import sys; sys.path.insert(0, sys.argv[1])\n"
+                        "from claude_session import hooks\n"
+                        "print(hooks.follow_launcher_on({'HOME': sys.argv[2]}))",
+                        str(box.plugin / "lib"), str(box.t)], capture_output=True, text=True,
+                       env=box.env(), timeout=20)
+    return r.stdout.strip() + r.stderr
+
+
+def _aged(path, seconds):
+    then = time.time() - seconds
+    os.utime(str(path), (then, then))
+
+
+@pytest.mark.parametrize("state", ["no launcher", "symlink", "dangling symlink", "directory", "25 h",
+                                   "24 h 5 m", "a directory at the launcher", "the year 2099",
+                                   "two minutes ahead"])
 def test_switch_still_off(box, state):
     box.decoy()
     box.on()
@@ -257,17 +334,43 @@ def test_switch_still_off(box, state):
     elif state == "directory":
         box.switch.unlink()
         box.switch.mkdir()
+    elif state == "25 h":
+        _aged(box.switch, 25 * 3600)
+    elif state == "24 h 5 m":      # the bound itself: `-mmin -1499` would still be on
+        _aged(box.switch, (24 * 60 + 5) * 60)
+    elif state == "a directory at the launcher":
+        box.launcher.unlink()
+        box.launcher.mkdir()
+    elif state == "the year 2099":
+        _aged(box.switch, time.time() - time.mktime((2099, 1, 1, 0, 0, 0, 0, 0, -1)))
     else:
-        old = time.time() - 25 * 3600
-        os.utime(box.switch, (old, old))
+        _aged(box.switch, -120)
     _off(box, ("PreToolUse", "Stop"))
-    r = subprocess.run(["/usr/bin/python3", "-I", "-c",
-                        "import sys; sys.path.insert(0, sys.argv[1])\n"
-                        "from claude_session import hooks\n"
-                        "print(hooks.follow_launcher_on({'HOME': sys.argv[2]}))",
-                        str(box.plugin / "lib"), str(box.t)], capture_output=True, text=True,
-                       env=box.env(), timeout=20)
-    assert r.stdout.strip() == "False", r.stderr    # the doctor reads what the shim reads
+    assert _doctor_reads(box) == "False"    # the doctor reads what the shim reads
+
+
+def test_switch_on_inside_the_bound(box):
+    box.decoy()
+    box.on()
+    _aged(box.switch, (24 * 60 - 5) * 60)
+    assert box.hook("Stop").returncode == 0
+    assert box.marks() == ["Stop"] and _doctor_reads(box) == "True"
+
+
+@pytest.mark.parametrize("age", [25 * 3600, -120], ids=["25 h", "two minutes ahead"])
+def test_switch_no_path_entry_can_select_the_launcher(box, age):
+    """A find on PATH that prints anything would turn the switch on for a lapsed file."""
+    box.decoy()
+    box.on()
+    _aged(box.switch, age)
+    called = box.t / "find-called"
+    planted = box.t / "planted" / "find"
+    _exe(planted, '#!/bin/sh\ntouch "%s"\necho anything\n' % called)
+    _off(box, ("PreToolUse", "Stop"), env=box.env(PATH="%s:/usr/bin:/bin" % planted.parent))
+    assert not called.exists()
+    box.switch.unlink()
+    _off(box, ("PreToolUse",), env=box.env(PATH="%s:/usr/bin:/bin" % planted.parent))
+    assert not called.exists()
 
 
 def _through(box):

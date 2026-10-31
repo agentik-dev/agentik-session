@@ -423,13 +423,14 @@ test('a redraw denied on a tick, the engine dropping it: the next tick still run
 // Packet S50 Amendment 1 (the refuter's F1): the engine above never lets `$.ui.invalidate`
 // refuse the module, so ruling 2's catch is reached by calling `register` with a fake `$`.
 // Every fake answers in microtasks, so one turn of the event loop settles a tick.
-const faked = (invalidate: (n: number) => Promise<void>) => {
+const faked = (invalidate: (n: number) => Promise<void>, root: unknown = ROOT) => {
   const handlers: Record<string, any> = {}
   // The module chains `.catch` on what `on` gives for its admission hooks.
   const on: any = (name: string, a: any, b: any) => { handlers[name] = b ?? a; return { catch: () => {} } }
   register(on)
   const sleepers: Array<() => void> = []
   const seen = { sleeps: 0, redraws: 0, starts: 0 }
+  const ran: string[][] = []
   const $: any = {
     session: { id: async () => 'sess-1' },
     clock: {
@@ -442,8 +443,9 @@ const faked = (invalidate: (n: number) => Promise<void>) => {
       },
     },
     ui: { invalidate: () => { seen.redraws += 1; return invalidate(seen.redraws) } },
-    plugin: { root: ROOT },
+    plugin: { root },
     process: { run: async (argv: string[]) => {
+      ran.push(argv)
       if (argv[1] !== 'mod') return { exitCode: 0, stdout: '', stderr: '' }
       seen.starts += 1
       return seen.starts <= 2
@@ -461,8 +463,19 @@ const faked = (invalidate: (n: number) => Promise<void>) => {
     await new Promise(resolve => setTimeout(resolve, 0))
   }
   const draw = async () => (await handlers['ui.render']($, PROPS(120), async () => null)).children[0].children[0] as string
-  return { seen, start, tick, draw }
+  return { seen, ran, start, tick, draw }
 }
+
+// sc2 Amendment 1: `undefined/bin/...` is a relative path, and could run a file in the cwd.
+const NO_ROOTS: Array<[string, unknown]> = [['absent', undefined], ['null', null], ['empty', ''], ['relative', 'plugins/session'], ['a number', 7]]
+for (const [how, root] of NO_ROOTS) test(`a plugin root that is ${how}: no process ran, and the band says no meter`, async () => {
+  const { seen, ran, start, tick, draw } = faked(() => Promise.resolve(), root)
+  await start()
+  await tick()
+  expect(ran).toEqual([])
+  expect(seen.starts).toBe(0)
+  expect(await draw()).toBe(NO_METER)
+})
 
 const REFUSALS: Array<[string, () => Promise<void>]> = [
   ['rejecting', () => Promise.reject(new Error('the redraw refuses'))],

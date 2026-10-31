@@ -5,10 +5,12 @@
 # The switch (design/04 §3): one file, its existence the whole state, lapsing 24 h after its
 # mtime. While on, a hook runs the launcher `make install` last wrote, as every hook did before
 # sc2; RUNBOOK has the emergency's lines. Only HOME is read here: no other variable, PATH entry
-# or settings `env` can select that launcher.
+# or settings `env` can select that launcher, so find is by its full path. A future mtime would
+# never lapse, so it is refused; the [ -e ] forks nothing while the file is absent. `date` below
+# stays by name: it selects nothing, and a wrong start only skews one row's figure.
 tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session; o=$HOME/.local/bin/agentik-session; f=$HOME/.config/agentik/hooks-follow-launcher
-if [ -e "$f" ] && [ -x "$o" ] && [ -n "$(find "$f" -type f -mmin -1440 2>/dev/null)" ]; then tool=$o; fi
-[ -x "$tool" ] || exit 0
+if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type f -mmin -1440 ! -newermt now 2>/dev/null)" ]; then tool=$o; fi
+[ -f "$tool" ] && [ -x "$tool" ] || exit 0
 # Stop never blocks: exit 2 there holds every turn end, and a CLI older than the plugin
 # refuses `hook Stop`. (Claude Code caps the hold: after 8 consecutive Stop blocks with no
 # tool call between them it overrides the next and ends the turn, a cap set by

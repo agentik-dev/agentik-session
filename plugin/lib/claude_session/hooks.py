@@ -359,7 +359,8 @@ def launch_profile(env) -> str | None:
 
 def follow_launcher_on(env=None, now=None) -> bool:
     """The shim's switch as `plugin/hooks/run` reads it (design/04 §3): the file a regular file,
-    never a link, under 24 h by mtime, and the launcher there. Only HOME is read."""
+    never a link, under 24 h by mtime and never in the future, and the launcher there a file.
+    Only HOME is read."""
     env = os.environ if env is None else env
     home = env.get("HOME")
     if not home:
@@ -369,8 +370,9 @@ def follow_launcher_on(env=None, now=None) -> bool:
     except OSError:
         return False
     age = (time.time() if now is None else now) - st.st_mtime
-    return (stat.S_ISREG(st.st_mode) and math.ceil(age / 60) < 1440   # as `find -mmin -1440`
-            and os.access(os.path.join(home, ".local", "bin", "agentik-session"), os.X_OK))
+    launcher = os.path.join(home, ".local", "bin", "agentik-session")
+    return (stat.S_ISREG(st.st_mode) and 0 <= age and math.ceil(age / 60) < 1440   # as `find -mmin -1440`
+            and os.path.isfile(launcher) and os.access(launcher, os.X_OK))
 
 
 FOLLOW_NOTE = ("agentik-session: hooks-follow-launcher is on: hooks run the launcher in "
