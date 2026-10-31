@@ -1,10 +1,13 @@
-"""Packet S49: the shim's row, its bound, the row's two new keys, and `report --hooks`."""
+"""Packet S49 and its Amendment 1: the shim's one variable, the CLI's row, its bound, the ledger
+row's new keys, and `report --hooks`."""
 
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +37,28 @@ def box(tmp_path):
     return tmp_path
 
 
+# The events the shim sends to /dev/null, whatever the tool says.
+SILENT_IN_SHIM = ("Stop", "StopFailure", "PostToolUseFailure", "PostToolBatch")
+
+
+@pytest.fixture
+def real(box):
+    """The same box with the real CLI on PATH: its row is the thing under test."""
+    _exe(box / "bin" / "agentik-session",
+         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+    return box
+
+
+def _scripted(box, body):
+    """The real `cli.main`, its `hooks.dispatch` replaced by `body`."""
+    (box / "tool.py").write_text(
+        "import sys\nfrom claude_session import cli, hooks\n"
+        f"def dispatch(event):\n    {body}\n"
+        "hooks.dispatch = dispatch\nraise SystemExit(cli.main(sys.argv[1:]))\n")
+    _exe(box / "bin" / "agentik-session",
+         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B "{box / "tool.py"}" "$@"\n')
+
+
 def _env(box, path=None):
     return {"PATH": path or f"{box / 'bin'}:/usr/bin:/bin", "HOME": str(box / "home"),
             "XDG_STATE_HOME": str(box / "xdg")}
@@ -49,22 +74,64 @@ def _rows(box, app=config.APP):
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
-# ---- the shim's row
+# ---- the shim: main's flow and one variable (Amendment 1)
 
-def test_s49_a_call_appends_one_row_of_exactly_three_keys(box):
-    assert _shim(box).returncode == 2
-    _shim(box, "SessionStart")
-    rows = _rows(box)
-    assert [list(r) for r in rows] == [["event", "ms", "exit"]] * 2
-    assert [(r["event"], r["exit"]) for r in rows] == [("PreToolUse", 2), ("SessionStart", 2)]
-    assert all(type(r["ms"]) is int and r["ms"] >= 0 for r in rows)
+MAIN_FLOW = '''case "$1" in
+  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  PreCompact) "$tool" hook "$1"; exit 0 ;;
+esac
+exec "$tool" hook "$1"
+'''
+T0 = "AGENTIK_SESSION_HOOK_T0"
 
 
-def test_s49_ms_is_the_tools_wall_time(box):
-    _exe(box / "bin" / "agentik-session", "cat >/dev/null; sleep 0.3\n")
-    _shim(box)
-    ms = _rows(box)[0]["ms"]
-    assert 290 <= ms < 5000, ms
+def test_s49_the_shim_is_mains_flow_and_one_variable():
+    text = SHIM.read_text()
+    assert text.endswith(MAIN_FLOW)
+    assert "hooks.jsonl" not in text
+    code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+    assert code[5] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
+    assert code[1:5] + code[6:] == [
+        'if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session',
+        'elif command -v claude-session >/dev/null 2>&1; then tool=claude-session',
+        'else exit 0', 'fi', *MAIN_FLOW.splitlines()]
+    assert sum("date" in ln for ln in code) == 1
+
+
+def test_s49_the_shim_execs_the_tool(box):
+    _exe(box / "bin" / "agentik-session", "cat >/dev/null; echo $$\n")
+    p = subprocess.Popen([str(SHIM), "PreToolUse"], env=_env(box), text=True,
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    out, _ = p.communicate("{}", timeout=20)
+    assert out.strip() == str(p.pid)
+
+
+def test_s49_f1_a_kill_at_the_timeout_leaves_no_tool_running_on(box):
+    done = box / "survived"
+    _exe(box / "bin" / "agentik-session", f"sleep 0.4; touch '{done}'\n")
+    p = subprocess.Popen([str(SHIM), "PreToolUse"], env=_env(box), stdin=subprocess.DEVNULL)
+    time.sleep(0.1)
+    p.kill()
+    p.wait(timeout=5)
+    time.sleep(0.6)
+    assert not done.exists()
+
+
+def test_s49_f2_a_kill_closes_stdout_at_once(box):
+    _exe(box / "bin" / "agentik-session", "exec sleep 8\n")
+    p = subprocess.Popen([str(SHIM), "PreToolUse"], env=_env(box), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE)
+    time.sleep(0.2)
+    p.kill()
+    began = time.monotonic()
+    p.communicate(timeout=20)
+    assert time.monotonic() - began < 2
+
+
+def test_s49_f3_a_tool_killed_by_a_signal_moves_neither_status_nor_stderr(box):
+    _exe(box / "bin" / "agentik-session", "kill -TERM $$\n")
+    r = _shim(box)
+    assert (r.returncode, r.stderr) == (-15, "")
 
 
 @pytest.mark.parametrize("event,code,out", [
@@ -72,11 +139,10 @@ def test_s49_ms_is_the_tools_wall_time(box):
     ("UserPromptSubmit", 2, "{}\n"), ("SessionEnd", 2, "{}\n"),
     ("Stop", 0, ""), ("StopFailure", 0, ""), ("PostToolUseFailure", 0, ""), ("PostToolBatch", 0, ""),
     ("PreCompact", 0, "{}\n")])
-def test_s49_the_hooks_exit_and_stdout_do_not_move_and_the_row_keeps_the_tools(box, event, code, out):
+def test_s49_the_hooks_exit_and_stdout_do_not_move(box, event, code, out):
     r = _shim(box, event)
     assert (r.returncode, r.stdout) == (code, out)
     assert r.stderr == ("" if code == 0 and not out else "said\n")
-    assert _rows(box)[0]["exit"] == 2
 
 
 def test_s49_stdin_still_reaches_the_tool(box):
@@ -85,51 +151,24 @@ def test_s49_stdin_still_reaches_the_tool(box):
     assert (r.returncode, r.stdout) == (0, '{"tool_input": "abc"}')
 
 
-def test_s49_a_row_carries_no_path_prompt_or_tool_input(box):
-    secret = {"cwd": "/secret/path", "prompt": "secret prompt", "tool_input": {"command": "secret"},
-              "session_id": "secret-session", "transcript_path": "/secret/t.jsonl"}
-    _shim(box, stdin=json.dumps(secret))
-    raw = (box / "xdg" / config.APP / "hooks.jsonl").read_text()
-    assert "secret" not in raw and str(box) not in raw
+def test_s49_the_variable_is_the_start_in_nanoseconds(box):
+    _exe(box / "bin" / "agentik-session", f'cat >/dev/null; printf %s "${T0}"\n')
+    before = time.time_ns()
+    val = _shim(box).stdout
+    assert len(val) == 19 and val.isdigit() and before <= int(val) <= time.time_ns()
 
 
-def test_s49_the_file_is_private_and_the_tool_keeps_its_umask(box):
-    _exe(box / "bin" / "agentik-session", "cat >/dev/null; umask\n")
-    r = subprocess.run(["/bin/sh", "-c", 'umask 022; exec "$0" PreToolUse', str(SHIM)],
-                       env=_env(box), text=True, input="{}", capture_output=True)
-    assert r.stdout.strip() == "0022"
-    assert (box / "xdg" / config.APP / "hooks.jsonl").stat().st_mode & 0o777 == 0o600
+def test_s49_no_date_on_path_is_an_empty_variable(box):
+    _exe(box / "bin" / "agentik-session",
+         f'printf "[%s]" "${T0}"; echo said >&2; exit 2\n')
+    r = _shim(box, path=str(box / "bin"))
+    assert (r.returncode, r.stdout, r.stderr) == (2, "[]", "said\n")
 
 
-@pytest.mark.parametrize("new,old", [(True, False), (False, True), (True, True)])
-def test_s49_the_shim_picks_the_state_root_config_picks(box, new, old):
-    import shutil
-    shutil.rmtree(box / "xdg")
-    for made, app in ((new, config.APP), (old, config.OLD_APP)):
-        if made:
-            (box / "xdg" / app).mkdir(parents=True)
-    _shim(box)
-    picked = config.state_dir(_env(box))
-    assert (picked / "hooks.jsonl").exists()
-    assert list((box / "xdg").glob("*/hooks.jsonl")) == [picked / "hooks.jsonl"]
-
-
-def test_s49_home_alone_picks_the_same_root(box):
-    state = box / "home" / ".local" / "state" / config.APP
-    state.mkdir(parents=True)
-    env = {k: v for k, v in _env(box).items() if k != "XDG_STATE_HOME"}
-    subprocess.run([str(SHIM), "Stop"], env=env, text=True, input="{}", capture_output=True)
-    assert config.state_dir(env) / "hooks.jsonl" == state / "hooks.jsonl"
-    assert (state / "hooks.jsonl").exists()
-
-
-def test_s49_lines_from_parallel_calls_stay_whole(box):
-    ps = [subprocess.Popen([str(SHIM), "PostToolUse"], env=_env(box), text=True,
-                           stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          for _ in range(24)]
-    for p in ps:
-        p.communicate("{}")
-    assert len(_rows(box)) == 24
+def test_s49_a_tool_of_the_old_shape_leaves_no_row_and_the_shim_writes_nothing(box):
+    r = _shim(box)
+    assert (r.returncode, r.stdout, r.stderr) == (2, "{}\n", "said\n")
+    assert _rows(box) == []
 
 
 def test_s49_no_tool_no_row_and_silent(box):
@@ -139,53 +178,299 @@ def test_s49_no_tool_no_row_and_silent(box):
     assert _rows(box) == []
 
 
-def _control(box, r):
-    """The tool's outcome stands whole: the failure that was planted cost nothing."""
-    assert (r.returncode, r.stdout, r.stderr) == (2, "{}\n", "said\n")
+# ---- the CLI's row (Amendment 1)
+
+def _bare(box, event="PreToolUse", stdin="{}", **kw):
+    """The tool with no variable: what a hook does when nothing measures it."""
+    return subprocess.run([str(box / "bin" / "agentik-session"), "hook", event], env=_env(box),
+                          text=True, input=stdin, capture_output=True, timeout=30, **kw)
 
 
-def test_s49_no_state_directory_writes_nothing_and_makes_nothing(box):
-    import shutil
-    shutil.rmtree(box / "xdg")
-    _control(box, _shim(box))
-    assert not (box / "xdg").exists()
+def _same(a, b):
+    assert (a.returncode, a.stdout, a.stderr) == (b.returncode, b.stdout, b.stderr)
 
 
-def test_s49_a_directory_where_the_file_goes(box):
-    (box / "xdg" / config.APP / "hooks.jsonl").mkdir()
-    _control(box, _shim(box))
+def test_s49_a_call_appends_one_row_of_exactly_three_keys(real):
+    assert _shim(real).returncode == 0
+    _shim(real, "SessionStart")
+    rows = _rows(real)
+    assert [list(r) for r in rows] == [["event", "ms", "exit"]] * 2
+    assert [(r["event"], r["exit"]) for r in rows] == [("PreToolUse", 0), ("SessionStart", 0)]
+    assert all(type(r["ms"]) is int and r["ms"] >= 0 for r in rows)
 
 
+@pytest.mark.parametrize("event", sorted(e for e in hooks.HANDLERS if e.isalpha()))
+def test_s49_every_event_writes_its_row_and_moves_nothing(real, event):
+    bare = _bare(real, event)
+    assert _rows(real) == []
+    r = _shim(real, event, stdin="{}")
+    assert (r.stdout, r.stderr) == (bare.stdout if event not in SILENT_IN_SHIM else "",
+                                    bare.stderr if event not in SILENT_IN_SHIM else "")
+    assert [x["event"] for x in _rows(real)] == [event]
+
+
+def test_s49_ms_is_the_tools_wall_time(real):
+    tool = real / "bin" / "agentik-session"
+    tool.write_text(tool.read_text().replace("exec", "sleep 0.3; exec", 1))
+    _shim(real)
+    ms = _rows(real)[0]["ms"]
+    assert 290 <= ms < 5000, ms
+
+
+@pytest.mark.parametrize("body,code", [
+    ("return 7", 7), ("raise SystemExit(3)", 3), ("raise SystemExit", 0),
+    ("raise SystemExit('words')", 1), ("raise RuntimeError('boom')", 1), ("return 0", 0)])
+def test_s49_the_row_reads_the_processs_own_exit(real, body, code):
+    _scripted(real, body)
+    r = _shim(real)
+    assert r.returncode == code
+    assert _rows(real)[0]["exit"] == code
+
+
+@pytest.mark.parametrize("event", ["Stop", "PreCompact"])
+def test_s49_a_stops_real_code_is_in_the_row_though_the_shim_discards_it(real, event):
+    _scripted(real, "return 3")
+    assert _shim(real, event).returncode == 0
+    assert _rows(real)[0]["exit"] == 3
+
+
+def test_s49_a_code_the_status_cannot_hold_leaves_no_row(real):
+    _scripted(real, "raise SystemExit(300)")
+    assert _shim(real).returncode == 44
+    assert _rows(real) == []
+
+
+def test_s49_a_keyboard_interrupt_dies_by_the_signal_and_leaves_no_row(real):
+    _scripted(real, "raise KeyboardInterrupt")
+    assert _shim(real).returncode == -2
+    assert _rows(real) == []
+
+
+def test_s49_a_refusal_before_the_handler_leaves_no_row(real):
+    r = _shim(real, "NotAnEvent")
+    assert r.returncode == 2 and "invalid choice" in r.stderr
+    assert _rows(real) == []
+
+
+def test_s49_a_broken_stdout_exits_as_it_did_and_leaves_no_row(real):
+    def run(argv, env):
+        rd, wr = os.pipe()
+        os.close(rd)
+        try:
+            return subprocess.run(argv, env=env, input='{"a": 1}', text=True, stdout=wr,
+                                  stderr=subprocess.PIPE, timeout=30)
+        finally:
+            os.close(wr)
+    bare = run([str(real / "bin" / "agentik-session"), "hook", "PreToolUse"], _env(real))
+    r = run([str(SHIM), "PreToolUse"], _env(real))
+    assert bare.returncode == r.returncode == 120
+    assert r.stderr == bare.stderr
+    assert _rows(real) == []
+
+
+def test_s49_a_row_carries_no_path_prompt_or_tool_input(real):
+    secret = {"cwd": "/secret/path", "prompt": "secret prompt", "tool_input": {"command": "secret"},
+              "session_id": "secret-session", "transcript_path": "/secret/t.jsonl"}
+    _shim(real, stdin=json.dumps(secret))
+    raw = (real / "xdg" / config.APP / "hooks.jsonl").read_text()
+    assert "secret" not in raw and str(real) not in raw
+
+
+def test_s49_the_file_is_private_whatever_the_umask(real):
+    subprocess.run(["/bin/sh", "-c", 'umask 022; exec "$0" PreToolUse', str(SHIM)],
+                   env=_env(real), text=True, input="{}", capture_output=True)
+    assert (real / "xdg" / config.APP / "hooks.jsonl").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("new,old", [(True, False), (False, True), (True, True)])
+def test_s49_the_row_lands_in_the_state_root_config_picks(real, new, old):
+    shutil.rmtree(real / "xdg")
+    for made, app in ((new, config.APP), (old, config.OLD_APP)):
+        if made:
+            (real / "xdg" / app).mkdir(parents=True)
+    _shim(real, "Stop")
+    picked = config.state_dir(_env(real))
+    assert list((real / "xdg").glob("*/hooks.jsonl")) == [picked / "hooks.jsonl"]
+
+
+def test_s49_home_alone_picks_the_same_root(real):
+    state = real / "home" / ".local" / "state" / config.APP
+    state.mkdir(parents=True)
+    env = {k: v for k, v in _env(real).items() if k != "XDG_STATE_HOME"}
+    subprocess.run([str(SHIM), "Stop"], env=env, text=True, input="{}", capture_output=True)
+    assert (state / "hooks.jsonl").exists()
+
+
+def test_s49_lines_from_parallel_calls_stay_whole(real):
+    ps = [subprocess.Popen([str(SHIM), "PostToolUse"], env=_env(real), text=True,
+                           stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          for _ in range(16)]
+    for p in ps:
+        p.communicate("{}")
+    assert len(_rows(real)) == 16
+
+
+# ---- nothing the writer meets moves the hook
+
+def test_s49_no_state_directory_writes_nothing_and_makes_nothing(tmp_path, capfd):
+    env = {"XDG_STATE_HOME": str(tmp_path / "gone"), "HOME": str(tmp_path)}
+    assert harness.record_hook(str(time.time_ns()), "Stop", 0, env) is None
+    assert not (tmp_path / "gone").exists()
+    assert capfd.readouterr() == ("", "")
+
+
+def _plant_file(real, how):
+    p = real / "xdg" / config.APP / "hooks.jsonl"
+    if how == "directory":
+        p.mkdir()
+    elif how == "unwritable":
+        p.write_text("")
+        p.chmod(0)
+    elif how == "fifo":
+        os.mkfifo(p)
+    elif how == "dangling":
+        p.symlink_to(real / "elsewhere")
+    elif how == "link":
+        (real / "elsewhere").write_text("kept\n")
+        p.symlink_to(real / "elsewhere")
+
+
+@pytest.mark.parametrize("how", ["directory", "unwritable", "fifo", "dangling", "link"])
 @pytest.mark.skipif(os.geteuid() == 0, reason="root writes through 000")
-def test_s49_an_unwritable_file(box):
-    p = box / "xdg" / config.APP / "hooks.jsonl"
-    p.write_text("")
-    p.chmod(0)
-    _control(box, _shim(box))
+def test_s49_a_file_that_is_not_a_regular_writable_file_writes_nothing(real, how):
+    bare = _bare(real)
+    _plant_file(real, how)
+    p = real / "xdg" / config.APP / "hooks.jsonl"
+    r = _shim(real, timeout=10)
+    _same(r, bare)
+    if how == "dangling":        # F4: the link's target is never made
+        assert not (real / "elsewhere").exists() and p.is_symlink()
+    if how == "link":
+        assert (real / "elsewhere").read_text() == "kept\n"
 
 
-def test_s49_a_fifo_never_hangs_the_hook(box):
-    os.mkfifo(box / "xdg" / config.APP / "hooks.jsonl")
-    _control(box, _shim(box, timeout=10))
-
-
-def test_s49_no_date_on_path(box):
-    _exe(box / "bin" / "agentik-session", "echo '{}'; echo said >&2; exit 2\n")
-    _control(box, _shim(box, path=str(box / "bin")))
-    assert _rows(box) == []
+@pytest.mark.parametrize("t0", [None, "", "1793461283", "1793461283N", "not-a-number",
+                                "1" * 18, "1" * 20, "١" * 19, "1" * 18 + "\n",
+                                "9" * 19])
+def test_s49_a_start_that_is_not_19_digits_or_is_ahead_writes_nothing(tmp_path, t0):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    harness.record_hook(t0, "Stop", 0, env)
+    assert list((tmp_path / config.APP).iterdir()) == []
 
 
 @pytest.mark.parametrize("stamp", ["1793461283N", "1793461283", "not-a-number", ""])
-def test_s49_a_date_without_nanoseconds(box, stamp):
-    _exe(box / "bin" / "date", f"echo '{stamp}'\n")
-    _control(box, _shim(box))
-    assert _rows(box) == []
+def test_s49_a_date_without_nanoseconds_leaves_no_row_and_moves_nothing(real, stamp):
+    bare = _bare(real)
+    _exe(real / "bin" / "date", f"echo '{stamp}'\n")
+    _same(_shim(real), bare)
+    assert _rows(real) == []
 
 
-@pytest.mark.parametrize("event", ['Pre"ToolUse', "Pre Tool", "../../x"])
-def test_s49_an_event_that_is_not_letters_leaves_no_row(box, event):
-    _control(box, _shim(box, event))
-    assert _rows(box) == []
+def test_s49_no_date_on_path_leaves_no_row(real):
+    bare = _bare(real)
+    _same(_shim(real, path=str(real / "bin")), bare)
+    assert _rows(real) == []
+
+
+@pytest.mark.parametrize("event", ['Pre"ToolUse', "Pre Tool", "../../x", "", None, 7])
+def test_s49_an_event_that_is_not_letters_writes_nothing(tmp_path, event):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    harness.record_hook(str(time.time_ns()), event, 0, env)
+    assert list((tmp_path / config.APP).iterdir()) == []
+
+
+@pytest.mark.parametrize("code", [None, -1, 256, "0", 1.0, True])
+def test_s49_a_code_that_is_no_exit_status_writes_nothing(tmp_path, code):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    harness.record_hook(str(time.time_ns()), "Stop", code, env)
+    assert list((tmp_path / config.APP).iterdir()) == []
+
+
+@pytest.mark.parametrize("name", ["open", "write", "fstat"])
+def test_s49_a_writer_that_breaks_never_raises(tmp_path, monkeypatch, capfd, name):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    def boom(*_a, **_k):
+        raise OSError("nope")
+    with monkeypatch.context() as m:
+        m.setattr(os, name, boom)
+        assert harness.record_hook(str(time.time_ns()), "Stop", 0, env) is None
+    assert capfd.readouterr() == ("", "")
+
+
+def test_s49_a_stdout_that_will_not_flush_writes_no_row(tmp_path, monkeypatch):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    class Broken:
+        def flush(self):
+            raise BrokenPipeError
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", Broken())
+        harness.record_hook(str(time.time_ns()), "Stop", 0, env)
+    assert list((tmp_path / config.APP).iterdir()) == []
+
+
+def test_s49_no_stdout_at_all_still_writes(tmp_path, monkeypatch):
+    env = {"XDG_STATE_HOME": str(tmp_path), "HOME": str(tmp_path)}
+    (tmp_path / config.APP).mkdir()
+    with monkeypatch.context() as m:
+        m.setattr(sys, "stdout", None)
+        harness.record_hook(str(time.time_ns()), "Stop", 0, env)
+    assert (tmp_path / config.APP / "hooks.jsonl").exists()
+
+
+@pytest.mark.parametrize("code,want", [(None, 0), (0, 0), (3, 3), (True, 1), ("words", 1), (300, 300)])
+def test_s49_exit_status_is_pythons_mapping(code, want):
+    assert harness.exit_status(code) == want
+
+
+# ---- the variable dies with the call
+
+def test_s49_the_hook_pops_the_variable_before_it_runs(monkeypatch):
+    monkeypatch.setenv(T0, str(time.time_ns()))
+    seen = {}
+    def spy(_event):
+        seen["env"] = os.environ.get(T0)
+        seen["child"] = subprocess.run(["/usr/bin/env"], capture_output=True, text=True).stdout
+        return 0
+    monkeypatch.setattr(hooks, "dispatch", spy)
+    assert cli.main(["hook", "Stop"]) == 0
+    assert seen["env"] is None and T0 not in seen["child"]
+    assert len(harness.read_hooks(config.state_dir(os.environ))) == 1
+
+
+def test_s49_a_child_on_the_real_hook_path_does_not_inherit_it(real):
+    log = real / "git-env"
+    _exe(real / "bin" / "git", f"/usr/bin/env >> '{log}'; exit 1\n")
+    state = real / "xdg" / config.APP
+    resolver.session_dir(state, SID).mkdir(parents=True, exist_ok=True)
+    cwd = real / "work"
+    cwd.mkdir()
+    payload = {"session_id": SID, "transcript_path": str(FIX / "at-80.jsonl"), "reason": "clear",
+               "cwd": str(cwd)}
+    assert _shim(real, "SessionEnd", stdin=json.dumps(payload)).returncode == 0
+    assert log.exists() and T0 not in log.read_text()
+    assert [r["event"] for r in _rows(real)] == ["SessionEnd"]
+    assert len(ledger.read(state)) == 1
+
+
+def test_s49_a_nested_hook_call_writes_no_row_of_its_own(real):
+    _scripted(real, 'import subprocess\n    subprocess.run(["agentik-session-real", "hook", "Stop"], '
+                    'input="{}", text=True, capture_output=True)\n    return 0')
+    _exe(real / "bin" / "agentik-session-real",
+         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+    _shim(real)
+    assert [r["event"] for r in _rows(real)] == ["PreToolUse"]
+
+
+def test_s49_no_other_verb_reads_the_variable(monkeypatch, capsys):
+    state = _plant({**OLD_ROW, "claude_md_bytes": 100})
+    monkeypatch.setenv(T0, str(time.time_ns()))
+    assert cli.main(["report", "--hooks"]) == 0
+    assert harness.read_hooks(state) == [] and os.environ.get(T0)
 
 
 # ---- the bound
@@ -392,14 +677,14 @@ def test_s49_session_end_writes_both_keys(ended, tmp_path):
     (tmp_path / "CLAUDE.md").write_text("x" * 21)
     (sdir / measure.MEASURE).write_text(json.dumps({"at": "t", "context": None, "rateLimits": LIMITS}))
     row = _end(env, tmp_path)[0]
-    assert row["rate_limits"] == LIMITS
+    assert row["rate_limits"] == LIMITS and row["rate_limits_at"] is None
     assert row["claude_md_bytes"] == 21 + 0 and list(row) == list(ledger.LEDGER_KEYS)
 
 
 def test_s49_no_measure_is_a_null_rate_limits_and_the_row_stands(ended, tmp_path):
     env, _ = ended
     row = _end(env, tmp_path)[0]
-    assert row["rate_limits"] is None and row["turns"] == 4
+    assert (row["rate_limits"], row["rate_limits_at"], row["turns"]) == (None, None, 4)
 
 
 @pytest.mark.parametrize("bad", ["not a list", [{"kind": "x", "percentUsed": "many"}],
@@ -424,7 +709,8 @@ def test_s49_a_failure_in_either_measure_never_loses_the_row(ended, tmp_path, mo
     monkeypatch.setattr(harness, "claude_md_bytes", boom)
     monkeypatch.setattr(measure, "stated_limits", boom)
     row = _end(env, tmp_path)[0]
-    assert (row["claude_md_bytes"], row["rate_limits"], row["turns"]) == (None, None, 4)
+    assert (row["claude_md_bytes"], row["rate_limits"], row["rate_limits_at"], row["turns"]) == (
+        None, None, None, 4)
 
 
 def test_s49_a_subagents_end_writes_no_row(ended, tmp_path):
@@ -467,7 +753,7 @@ def test_s49_an_old_row_reads_as_before(capsys):
     assert json.loads(capsys.readouterr().out) == [OLD_ROW]
 
 
-def test_s49_entry_for_takes_the_two_keys_and_defaults_them_null(tmp_path):
+def test_s49_entry_for_takes_the_keys_and_defaults_them_null(tmp_path):
     m = meter.parse(FIX / "at-80.jsonl").as_dict()
     plain = ledger.entry_for(m, project="p", profile="f", cwd=tmp_path, exit_reason="x")
     assert plain["claude_md_bytes"] is None and plain["rate_limits"] is None
@@ -584,15 +870,187 @@ def test_s49_an_import_that_is_not_text_does_not_count(tree):
     assert _md(tree) == 10
 
 
-def test_s49_a_rotation_costs_a_hook_nothing_on_the_shims_side(box):
-    # The shim writes on after a rename: the next row starts a new file, 0600.
-    p = box / "xdg" / config.APP / "hooks.jsonl"
-    _shim(box)
+def test_s49_a_rotation_starts_a_new_private_file(real):
+    p = real / "xdg" / config.APP / "hooks.jsonl"
+    _shim(real, "Stop")
     harness.HOOKS_CAP, cap = 1, harness.HOOKS_CAP
     try:
         harness.rotate(p.parent)
     finally:
         harness.HOOKS_CAP = cap
-    _shim(box)
+    _shim(real, "Stop")
     assert len(harness.read_hooks(p.parent)) == 2 and (p.parent / "hooks.jsonl.1").exists()
     assert p.stat().st_mode & 0o777 == 0o600
+
+
+# ---- Amendment 1: F4 to F7, the reading's time, the design line
+
+def test_s49_f4_rotate_never_takes_a_link_or_a_fifo(tmp_path, monkeypatch):
+    monkeypatch.setattr(harness, "HOOKS_CAP", 4)
+    big = tmp_path / "big"
+    big.write_text("x" * 40)
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "hooks.jsonl").symlink_to(big)
+    harness.rotate(state)
+    assert sorted(p.name for p in state.iterdir()) == ["hooks.jsonl"]
+    (state / "hooks.jsonl").unlink()
+    (state / "hooks.jsonl").symlink_to(state / "gone")
+    harness.rotate(state)
+    assert not (state / "gone").exists()
+
+
+def _since_rows():
+    return _plant({**OLD_ROW, "claude_md_bytes": 100},
+                  {**OLD_ROW, "ended": "2026-10-20T00:00:00+00:00"})
+
+
+def test_s49_f5_since_says_the_table_is_unfiltered_and_the_ledger_is_filtered(capsys):
+    state = _plant({**OLD_ROW, "claude_md_bytes": 100},
+                   {**OLD_ROW, "ended": "2026-10-20T00:00:00+00:00", "claude_md_bytes": 300})
+    _hooks(state, _row("Stop", 80))
+    assert cli.main(["report", "--hooks", "--since", "2026-10-10"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[-2] == ("hook rows: all of them, unfiltered; a hook row has no time, so --since "
+                       "filters the ledger only")
+    assert out[-1] == "claude_md_bytes since 2026-10-10: newest 300 (old-sess), p50 300, max 300, 1 rows"
+
+
+def test_s49_f5_no_since_says_nothing_of_a_filter(capsys):
+    state = _plant({**OLD_ROW, "claude_md_bytes": 100})
+    _hooks(state, _row("Stop", 80))
+    assert cli.main(["report", "--hooks"]) == 0
+    assert "unfiltered" not in capsys.readouterr().out
+
+
+def test_s49_f5_no_row_in_the_period_is_not_no_row_carrying_it(capsys):
+    state = _since_rows()
+    _hooks(state, _row("Stop", 80))
+    assert cli.main(["report", "--hooks", "--since", "2027-01-01"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "claude_md_bytes: no ledger row since 2027-01-01"
+    assert cli.main(["report", "--hooks", "--since", "2026-10-10"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "claude_md_bytes: no row since 2026-10-10 carries it, of 1"
+
+
+def test_s49_f5_an_empty_ledger_is_not_no_row_carrying_it(capsys):
+    _hooks(config.state_dir(os.environ), _row("Stop", 80))
+    assert cli.main(["report", "--hooks"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "claude_md_bytes: no ledger row"
+
+
+def test_s49_f5_json_says_the_same(capsys):
+    state = _since_rows()
+    _hooks(state, _row("Stop", 80))
+    assert cli.main(["report", "--hooks", "--json", "--since", "2027-01-01"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert (doc["since"], doc["events_filtered"], doc["ledger_rows"], doc["claude_md_bytes"]) == (
+        "2027-01-01", False, 0, None)
+    assert doc["events"]["Stop"]["count"] == 1
+
+
+def test_s49_f5_nothing_with_since_says_which_nothing(capsys):
+    assert cli.main(["report", "--hooks", "--since", "2027-01-01"]) == 2
+    assert "no ledger row since 2027-01-01" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("word", [b"@zz ", None])
+def test_s49_f6_three_files_of_imports_end_far_inside_the_timeout(tree, word):
+    for name in ("CLAUDE.md", "CLAUDE.local.md"):
+        body = word * 262144 if word else b" ".join(b"@z%d" % i for i in range(150000))
+        (tree / "repo" / name).write_bytes(body)
+    (tree / "CLAUDE.md").write_bytes(word * 262144 if word else b"@y " * 262144)
+    began = time.monotonic()
+    n = _md(tree)
+    took = time.monotonic() - began
+    assert n is not None and n >= 3 * 1000000 or word is None
+    assert took < 3, took
+
+
+def test_s49_f6_a_scan_past_its_budget_ends_far_inside_the_timeout(tree):
+    # 64 files of bare newlines and lone @s: the slowest text for the scan, line by line.
+    names = [f"f{i}.md" for i in range(63)]
+    (tree / "repo" / "CLAUDE.md").write_text(" ".join("@" + n for n in names) + "\n")
+    for n in names:
+        (tree / "repo" / n).write_bytes(b"@\n" * 524287)
+    began = time.monotonic()
+    n = _md(tree)
+    assert time.monotonic() - began < 6
+    assert n >= 63 * 1048574
+
+
+def test_s49_f6_the_queue_is_capped(tree, monkeypatch):
+    monkeypatch.setattr(harness, "MD_MAX_QUEUE", 8)
+    for i in range(40):
+        (tree / "repo" / f"{i}.md").write_text("x")
+    (tree / "repo" / "CLAUDE.md").write_text(" ".join(f"@{i}.md" for i in range(40)) + "\n")
+    base = len((tree / "repo" / "CLAUDE.md").read_text())
+    n = _md(tree)
+    assert base <= n < base + 8
+
+
+def test_s49_f6_a_scan_cap_counts_by_size_and_does_not_scan(tree, monkeypatch):
+    monkeypatch.setattr(harness, "MD_SCAN_CAP", 4)
+    (tree / "repo" / "no.md").write_text("n" * 5)
+    (tree / "repo" / "CLAUDE.md").write_text("@no.md and more\n")
+    assert _md(tree) == 16
+
+
+def test_s49_f6_each_path_is_queued_once_and_a_shallow_import_still_scans(tree):
+    (tree / "repo" / "a.md").write_text("@b.md\n")
+    (tree / "repo" / "b.md").write_text("b")
+    (tree / "repo" / "CLAUDE.md").write_text("@a.md @a.md @b.md @a.md\n")
+    assert _md(tree) == 24 + 6 + 1
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads through 000")
+def test_s49_f6_a_denied_import_is_left_out_and_the_rest_counts(tree):
+    (tree / "repo" / "no.md").write_text("n" * 5)
+    (tree / "repo" / "no.md").chmod(0)
+    (tree / "repo" / "yes.md").write_text("y" * 3)
+    (tree / "repo" / "CLAUDE.md").write_text("@no.md @yes.md\n")
+    assert _md(tree) == 15 + 3
+
+
+def test_s49_f7_read_hooks_never_blocks_on_a_fifo_and_never_follows_a_link(tmp_path):
+    os.mkfifo(tmp_path / "hooks.jsonl.1")
+    (tmp_path / "real").write_text(json.dumps(_row("Stop", 1)) + "\n")
+    (tmp_path / "hooks.jsonl").symlink_to(tmp_path / "real")
+    code = ("import sys; from claude_session import harness; "
+            f"sys.exit(len(harness.read_hooks({str(tmp_path)!r})))")
+    r = subprocess.run([sys.executable, "-B", "-c", code], env={"PYTHONPATH": str(ROOT)}, timeout=10)
+    assert r.returncode == 0
+
+
+def test_s49_f7_a_line_too_deep_to_parse_is_skipped(tmp_path):
+    _hooks(tmp_path, "[" * 400000, _row("Stop", 5), '{"a":' * 200000)
+    assert harness.read_hooks(tmp_path) == [_row("Stop", 5)]
+
+
+def test_s49_the_row_keeps_when_the_reading_was_taken(ended, tmp_path):
+    env, sdir = ended
+    (sdir / measure.MEASURE).write_text(json.dumps(
+        {"at": "2020-01-02T03:04:05+00:00", "context": None, "rateLimits": LIMITS}))
+    row = _end(env, tmp_path)[0]
+    assert row["rate_limits"] == LIMITS and row["rate_limits_at"] == "2020-01-02T03:04:05+00:00"
+
+
+@pytest.mark.parametrize("at", ["t", 7, None, "2020-01-02T03:04:05"])
+def test_s49_an_at_that_is_no_time_is_null_and_the_limits_stand(ended, tmp_path, at):
+    env, sdir = ended
+    (sdir / measure.MEASURE).write_text(json.dumps({"at": at, "rateLimits": LIMITS}))
+    row = _end(env, tmp_path)[0]
+    assert row["rate_limits"] == LIMITS and row["rate_limits_at"] is None
+
+
+def test_s49_no_limits_is_no_at(ended, tmp_path):
+    env, sdir = ended
+    (sdir / measure.MEASURE).write_text(json.dumps({"at": "2020-01-02T03:04:05+00:00", "context": None}))
+    row = _end(env, tmp_path)[0]
+    assert (row["rate_limits"], row["rate_limits_at"]) == (None, None)
+
+
+def test_s49_mod_r1_says_session_end_copies_the_measure():
+    lines = (ROOT / "design" / "mod-r1.md").read_text().splitlines()
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("3. A pytest proves `chain.py`"))
+    near = " ".join(lines[at + 1:at + 3])
+    assert "S49" in near and "SessionEnd" in near and "harness" in near and "decides nothing" in near
