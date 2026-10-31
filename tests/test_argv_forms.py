@@ -222,12 +222,15 @@ def test_the_table_holds_under_the_floor():
     assert not wrong
 
 
-@pytest.mark.parametrize("form", [f for f, _ in ACCEPTED + WIDER] + REFUSED)
-def test_no_value_or_message_holds_the_mark(form):
-    got, err = said(form)
-    if isinstance(got, dict):
-        got = {k: v for k, v in got.items() if k != "func"}
-    assert not marked(repr(got) + json.dumps(err))
+def test_no_value_or_message_holds_the_mark():
+    wrong = []
+    for form in [f for f, _ in ACCEPTED + WIDER] + REFUSED:
+        got, err = said(form)
+        if isinstance(got, dict):
+            got = {k: v for k, v in got.items() if k != "func"}
+        if marked(repr(got) + json.dumps(err)):
+            wrong.append(form)
+    assert not wrong
 
 
 @pytest.mark.parametrize("form,text", MESSAGES)
