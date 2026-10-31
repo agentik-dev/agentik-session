@@ -2,7 +2,7 @@
 
 | item | value |
 |---|---|
-| from | the refuter's round 2, the last (macbase entry 20: no third round): F1 and F4 of round 1 not closed; the coordinator's rulings below. Parents `design/packets/sc1-proof.md` and `design/packets/sc1-proof-a1.md`, whose rulings stand except where this moves them |
+| from | the refuter's round 2, the last (the review rule: no third round): F1 and F4 of round 1 not closed; the coordinator's rulings below. Parents `design/packets/sc1-proof.md` and `design/packets/sc1-proof-a1.md`, whose rulings stand except where this moves them |
 | pin | 62a57d8 (branch `sc1-proof`); worktree `.claude/worktrees/sc1-proof` |
 | wall | as the parents'; `claude` only as `claude plugin validate` and `claude plugin test plugin`; the proof and mutants only from a scratch clone or the worktree as it ships; never a gate verb by hand under a temp HOME, never a typed `kill` |
 | may touch | `scripts/bare-proof`, `claude_session/cli.py` (`_Parser` only), `tests/` (the parser's table, and any test of the proof), `README.md`, `design/readme/source.md` and the sidecar if the suite's count moves them, `NICE_TO_HAVE.md`, `design/packets/sc1-proof-a2.md` (new), the charter |
