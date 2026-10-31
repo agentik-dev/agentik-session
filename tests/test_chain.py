@@ -566,7 +566,7 @@ def test_s20a_start_line_runs(fake, monkeypatch):
 def test_s20a_flags_override_config(case, fake, monkeypatch):
     ch = C()
     if case == "defaults":
-        assert ch.guards(fake.work, dict(os.environ), {}) == {"cap": 12, "floor": 600,
+        assert ch.guards(fake.work, dict(os.environ), {}) == {"cap": 20, "floor": 600,
                                                                 "settle": 60}
     elif case == "layers":
         d = fake.work / resolver.REPO_DIR
@@ -1278,3 +1278,68 @@ def test_s39_the_launcher_hands_the_state_on_and_deletes_a_stale_one(tmp_path, m
     fx2 = _fx(monkeypatch, [[(1, look), end(2)]])            # a later chain, the same name
     _frun(fx2, FAST)
     assert seen[2] is None and not (home / "state.md").exists()
+
+
+# ---- S48: the cap's default is 20, and every layer still overrides it ---------------------
+
+def _restarted(n, chain="c1"):
+    """A ledger holding `n` of the chain's restarts, all inside the past 24 h."""
+    lp = ledger.path(_state())
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    lp.write_text("".join(
+        json.dumps({"kind": "restart", "chain": chain, "at": _iso(T0 - 60 * (i + 1))}) + "\n"
+        for i in range(n)))
+
+
+def test_s48_the_default_is_twenty(fake):
+    ch = C()
+    assert ch.DEFAULTS == {"cap": 20, "floor": 600, "settle": 60}
+    assert ch.guards(fake.work, dict(os.environ), {}) == ch.DEFAULTS
+
+
+@pytest.mark.parametrize("ledgered,starts", [(18, 3), (19, 2), (20, 1)])
+def test_s48_a_chain_with_no_cap_stops_at_twenty(ledgered, starts, fake, monkeypatch):
+    """No cap named anywhere: the chain restarts until the 24 h count reaches 20."""
+    _restarted(ledgered)
+    fx = _fx(monkeypatch, [respawn_seq(fake.charter) + [end(3600)]])
+    _frun(fx, {"floor": 0, "settle": 60})
+    assert len(fx.procs) == starts
+    assert _stops()[-1] == "cap"
+
+
+@pytest.mark.parametrize("layer,text,want", [
+    ("user", "defaults:\n  respawn: {cap: 12}\n", 12),
+    ("user", "defaults:\n  respawn: {cap: 40}\n", 40),
+    ("repo", "session:\n  respawn: {cap: 5}\n", 5),
+    ("local", "session:\n  respawn: {cap: 7}\n", 7),
+], ids=["user-under", "user-over", "config.yaml", "config.local.yaml"])
+def test_s48_every_layer_still_overrides(layer, text, want, fake):
+    home, d = Path(os.environ["HOME"]), fake.work / resolver.REPO_DIR
+    path = {"user": home / ".claude/agentik/profiles.yaml", "repo": d / "config.yaml",
+            "local": d / "config.local.yaml"}[layer]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    assert C().guards(fake.work, dict(os.environ), {})["cap"] == want
+
+
+@pytest.mark.parametrize("argv,want", [(["--cap", "3"], 3), (["--cap", "33"], 33), ([], 20)],
+                         ids=["under", "over", "no-flag"])
+def test_s48_the_flag_still_overrides(argv, want, fake, monkeypatch):
+    """`run --cap` reaches the guards the chain re-reads, over a user layer's value too."""
+    ch, seen = C(), {}
+
+    class Stub:
+        def __init__(self, name, args, state, fx, guards, **kw):
+            seen["guards"] = guards
+
+        def run(self):
+            return 0
+    monkeypatch.setattr(ch, "on_tty", lambda: True)
+    monkeypatch.setattr(ch, "Chain", Stub)
+    assert _cli("run", "--chain", "c1", *argv, "--", "--model", "m", "go")[0] == 0
+    assert seen["guards"]()["cap"] == want
+    if argv:
+        user = Path(os.environ["HOME"]) / ".claude/agentik/profiles.yaml"
+        user.parent.mkdir(parents=True, exist_ok=True)
+        user.write_text("defaults:\n  respawn: {cap: 9}\n")
+        assert seen["guards"]()["cap"] == want
