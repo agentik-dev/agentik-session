@@ -10,7 +10,7 @@
 | verify | the gate, by the coordinator |
 | budget | acts: 0 this packet; 1 the tests, red; 2 the code; 3 NICE and docs. 30 tool calls, stop at 80% (commit the act in flight), `claude-opus-5-5`; one commit per act |
 
-## 1. What the refuter found
+## 1. What the source says (the refuter's round 1 on 5c1a295)
 
 - F1, block, `demand.py:181,190`: in a DST fold's second pass, `band` comes from the wall while the first-instant cut is already past, so `until` and `next` land a week late. Repro: rules `Sun 01:30-24:00 best`, else `good`, `demand(2026-11-01T09:15Z)` gives `band: good, until: 2026-11-08T01:30:00-08:00`, and 15 minutes later `band` is `best`.
 - F2, block, `cli.py:123` with `admission.py:1289`: `status` now calls `read_band`, which lets RecursionError escape on nesting under `BAND_MAX`. Repro: band.json = `'['*65000`: at bbb3f90 `status` exits 0 with 4 lines; at 5c1a295 exit 1, RecursionError.

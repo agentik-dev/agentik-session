@@ -199,6 +199,13 @@ BAD = {
     "no-band": rule_file(['{days: Mon, from: "00:00", to: "24:00"}', ALL_WEEK]),
     "band-empty": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: ""}', ALL_WEEK]),
     "band-number": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: 7}', ALL_WEEK]),
+    "band-40000": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: %s}' % ("x" * 40000), ALL_WEEK]),
+    "band-33": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: %s}' % ("x" * 33), ALL_WEEK]),
+    "band-control": rule_file([r'{days: Mon, from: "00:00", to: "24:00", band: "a\nb\u001b[31m"}', ALL_WEEK]),
+    "band-trailing-newline": rule_file([r'{days: Mon, from: "00:00", to: "24:00", band: "avoid\n"}', ALL_WEEK]),
+    "band-space": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: "a b"}', ALL_WEEK]),
+    "band-dot": rule_file(['{days: Mon, from: "00:00", to: "24:00", band: a.b}', ALL_WEEK]),
+    "band-not-ascii": rule_file([r'{days: Mon, from: "00:00", to: "24:00", band: "b\u00e4nd"}', ALL_WEEK]),
     "hour-short": rule_file(['{days: Mon-Sun, from: "00:00", to: "23:00", band: good}']),
     "half-hour-short": rule_file(['{days: Mon-Sun, from: "00:00", to: "23:30", band: good}']),
     "a-day-short": rule_file(['{days: Mon-Sat, from: "00:00", to: "24:00", band: good}']),
@@ -213,6 +220,19 @@ def test_bad_bands_file_falls_back(env, name):
     assert len(notes) == 1 and str(user_file(env)) in notes[0]
     rows = doctor._check_bands(env)
     assert [(c.ok, c.warn, c.detail) for c in rows] == [(True, True, notes[0])]
+
+
+@pytest.mark.parametrize("name", ["band-40000", "band-control"])
+def test_a_bad_band_name_stays_out_of_the_note(env, name):
+    _, _, notes = load(env, BAD[name])
+    assert len(notes) == 1 and len(notes[0]) < 400 + len(str(user_file(env)))
+    assert not any(ord(c) < 32 for c in notes[0])
+
+
+def test_the_longest_band_name_and_its_characters_bind(env):
+    name = "aZ09-_" + "x" * 26
+    rules_, _, notes = load(env, rule_file(['{days: Mon-Sun, from: "00:00", to: "24:00", band: %s}' % name]))
+    assert notes == [] and rules_[0]["band"] == name
 
 
 def test_bad_bands_not_utf8_too_big_a_dir_or_a_fifo_never_hang(env):
@@ -333,6 +353,67 @@ def test_a_wall_time_in_a_fold_reads_its_first_instant(env):
     rules_, tz, _ = load(env, rule_file(['{days: Sun, from: "01:30", to: "24:00", band: best}', ALL_WEEK]))
     d = demand.demand(wall(2026, 11, 1, 0, 30), rules_, tz, LA)
     assert d["until"] == "2026-11-01T01:30:00-07:00"
+
+
+FOLD_RULES = ['{days: Sun, from: "01:30", to: "24:00", band: best}', ALL_WEEK]
+BEFORE_THE_CUT = {"band": "good", "until": "2026-11-01T01:30:00-07:00",
+                  "next": {"good": "2026-11-02T00:00:00-08:00", "best": "2026-11-01T01:30:00-07:00"}}
+PAST_THE_CUT = {"band": "best", "until": "2026-11-02T00:00:00-08:00",
+                "next": {"good": "2026-11-02T00:00:00-08:00", "best": "2026-11-08T01:30:00-08:00"}}
+
+
+@pytest.mark.parametrize("h,m,s,want", [
+    (8, 15, 0, BEFORE_THE_CUT),      # the first pass, before the cut
+    (8, 45, 0, PAST_THE_CUT),        # the first pass, past it
+    (8, 59, 59, PAST_THE_CUT),       # the first pass's last second
+    (9, 0, 0, PAST_THE_CUT),         # the second pass's first: the wall reads 01:00 again
+    (9, 15, 0, PAST_THE_CUT),        # the refuter's F1: the wall reads before the cut, which is past
+    (9, 45, 0, PAST_THE_CUT),
+    (10, 0, 0, PAST_THE_CUT),        # the fold is over
+])
+def test_a_cut_in_a_fold_happens_once(env, h, m, s, want):
+    rules_, tz, _ = load(env, rule_file(FOLD_RULES))
+    assert demand.demand(datetime(2026, 11, 1, h, m, s, tzinfo=UTC), rules_, tz, LA) == want
+
+
+def test_a_stretch_inside_a_fold_does_not_come_back(env):
+    rules_, tz, _ = load(env, rule_file(['{days: Sun, from: "01:10", to: "01:20", band: best}', ALL_WEEK]))
+    d = demand.demand(datetime(2026, 11, 1, 9, 15, tzinfo=UTC), rules_, tz, LA)
+    assert (d["band"], d["until"]) == ("good", "2026-11-08T01:10:00-08:00")
+
+
+def test_a_cut_at_a_fold_s_end_is_still_ahead_in_the_second_pass(env):
+    rules_, tz, _ = load(env, rule_file(['{days: Sun, from: "02:00", to: "24:00", band: best}', ALL_WEEK]))
+    d = demand.demand(datetime(2026, 11, 1, 9, 15, tzinfo=UTC), rules_, tz, LA)
+    assert (d["band"], d["until"]) == ("good", "2026-11-01T02:00:00-08:00")
+
+
+def test_a_half_hour_fold_reads_the_first_pass_s_end_too(env):
+    lord_howe = ZoneInfo("Australia/Lord_Howe")          # 02:00 back to 01:30 on 2027-04-04
+    rules_, tz, _ = load(env, rule_file(['{days: Sun, from: "01:45", to: "24:00", band: best}', ALL_WEEK],
+                                        "Australia/Lord_Howe"))
+    t = datetime(2027, 4, 3, 15, 10, tzinfo=UTC)         # 01:40 on the second pass
+    assert t.astimezone(lord_howe).fold == 1
+    d = demand.demand(t, rules_, tz, UTC)
+    assert (d["band"], d["until"]) == ("best", "2027-04-04T13:30:00+00:00")
+
+
+def test_the_walk_reaches_a_stretch_past_the_gap_that_swallowed_it(env):
+    rules_, tz, _ = load(env, rule_file(['{days: Sun, from: "02:00", to: "03:00", band: best}', ALL_WEEK]))
+    d = demand.demand(wall(2027, 3, 7, 3, 0), rules_, tz, LA)     # pins WALK_WEEKS: two weeks read None
+    assert d == {"band": "good", "until": "2027-03-21T02:00:00-07:00",
+                 "next": {"good": "2027-03-21T03:00:00-07:00", "best": "2027-03-21T02:00:00-07:00"}}
+
+
+def test_next_keeps_the_first_stretch_when_a_band_comes_twice(env):
+    rules_, tz, _ = load(env, rule_file([
+        '{days: Mon, from: "00:00", to: "06:00", band: avoid}',
+        '{days: Mon, from: "06:00", to: "12:00", band: best}',
+        '{days: Mon, from: "12:00", to: "18:00", band: middle}',
+        '{days: Mon, from: "18:00", to: "24:00", band: best}',
+        ALL_WEEK]))
+    d = demand.demand(wall(2026, 10, 26, 1), rules_, tz, LA)
+    assert d["next"] == {"good": "2026-10-27T00:00:00-07:00", "best": "2026-10-26T06:00:00-07:00"}
 
 
 def test_stamps_are_the_band_s_zone_not_the_schedule_s(env):
@@ -513,6 +594,8 @@ def test_band_status_forms():
     assert admission.band_status(b, NOW) == "band: avoid to 23:00; next good Mon 06:00, best 23:30"
     b["demand"]["next"]["good"] = "2026-10-30T19:00:00+00:00"      # past: not listed
     assert admission.band_status(b, NOW) == "band: avoid to 23:00; next best 23:30"
+    b["demand"]["next"]["good"] = iso(NOW)                         # now itself is not in the future
+    assert admission.band_status(b, NOW) == "band: avoid to 23:00; next best 23:30"
     del b["demand"]["next"]["best"]
     assert admission.band_status(b, NOW) == "band: avoid to 23:00"
     b["demand"]["next"] = "soon"
@@ -572,6 +655,17 @@ def test_status_is_today_s_bytes_with_no_band_to_show(env, metered, b):
     plain = run("status")[1]
     write_band(env, b)
     assert run("status")[1] == plain
+
+
+def test_status_survives_a_nest_under_band_max(env, metered):
+    rc, plain, _ = run("status")
+    d = admission.directory(env)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / admission.BAND).write_text("[" * 65000)
+    assert 65000 < admission.BAND_MAX
+    assert admission.read_band(env) is None
+    assert run("status")[:2] == (rc, plain)
+    assert rc == 0
 
 
 def test_status_json_carries_window_and_demand_only_on_none(env, metered):
