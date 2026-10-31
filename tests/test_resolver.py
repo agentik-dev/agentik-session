@@ -229,7 +229,7 @@ def test_newest_session(world):
 
 def test_s19_respawn_defaults(world):
     from claude_session import sessionconfig
-    assert run(world).sections["session"]["respawn"] == {"cap": 12, "floor": 600, "settle": 60}
+    assert run(world).sections["session"]["respawn"] == {"cap": 20, "floor": 600, "settle": 60}
     assert "respawn" in resolver.SESSION_KEYS and "respawn" not in sessionconfig.SETTABLE
 
 

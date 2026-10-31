@@ -408,7 +408,7 @@ hang-up the launcher writes nothing more to the terminal).
   row or a started session clears nothing); with no chain the copy stays in
   the session's own directory, where no successor looks.
 - The guards are `session: {respawn: {cap, floor, settle}}` in the config
-  layers (defaults 12 restarts in any 24 h, 600 s, 60 s); `--cap`,
+  layers (defaults 20 restarts in any 24 h, 600 s, 60 s); `--cap`,
   `--floor` and `--settle` override them for one chain.
 - Two STOP files hold the chain: `respawn/<chain>/STOP` and
   `respawn/STOP` under the state root (the `state-dir` line of

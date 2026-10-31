@@ -106,9 +106,9 @@ The checks bind the marker to this sitting (F2):
 
 ### §3.5 The guards: cap, floor, stop file
 
-- **Cap** (default 12 in any rolling 24 h, per chain).
+- **Cap** (default 20 in any rolling 24 h, per chain; 12 until S48).
   - *How it counts.* The count comes from the ledger's restart lines for that chain.
-  - *Why twelve.* On the measured night the sittings ran 3 h 34 min (20:30 to 00:04), 1 h 33 min (01:57 to 03:30) and 1 h 41 min (06:31 to 08:12). Once the gaps are gone, a busy orchestrator could restart up to about fifteen times a day. Twelve covers a night and most of a day before the owner's word is needed again. A slow runaway costs at most twelve sittings, and the floor catches a fast one. A cap of 0 means the chain never restarts, so `run` is then a plain wrapper.
+  - *Why twelve.* On the measured night the sittings ran 3 h 34 min (20:30 to 00:04), 1 h 33 min (01:57 to 03:30) and 1 h 41 min (06:31 to 08:12). Once the gaps are gone, a busy orchestrator could restart up to about fifteen times a day. Twelve covers a night and most of a day before the owner's word is needed again. A slow runaway costs at most twelve sittings, and the floor catches a fast one. Since S48 the default is 20, the owner's answer after two launchers ran `--cap 20` and both chains were relaunched past 12 in a day; a slow runaway now costs at most twenty sittings, and a layer or `--cap` sets it lower. A cap of 0 means the chain never restarts, so `run` is then a plain wrapper.
   - *It fails closed (N6).* An unreadable ledger (any error but its absence) holds the chain at `cap`. A line that fails to parse but holds the chain's quoted name counts as a restart. The count is never below the launcher's own tally of the restarts it made in the past 24 h, so a deleted or truncated ledger never resets it. The restart line is written before the successor starts. If the write fails, no successor starts, the chain stops at `cap`, and the write's error is printed.
 - **Floor** (default 600 s). A sitting that reaches RESPAWN in under ten minutes has done no work. The launcher holds such a sitting until it is `floor` seconds old, so a fault loop restarts at most once a `floor` and is held at the cap. A hold is re-checked every poll and said in `held.json`; S37.
 - **Stop file.** `<state>/respawn/STOP` ends every chain, and `<state>/respawn/<chain>/STOP` ends one. A stop file counts only when its mtime is at or after the chain's start. So `touch` is the whole verb, a stale file is harmless, and a chain started afterwards ignores it. The launcher never deletes a stop file. A fresh stop file means the launcher does not end the current sitting. The sitting runs on as it does today, and when it exits the chain stops.
@@ -150,7 +150,7 @@ The launcher is the shell's foreground job. Its child runs in the launcher's own
 
 ## §4 Configuration
 
-`respawn: {cap: 12, floor: 600, settle: 60}` goes in `profiles.yaml` `defaults` and becomes a new `SESSION_KEYS` key. It layers like every other session key: the user's profiles, the repo's `config.yaml`, then `config.local.yaml`. `run --cap`, `--floor` and `--settle` are the invocation layer.
+`respawn: {cap: 20, floor: 600, settle: 60}` goes in `profiles.yaml` `defaults` and becomes a new `SESSION_KEYS` key. It layers like every other session key: the user's profiles, the repo's `config.yaml`, then `config.local.yaml`. `run --cap`, `--floor` and `--settle` are the invocation layer.
 
 - **Validation.** A negative or non-integer value is a `ResolveError` (exit 2, the key named).
 - **When it is resolved.** At the chain's start, from the launcher's cwd and `CLAUDE_SESSION_PROFILE`, and again before each restart, so a config edit takes effect at the next sitting.
@@ -208,7 +208,7 @@ Each criterion is one or more named tests on the fake `claude` (conventions §4)
 14. **The terminal.** These run under `pty.fork`. A fake that sets raw mode and exits finds the attributes restored before the launcher's next line. The fake reports SIGINT at its default disposition. SIGINT to the group while the child runs leaves the launcher alive. SIGINT in the grace stops the chain with `interrupted` and starts nothing. SIGHUP stops with `hangup` after the child exits.
 15. **It never compacts or resumes.** Across a three-restart chain, every recorded argument that begins with `-` is on the allowlist, and none holds `/compact`.
 16. **The printed start line runs as printed.** The start line printed at a stop, run with the fake on PATH, starts the same arguments.
-17. **The configuration resolves.** `respawn` resolves from the defaults (12, 600, 60), and each layer and flag overrides the one below. A negative or non-integer value exits 2 naming the key.
+17. **The configuration resolves.** `respawn` resolves from the defaults (20, 600, 60), and each layer and flag overrides the one below. A negative or non-integer value exits 2 naming the key.
 18. **The doctor and the hooks.** `doctor` checks `--session-id` in `claude --help` and goes red without it. `hooks.json` registers Stop with a timeout and PreToolUse on every tool, and `test_every_hook_command_has_its_events_timeout` covers Stop.
 
 ## §7 Proofs owed
@@ -235,7 +235,7 @@ These are measured on the installed `claude` by an attended sitting or by the ow
 
 - **C1. Who ends the sitting.** The launcher sends SIGTERM to its own child, because a sitting cannot leave the interactive session itself. It does so only after the main thread's turn has ended and nothing has started since (§3.3).
 - **C2. How a RESPAWN exit is detected.** By a marker that `checkpoint --respawn` writes after checking the Next act. The main thread's PostToolUse confirms it, and it is keyed by the session id the launcher minted. The charter must be touched in this sitting, and the launcher reads the Next act again before signalling. It never parses a transcript (§3.2, §3.4).
-- **C3. The cap.** It is 12 per chain in any rolling 24 h, counted from the ledger and failing closed. A calendar day would allow twice the cap across midnight (§3.5).
+- **C3. The cap.** It is 20 per chain in any rolling 24 h (12 until S48), counted from the ledger and failing closed. A calendar day would allow twice the cap across midnight (§3.5).
 - **C4. The floor holds rather than delays.** A sitting that reaches RESPAWN in under 600 s ends the chain at its exit (§3.5). Since S37 the hold is re-checked every poll, so the floor delays the restart until the sitting is `floor` seconds old rather than ending the chain, and the cap bounds a fault loop.
 - **C5. The stop file.** There is a global path and a per-chain path. A stop file counts by its mtime against the chain's start and is never deleted (§3.5).
 - **C6. Degrade to today.** Any check that holds the sitting leaves it open for the owner, as it is today, and the launcher ends only a sitting it will restart (§3.3).
@@ -249,3 +249,4 @@ These are measured on the installed `claude` by an attended sitting or by the ow
 
 - 2026-10-29, packet S37 (the agentik-hq sitting 2026-10-29-1's rulings): §3.5, a hold is re-checked every poll, said in the chain home's `held.json` and printed by `status`, so a floor read too early delays the sitting rather than holding it for good.
 - 2026-10-29, packet S39 (the agentik-hq sitting 2026-10-29-1's rulings): §3.2, `checkpoint --respawn --state FILE` checks the sitting's state file, copies it to the chain home as `state.md` with `state.json`, and SessionStart names it to the successor; the marker keeps its five keys. Amendment 1: the launcher stamps the record `to_session` at the successor's start and deletes a stale one.
+- 2026-10-31, packet S48 (agentik-hq's design/03 §10, the owner's answer to its question 2): §3.5, §4, criterion 17 and C3, the cap's default moves from 12 to 20; every layer and `--cap` still override it.

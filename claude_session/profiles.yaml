@@ -48,7 +48,7 @@ defaults:
   device: never
   charter: {dir: history/sittings, required: true}
   verify: null
-  respawn: {cap: 12, floor: 600, settle: 60}
+  respawn: {cap: 20, floor: 600, settle: 60}
   # The priority and pacing every sitting meets (rules.py, `agentik session rules`).
   # Each level text is quoted: it holds ": ". A layer replaces one level's text;
   # the names S1 to S4 and their count are fixed.
