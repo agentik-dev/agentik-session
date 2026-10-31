@@ -253,19 +253,24 @@ def cmd_report(args) -> int:
 
 def _report_hooks(args) -> int:
     """`report --hooks` (packet S49): this plugin's hooks per event, then claude_md_bytes.
-    `--since` filters the ledger's rows only: a hook row carries no time."""
+    `--since` filters the ledger's rows only, and the output says so: a hook row has no time."""
     state = resolver.state_dir(os.environ)
     stats = harness.hook_stats(harness.read_hooks(state))
     rows = ledger.read(state, args.since)
     md = harness.claude_md_stats(rows)
+    line = harness.claude_md_line(rows, args.since)
     if not stats and md is None:
-        print("no hook rows, and no ledger row carries claude_md_bytes", file=sys.stderr)
+        print(f"no hook rows; {line}", file=sys.stderr)
         return 2
     if args.json:
-        print(json.dumps({"events": stats, "claude_md_bytes": md}, indent=2))
+        print(json.dumps({"events": stats, "events_filtered": False, "since": args.since,
+                          "ledger_rows": len(rows), "claude_md_bytes": md}, indent=2))
         return 0
     print(harness.hooks_table(stats))
-    print(harness.claude_md_line(rows))
+    if args.since:
+        print("hook rows: all of them, unfiltered; a hook row has no time, so --since "
+              "filters the ledger only")
+    print(line)
     return 0
 
 

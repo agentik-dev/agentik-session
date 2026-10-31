@@ -9,7 +9,7 @@ wrong: `status` and `doctor` print the drift between the engine's context tokens
 meter's. What decides reads one figure of it, `context.window`, as the window pick's first
 source (design/window-r1.md §2), and only through `models.engine_window`; `record` then moves
 the resolved file by `resolver.rewindow`. The other figures decide nothing, and the budget
-never reads the file. SessionEnd copies the last `rateLimits` to the ledger row (S49).
+never reads the file. SessionEnd copies the last `rateLimits` and its `at` to the ledger row (S49).
 The whole shape is checked against 2.1.296's SessionMeasureInput (M2's fix round, F1): an
 unknown key at any depth, a wrong type, a non-finite number or an unwritable string is refused,
 and so is a window `engine_window` would not read, so it never overwrites a good reading.
@@ -109,23 +109,25 @@ def load(sdir) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def stated_limits(sdir) -> list | None:
-    """The session's last rateLimits for the ledger row: None when absent, torn, or anything
-    the shape check refuses, so only a checked list reaches the row."""
-    m = load(sdir)
-    try:
-        rate_limits(m.get("rateLimits") if m else None)
-    except Shape:
-        return None
-    return m["rateLimits"]
-
-
 def _when(v) -> datetime | None:
     try:
         t = datetime.fromisoformat(str(v))
     except ValueError:
         return None
     return t if t.tzinfo is not None else None
+
+
+def stated_limits(sdir) -> tuple[list | None, str | None]:
+    """The session's last rateLimits for the ledger row and when they were recorded: (None, None)
+    when absent, torn, or anything the shape check refuses, so only a checked list reaches the
+    row; the time is None when `at` is not one, and the list still stands."""
+    m = load(sdir)
+    try:
+        rate_limits(m.get("rateLimits") if m else None)
+    except Shape:
+        return None, None
+    at = m.get("at")
+    return m["rateLimits"], at if isinstance(at, str) and _when(at) else None
 
 
 def _count(v) -> int | None:

@@ -20,6 +20,7 @@ import re
 import stat
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 from . import config
@@ -33,7 +34,9 @@ HOOKS_CAP = 1048576
 PROJECT_FILES = ("CLAUDE.md", os.path.join(".claude", "CLAUDE.md"), "CLAUDE.local.md")
 MD_HOPS = 5                 # an import chain's depth, as Claude Code documents it
 MD_MAX_FILES = 64           # a floor past this: the walk stops counting
+MD_MAX_QUEUE = 1024         # imports queued, each path once: past this the figure is a floor
 MD_READ_CAP = 1048576       # a file past this counts by its size and is not scanned
+MD_SCAN_CAP = 2097152       # bytes scanned in all: past this a file counts by its size alone
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _SPAN = re.compile(r"`[^`\n]*`")
 _IMPORT = re.compile(r"(?:^|(?<=\s))@(\S+)")
@@ -101,18 +104,32 @@ def _whole(v) -> bool:
     return type(v) is int
 
 
+def _read_regular(path, flags=0) -> bytes | None:
+    """A regular file's bytes, else None: gone, denied, a directory, a FIFO (never blocks on
+    one). Never raises for any of these."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | flags)
+    except (OSError, ValueError):
+        return None
+    try:
+        with os.fdopen(fd, "rb") as f:
+            return f.read() if stat.S_ISREG(os.fstat(fd).st_mode) else None
+    except OSError:
+        return None
+
+
 def read_hooks(state) -> list[dict]:
-    """The rows of both generations, oldest first; anything that is not a row is skipped."""
+    """The rows of both generations, oldest first, from regular files and through no link;
+    anything that is not a row is skipped, a line too deep to parse among them."""
     out = []
     for name in (HOOKS + ".1", HOOKS):
-        try:
-            text = Path(state, name).read_text(errors="replace")
-        except OSError:
+        data = _read_regular(os.path.join(state, name), os.O_NOFOLLOW)
+        if data is None:
             continue
-        for raw in text.splitlines():
+        for raw in data.decode(errors="replace").splitlines():
             try:
                 d = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
             if (isinstance(d, dict) and isinstance(d.get("event"), str) and d["event"]
                     and _whole(d.get("ms")) and d["ms"] >= 0 and _whole(d.get("exit"))):
@@ -157,67 +174,79 @@ def claude_md_stats(rows: list[dict]) -> dict | None:
             "p50": _rank(sizes, .50), "max": sizes[-1], "rows": len(have)}
 
 
-def claude_md_line(rows: list[dict]) -> str:
+def claude_md_line(rows: list[dict], since=None) -> str:
+    """Over the rows `since` left: a period with no row is not a period whose rows lack the key."""
     s = claude_md_stats(rows)
+    within = f" since {since}" if since else ""
     if s is None:
-        return "claude_md_bytes: no row carries it"
-    return (f"claude_md_bytes: newest {s['newest']} ({str(s['session'] or '')[:8]}), "
+        if not rows:
+            return f"claude_md_bytes: no ledger row{within}"
+        return (f"claude_md_bytes: no row{within} carries it, of {len(rows)}" if since
+                else "claude_md_bytes: no row carries it")
+    return (f"claude_md_bytes{within}: newest {s['newest']} ({str(s['session'] or '')[:8]}), "
             f"p50 {s['p50']}, max {s['max']}, {s['rows']} rows")
 
 
-def _imports(path: str, text: str, home: str) -> list[str]:
+def _imports(path: str, text: str, home: str):
     """The `@` targets of one file, outside code spans and fences, resolved: `~/` from home,
     an absolute path as it stands, any other from the importing file's directory."""
-    out, fenced = [], False
+    base, fenced = os.path.dirname(path), False
     for line in text.splitlines():
         if _FENCE.match(line):
             fenced = not fenced
             continue
-        if fenced:
+        if fenced or "@" not in line:
             continue
         for t in _IMPORT.findall(_SPAN.sub("", line)):
-            if t.startswith("~/"):
-                out.append(os.path.join(home, t[2:]))
-            else:
-                out.append(os.path.join(os.path.dirname(path), t))     # an absolute t stands
-    return out
+            yield os.path.join(home, t[2:]) if t.startswith("~/") else os.path.join(base, t)
 
 
 def _walk(cwd: str, env) -> int:
+    """Breadth first, so a path's first hop is its least and queuing it once loses nothing. The
+    caps are the floor's: past MD_MAX_FILES, MD_MAX_QUEUE or MD_SCAN_CAP the figure undercounts,
+    as it does for a file it cannot read, which Claude Code cannot load either. The caps hold a
+    tree's worst far inside SessionEnd's 15 s (packet S49, Amendment 1)."""
     home = env.get("HOME") or str(Path.home())
-    queue = [(os.path.join(env.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude"),
-                           "CLAUDE.md"), 0)]
+    roots = [os.path.join(env.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude"), "CLAUDE.md")]
     d = os.path.abspath(cwd)
     while True:
-        queue += [(os.path.join(d, name), 0) for name in PROJECT_FILES]
+        roots += [os.path.join(d, name) for name in PROJECT_FILES]
         up = os.path.dirname(d)
         if up == d:
             break
         d = up
-    seen = {}
+    queue, queued = deque((p, 0) for p in roots), set(roots)
+    seen, imported, scanned = {}, 0, 0
     while queue and len(seen) < MD_MAX_FILES:
-        path, hop = queue.pop(0)
+        path, hop = queue.popleft()
         real = os.path.realpath(path)
         if real in seen or not os.path.isfile(real):       # a FIFO is never opened
             continue
         size = os.stat(real).st_size
-        if size > MD_READ_CAP:
+        if size > MD_READ_CAP or scanned + size > MD_SCAN_CAP:
             seen[real] = size
             continue
-        with open(real, "rb") as f:
-            data = f.read()
-        if b"\0" in data:                                  # not text: Claude Code loads none
+        data = _read_regular(real)
+        if data is None or b"\0" in data:                  # denied, or not text: none loads
             continue
         seen[real] = size
-        if hop < MD_HOPS:
-            queue += [(t, hop + 1) for t in _imports(path, data.decode(errors="replace"), home)]
+        scanned += size
+        if hop >= MD_HOPS:
+            continue
+        for t in _imports(path, data.decode(errors="replace"), home):
+            if imported >= MD_MAX_QUEUE:
+                break
+            if t not in queued:
+                queued.add(t)
+                imported += 1
+                queue.append((t, hop + 1))
     return sum(seen.values())
 
 
-def stated_limits(sdir) -> list | None:
-    """The ledger's `rate_limits`, by measure's own reader: a record, which nothing that decides
-    reads, so hooks.py still names no measure (M2's criterion 3). Imported here: measure imports
-    hooks, which imports this module."""
+def stated_limits(sdir) -> tuple[list | None, str | None]:
+    """The ledger's `rate_limits` and `rate_limits_at`, by measure's own reader: a copy, which
+    nothing that decides reads, so hooks.py still names no measure (M2's criterion 3, mod-r1
+    §7.3's amendment). Imported here: measure imports hooks, which imports this module."""
     from . import measure
     return measure.stated_limits(sdir)
 
@@ -227,8 +256,8 @@ def claude_md_bytes(cwd, env) -> int | None:
     path, as they stand at the call: the user's (under CLAUDE_CONFIG_DIR, else ~/.claude); each
     of PROJECT_FILES in `cwd` and every ancestor; their `@` imports, to MD_HOPS hops. Not
     counted: managed policy, `.claude/rules/`, a subdirectory's file that loads on demand, auto
-    memory, `--add-dir`, a plugin's or a hook's context. None with no usable `cwd` or on any
-    failure; it never raises."""
+    memory, `--add-dir`, a plugin's or a hook's context, or a file it cannot read: the rest still
+    count. None with no usable `cwd` or on any other failure; it never raises."""
     try:
         if not isinstance(cwd, str) or not os.path.isabs(cwd) or not os.path.isdir(cwd):
             return None

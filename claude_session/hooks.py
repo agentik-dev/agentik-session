@@ -657,11 +657,12 @@ def _ledger_line(payload: dict, env) -> None:
     resolved = _load_json(sdir / "resolved.json")
     profile = ((resolved.get("provider") or {}).get("profile")
                or (resolved.get("session") or {}).get("profile"))
+    limits, limits_at = _measured(lambda: harness.stated_limits(sdir)) or (None, None)
     ledger.append(state, ledger.entry_for(
         m.as_dict(), project=Path(tp).parent.name, profile=profile,
         cwd=payload.get("cwd"), exit_reason=payload.get("reason"),
         claude_md_bytes=_measured(lambda: harness.claude_md_bytes(payload.get("cwd"), env)),
-        rate_limits=_measured(lambda: harness.stated_limits(sdir))))
+        rate_limits=limits, rate_limits_at=limits_at))
 
 
 def _measured(read) -> object:
