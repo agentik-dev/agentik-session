@@ -191,7 +191,8 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     out.extend(_while_waiting_shape(lines, text))
     if n:
         what = WAITING_LINE.match(line.rstrip()).group(2)
-        if re.search(r"\b(room for|meter|usage limit|five-hour|5h)", what, re.I):
+        if re.search(r"\b(room for|meter|usage limit|five-hour|5h)"
+                     r"|\b(week|weekly|7d|seven-day|band)\b", what, re.I):
             out.append("a wait on the usage meter is not WAITING (session.pacing): keep the "
                        "act as the Next act and wake at the band's reset")
             return out

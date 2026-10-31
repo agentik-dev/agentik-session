@@ -143,11 +143,52 @@ export const sessionBand = (b: any, id: string): any => {
   return a && typeof a === 'object' && !Array.isArray(a) ? a : b
 }
 
+// A stamp's weekday from its own date digits (packet S43 ruling 2): arithmetic, so no locale,
+// no system zone and no runtime's date parser; null for a date that does not exist, which
+// Python's _wall refuses and this file's Date.parse may roll forward.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const MONTH_SHIFT = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+const weekday = (v: string): string | null => {
+  const y = Number(v.slice(0, 4)), m = Number(v.slice(5, 7)), d = Number(v.slice(8, 10))
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)
+  if (y < 1 || m < 1 || m > 12 || d < 1 || d > MONTH_DAYS[m - 1] + (m === 2 && leap ? 1 : 0)) return null
+  const z = m < 3 ? y - 1 : y
+  return WEEKDAYS[(z + Math.floor(z / 4) - Math.floor(z / 100) + Math.floor(z / 400) + MONTH_SHIFT[m - 1] + d) % 7]
+}
+
+// The line's last parts in either mode: `observe`, then the age past STALE_S.
+const lineEnd = (b: any, nowMs: number): string[] => {
+  const parts = b.mode === 'observe' ? ['observe'] : []
+  const a = wall(b.at)
+  const age = a ? Math.floor((nowMs - a[2]) / 1000) : NaN
+  if (Number.isFinite(age) && age > STALE_S) parts.push(`${age}s old`)
+  return parts
+}
+
+// A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
+// `resetsAt`, both the week's. No countdown, ceiling, room or deferred.
+const lineNone = (b: any, nowMs: number): string[] => {
+  const parts = ['no 5h window']
+  const p7 = fig(b.P7), running = fig(b.running)
+  if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
+  for (const v of [b.until, b.resetsAt]) {
+    const w = wall(v), day = w ? weekday(String(v)) : null
+    if (w && day) {
+      parts.push(`week resets ${day} ${w[0]}:${w[1]}`)
+      break
+    }
+  }
+  if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
+  return [...parts, ...lineEnd(b, nowMs)]
+}
+
 export const admissionLine = (band: string | null, nowMs: number, id = ''): string | null => {
   let b: any = null
   try { b = band === null ? null : JSON.parse(band) } catch { b = null }
   if (!b || typeof b !== 'object' || Array.isArray(b)) return null
   b = sessionBand(b, id)
+  if (b.window === 'none') return lineNone(b, nowMs).join(' · ')
   const P = fig(b.P), peak = fig(b.peak), c = fig(b.ceiling)
   const parts = [P === null ? '5h no reading' : `5h ${whole(P)}%` + (peak !== null ? ` → ${whole(peak)}%` : '')]
   if (c !== null) parts.push(`ceiling ${String(c)}`)
@@ -166,11 +207,7 @@ export const admissionLine = (band: string | null, nowMs: number, id = ''): stri
   const d = fig(b.deferred), p7 = fig(b.P7)
   if (d !== null) parts.push(`${whole(d)} deferred`)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
-  if (b.mode === 'observe') parts.push('observe')
-  const a = wall(b.at)
-  const age = a ? Math.floor((nowMs - a[2]) / 1000) : NaN
-  if (Number.isFinite(age) && age > STALE_S) parts.push(`${age}s old`)
-  return parts.join(' · ')
+  return [...parts, ...lineEnd(b, nowMs)].join(' · ')
 }
 
 // ---- Admission (design/admission-r1.md §3.1, packet S25): it observes. ----

@@ -5,11 +5,13 @@ is passed in."""
 import io
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
-from claude_session import admission, cli, config, measure, resolver, rules, yamlsubset
+from claude_session import admission, cli, config, hooks, measure, resolver, rules, yamlsubset
 
 UTC = timezone.utc
 NOW = datetime(2026, 10, 30, 20, 0, tzinfo=UTC)
@@ -473,13 +475,138 @@ def test_a_lone_five_hour_login_writes_no_accounts():
     assert "accounts" not in b and "sessions" not in b
 
 
-def test_none_line_reads_as_today_until_s43():
-    """Packet S42 ruling 2, today's `band_line` on the record's entry; S43 replaces this line."""
+# ---- Packet S43: the lines on a `none` login: one fixture pins both twins -----------------------
+
+def _ts_fixture(name: str) -> str:
+    """One line of the module's test file (its name in pieces, as test_band's reader is)."""
+    p = Path(__file__).resolve().parent.parent / "plugin" / "hooks" / ("session.test." + "ts")
+    if not p.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    return re.search(rf"^const {name} = '(.*)'$", p.read_text(), re.M).group(1)
+
+
+def _ts_now() -> datetime:
+    p = Path(__file__).resolve().parent.parent / "plugin" / "hooks" / ("session.test." + "ts")
+    if not p.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    return datetime.fromisoformat(re.search(r"^const NOW = Date\.parse\('(.*)'\)$", p.read_text(), re.M).group(1))
+
+
+def test_band_line_none_draws_the_module_s_fixtures():
+    now = _ts_now()
+    assert admission.band_line(json.loads(_ts_fixture("BAND_NONE")), now) == _ts_fixture("BAND_NONE_LINE")
+    assert admission.band_line(json.loads(_ts_fixture("BAND_NONE_BARE")), now) == _ts_fixture("BAND_NONE_BARE_LINE")
+    assert _ts_fixture("BAND_NONE_LINE") == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe"
+    assert _ts_fixture("BAND_NONE_BARE_LINE") == "no 5h window · 3 helpers · observe"
+
+
+def test_band_line_none_draws_the_module_s_cases():
+    now = _ts_now()
+    cases = json.loads(_ts_fixture("BAND_NONE_CASES"))
+    assert len(cases) >= 20
+    for entry, line in cases:
+        assert admission.band_line(entry, now) == line, entry
+
+
+def test_band_line_none_on_the_entry_decide_writes():
+    """The record's entry, from band(), not a fixture: the line S42 pinned as today's is gone."""
     rows = rising(61, 62) + [spawn(at(5), "h1"), spawn(at(4), "h2"), spawn(at(3), "h3")]
     b = admission.band(rows, NOW, settings(), tz=UTC)
-    assert admission.band_line(b, NOW) == ("5h no reading · week resets 21:00 (169h00), 5h 21:00 · "
-                                           "3 helpers · 7d 62% · observe")
-    assert rules.lifetime({}, "/nonexistent", b, now=NOW)[0] is None
+    assert admission.band_line(b, NOW) == "no 5h window · 7d 62% · week resets Fri 21:00 · 3 helpers · observe"
+    assert admission.band_line(b, NOW, 30) == "no 5h window · 7d 62% · week …"
+
+
+def test_band_line_none_reads_no_system_zone_or_locale(monkeypatch):
+    b = json.loads(_ts_fixture("BAND_NONE"))
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    assert admission.band_line(b, _ts_now()) == _ts_fixture("BAND_NONE_LINE")
+
+
+def test_band_line_none_in_the_prompt_hook_with_its_cache_clause(monkeypatch):
+    """The prompt hook draws the line, then the clause `lifetime` gives. The reset is a fixed
+    stamp far ahead and the entry has no `at`, so the real clock moves nothing."""
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    reset = "2099-01-02T13:00:00+00:00"                 # a Friday
+    d = config.state_dir(os.environ) / "admission"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "band.json").write_text(json.dumps({"window": "none", "P": None, "P7": 62, "resetsAt": reset,
+                                             "until": reset, "bound": "seven_day", "running": 3,
+                                             "mode": "observe"}))
+    out = hooks.user_prompt_submit({"session_id": SID})
+    bits = out["hookSpecificOutput"]["additionalContext"].split("\n\n")
+    [line] = [x for x in bits if x.startswith("no 5h window")]
+    assert line == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe"
+    assert bits[bits.index(line) + 1].startswith("cache 1h (within plan usage, 7d 62%): ")
+
+
+@pytest.mark.parametrize("window", ["five_hour", "auto", "NONE", None, 7, ["none"]])
+def test_band_line_five_hour_bytes_unchanged(window):
+    """Packet S43 ruling 3: today's three lines, spelled here as well as in the fixture, and any
+    `window` but the string `none` changes nothing."""
+    now = _ts_now()
+    fives = [("BAND", None, "5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · "
+                            "1 deferred · 7d 41% · observe"),
+             ("BAND_WEEK", None, "5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17), 5h 15:30 · "
+                                 "3 helpers, room for 2 · 1 deferred · 7d 41% · observe"),
+             ("BAND_TWO", "sess-1", "5h 40% → 55% · ceiling 97 · resets 14:30 (2h30) · 1 helper, room for 9 · "
+                                    "0 deferred · 7d 81% · observe")]
+    for name, sid, line in fives:
+        assert _ts_fixture(f"{name}_LINE") == line
+        b = json.loads(_ts_fixture(name))
+        assert admission.band_line(admission.session_band(b, sid), now) == line
+        marked = {**b, "window": window}
+        if "accounts" in marked:
+            marked["accounts"] = {k: {**v, "window": window} for k, v in marked["accounts"].items()}
+        assert admission.band_line(admission.session_band(marked, sid), now) == line
+
+
+def _none_entry(p7, reset=WEEK, **kw):
+    return {"window": "none", "P": None, "peak": None, "room": None, "P7": p7,
+            "resetsAt": iso(reset) if reset is not None else None, "bound": "seven_day", **kw}
+
+
+@pytest.mark.parametrize("entry,want", [
+    (_none_entry(62), ("1h", "within plan usage, 7d 62%")),
+    (_none_entry(72.5), ("1h", "within plan usage, 7d 72.5%")),
+    (_none_entry(99.5), ("1h", "within plan usage, 7d 99.5%")),
+    (_none_entry(100), ("5m", "past plan usage, 7d 100%")),
+    (_none_entry(104.5), ("5m", "past plan usage, 7d 104.5%")),
+    (_none_entry(62, NOW), (None, rules.UNKNOWN)),
+    (_none_entry(62, NOW - timedelta(hours=1)), (None, rules.UNKNOWN)),
+    (_none_entry(62, None), (None, rules.UNKNOWN)),
+    (_none_entry(None), (None, rules.UNKNOWN)),
+    (_none_entry("62"), (None, rules.UNKNOWN)),
+    (_none_entry(True), (None, rules.UNKNOWN)),
+], ids=["below", "below-fraction", "just-below", "at-plan", "past-plan", "reset-now", "reset-past",
+        "no-reset", "p7-null", "p7-string", "p7-bool"])
+def test_lifetime_none_by_seven_day(entry, want):
+    assert rules.lifetime({}, "/nonexistent", entry, now=NOW) == want
+
+
+def test_lifetime_none_by_seven_day_on_the_entry_decide_writes():
+    """S42's lifetime assertion on this entry, moved here and turned (packet S43 ruling 6)."""
+    b = admission.band(rising(61, 62), NOW, settings(), tz=UTC)
+    assert b["window"] == "none"
+    assert rules.lifetime({}, "/nonexistent", b, now=NOW) == ("1h", "within plan usage, 7d 62%")
+
+
+def test_lifetime_none_by_seven_day_leaves_every_rule_above_it():
+    b = _none_entry(100)
+    assert rules.lifetime({"FORCE_PROMPT_CACHING_5M": "1"}, "/nonexistent", b, now=NOW) == ("5m", "FORCE_PROMPT_CACHING_5M")
+    assert rules.lifetime({"ENABLE_PROMPT_CACHING_1H": "1"}, "/nonexistent", b, now=NOW) == ("1h", "ENABLE_PROMPT_CACHING_1H")
+    assert rules.lifetime({"DISABLE_PROMPT_CACHING": "1"}, "/nonexistent", b, now=NOW) == ("off", "DISABLE_PROMPT_CACHING")
+    assert rules.lifetime({"CLAUDE_CODE_USE_BEDROCK": "1"}, "/nonexistent", b, now=NOW) == ("5m", "a cloud provider")
+    assert rules.lifetime({"ANTHROPIC_API_KEY": "x"}, "/nonexistent", b, now=NOW)[0] is None
+
+
+@pytest.mark.parametrize("marks", [{}, {"window": "five_hour"}, {"window": "auto"}, {"window": None}])
+def test_lifetime_none_by_seven_day_leaves_a_five_hour_band(marks):
+    five = {"P": 41, "P7": 99.5, "resetsAt": iso(FIVE), **marks}
+    assert rules.lifetime({}, "/nonexistent", five, now=NOW) == ("1h", "within plan usage, 5h 41%")
+    assert rules.lifetime({}, "/nonexistent", {**five, "P7": 100}, now=NOW) == ("5m", "past plan usage, 7d 100%")
+    assert rules.lifetime({}, "/nonexistent", {**five, "P": 100}, now=NOW) == ("5m", "past plan usage, 5h 100%")
+    assert rules.lifetime({}, "/nonexistent", {**five, "P": None}, now=NOW) == (None, rules.UNKNOWN)
 
 
 # ---- Amendment 1, F1: the stale gate holds a relay ask across logins ----------------------------

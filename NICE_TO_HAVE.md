@@ -6,6 +6,10 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## S43, the lines on a login with no five-hour window (2026-10-30)
+- S4: `rules.py`'s rendered waiting rule still reads `(room for 0, or a usage limit hit)`, and `tests/test_rules.py` pins it, while the charter's pattern and the two docs now name the week and the band too; the packet allows only `lifetime` in that file. A packet that touches the rendered rules takes it.
+- S4: the twins differ on a stamp at datetime's very ends: Python's `_wall` refuses 0001-01-01 and 9999-12-31, `wall` in `session.ts` takes them. Older than this change and on both lines; `_stamp` never writes one.
+
 ## The research site's vendor-docs check (2026-10-14): one behaviour item left
 - S4: PreCompact's quiet pass rests on an undocumented reading, that a passing PreCompact's stdout becomes the compaction's custom instructions (observed on claude 2.1.296; `claude_session/hooks.py` `QUIET_PASS`). The "Hooks reference" of 2026-10-14 sends most events' passing stdout to the debug log and does not list PreCompact as an exception. Add a check that fails loudly when the behaviour changes, such as a `doctor` probe or a gated live test that runs a manual `/compact` under a PreCompact hook printing a marker and looks for it in the summary. It needs a real `claude`, so it waits for a sitting that may run one. Source: the research site's fix prompt, item 8.
 

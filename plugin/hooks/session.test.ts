@@ -21,6 +21,14 @@ const BAND_JSON = '/state/admission/band.json'
 // no account draws the top level, BAND_LINE. tests/test_s35.py reads these two lines too.
 const BAND_TWO = '{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00", "accounts": {"2026-10-17T05:00Z": {"P": 40, "peak": 55.2, "ceiling": 97, "resetsAt": "2026-10-12T14:30:00+00:00", "until": "2026-10-12T14:30:00+00:00", "bound": "five_hour", "running": 1, "room": 9, "deferred": 0, "P7": 81, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, "2026-10-21T22:00Z": {"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}}, "sessions": {"sess-1": "2026-10-17T05:00Z", "sess-2": "2026-10-21T22:00Z"}}'
 const BAND_TWO_LINE = '5h 40% → 55% · ceiling 97 · resets 14:30 (2h30) · 1 helper, room for 9 · 0 deferred · 7d 81% · observe'
+// A login with no five-hour window (packet S43 ruling 3): its line, with no countdown, no
+// ceiling and no room; the same entry with no week reading; and the corners, [entry, line]
+// each. tests/test_window_mode.py reads these lines too.
+const BAND_NONE = '{"window": "none", "slot": "Fri-1300Z", "P": null, "peak": null, "room": null, "P7": 62, "ceiling_7d": 97, "resetsAt": "2026-10-16T13:00:00+00:00", "until": "2026-10-16T13:00:00+00:00", "bound": "seven_day", "running": 3, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
+const BAND_NONE_LINE = 'no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe'
+const BAND_NONE_BARE = '{"window": "none", "slot": null, "P": null, "peak": null, "room": null, "P7": null, "ceiling_7d": 97, "resetsAt": null, "until": null, "bound": "seven_day", "running": 3, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}'
+const BAND_NONE_BARE_LINE = 'no 5h window · 3 helpers · observe'
+const BAND_NONE_CASES = '[[{"window": "none", "until": "2026-10-16T13:00:00+00:00", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Fri 13:00"], [{"window": "none", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Sat 09:00"], [{"window": "none", "until": "soon", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Sat 09:00"], [{"window": "none", "until": "soon", "resetsAt": 7}, "no 5h window"], [{"window": "none", "until": "2026-10-16T13:00:00"}, "no 5h window"], [{"window": "none", "until": "2026-02-31T13:00:00+00:00"}, "no 5h window"], [{"window": "none", "until": "0000-03-01T13:00:00+00:00"}, "no 5h window"], [{"window": "none", "until": "2026-10-17T00:30:00+14:00"}, "no 5h window · week resets Sat 00:30"], [{"window": "none", "until": "2026-10-16T23:30:00-07:00"}, "no 5h window · week resets Fri 23:30"], [{"window": "none", "until": "2026-10-16T13:00Z"}, "no 5h window · week resets Fri 13:00"], [{"window": "none", "until": "2028-02-29T13:00:00+00:00"}, "no 5h window · week resets Tue 13:00"], [{"window": "none", "until": "2100-03-01T13:00:00+00:00"}, "no 5h window · week resets Mon 13:00"], [{"window": "none", "P": 72, "peak": 91, "ceiling": 97, "room": 2, "deferred": 1, "P7": 41, "resetsAt": "2026-10-16T13:00:00+00:00", "bound": "five_hour"}, "no 5h window · 7d 41% · week resets Fri 13:00"], [{"window": "none", "P7": 61.5}, "no 5h window · 7d 62%"], [{"window": "none", "P7": "62"}, "no 5h window"], [{"window": "none", "P7": true}, "no 5h window"], [{"window": "none", "running": 1}, "no 5h window · 1 helper"], [{"window": "none", "running": 0}, "no 5h window · 0 helpers"], [{"window": "none", "mode": "enforce"}, "no 5h window"], [{"window": "none", "at": "2026-10-12T11:58:00+00:00"}, "no 5h window"], [{"window": "none", "at": "2026-10-12T11:57:00+00:00"}, "no 5h window · 180s old"]]'
 
 const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
 const NO_METER = 'session: no meter · agentik-session doctor'
@@ -254,6 +262,43 @@ test('no reading: 5h no reading', async (t: any, on: any) => {
     [BAND_JSON]: JSON.stringify({ mode: 'observe', at: '2026-10-12T11:57:00+00:00' }) })
   expect(texts(tree)[1]).toBe('5h no reading · observe · 180s old')
 })
+
+test('s43: a login with no five-hour window: its own line, the text Python draws', async (t: any, on: any) => {
+  const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND_NONE })
+  expect(texts(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_NONE_LINE])
+})
+
+test('s43: a none entry with no week reading: the parts with a figure', async (t: any, on: any) => {
+  const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND_NONE_BARE })
+  expect(texts(tree)[1]).toBe(BAND_NONE_BARE_LINE)
+})
+
+test('s43: a none account draws its line beside a five-hour top level', async (t: any, on: any) => {
+  const two = JSON.parse(BAND)
+  two.accounts = { k: JSON.parse(BAND_NONE) }
+  two.sessions = { 'sess-1': 'k' }
+  const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: JSON.stringify(two) })
+  expect(texts(tree)[1]).toBe(BAND_NONE_LINE)
+})
+
+for (const [entry, line] of JSON.parse(BAND_NONE_CASES)) {
+  test(`s43: a none entry's corner, the case Python reads: ${JSON.stringify(entry)}`, async (t: any, on: any) => {
+    const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: JSON.stringify(entry) })
+    expect(texts(tree)[1]).toBe(line)
+  })
+}
+
+for (const [band5, line] of [[BAND, BAND_LINE], [BAND_WEEK, BAND_WEEK_LINE], [BAND_TWO, BAND_TWO_LINE]]) {
+  for (const window of ['five_hour', 'auto', 'NONE', null, 7, ['none']]) {
+    test(`s43: window ${JSON.stringify(window)} draws the five-hour line, byte for byte: ${line}`, async (t: any, on: any) => {
+      const o = JSON.parse(band5)
+      o.window = window
+      for (const a of Object.values(o.accounts ?? {})) (a as any).window = window
+      const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: JSON.stringify(o) })
+      expect(texts(tree)[1]).toBe(line)
+    })
+  }
+}
 
 test('while hasSurvey: neither line, and what next gives', async (t: any, on: any) => {
   const survey = { type: 'Text', props: {}, children: ['survey: how was it?'] }

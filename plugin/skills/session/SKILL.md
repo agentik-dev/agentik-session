@@ -171,7 +171,7 @@ whole, as resolved.
   owner must see goes in a file under `history/`, a PushNotification, or a
   turn that ends on text and calls no ScheduleWakeup: text written before a
   ScheduleWakeup call was not shown at the terminal on 2026-10-21. A wait on the
-  usage meter (room for 0, or a usage limit hit) is not WAITING: the Next
+  usage meter (room for 0, a usage limit hit, the week or the band) is not WAITING: the Next
   act stays the act, the wake is the band's reset or one fallback, whichever
   is first, and it never counts toward n.
 - The prompt cache's lifetime sets how long an idle wait may be. On 1h (a
@@ -215,7 +215,7 @@ Before each spawn and each SendMessage resume the module also runs `agentik-sess
 
 The window: `record` and `admit` rewrite `<state>/admission/band.json`, and the band draws it as a second line, `5h <P>% → <peak>% · ceiling <c> · resets <HH:MM> (<h>h<mm>) · <n> helpers, room for <r> · <d> deferred · 7d <P7>%` (then `observe`); the prompt hook adds the same line to the budget context. `Room for N` means N more helpers fit under the ceiling: pull work forward. `agentik-session report` ends with each five-hour window `held` or `idle`, `under 90` marked.
 
-A login's window mode is read from its readings at every call: `five_hour` by default; `none` when, since its last list carrying a five-hour entry, one session shows the week up a whole point over at least 30 minutes with no five-hour entry. On `none` a verdict is `denied` at `ceiling_7d`, else `admitted`, and no band or peak applies; nothing waits for a band. band.json's entries carry `window` and `slot` (`Wed-1500Z`), and its top level is the current login. Override with `session.admission.window: auto | five_hour | none`, or `windows: {Wed-1500Z: none}` per login. Until the line changes, a `none` login's band reads `5h no reading · week resets HH:MM (h:mm), 5h HH:MM`, the `5h` time being the week's reset.
+A login's window mode is read from its readings at every call: `five_hour` by default; `none` when, since its last list carrying a five-hour entry, one session shows the week up a whole point over at least 30 minutes with no five-hour entry. On `none` a verdict is `denied` at `ceiling_7d`, else `admitted`, and no band or peak applies; nothing waits for a band. band.json's entries carry `window` and `slot` (`Wed-1500Z`), and its top level is the current login. Override with `session.admission.window: auto | five_hour | none`, or `windows: {Wed-1500Z: none}` per login. A `none` login's band reads `no 5h window · 7d <P7>% · week resets <Ddd> <HH:MM> · <n> helpers` (then `observe`), each part left out with no figure, and its prompt cache's lifetime reads the week: 1h under 100%, 5m at 100% or past.
 
 The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `agentik-session measure record --session <id>` (exit 0, 1 no session, 2 refused, an unreadable window included), which writes `measure.json` and, when the window has moved, rewrites `resolved.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. Its `context.window` is the window pick's first source; its other figures decide nothing, and the budget never reads it.
 
