@@ -352,5 +352,8 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## sc1, the bare-machine proof (2026-10-31, S4)
 - Until sc3 the doctor passes 3.9 while `make install`'s launcher still runs `python -P` and its interpreter search wants 3.11 (`Makefile`, `install-wrapper.sh`), so `make install PYTHON=<a 3.9>` writes a launcher that exits 2. Named for sc3; two install tests wait for 3.11 under the floor.
-- `-- -- budget`: 3.12 reads it, 3.9 refuses it. A form with no use, left out of the table.
+- `-- -- budget`: base's stock parser under 3.12.7 refuses it; head accepts it on 3.12 and refuses it on 3.9. A form with no use, left out of the table.
+- `mod -- -h` now prints help and exits 0, where base refused it: newly accepted, as are `gate run R a --label t b` and `charter close F --exit X G`, the charter's two forms.
+- `gate.py:640`: a non-UTF-8 gate command crashes the runner with UnicodeEncodeError, at base too.
+- `gate wait` exits 0 whatever the job's code, as the README states, so a background Bash's exit reads green on a red job. Lead: a `--code` flag that exits the job's code.
 - `scripts/bare-proof`'s write detector is a Python audit hook: it sees the tool's own process, and a child's HOME, not what `git` or the gate's detached runner write themselves. The runner's state is read under `$T` and its job's HOME is asserted.
