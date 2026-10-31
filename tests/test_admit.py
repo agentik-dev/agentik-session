@@ -79,9 +79,12 @@ DENIED = ("admission: not started. The seven-day window is at 98% and resets Mon
 
 
 def test_no_five_hour_reading_is_unread():
-    rows = [reading(at(13), 98, at(0, day=19), kind="seven_day")]
-    v = decide(rows, at(13, 20))
+    v = decide([], at(13, 20))                                  # neither window stays unread
     assert (v["verdict"], v["mode"], v["text"], v["peak"]) == ("unread", "observe", "", None)
+    rows = [reading(at(13), 98, at(0, day=19), kind="seven_day")]   # a spent week alone is denied
+    v = decide(rows, at(13, 20))
+    assert (v["verdict"], v["mode"], v["peak"]) == ("denied", "observe", None)
+    assert v["text"].startswith("admission: not started. The seven-day window is at 98%")
 
 
 def test_a_reading_past_its_reset_is_stale_and_admitted():
@@ -301,7 +304,7 @@ def test_admit_appends_one_verdict_line_and_prints_the_answer(state):
     rc, out, err = run("admit", ask(tool_use_id="toolu_01"))
     assert (rc, err) == (0, "")
     got = json.loads(out)
-    assert list(got) == ["verdict", "mode", "text", "peak"]
+    assert list(got) == ["verdict", "mode", "text", "peak", "window", "resume_at"]
     assert (got["verdict"], got["mode"], got["text"]) == ("admitted", "observe", "")
     last = lines(state)[-1]
     assert list(last) == ["ts", "session", "kind", "tool_use_id", "verdict", "mode", "peak",
