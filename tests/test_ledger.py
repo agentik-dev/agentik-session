@@ -14,7 +14,7 @@ FIX = Path(__file__).resolve().parent / "fixtures" / "meter"
 
 def test_keys_are_a_superset_of_burn_reports_per_session():
     assert set(ledger.PER_SESSION_KEYS) <= set(ledger.LEDGER_KEYS)
-    assert len(set(ledger.LEDGER_KEYS)) == len(ledger.LEDGER_KEYS) == 19
+    assert len(set(ledger.LEDGER_KEYS)) == len(ledger.LEDGER_KEYS) == 21
 
 
 def test_unknown_key_is_refused_and_nothing_written(tmp_path):
