@@ -2,13 +2,14 @@
 while its week rises stops pacing against five hours; every five-hour behaviour stays for
 one that has it, but the four mode-free fixes. No test depends on real time: every `now`
 is passed in."""
+import io
 import json
 import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from claude_session import admission, config, measure, resolver, rules, yamlsubset
+from claude_session import admission, cli, config, measure, resolver, rules, yamlsubset
 
 UTC = timezone.utc
 NOW = datetime(2026, 10, 30, 20, 0, tzinfo=UTC)
@@ -654,3 +655,37 @@ def test_none_entry_reads_only_a_fresh_week():
     rows = [reading(at(60), L7(50, at(10)))]
     b = admission.band(rows, NOW, settings(window="none"), tz=UTC)
     assert (b["window"], b["P7"], b["resetsAt"], b["until"]) == ("none", None, None, None)
+
+
+# ---- Amendment 2: round 2's regression and three survivors ---------------------------------------
+
+def test_a_user_layer_nested_past_the_stack_does_not_break_admission_admit(capsys, monkeypatch):
+    """Through the verb: a session with no resolved file reads the override, and that read
+    never raises. Deep enough to pass the interpreter's limit from any caller's stack."""
+    nested = "defaults:\n" + "".join(" " * i + f"k{i}:\n" for i in range(1, 1500))
+    user_layer(nested)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"rateLimits": L5(40, 50)})))
+    assert cli.main(["admission", "admit", "--session", "row-sess-1111"]) == 0
+    assert json.loads(capsys.readouterr().out)["window"] == "five_hour"
+
+
+def test_stale_gate_a_current_login_s_keyed_line_holds_a_row():
+    rows = _stale_two() + [_verdict(NOW - timedelta(seconds=30), SID, "n/1/1")]
+    assert decide(rows, ask(tool_use_id="n/2/1"), "row-2")["verdict"] == "wait"
+
+
+def test_no_resolved_file_a_directory_at_the_user_layer_reads_as_auto():
+    user_layer("")
+    p = config.Path(os.environ["HOME"]) / ".claude" / "agentik" / "profiles.yaml"
+    p.unlink()
+    p.mkdir()
+    a = answer(dict(os.environ), L5(40, 50))
+    assert (a["verdict"], a["window"]) == ("admitted", "five_hour")
+
+
+def test_a_torn_resolved_file_still_reads_the_user_layer_override(tmp_path):
+    user_layer("defaults:\n  admission:\n    window: none\n")
+    env = world(tmp_path, "")
+    p = config.state_dir(env) / "sessions" / SID / "resolved.json"
+    p.write_text(p.read_text()[:40])
+    assert answer(env, L7(50))["window"] == "none"
