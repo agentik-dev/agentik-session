@@ -6,17 +6,17 @@
 | pin | 8b7297d (branch `sc1-proof`); worktree `.claude/worktrees/sc1-proof` |
 | wall | as the parent's, and `claude plugin test plugin` is allowed: it uses no model |
 | may touch | `scripts/bare-proof`, `claude_session/cli.py` (`_Parser` only), `tests/` (the parser's table, and any test of the proof), `NICE_TO_HAVE.md`, the parent packet (this amendment as its last section, or `design/packets/sc1-proof-a1.md` if doclint's ceiling needs it), the charter |
-| acceptance | §2's mutants each make `scripts/bare-proof` exit nonzero, each quoted by its failing row; the unmutated proof exits 0 with its last line `bare-proof: go`; §3's forms pinned by a test green under `make test-floor` and under `.venv`; `make hygiene` exits 0 |
+| acceptance | §2's mutants each make `scripts/bare-proof` exit nonzero, each quoted by its failing row; the unmutated proof exits 0 with its last line `bare-proof: go`; §3's forms pinned by a test green under the floor and under `.venv`, by the verify row's gates; `make hygiene` exits 0 |
 | verify | `agentik session gate run <absolute worktree path> -- make test-floor`, then the same with `make check`; each `agentik session gate wait <id>`. **`gate wait` exits 0 whatever the job's code: read the code from its line** |
 | budget | acts: 0 this amendment; 1 the parser, §3; 2 the proof's reach, §2; 3 the NICE lines, §4; 4 the rerun and the charter. 70 tool calls, stop at 80% (commit the act in flight), 180k, `claude-opus-5-5`; one commit per act |
 
 Mutants run only in a scratch copy, never the worktree; a synthetic transcript will do for them. Keep load below 20: this Mac is shared.
 
-## 1. Why this blocks
+## 1. What the source says: why this blocks
 
 The slice proves or kills design/04. The builder's go stands in substance, by the refuter's own diff of 13 hook calls under 3.9 and 3.12, but the proof could not have shown it: `hooks.py:764-767` turns any handler exception into `{}`, exit 0, so the ten-events row passes on a dead handler. sc2 moves this test into the suite, so it must see what it claims.
 
-## 2. The proof's reach (`scripts/bare-proof`)
+## 2. Rulings: the proof's reach (`scripts/bare-proof`)
 
 | finding | ruling | the mutant that must go red |
 |---|---|---|
@@ -30,13 +30,13 @@ The slice proves or kills design/04. The builder's go stands in substance, by th
 
 `spawn_serve` (`gate.py:478`) drops `-I` and the prefix, leaving .pyc files under `$T/Library/Caches/com.apple.python`, unseen by the bytecode row. sc1 moves no code: **the row counts .pyc anywhere under `$T` outside the prefix and prints that figure, naming `spawn_serve` as sc2's, without failing on it.** sc2 fixes it and makes the row strict.
 
-## 3. The parser (`claude_session/cli.py`)
+## 3. Interfaces: the parser (`claude_session/cli.py`)
 
 - **F3 S3, :981:** under 3.9 and 3.10, `--opt=--` reads as `[]`: `charter close --exit=-- F` writes `exit taken: goal met` against base 3.12's `exit taken: --`. Hold `--` in a `_get_values` override.
 - **F4 S3, :1000:** the mark reaches an error message: `config -- -x` prints `invalid choice: '\x00-x'`, where base printed `'-x'`. Strip it in a `_get_value` override. The post-parse loop goes if the two overrides replace it; the refuter's scratch form did so on 3.9.6 alone, so try it on the rest.
 - **Pin both** in a test, with parent ruling 1's forms, and assert no value or message holds a NUL. Run the table on each interpreter this Mac has that the refuter named (3.9.6, 3.9.20, 3.10.15, 3.12.7, 3.14.7) and quote the counts; the suite's test need only run under its own interpreter. A form 3.12 accepted at 8ed5667 keeps its meaning.
 
-## 4. The NICE lines, S4, in `NICE_TO_HAVE.md`
+## 4. Findings that name this row: the NICE lines, S4, in `NICE_TO_HAVE.md`
 
 - Correct the `-- -- budget` line: base 3.12.7 refuses it; head accepts on 3.12 and refuses on 3.9.
 - `mod -- -h` now prints help, exit 0, where base refused: newly accepted, as are the charter's two forms.
