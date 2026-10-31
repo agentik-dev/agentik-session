@@ -374,8 +374,9 @@ test('mod start never answering: 24 tries, then the doctor line', async (t: any,
 // catch itself is tested under Amendment 1's fake `$`, below).
 test('clock.sleep refusing the loop: no stray rejection, no further call, session.start answered', async (t: any, on: any) => {
   let refused = 0
-  // A loop that went on past a refusal would spin: the fourth call parks it, so that loop
-  // fails the count below rather than the runner's wall.
+  // A loop that went on past a refusal would spin: the fourth call parks this test's loop, so
+  // the count below fails. Such a `catch { continue }` is red either way: the refuter's run hit
+  // the wall instead (rc 124), since earlier tests' loops spin once their handlers are gone.
   const sleep = ($: any, e: any) => {
     if (Number(e.ms) !== 5000 || refused >= 3) return new Promise(() => {})
     refused += 1
