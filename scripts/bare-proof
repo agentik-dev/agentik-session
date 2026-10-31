@@ -199,7 +199,7 @@ class Proof:
                         newest = (st.st_mtime, path)
             src = newest[1]
         if not src or not os.path.isfile(src):
-            raise SystemExit("bare-proof: no transcript over 1 MB; name one with --transcript")
+            raise OSError("no transcript over 1 MB; name one with --transcript")
         dest = os.path.join(self.t, ".claude", "projects", "-proof", str(uuid.uuid4()) + ".jsonl")
         os.makedirs(os.path.dirname(dest))
         shutil.copyfile(src, dest)
@@ -673,7 +673,10 @@ class Proof:
                 continue
             ps = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
             if self.t in ps.stdout:
-                os.kill(pid, signal.SIGTERM)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue
                 for _ in range(50):
                     if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode:
                         break
@@ -708,7 +711,11 @@ class Proof:
     def run(self):
         self.cache_there = os.path.exists(os.path.expanduser("~/.cache/agentik"))
         self.first_pyc = 0
-        self.assemble()
+        try:
+            self.assemble()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+            print("bare-proof: stop: setup: %s: %s" % (type(e).__name__, str(e)[:160]))
+            return 2
         print("bare-proof: %s at %s, transcript %d MB, under %s" % (
             self.version, self.git("rev-parse", "--short", "HEAD"),
             os.path.getsize(self.script) >> 20, sys.version.split()[0]), flush=True)
