@@ -304,7 +304,7 @@ def test_admit_appends_one_verdict_line_and_prints_the_answer(state):
     rc, out, err = run("admit", ask(tool_use_id="toolu_01"))
     assert (rc, err) == (0, "")
     got = json.loads(out)
-    assert list(got) == ["verdict", "mode", "text", "peak"]
+    assert list(got) == ["verdict", "mode", "text", "peak", "window", "resume_at"]
     assert (got["verdict"], got["mode"], got["text"]) == ("admitted", "observe", "")
     last = lines(state)[-1]
     assert list(last) == ["ts", "session", "kind", "tool_use_id", "verdict", "mode", "peak",

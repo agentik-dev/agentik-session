@@ -50,6 +50,7 @@ The rate model needs no token weights, since the plan's weights are not publishe
 - **In `-p`** (once enforced), with no wake promised: `admission: not started. The five-hour window is at 88% and resets at 14:05. Continue in this thread.`
 - **Denied** when the seven-day reading crosses its own ceiling: `admission: not started. The seven-day window is at 96% and resets Mon 00:00. Spawn nothing more; checkpoint and leave the next step to the owner.`
 - **No reading** (off a subscription, or none yet): admitted, recorded `unread`.
+  Amended 2026-10-30 by packet S42: with no five-hour reading a fresh seven-day at its ceiling is `denied`, a request with no list is judged on its session's key else the current login, an entry with a null kind or percent is skipped; a login with no five-hour window (`none`) reads only `denied` at `ceiling_7d`, else `admitted`; the answer gains `window` and `resume_at`.
 - **A stale reading** (its `resetsAt` passed): one spawn at a time across the machine until a fresh reading lands. The others read `admission: not started. The window has no fresh reading yet; retry in a minute.`
 - **The hook fails** (a lock wait, a timeout): a `.catch` calls `next(e)` and records `unchecked`, and the band shows it.
 
@@ -60,6 +61,8 @@ The deferred list lives in the ledger, keyed by the chain (`CLAUDE_SESSION_CHAIN
 ### §3.5 The band
 
 The band is one line in `AbovePrompt`, cut to `bodyColumns`. It yields while `hasSurvey` is true and keeps other mods' lines. For example: `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41%`. The prompt hook adds the same line to the budget context. With two logins on one Mac, a reading's seven-day `resetsAt` keys its account, and each session draws its band, and each verdict projects, from its own account's lines alone (packet S35).
+
+Amended 2026-10-30 by packet S42: each entry gains `window` and `slot`, band.json's top level is the current login's entry rather than a mix, `accounts` is also written when any key is `none`, and a `none` entry carries the week's reading and reset with no peak or room.
 
 ### §3.6 Using 90% without crossing 100
 
