@@ -27,7 +27,7 @@
 ## 2. Rulings
 
 1. **The tests the record changes**, and no other: `test_band_on_a_synthetic_ledger_matches_a_hand_count`, `test_no_five_hour_reading_is_mode_and_at_only` ([none], [past-reset]), `test_record_rewrites_band_json_atomically_and_0600` for `window` and `slot`; `test_s35_two_accounts_each_session_draws_its_own_window`, `test_s35_a_session_with_no_account_draws_the_top_level` for the top level; `test_no_five_hour_reading_is_unread`: seven_day 98 alone is `denied`, neither window stays `unread`. Another that must change is a finding: stop and name it.
-2. **What a `none` account's line reads until S43**: `5h no reading · week resets HH:MM (h:mm) · 3 helpers · 7d 62% · observe`, today's `band_line` and its twin on §4's entry, unedited; `rules.lifetime` answers `(None, unknown)`, as today.
+2. **What a `none` account's line reads until S43**: `5h no reading · week resets HH:MM (h:mm), 5h HH:MM · 3 helpers · 7d 62% · observe` (the `5h HH:MM` is the week's reset), today's `band_line` on the entry, unedited; `rules.lifetime` answers `(None, unknown)`, as today.
 3. **The band in the answer** comes with `demand` in S44: S42's answer gains `window` and `resume_at` alone. The `verdict` line is unchanged.
 4. **Forks decided here, reversible**.
    - `rules.admission` carries `window` and `windows` only when set, so `test_the_defaults` stays green unchanged; `window()` reads them with defaults [`settings`].
@@ -42,7 +42,7 @@
 
 ## 3. Interfaces (signatures, not prose)
 
-`admission.window(rows, key, now, settings) -> str`; `admission.slot(key) -> str | None`; `admission.band(rows, now, settings, tz=None, key=None, mode=None)`; `admission.decide` returns `window` and `resume_at` beside today's keys; `admission.admit` answers `{verdict, mode, text, peak, window, resume_at}` (and `notes`); `rules.admission` adds `window` and `windows` when set.
+`admission.window(rows, key, now, settings) -> str`; `admission.slot(key) -> str | None`; `admission.band(rows, now, settings, tz=None, key=None, mode=None)`; `admission.decide` returns `window` and `resume_at` beside today's keys; `admission.admit` answers `{verdict, mode, text, peak, window, resume_at}` (and `notes`).
 
 ## 4. Findings that name this row
 

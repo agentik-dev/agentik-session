@@ -377,7 +377,7 @@ def _two_logins():
     five = FIVE
     rows = [reading(at(40), L5(70, 50, five, OTHER), S2)]
     rows += [spawn(at(5), f"h{i}", sid=S2) for i in range(14)]
-    return rows + [reading(at(30), L5(70, 80, five), SID)]
+    return rows + [reading(at(30), L5(50, 80, five), SID)]
 
 
 def test_no_rate_limits_judged_on_current_login():
@@ -386,7 +386,7 @@ def test_no_rate_limits_judged_on_current_login():
         v = admission.decide(rows, req, FRESH, NOW, settings(), tz=UTC)
         want = admission.decide([r for r in rows if r["session"] == SID], req, FRESH, NOW, settings(), tz=UTC)
         assert v == want and v["verdict"] == "admitted"
-    mix = admission.decide(rows, ask(rateLimits=L5(70, 80)), FRESH, NOW, settings(), tz=UTC)
+    mix = admission.decide(rows, ask(rateLimits=L5(50, 80)), FRESH, NOW, settings(), tz=UTC)
     assert mix["verdict"] == "admitted"                                  # its own key, as before
 
 
@@ -412,7 +412,7 @@ def test_null_entry_skipped_not_refused():
     assert answer(env, good)["verdict"] == "admitted"
     b = json.loads((admission.directory(env) / admission.BAND).read_text())
     assert (b["P"], b["P7"]) == (40, 50)
-    measure.shape({"context": None, "rateLimits": nulls, "cost": None, "changed": []})
+    measure.shape({"context": {"window": 200000}, "rateLimits": nulls, "cost": None, "changed": []})
 
 
 @pytest.mark.parametrize("bad", [{"kind": "five_hour"}, {"percentUsed": 1},
@@ -428,7 +428,7 @@ def test_top_level_is_current_login():
     b = admission.bands(rows, NOW, settings(), tz=UTC)
     top = {k: v for k, v in b.items() if k not in ("accounts", "sessions")}
     assert top == b["accounts"][KEY]                                     # B wrote last
-    assert (top["P"], top["running"], top["P7"]) == (70, 0, 80)          # not the mix's 14 helpers
+    assert (top["P"], top["running"], top["P7"]) == (50, 0, 80)          # not the mix's 14 helpers
     assert b["accounts"][KEY2]["running"] == 14
     assert admission.session_band(b, FRESH) is b
 
@@ -476,6 +476,6 @@ def test_none_line_reads_as_today_until_s43():
     """Packet S42 ruling 2, today's `band_line` on the record's entry; S43 replaces this line."""
     rows = rising(61, 62) + [spawn(at(5), "h1"), spawn(at(4), "h2"), spawn(at(3), "h3")]
     b = admission.band(rows, NOW, settings(), tz=UTC)
-    assert admission.band_line(b, NOW) == ("5h no reading · week resets 21:00 (169h00) · "
+    assert admission.band_line(b, NOW) == ("5h no reading · week resets 21:00 (169h00), 5h 21:00 · "
                                            "3 helpers · 7d 62% · observe")
     assert rules.lifetime({}, "/nonexistent", b, now=NOW)[0] is None

@@ -408,6 +408,35 @@ ADMISSION_BOUNDS = {"ceiling": (0, 100, False), "margin": (0, 100, True),
                     "ceiling_7d": (0, 100, False), "a": (0, 10, True), "b": (0, 10, True),
                     "life": (0, 300, False)}
 ENFORCE = "session.admission.mode: enforce is not built yet (S27a); read as observe"
+# The window mode's override (packet S42). A slot is a login's weekly reset, weekday and
+# minute: spelled to load as a key of the YAML subset, which admits no space or colon.
+WINDOW_MODES = ("auto", "five_hour", "none")
+_SLOT = re.compile(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)-(?:[01]\d|2[0-3])[0-5]\dZ\Z")
+
+
+def _window_override(ad: dict, notes: list | None) -> dict:
+    """{window, windows} as far as each is set and readable; each unreadable part is one
+    note and reads as unset, so the rule decides."""
+    out, bad = {}, []
+    w = ad.get("window")
+    if isinstance(w, str) and w in WINDOW_MODES:
+        if w != "auto":
+            out["window"] = w
+    elif w is not None:
+        bad.append(f"session.admission.window: {w!r:.40} is not auto, five_hour or none; read as auto")
+    by = ad.get("windows")
+    if isinstance(by, dict):
+        good = {k: v for k, v in by.items() if isinstance(k, str) and _SLOT.match(k)
+                and isinstance(v, str) and v in WINDOW_MODES}
+        if good:
+            out["windows"] = good
+        bad += [f"session.admission.windows: {k!r:.40} is not a slot like Wed-1500Z with auto, "
+                "five_hour or none; ignored" for k in by if k not in good]
+    elif by is not None:
+        bad.append("session.admission.windows: not a mapping; ignored")
+    if notes is not None:
+        notes.extend(bad)
+    return out
 
 
 def _real(v, key: str) -> bool:
@@ -420,7 +449,7 @@ def _real(v, key: str) -> bool:
 def admission(session, notes: list | None = None) -> dict:
     """`session.admission` as it binds: `mode` is always `observe` in S26 (`enforce` is
     refused, one note in `notes`, and read as `observe`); every other field is its value
-    when in bounds, else its default."""
+    when in bounds, else its default; `window` and `windows` are there only when set."""
     s = session if isinstance(session, dict) else {}
     ad = s.get("admission") if isinstance(s.get("admission"), dict) else {}
     sd = ad.get("seeds") if isinstance(ad.get("seeds"), dict) else {}
@@ -435,4 +464,4 @@ def admission(session, notes: list | None = None) -> dict:
         "a": sd["a"] if _real(sd.get("a"), "a") else seeds["a"],
         "b": {f: bd[f] if _real(bd.get(f), "b") else v for f, v in seeds["b"].items()},
         "life": sd["life"] if _real(sd.get("life"), "life") else seeds["life"]}
-    return out
+    return {**out, **_window_override(ad, notes)}

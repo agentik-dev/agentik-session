@@ -119,12 +119,16 @@ def context(v, where: str = "context") -> None:
 
 
 def rate_limits(v, where: str = "rateLimits") -> None:
-    """SessionRateLimit[]: kind, percentUsed, resetsAt?; at most MAX_ITEMS."""
+    """SessionRateLimit[]: kind, percentUsed, resetsAt?; at most MAX_ITEMS. A kind or percent
+    that is there and null passes, and the readers skip that entry (packet S42); absent, or
+    any other type, it is refused."""
     for i, r in enumerate(items(v, where)):
         w = f"{where}[{i}]"
         only(r, w, ("kind", "percentUsed", "resetsAt"))
-        text(r.get("kind"), f"{w}.kind", LIMIT_CAP, null=False)
-        number(r.get("percentUsed"), f"{w}.percentUsed")
+        if "kind" not in r or r["kind"] is not None:
+            text(r.get("kind"), f"{w}.kind", LIMIT_CAP, null=False)
+        if "percentUsed" not in r or r["percentUsed"] is not None:
+            number(r.get("percentUsed"), f"{w}.percentUsed")
         text(r.get("resetsAt"), f"{w}.resetsAt", LIMIT_CAP)
 
 
@@ -681,14 +685,20 @@ def _rise(rows, reads: list, now: datetime, T: float, seeds: dict, sids: set,
     rs = runs(rows)
     lv = lives(rs)
     rise, running = f["a"] * len(_active(reads, now, ends(rows)) | sids) * T, 0
+    for r, L, age in _in_flight(rs, lv, now, seeds):
+        running += 1
+        rise += f["b"].get(r["family"], seeds["b"]["other"]) * min(T5, max(L - age, FLOOR))
+    return rise, f, lv, running
+
+
+def _in_flight(rs: list, lv: dict, now: datetime, seeds: dict):
+    """(run, its life, its age) for each helper in flight: no done, and not aged out."""
     for r in rs:
         if r["end"] is None:
             L, out = _life(lv, r["type"], seeds)
             age = _minutes(now - r["start"])
             if 0 <= age <= out:
-                running += 1
-                rise += f["b"].get(r["family"], seeds["b"]["other"]) * min(T5, max(L - age, FLOOR))
-    return rise, f, lv, running
+                yield r, L, age
 
 
 def horizon(resets: datetime, seven: list, now: datetime) -> tuple:
@@ -770,6 +780,21 @@ def _keyed(rows) -> tuple:
     return own, of
 
 
+def _current(of: dict):
+    """The current login: the key of the newest keyed reading (packet S42); None with none."""
+    best = None
+    for t, k in of.values():
+        if best is None or t >= best[0]:
+            best = (t, k)
+    return best[1] if best else None
+
+
+def _login(of: dict, sid, key=None):
+    """The key a request is judged on: its own list's, else its session's, else the current
+    login's (packet S42; a relay ask has no list and no readings)."""
+    return key or of.get(sid, (None, None))[1] or _current(of)
+
+
 def _split(rows, own: list, of: dict) -> dict:
     """key -> its lines: a keyed reading by its own key, any other line by its session's."""
     out: dict = {}
@@ -781,15 +806,76 @@ def _split(rows, own: list, of: dict) -> dict:
 
 
 def scoped(rows, sid, key=None) -> list:
-    """The lines `sid` is judged on: its account's (`key`, else its newest keyed reading's)
-    when the ledger holds two or more keys; else every line."""
+    """The lines `sid` is judged on: its account's (`_login`'s) when the ledger holds two or
+    more keys; else every line."""
     own, of = _keyed(rows)
-    key = key or of.get(sid, (None, None))[1]
+    key = _login(of, sid, key)
     if key is None or len({k for _, k in of.values()} | {key}) < 2:
         return rows
     if isinstance(sid, str):
         of[sid] = (None, key)
     return _split(rows, own, of).get(key, [])
+
+
+# ---- The window mode (packet S42): `five_hour`, or `none` for a login with no such window ----
+# Stateless: recomputed from the rows at each call, with no stored mode, and in doubt
+# `five_hour`, since a false `none` would switch off a Max login's five-hour pacing.
+FIVE_MODE, NO_WINDOW = "five_hour", "none"
+RISE_SPAN = timedelta(minutes=30)         # two counted observations at least this far apart
+RISE_POINTS = 1.0                         # and the week up by at least this
+
+
+def slot(key):
+    """A login's slot, `Wed-1500Z`: the weekday and minute of its week's reset, which the key
+    keeps as the key rolls forward 7 days, spelled to load as a YAML-subset key. None
+    without a key."""
+    try:
+        t = datetime.strptime(key, "%Y-%m-%dT%H:%MZ")
+    except (TypeError, ValueError):
+        return None
+    return f"{DAYS[t.weekday()]}-{t:%H%M}Z"
+
+
+def window(rows, key, now: datetime, settings: dict) -> str:
+    """The login's window mode. The override first: `windows[slot]`, then `window`, when not
+    `auto`. Else `none` when, after the key's newest list carrying five_hour (any such entry,
+    whatever its percent), one session holds two counted observations (a reading or spawn
+    row for the key with seven_day at a finite percent and a future resetsAt, and no
+    five_hour entry) at least RISE_SPAN apart with the week up RISE_POINTS from the earlier
+    to the later. The pair stays in one session because each session's list moves only on
+    its own responses: an idle Max login lists seven_day alone, and those lists differ across
+    sessions while nothing moves. An admit request is not a row and is not evidence."""
+    forced = (settings.get("windows") or {}).get(slot(key), settings.get("window", "auto"))
+    if forced != "auto":
+        return forced
+    if key is None:
+        return FIVE_MODE
+    of = _keyed(rows)[1]
+    counted, last = {}, None
+    for r in rows:
+        t, lims, sid = _when(r.get("ts")), r.get("rateLimits"), _sid(r)
+        if r.get("kind") not in ("reading", "spawn") or t is None or t > now or not isinstance(lims, list):
+            continue
+        own = account(lims)
+        if any(isinstance(x, dict) and x.get("kind") == FIVE for x in lims):
+            # by its own key, else its session's; a session with no key counts for every
+            # key, which only delays a `none` (in doubt, `five_hour`)
+            if (own or of.get(sid, (None, None))[1]) in (key, None) and (last is None or t > last):
+                last = t
+        elif own == key and sid is not None:
+            seen = [x for x in limits(lims, SEVEN, t, sid) if x[3] > now]
+            if seen:
+                counted.setdefault(sid, []).append((t, seen[0][2]))
+    for obs in counted.values():
+        obs = sorted((x for x in obs if last is None or x[0] > last), key=lambda x: x[0])
+        low, j = None, 0
+        for t, pct in obs:
+            while t - obs[j][0] >= RISE_SPAN:
+                low = obs[j][1] if low is None else min(low, obs[j][1])
+                j += 1
+            if low is not None and pct - low >= RISE_POINTS:
+                return NO_WINDOW
+    return FIVE_MODE
 
 
 # ---- The verdict and its texts (design/admission-r1.md §3.3; packet S26 ruling 4) ----
@@ -884,31 +970,50 @@ def _interactive(rows, sid) -> bool:
     return bool(starts) and starts[-1].get("interactive") is True
 
 
+def _stamp(t: datetime, tz) -> str:
+    """A time as band.json writes it: zoned ISO, local (`tz` for tests)."""
+    return _local(t, tz).isoformat(timespec="seconds")
+
+
 def decide(rows, req: dict, sid, now: datetime, settings: dict, tz=None) -> dict:
-    """The verdict, in ruling 4's order: unread, stale (or wait), denied, deferred or
-    not-started, admitted. `peak` is unrounded; None when no fresh reading projects one.
-    Only the lines of the request's account count (`scoped`, packet S35)."""
-    rows = scoped(rows, sid, account(req.get("rateLimits")))
+    """The verdict. On a `five_hour` login, in ruling 4's order: unread (a fresh seven-day at
+    its ceiling is denied there, packet S42), stale (or wait), denied, deferred or
+    not-started, admitted. On a `none` login: denied at `ceiling_7d`, else admitted, no fit
+    and no five-hour line read. `peak` is unrounded; None when no fresh reading projects
+    one. `resume_at` is the reset a holder waits for: the five-hour one, the week's on a
+    weekly denial or a `none` login, None with neither. Only the lines of the request's
+    account count (`scoped`, packet S35)."""
+    given = account(req.get("rateLimits"))
+    mode = window(rows, _login(_keyed(rows)[1], sid, given), now, settings)
+    rows = scoped(rows, sid, given)
     fam = family(req.get("model"), req.get("parentModel"))
     typ = helper_type(req.get("subagentType"), req.get("fork"))
     seeds = settings["seeds"]
     out = {"verdict": "admitted", "mode": settings["mode"], "text": "", "peak": None,
-           "P": None, "T": None, "family": fam, "type": typ}
+           "P": None, "T": None, "family": fam, "type": typ, "window": mode, "resume_at": None}
+    seven = [x for x in readings(rows, SEVEN) + limits(req.get("rateLimits"), SEVEN, now, sid)
+             if x[3] > now]
+    week = _newest(seven) if seven else None
+
+    def weekly(base: dict) -> dict | None:
+        if week is not None and week[2] >= settings["ceiling_7d"]:
+            return {**base, "verdict": "denied", "resume_at": _stamp(week[3], tz),
+                    "text": texts("denied", week[2], week[3], tz=tz)}
+        return None
+    if mode == NO_WINDOW:
+        return weekly(out) or {**out, "resume_at": _stamp(week[3], tz) if week else None}
     five = readings(rows, FIVE) + limits(req.get("rateLimits"), FIVE, now, sid)
     if not five:
-        return {**out, "verdict": "unread"}
+        return weekly(out) or {**out, "verdict": "unread"}
     newest = max(enumerate(five), key=lambda ix: (ix[1][0], ix[0]))[1]
     if newest[3] <= now:
         wait = _stale_in_flight(rows, req, newest[3], now, seeds)
         return {**out, "verdict": "wait" if wait else "stale", "text": texts("wait") if wait else ""}
     p = project(rows, req, sid, now, seeds)
-    out.update(peak=p["peak"], P=p["P"], T=p["T"])
-    seven = [x for x in readings(rows, SEVEN) + limits(req.get("rateLimits"), SEVEN, now, sid)
-             if x[3] > now]
-    if seven:
-        s = max(enumerate(seven), key=lambda ix: (ix[1][0], ix[0]))[1]
-        if s[2] >= settings["ceiling_7d"]:
-            return {**out, "verdict": "denied", "text": texts("denied", s[2], s[3], tz=tz)}
+    out.update(peak=p["peak"], P=p["P"], T=p["T"], resume_at=_stamp(p["resets"], tz))
+    denied = weekly(out)
+    if denied:
+        return denied
     if p["peak"] + settings["margin"] > settings["ceiling"]:
         v = "deferred" if _interactive(rows, sid) else "not-started"
         return {**out, "verdict": v, "text": texts(v, p["P"], p["resets"], p["peak"] - p["P"], tz)}
@@ -964,7 +1069,7 @@ def _round(x, n):
 
 def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
     """Check stdin, then inside the one lock read the ledger, decide and append one
-    `verdict` line; the answer is {verdict, mode, text, peak}, and `notes` when the config
+    `verdict` line; the answer is {verdict, mode, text, peak, window, resume_at}, and `notes` when the config
     left any (an `enforce` read as `observe`). It never refuses a spawn."""
     req = parse_admit(sid, text_in)
     now = now or datetime.now(timezone.utc)
@@ -986,7 +1091,7 @@ def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
         _write_band(d, now, settings)
     finally:
         os.close(fd)
-    out = {k: v[k] for k in ("verdict", "mode", "text", "peak")}
+    out = {k: v[k] for k in ("verdict", "mode", "text", "peak", "window", "resume_at")}
     return {**out, "notes": notes} if notes else out
 
 
@@ -1018,15 +1123,34 @@ def _room(peak: float, each: float, T: float, settings: dict):
     return n
 
 
-def band(rows, now: datetime, settings: dict, tz=None) -> dict:
-    """{P, peak, ceiling, resetsAt, until, bound, running, room, deferred, P7, mode, at}:
+def _band_none(rows, now: datetime, settings: dict, tz, out: dict) -> dict:
+    """A `none` login's entry (packet S42): the week's reading and reset, and the helpers in
+    flight; no fit, no project, no five-hour line read."""
+    seven = [x for x in readings(rows, SEVEN) if x[3] > now]
+    week = _newest(seven) if seven else None
+    reset = _stamp(week[3], tz) if week else None
+    rs = runs(rows)
+    running = sum(1 for _ in _in_flight(rs, lives(rs), now, settings["seeds"]))
+    return {"P": None, "peak": None, "room": None, "P7": _round(week[2], 2) if week else None,
+            "ceiling_7d": settings["ceiling_7d"], "resetsAt": reset, "until": reset,
+            "bound": SEVEN, "running": running, **out}
+
+
+def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> dict:
+    """{P, peak, ceiling, resetsAt, until, bound, running, room, deferred, P7, mode, at, window,
+    slot}, for `key` (else the rows' current login) at `mode` (else `window`'s reading):
     the newest five-hour reading not past its reset (resetsAt, where a meter wait wakes) and
     its peak with no new spawn, the reset its background term runs to (`horizon`'s: until,
     named by bound; fix round F3), the helpers in flight, the room for spawns of the
     parent's family (each costed over the five-hour window), the held verdicts since the
-    window's start, the seven-day reading; {mode, at} alone with no such reading. The times
-    are local (`tz` for tests), so every reader draws the same HH:MM."""
-    out = {"mode": settings["mode"], "at": _ts(now)}
+    window's start, the seven-day reading; {mode, at, window, slot} alone with no such
+    reading; `_band_none`'s on a `none` login. The times are local (`tz` for tests), so every
+    reader draws the same HH:MM."""
+    key = key or _current(_keyed(rows)[1])
+    mode = mode or window(rows, key, now, settings)
+    out = {"mode": settings["mode"], "at": _ts(now), "window": mode, "slot": slot(key)}
+    if mode == NO_WINDOW:
+        return _band_none(rows, now, settings, tz, out)
     reads = readings(rows, FIVE)
     fresh = [x for x in reads if x[3] > now]
     if not fresh:
@@ -1057,21 +1181,25 @@ def band(rows, now: datetime, settings: dict, tz=None) -> dict:
 
 def bands(rows, now: datetime, settings: dict, tz=None) -> dict:
     """band.json's object (packet S35 ruling 4): `band()` over every line, as before; with
-    two or more account keys also `accounts` {key: `band()` over its lines} for the
-    MAX_ACCOUNTS newest and `sessions` {sid: key} for the MAX_SESSIONS newest of those."""
-    out = band(rows, now, settings, tz)
+    two or more account keys, or any `none` one (packet S42), also `accounts` {key: `band()`
+    over its lines} for the MAX_ACCOUNTS newest and `sessions` {sid: key} for the
+    MAX_SESSIONS newest of those, and the top level is the current login's entry."""
     own, of = _keyed(rows)
     newest: dict = {}
     for t, k in of.values():
         newest[k] = max(t, newest.get(k, t))
-    if len(newest) < 2:
-        return out
-    keep = sorted(newest, key=lambda k: newest[k], reverse=True)[:MAX_ACCOUNTS]
+    modes = {k: window(rows, k, now, settings) for k in newest}
+    if len(newest) < 2 and NO_WINDOW not in modes.values():
+        return band(rows, now, settings, tz)
+    current = _current(of)
+    keep = sorted(newest, key=lambda k: (k == current, newest[k]), reverse=True)[:MAX_ACCOUNTS]
     split = _split(rows, own, of)
-    accounts = {k: band(split.get(k, []), now, settings, tz) for k in sorted(keep)}
+    accounts = {k: band(split.get(k, []), now, settings, tz, key=k, mode=modes[k])
+                for k in sorted(keep)}
     sids = sorted((s for s in of if of[s][1] in accounts), key=lambda s: of[s][0],
                   reverse=True)[:MAX_SESSIONS]
-    return {**out, "accounts": accounts, "sessions": {s: of[s][1] for s in sorted(sids)}}
+    return {**accounts[current], "accounts": accounts,
+            "sessions": {s: of[s][1] for s in sorted(sids)}}
 
 
 def session_band(b, sid):
