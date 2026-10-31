@@ -1,11 +1,15 @@
 #!/bin/sh
 # agentik-session, the plugin's own launcher (design/04 §2): the runner beside it under the
-# one interpreter a fresh Mac and this one share. With no Python a hook exits 0, SessionStart
-# says so in a systemMessage, other verbs exit 3 (GUIDE §10).
+# one interpreter a fresh Mac and this one share. With no Python or no runner a hook exits 0,
+# SessionStart says so in a systemMessage, other verbs exit 3 (GUIDE §10): Python's "can't open
+# file" exits 2, and exit 2 from a PreToolUse hook would deny every tool call of a session.
 root=${0%/*}/..
-py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -x "$py" ] || py=$(command -v python3) || {
-    if [ "$1" != hook ]; then echo "agentik-session: no python3, at /usr/bin/python3 or on PATH" >&2; exit 3; fi
-    [ "$2" != SessionStart ] || printf '{"systemMessage": "agentik-session: no python3, at /usr/bin/python3 or on PATH; its hooks do nothing"}\n'
+refuse() {   # the reason, then this launcher's own arguments
+    why=$1
+    if [ "$2" != hook ]; then echo "agentik-session: $why" >&2; exit 3; fi
+    [ "$3" != SessionStart ] || printf '{"systemMessage": "agentik-session: %s; its hooks do nothing"}\n' "$why"
     exit 0
 }
+[ -f "$root/lib/agentik-session" ] && [ -r "$root/lib/agentik-session" ] || refuse "no runner in this plugin, at lib/agentik-session" "$@"
+py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -x "$py" ] || py=$(command -v python3) || refuse "no python3, at /usr/bin/python3 or on PATH" "$@"
 exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" "$root/lib/agentik-session" "$@"

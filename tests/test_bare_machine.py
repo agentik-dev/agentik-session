@@ -10,6 +10,7 @@ import importlib.machinery
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -142,6 +143,47 @@ def test_no_python_a_hook_exits_0_and_says_so_at_start_other_verbs_exit_3(box, t
     assert "no python3" in json.loads(run("hook", "SessionStart").stdout)["systemMessage"]
     assert (run("hook", "PostToolUse").returncode, run("hook", "PostToolUse").stdout) == (0, "")
     assert run("status").returncode == 3
+
+
+def _damage(box, how):
+    runner = box.plugin / "lib" / "agentik-session"
+    if how == "no runner":
+        runner.unlink()
+    elif how == "no lib":
+        shutil.rmtree(str(box.plugin / "lib"))
+    elif how == "a directory at the runner":
+        runner.unlink()
+        runner.mkdir()
+    else:
+        runner.chmod(0)
+
+
+DAMAGES = ("no runner", "no lib", "a directory at the runner", "an unreadable runner")
+
+
+@pytest.mark.parametrize("how", DAMAGES)
+def test_a_damaged_plugin_never_blocks_a_hook(box, how):
+    """Python's "can't open file" exits 2, a block from PreToolUse, on every tool call."""
+    _damage(box, how)
+    for event in EVENTS:
+        r = box.tool("hook", event, stdin=json.dumps(box.payload(event)))
+        assert (r.returncode, r.stderr) == (0, ""), (event, r.stderr)
+        if event == "SessionStart":
+            assert "no runner" in json.loads(r.stdout)["systemMessage"]
+        else:
+            assert r.stdout == "", event
+        s = box.hook(event)
+        assert (s.returncode, s.stderr) == (0, ""), (event, s.stderr)
+        assert s.stdout == (r.stdout if event not in SWALLOWED else ""), event
+
+
+@pytest.mark.parametrize("how", DAMAGES)
+@pytest.mark.parametrize("verb", (("status",), ("--version",), ("doctor",), ("gate", "status")))
+def test_a_damaged_plugin_other_verbs_exit_3_with_one_line(box, how, verb):
+    _damage(box, how)
+    r = box.tool(*verb)
+    assert (r.returncode, r.stdout) == (3, "")
+    assert len(r.stderr.splitlines()) == 1 and "no runner" in r.stderr
 
 
 def test_a_root_with_a_space_runs(tmp_path):
