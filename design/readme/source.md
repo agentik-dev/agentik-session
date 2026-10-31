@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue, per state root (per M
 
 ## Status
 
-Status: version `v2.0.0-alpha.31`, rendered `2026-10-14`, `1842` tests in the suite.
+Status: version `v2.0.0-alpha.32`, rendered `2026-10-14`, `1912` tests in the suite.
 
 ## Credit
 
