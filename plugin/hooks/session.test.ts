@@ -31,7 +31,10 @@ const BAND_NONE_BARE = '{"window": "none", "slot": null, "P": null, "peak": null
 const BAND_NONE_BARE_LINE = 'no 5h window · 3 helpers · observe'
 const BAND_NONE_CASES = '[[{"window": "none", "until": "2026-10-16T13:00:00+00:00", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Fri 13:00"], [{"window": "none", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Sat 09:00"], [{"window": "none", "until": "soon", "resetsAt": "2026-10-17T09:00:00+00:00"}, "no 5h window · week resets Sat 09:00"], [{"window": "none", "until": "soon", "resetsAt": 7}, "no 5h window"], [{"window": "none", "until": "2026-10-16T13:00:00"}, "no 5h window"], [{"window": "none", "until": "2026-02-31T13:00:00+00:00"}, "no 5h window"], [{"window": "none", "until": "0000-03-01T13:00:00+00:00"}, "no 5h window"], [{"window": "none", "until": "2026-10-17T00:30:00+14:00"}, "no 5h window · week resets Sat 00:30"], [{"window": "none", "until": "2026-10-16T23:30:00-07:00"}, "no 5h window · week resets Fri 23:30"], [{"window": "none", "until": "2026-10-16T13:00Z"}, "no 5h window · week resets Fri 13:00"], [{"window": "none", "until": "2028-02-29T13:00:00+00:00"}, "no 5h window · week resets Tue 13:00"], [{"window": "none", "until": "2100-03-01T13:00:00+00:00"}, "no 5h window · week resets Mon 13:00"], [{"window": "none", "P": 72, "peak": 91, "ceiling": 97, "room": 2, "deferred": 1, "P7": 41, "resetsAt": "2026-10-16T13:00:00+00:00", "bound": "five_hour"}, "no 5h window · 7d 41% · week resets Fri 13:00"], [{"window": "none", "P7": 61.5}, "no 5h window · 7d 62%"], [{"window": "none", "P7": "62"}, "no 5h window"], [{"window": "none", "P7": true}, "no 5h window"], [{"window": "none", "running": 1}, "no 5h window · 1 helper"], [{"window": "none", "running": 0}, "no 5h window · 0 helpers"], [{"window": "none", "mode": "enforce"}, "no 5h window"], [{"window": "none", "at": "2026-10-12T11:58:00+00:00"}, "no 5h window"], [{"window": "none", "at": "2026-10-12T11:57:00+00:00"}, "no 5h window · 180s old"], [{"window": "none", "P7": 62, "until": "2026-10-16T13:00:00+00:00", "running": 3, "mode": "observe", "at": "2026-10-12T11:59:30+00:00", "demand": {"band": "avoid", "until": "2026-10-12T11:00:00-07:00", "next": {"good": "2026-10-12T23:00:00-07:00", "best": "2026-10-12T16:00:00-07:00"}}}, "no 5h window · 7d 62% · week resets Fri 13:00 · band avoid to 11:00 · 3 helpers · observe"], [{"window": "none", "demand": {"band": "best", "until": "2026-10-18T20:00:00-07:00"}}, "no 5h window · band best to Sun 20:00"], [{"window": "none", "at": "2026-10-12T12:00:00+00:00", "demand": {"band": "good", "until": "2026-10-13T12:00:00+00:00"}}, "no 5h window · band good to 12:00"], [{"window": "none", "at": "2026-10-12T12:00:00+00:00", "demand": {"band": "good", "until": "2026-10-13T12:00:01+00:00"}}, "no 5h window · band good to Tue 12:00"], [{"window": "none", "at": "2026-10-11T12:00:00+00:00", "demand": {"band": "good", "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window · band good to Mon 18:00 · 86400s old"], [{"window": "none", "demand": {"band": "good", "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window · band good to 18:00"], [{"window": "none", "at": "soon", "demand": {"band": "good", "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window · band good to 18:00"], [{"window": "none", "demand": {"band": "avoid", "until": "2026-10-12T18:00Z"}}, "no 5h window · band avoid to 18:00"], [{"window": "none", "running": 1, "demand": {"band": "avoid", "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window · band avoid to 18:00 · 1 helper"], [{"window": "none", "demand": {"band": "avoid", "until": "2026-10-12T18:00:00+00:00", "next": "soon"}}, "no 5h window · band avoid to 18:00"], [{"window": "none", "demand": {"band": "good", "until": "2026-10-12T12:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": "2026-10-12T11:59:59+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": "soon"}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": "2026-10-12T18:00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": 7}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": null}}, "no 5h window"], [{"window": "none", "demand": {"band": "good"}}, "no 5h window"], [{"window": "none", "demand": {"band": "good", "until": "2027-02-31T13:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"until": "2026-10-12T18:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": "", "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": 7, "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": true, "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": {"band": null, "until": "2026-10-12T18:00:00+00:00"}}, "no 5h window"], [{"window": "none", "demand": null}, "no 5h window"], [{"window": "none", "demand": "avoid"}, "no 5h window"], [{"window": "none", "demand": 7}, "no 5h window"], [{"window": "none", "demand": ["avoid"]}, "no 5h window"], [{"window": "five_hour", "P": 72, "peak": 91, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00", "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "demand": {"band": "avoid", "until": "2026-10-12T18:00:00+00:00"}}, "5h 72% → 91% · ceiling 97 · resets 14:05 (2h05)"], [{"P": 72, "peak": 91, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00", "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "demand": {"band": "avoid", "until": "2026-10-12T18:00:00+00:00"}}, "5h 72% → 91% · ceiling 97 · resets 14:05 (2h05)"], [{"P": null, "bound": "seven_day", "until": "2026-10-16T13:00:00+00:00"}, "5h no reading · week resets 13:00 (97h00)"]]'
 
-const ARGV = ['agentik-session', 'mod', 'start', '--session', 'sess-1']
+// The mod calls under its own root (design/04 §2): this plugin's, as the test engine mounts it.
+const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '')
+const BIN = `${ROOT}/bin/agentik-session`
+const ARGV = [BIN, 'mod', 'start', '--session', 'sess-1']
 const NO_METER = 'session: no meter · agentik-session doctor'
 
 const band = async (t: any, on: any, files: Record<string, string>, columns = 120, ran = 0) => {
@@ -439,6 +442,7 @@ const faked = (invalidate: (n: number) => Promise<void>) => {
       },
     },
     ui: { invalidate: () => { seen.redraws += 1; return invalidate(seen.redraws) } },
+    plugin: { root: ROOT },
     process: { run: async (argv: string[]) => {
       if (argv[1] !== 'mod') return { exitCode: 0, stdout: '', stderr: '' }
       seen.starts += 1
@@ -479,8 +483,8 @@ for (const [how, refuse] of REFUSALS) test(`ui.invalidate ${how} on a tick: a la
 // Packet M2: every session.measure sends one `measure record` (the four figures, never a
 // message's text), and admission's reading beside it when a window moved; either call
 // rejecting or hanging still reaches `next`, and the hook answers what `next` settled to.
-const MEASURED = ['agentik-session', 'measure', 'record', '--session', 'sess-1']
-const READING = ['agentik-session', 'admission', 'record', '--session', 'sess-1']
+const MEASURED = [BIN, 'measure', 'record', '--session', 'sess-1']
+const READING = [BIN, 'admission', 'record', '--session', 'sess-1']
 const LIMITS = [{ kind: 'five_hour', percentUsed: 41.5, resetsAt: '2026-10-12T14:05:00Z' }]
 const MEASURE_IN = { context: { tokens: 20000, window: 200000, percent: 10 }, rateLimits: LIMITS,
   cost: { usd: 1.25 }, prompt: 'never sent', message: 'secret text' }
@@ -554,3 +558,22 @@ for (const verb of ['measure', 'admission'] as const) {
     })
   }
 }
+
+// sc2, the mod's root: every call the mod makes is under its root, whatever PATH holds.
+test('the mod calls the tool under its root, never by name from PATH', async (t: any, on: any) => {
+  const seen: string[] = []
+  on('session.start', ($: any, e: any) => e)
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('process.run', ($: any, e: any) => {
+    seen.push(String(e.argv[0]))
+    return { value: { exitCode: 0, stdout: JSON.stringify({ dir: DIR }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('fs.read', ($: any, e: any) => { throw new Error(`ENOENT ${e.path}`) })
+  on('clock.now', () => ({ value: NOW }))
+  on('clock.sleep', () => new Promise(() => {}))
+  on('ui.invalidate', () => ({ value: undefined }))
+  await t.session.start({ cwd: '/repo' })
+  await t.ui.render(PROPS(120))
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen.filter(p => p !== BIN)).toEqual([])
+})

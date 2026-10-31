@@ -422,16 +422,15 @@ class Proof:
         return sum(n.endswith(".pyc") for _, _, ns in os.walk(self.prefixes()[0]) for n in ns)
 
     def bytecode(self):
-        """After the first run under the prefix, none beside the sources. Elsewhere under $T a
-        count, not a failure: gate.spawn_serve drops `-I` and the prefix, and the runner's
-        .pyc land in $T/Library/Caches/com.apple.python. sc2 fixes it and makes this strict."""
+        """After the first run under the prefix, none beside the sources and none elsewhere under
+        $T, the gate's runner's with them (sc2 ruling 6)."""
         beside = [os.path.join(d, n) for d, ds, ns in os.walk(self.root) for n in ds + ns
                   if n == "__pycache__" or n.endswith(".pyc")]
         inside = tuple(p + os.sep for p in self.prefixes())
         strays = sum(n.endswith(".pyc") and not os.path.join(d, n).startswith(inside)
                      for d, _, ns in os.walk(self.t) for n in ns)
-        self.row("bytecode", self.first_pyc > 0 and not beside,
-                 "%d .pyc under the prefix after the first run, %d beside the sources; %d elsewhere under $T, gate.spawn_serve's, sc2's to fix"
+        self.row("bytecode", self.first_pyc > 0 and not beside and not strays,
+                 "%d .pyc under the prefix after the first run, %d beside the sources; %d elsewhere under $T"
                  % (self.first_pyc, len(beside), strays))
 
     def clone_paths(self, label):

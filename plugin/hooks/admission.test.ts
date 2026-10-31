@@ -6,7 +6,8 @@ import { test, expect } from 'claude-code/testing'
 // hooks beside the band (2.1.296 loads one module per plugin), so only the process.run calls
 // that run `admission record` are counted; the band's `mod start` is answered and left out.
 
-const ARGV = ['agentik-session', 'admission', 'record', '--session', 'sess-1']
+const BIN = `${new URL('..', import.meta.url).pathname.replace(/\/$/, '')}/bin/agentik-session`
+const ARGV = [BIN, 'admission', 'record', '--session', 'sess-1']
 const LIMITS = [{ kind: 'five_hour', percentUsed: 41.5, resetsAt: '2026-10-12T14:05:00Z' }]
 const SPAWN = { tool_use_id: 'toolu_01', prompt: 'the whole task, never sent', description: 'read the packet',
   subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, model: 'opus',
@@ -24,7 +25,7 @@ type Call = { argv: string[], stdin: any, timeoutMs: unknown, raw: any }
 // before fix round 1, F4), and `sleeps` keeps every wait asked.
 type Answer = 'admitted' | 'deferred' | 'denied' | 'reject' | 'hang' | 'refused'
 const ANSWER_TEXT = 'admission: not started. The five-hour window is at 88% and resets at 14:05.'
-const ADMIT = ['agentik-session', 'admission', 'admit', '--session', 'sess-1']
+const ADMIT = [BIN, 'admission', 'admit', '--session', 'sess-1']
 const world = (on: any, mode: 'ok' | 'reject' | 'timeout' | 'refused' = 'ok', hang: string[] = [],
   answer: Answer = 'admitted') => {
   const calls: Call[] = []
@@ -186,7 +187,7 @@ test('session.start records start; session.end records end under the ending id',
   await t.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await t.session.end({ reason: 'exit', sessionId: 'sess-0', resume: { id: 'sess-0' } })
   expect(calls.map(c => c.stdin)).toEqual([{ kind: 'start', interactive: false }, { kind: 'end', reason: 'exit' }])
-  expect(calls[1].argv).toEqual(['agentik-session', 'admission', 'record', '--session', 'sess-0'])
+  expect(calls[1].argv).toEqual([BIN, 'admission', 'record', '--session', 'sess-0'])
 })
 
 // ---- Packet S26: admit is called before `next`, and `next(e)` follows whatever it answers ----

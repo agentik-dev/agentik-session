@@ -464,22 +464,21 @@ def _over(cfg: dict, fx, count: int, last, now: float):
 
 def spawn_serve(root, popen=None) -> bool:
     """Start `serve` detached when the queue is not empty: this interpreter (never PATH),
-    a new session, close_fds, stdio to gate/runner.log, PYTHONPATH led by this package's
-    parent so the runner is this code. True when it spawned."""
+    a new session, close_fds, stdio to gate/runner.log, `-I` and the runner beside this package
+    so the runner is this code and its bytecode goes under the launcher's prefix (design/04 §3).
+    True when it spawned."""
     if not entries(root):
         return False
     popen = popen or subprocess.Popen
     g = gate_dir(root)
     _mkdir(g)
-    here = str(Path(__file__).resolve().parent.parent)
-    env = dict(os.environ)
-    rest = [p for p in (env.get("PYTHONPATH") or "").split(os.pathsep) if p and p != here]
-    env["PYTHONPATH"] = os.pathsep.join([here, *rest])
-    flags = (["-P"] if getattr(sys.flags, "safe_path", False) else []) + \
-        (["-B"] if sys.flags.dont_write_bytecode else [])
-    argv = [sys.executable, *flags, "-m", "claude_session", "gate", "serve", "--root", str(root)]
+    runner = Path(__file__).resolve().parent.parent / "agentik-session"
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
+    prefix = sys.pycache_prefix or os.path.join(cache, "agentik", "pycache")
+    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner),
+            "gate", "serve", "--root", str(root)]
     with open(g / "runner.log", "ab") as log:
-        popen(argv, cwd=str(g), env=env, stdin=subprocess.DEVNULL, stdout=log,
+        popen(argv, cwd=str(g), env=dict(os.environ), stdin=subprocess.DEVNULL, stdout=log,
               stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
     return True
 

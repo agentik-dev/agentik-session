@@ -31,16 +31,17 @@ doctor:  ## check the tool, the plugin and its dependencies on this machine
 PREFIX ?= $(HOME)/.local
 PYTHON ?= $(CURDIR)/.venv/bin/python
 DOCTOR ?= 1
-# The frozen tree holds claude_session/ at its top whatever its path in the repo, so the
-# launcher form is unchanged. The old trees are pruned by scripts/prune-trees, which keeps every tree a live process
+# The frozen tree is plugin/lib's contents with plugin.json beside them, named for both (a bump
+# alone is a new tree, or `--version` would lie), so the launcher form is unchanged and
+# gate.spawn_serve finds its runner. The old trees are pruned by scripts/prune-trees, which keeps every tree a live process
 # names (a running launcher's PYTHONPATH) and the newest three, and on doubt keeps all (F8).
 # agentik-r1 ruling 2: the launcher is agentik-session, claude-session a relative link to it
 # until r2; the front door `agentik` is the vendored scripts/agentik (D3). New trees go under
 # share/agentik-session (c8); the old share keeps its trees while a launcher uses them.
-install:  ## freeze plugin/lib/claude_session/ under $(PREFIX)/share/agentik-session/<tree>, launcher agentik-session in $(PREFIX)/bin
-	@if [ -n "$$(git status --porcelain -- plugin/lib/claude_session)" ]; then \
-	  echo "install: plugin/lib/claude_session/ is dirty; commit it first (the install is one committed tree)" >&2; exit 2; fi
-	@set -e; tree=$$(git rev-parse HEAD:plugin/lib/claude_session); \
+install:  ## freeze plugin/lib under $(PREFIX)/share/agentik-session/<tree>, launcher agentik-session in $(PREFIX)/bin
+	@if [ -n "$$(git status --porcelain -- plugin/lib plugin/.claude-plugin/plugin.json)" ]; then \
+	  echo "install: plugin/lib or plugin.json is dirty; commit it first (the install is one committed tree)" >&2; exit 2; fi
+	@set -e; tree=$$(git rev-parse HEAD:plugin/lib HEAD:plugin/.claude-plugin/plugin.json | git hash-object --stdin); \
 	share="$(PREFIX)/share/agentik-session"; code="$$share/$$tree"; bin="$(PREFIX)/bin"; \
 	py="$(if $(realpath $(dir $(PYTHON))),$(realpath $(dir $(PYTHON)))/$(notdir $(PYTHON)))"; \
 	if [ -z "$$py" ] || [ ! -x "$$py" ]; then py=; \
@@ -52,7 +53,8 @@ install:  ## freeze plugin/lib/claude_session/ under $(PREFIX)/share/agentik-ses
 	case "$$py" in */Cellar/*) echo "install: $$py is a versioned Cellar path (a brew upgrade deletes it); use a venv's or opt/'s link" >&2; exit 2;; esac; \
 	mkdir -p "$$share" "$$bin"; \
 	if [ ! -d "$$code" ]; then rm -rf "$$code.tmp"; mkdir "$$code.tmp"; \
-	  git archive HEAD plugin/lib/claude_session | tar -x --strip-components 2 -C "$$code.tmp"; mv "$$code.tmp" "$$code"; fi; \
+	  git archive HEAD plugin/lib | tar -x --strip-components 2 -C "$$code.tmp"; \
+	  git show HEAD:plugin/.claude-plugin/plugin.json > "$$code.tmp/plugin.json"; mv "$$code.tmp" "$$code"; fi; \
 	sed -e "s|__CODE__|$$code|" -e "s|__PYTHON__|$$py|" install-wrapper.sh > "$$bin/agentik-session.tmp"; \
 	chmod 755 "$$bin/agentik-session.tmp"; mv -f "$$bin/agentik-session.tmp" "$$bin/agentik-session"; \
 	rm -f "$$bin/.claude-session.tmp"; ln -s agentik-session "$$bin/.claude-session.tmp"; mv -f "$$bin/.claude-session.tmp" "$$bin/claude-session"; \
