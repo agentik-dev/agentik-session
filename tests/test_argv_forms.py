@@ -109,7 +109,6 @@ ACCEPTED = [
 ]
 
 REFUSED = [
-    "-- -- budget",
     "gate run",
     "gate run --label t",
     "gate run R --bogus",

@@ -221,10 +221,10 @@ def newest_known(env) -> tuple[str, str]:
 def _check_python(env, version=sys.version_info, exe=sys.executable) -> Check:
     """The interpreter doctor runs under: the one the launcher and the hooks resolve."""
     ver = "%d.%d.%d" % tuple(version[:3])
-    ok = tuple(version[:2]) >= (3, 11)   # the launcher runs `python -P` (ADV6-3)
+    ok = tuple(version[:2]) >= (3, 9)    # /usr/bin/python3 on a bare Mac (hq entry 6, design/04)
     newest, source = newest_known(env)
     detail = f"{ver} ({exe}); newest known {newest} ({source})"
-    return Check("python", ok, detail + ("" if ok else "; needs 3.11+"))
+    return Check("python", ok, detail + ("" if ok else "; needs 3.9+"))
 
 
 def _check_state(env) -> Check:

@@ -116,16 +116,16 @@ def test_claude_check_passes_without_max_turns_listed(machine):
 
 
 def test_old_python(machine):
-    c = doctor._check_python(machine.env, (3, 9, 6, "final", 0), "/opt/py/bin/python3")
-    assert not c.ok and c.detail.startswith("3.9.6 (/opt/py/bin/python3)")
-    assert c.detail.endswith("needs 3.11+")
+    c = doctor._check_python(machine.env, (3, 8, 12, "final", 0), "/opt/py/bin/python3")
+    assert not c.ok and c.detail.startswith("3.8.12 (/opt/py/bin/python3)")
+    assert c.detail.endswith("needs 3.9+")
 
 
-def test_python_floor_is_3_11(machine):
-    # The launcher runs `python -P` (ADV6-3), which 3.10 lacks.
-    assert not doctor._check_python(machine.env, (3, 10, 21, "final", 0), "/p").ok
-    assert doctor._check_python(machine.env, (3, 11, 0, "final", 0), "/p").ok
-    assert min(doctor.KNOWN_PYTHONS, key=doctor._vtuple).startswith("3.11.")
+def test_python_floor_is_3_9(machine):
+    # /usr/bin/python3 on a bare Mac is 3.9.6 (hq entry 6, design/04 §2).
+    assert not doctor._check_python(machine.env, (3, 8, 20, "final", 0), "/p").ok
+    assert doctor._check_python(machine.env, (3, 9, 0, "final", 0), "/p").ok
+    assert doctor._check_python(machine.env, (3, 9, 6, "final", 0), "/usr/bin/python3").ok
 
 
 def test_python_is_the_running_interpreter(machine):

@@ -8,7 +8,7 @@ version = "2.0.0a37"
 description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 # Runtime dependencies are deliberately empty. This code runs unattended from a
 # scheduler hours after it was installed; every dependency is another way for
 # that invocation to fail with nobody watching.
