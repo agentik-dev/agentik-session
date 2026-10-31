@@ -474,7 +474,8 @@ def spawn_serve(root, popen=None) -> bool:
     _mkdir(g)
     runner = Path(__file__).resolve().parent.parent / "agentik-session"
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
-    prefix = sys.pycache_prefix or os.path.join(cache, "agentik", "pycache")
+    # The launcher's expression, never sys.pycache_prefix: Apple's 3.9 sets its own by default.
+    prefix = os.path.join(cache, "agentik", "pycache")
     argv = [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner),
             "gate", "serve", "--root", str(root)]
     with open(g / "runner.log", "ab") as log:
