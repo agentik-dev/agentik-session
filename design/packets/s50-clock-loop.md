@@ -10,7 +10,7 @@
 | verify | `agentik session gate run <absolute worktree path> -- make check`, then `agentik session gate wait <id>`, last |
 | budget | acts: 0 this packet, as `design/packets/s50-clock-loop.md`, committed first; 1 the test, red; 2 the loop; 3 the NICE lines; 4 the version, last, one bump to 2.0.0-alpha.36, the README count from the suite, the sidecar re-hashed by hand. 40 tool calls, 180k, `claude-opus-5-5`; one commit per act; the charter opens with doclint's five rows |
 
-## 1. The defect
+## 1. What the source says: the defect
 
 `session.ts:396-398` starts the band's tick as `void (async () => { for (;;) { await $.clock.sleep(EVERY_MS); await start(); await $.ui.invalidate('ui.render') } })()`. Nothing catches it. When `$.clock.sleep` rejects (a test's handlers are gone when the loop wakes late; an engine refusing the clock at teardown), the rejection is unhandled: bun fails the file, and in the engine it is a stray rejection from a hook module.
 
@@ -22,7 +22,11 @@
 4. **The tests**, in `session.test.ts`, each forcing the case deterministically, with no sleep-based timing: (a) `clock.sleep` rejects on the loop's first call: no unhandled rejection reaches the runner, the loop makes no further call, and `session.start` still answered; (b) `ui.invalidate` rejects once on a tick: a later tick still runs and draws the meter. If bun's own unhandled-rejection failure is what proves (a), say so and quote the red run from the reverted tree.
 5. **`retrying`'s comment at session.test.ts:340-342** stays true or is corrected; S41 Amendment 1's parked-loop wait stays, since it keeps the tests' counts deterministic.
 
-## 3. The NICE lines (act 3)
+## 3. Interfaces
+
+None new: the loop's two `$` calls, as they are.
+
+## 4. Findings that name this row: the NICE lines (act 3)
 
 Move lines 275 and 337 of NICE_TO_HAVE.md to answered, in the file's own way, naming S50. Add, under a heading `## S49's refuter, round 2 (2026-10-31, S4)`, these four as written:
 
@@ -31,10 +35,10 @@ Move lines 275 and 337 of NICE_TO_HAVE.md to answered, in the file's own way, na
 - `measure.stated_limits`: RecursionError.
 - A directory at `hooks.jsonl.1` stops rotation.
 
-## 4. Forbidden reads
+## 5. Forbidden reads
 
 Transcripts; `~/.local/state`, every part; relay ledgers.
 
-## 5. Report (at most ten lines)
+## 6. Report (at most ten lines)
 
 The branch and sha; the gate id and exit; the quoted red; anything decided or left over.
