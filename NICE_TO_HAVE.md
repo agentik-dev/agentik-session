@@ -308,3 +308,22 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `admission.py:298-299`, `_rows` lets RecursionError out on a ledger line nested past the stack; `read_band`'s shape on the ledger. A hook path was not traced.
 - `demand.py:153`, `_shift`'s 1-second stop is unpinned: a mutant at 120 seconds passes. Pin a mid-gap stamp and a cut at the second pass's last minute.
 - `--`, `2026-10-30` and `1e3` bind as band names; `Good` binds and `next` never names it.
+
+## S47's leftovers (2026-10-30, packet S47; S4)
+
+- `plugin/commands/gate.md` says "the running gate" and one at a time; a plugin edit needs a version step, so it waits for the next that moves `plugin/`. Reword it to one per repo under a load ceiling. `cli.py`'s help, one string, moved with Amendment 1.
+- `notify`'s POST holds the runner's loop up to its 5 s timeout, against the letter of ruling 5, so another child's wall cut can land 5 s late. Post from a thread if a late cut ever matters.
+- A hand-written entry with no `repo` or `command` raises in `_start`, as in S38's `_run`; the respawned runner then kills the running set each time. Close such an entry with 127.
+- `_recover` kills a dead runner's groups in turn, a grace each, up to 15 s at three. Signal them together if a cold start ever feels it.
+- A crash after the result and before the inbox loses the inbox line, though the result stays readable (same on main).
+- `start_settle` with a clock set back an hour waits that hour while something runs.
+- A corrupt runner.json with a live child double-runs (same on main).
+- A stale pgid after a reboot could hit another group, by reading only.
+- A crash after the spawn and before the second runner.json write leaves the child running, unnamed: its entry closes 125 and never runs twice, but its key frees under it. Amendment 1 narrows the double run to this.
+- A finish's SIGKILL follows the reap, so an empty group's id could in that instant be another's; pids run in sequence, so a wrap would have to land between two lines.
+- With git failing in a subdirectory of a repo, `<repo>/.git` is absent and the entry keys on the subdirectory itself, apart from its siblings until git answers again.
+- A finish kills a deliberate same-group helper with no log line, and a `setsid` helper survives it.
+- A 61fd2ad-form string key beside a new key does not hold; unreachable, since that form was never merged.
+- With git hung, `main/sub` keys apart from `main`.
+- A lock's `..` through a symlink collapses lexically.
+- The pid is free between `poll` and `killpg` on an empty group, needing a pid wrap between adjacent lines.

@@ -108,7 +108,7 @@ def _results(n, repo="/r/x", root="/s"):
 
 # ---- the queue ---------------------------------------------------------------
 
-def test_enqueue_writes_a_private_entry_with_its_nine_keys(w):
+def test_enqueue_writes_a_private_entry_with_its_eleven_keys(w):
     e = w.put(label="land s38", caller="sess-1")
     p = w.root / "gate" / "queue" / f"{e['id']}.json"
     assert ID.match(e["id"]) and e["id"].endswith("-1")
@@ -117,7 +117,8 @@ def test_enqueue_writes_a_private_entry_with_its_nine_keys(w):
     assert list(body) == list(gate.ENTRY_KEYS)
     assert body == {"id": e["id"], "repo": os.path.realpath(w.repo), "command": ["a", "x"],
                     "env": ENV, "locks": [], "wall": 5400, "label": "land s38",
-                    "caller": "sess-1", "queued": T0}
+                    "caller": "sess-1", "queued": T0, "key": gate.repo_key(str(w.repo)),
+                    "key_name": "repo"}
     assert [n for n in os.listdir(p.parent) if n.startswith(".")] == []   # written, renamed
 
 
@@ -181,7 +182,7 @@ def test_serve_runs_fifo_and_writes_the_result_last(w):
     assert gate.entries(w.root) == [] and not (w.root / "gate" / "runner.json").exists()
 
 
-def test_runner_json_holds_its_four_keys_while_an_entry_runs(w):
+def test_runner_json_holds_its_keys_while_an_entry_runs(w):
     seen = []
 
     def peek(world):
@@ -194,9 +195,9 @@ def test_runner_json_holds_its_four_keys_while_an_entry_runs(w):
     gate.serve(w.root, w.fx())
     running = [s for s in seen if s["running"]]
     assert running and list(running[0]) == list(gate.RUNNER_KEYS)
-    assert (running[0]["running"], running[0]["pid"], running[0]["pgid"]) == \
-        (a["id"], 777, w.spawned[0][2].pid)
-    assert any(s["running"] is None for s in seen)
+    assert (running[0]["running"], running[0]["pid"]) == \
+        ([{"id": a["id"], "pgid": w.spawned[0][2].pid}], 777)
+    assert any(s["running"] == [] for s in seen)
 
 
 def test_a_second_serve_exits_0_while_another_holds_the_lock(w):
@@ -233,7 +234,10 @@ def test_a_head_locked_past_its_wall_gets_126_and_never_runs(w, tmp_path):
 def test_a_younger_unlocked_entry_runs_first_then_the_head_when_its_lock_goes(w, tmp_path):
     lock = tmp_path / "tlc.lock"
     lock.mkdir()
-    a, b = w.put("a", locks=[str(lock)], wall=600), w.put("b")
+    other = tmp_path / "other"
+    other.mkdir()
+    a = w.put("a", locks=[str(lock)], wall=600)
+    b = gate.enqueue(w.root, str(other), ["b", "x"], ENV, [], 5400, "", None, w.t)
 
     def free(world):
         if gate.result_path(world.root, b["id"]).exists() and lock.exists():
@@ -402,7 +406,7 @@ def test_status_lines_running_queued_done_and_the_runner(w, tmp_path):
     hm = time.strftime("%H:%M", time.localtime(T0))
     repo = os.path.realpath(w.repo)
     assert lines[:3] == [f"running {run['id']} {repo} since {hm} land s38",
-                         f"queued {q1['id']} {repo} position 1",
+                         f"queued {q1['id']} {repo} position 1 waits on key repo",
                          f"queued {q2['id']} {repo} position 2 waits on lock {lock}"]
     assert lines[3:8] == [f"done {d['id']} {repo} exit 1 1 min" for d in reversed(done[1:])]
     assert lines[8:] == [f"runner: pid {os.getpid()} since {time.strftime('%H:%M', time.localtime(T0))}"]

@@ -146,9 +146,9 @@ Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); 
 
 ## The gate queue
 
-A full gate can run an hour behind a lock, so gates queue: one at a time per state root (per Mac), each in its repo, cut at `gate.wall` (5400 s).
+A gate can run an hour, so gates queue: one running per repo, under a load ceiling (RUNBOOK §5), each cut at `gate.wall`.
 
-- `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`; a lock path that exists holds it.
+- `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`; a lock path that exists or a running gate names holds it.
 - Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
 - `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
 
@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue: one at a time per sta
 
 ## Status
 
-Status: version `v2.0.0-alpha.31`, rendered `2026-10-14`, `1842` tests in the suite.
+Status: version `v2.0.0-alpha.32`, rendered `2026-10-14`, `1991` tests in the suite.
 
 ## Credit
 

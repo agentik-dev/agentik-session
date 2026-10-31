@@ -315,10 +315,12 @@ def window_override(env) -> dict:
     return {k: ad[k] for k in ("window", "windows") if k in ad} if isinstance(ad, dict) else {}
 
 
-def gate_config(env) -> dict:
+def gate_config(env, log=None) -> dict:
     """The gate section's user layer (design/gate-r1.md ruling 4): the top-level `gate:`
     mapping of the user's profiles.yaml, read alone. A key unset, mistyped or unreadable
-    reads as its default (no ntfy, a 5400 s wall); it never raises."""
+    reads as its default (no ntfy, a 5400 s wall); it never raises. `load_ceiling` and
+    `max_running` (packet S47) appear only when set well, and the gate holds their defaults,
+    since one follows the core count; a bad one is one line through `log`."""
     out = dict(GATE_DEFAULTS)
     try:
         doc = _read(_user_file(env), [])
@@ -334,6 +336,16 @@ def gate_config(env) -> dict:
     w = g.get("wall")
     if isinstance(w, int) and not isinstance(w, bool) and w > 0:
         out["wall"] = w
+    c = g.get("load_ceiling")
+    if isinstance(c, (int, float)) and not isinstance(c, bool) and 0 < c < float("inf"):
+        out["load_ceiling"] = c
+    elif "load_ceiling" in g and log:
+        log(f"gate: load_ceiling {c!r} is no positive number; the default stands")
+    m = g.get("max_running")
+    if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+        out["max_running"] = m
+    elif "max_running" in g and log:
+        log(f"gate: max_running {m!r} is no positive whole number; the default stands")
     return out
 
 
