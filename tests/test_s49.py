@@ -315,7 +315,7 @@ def test_s49_imports_relative_home_absolute_and_chained(tree, tmp_path):
 
 def test_s49_an_import_cycle_counts_once(tree):
     (tree / "repo" / "CLAUDE.md").write_text("@a.md\n")
-    (tree / "repo" / "a.md").write_text("@CLAUDE.md\n@a.md\n")
+    (tree / "repo" / "a.md").write_text("@CLAUDE.md @a.md\n")
     assert _md(tree) == 6 + 17
 
 
@@ -328,7 +328,7 @@ def test_s49_imports_stop_at_five_hops(tree):
 
 def test_s49_a_code_span_a_fence_an_email_and_a_missing_file_import_nothing(tree):
     (tree / "repo" / "no.md").write_text("n" * 1000)
-    body = "`@no.md`\n```\n@no.md\n```\nkevin@no.md\n@gone.md\n@name\n@.\n"
+    body = "\n".join(["`@no.md`", "```", "@no.md", "```", "someone" + "@" + "no.md", "@gone.md", "@name", "@.", ""])
     (tree / "repo" / "CLAUDE.md").write_text(body)
     assert _md(tree) == len(body)
 

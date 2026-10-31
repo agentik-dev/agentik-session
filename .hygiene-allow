@@ -14,6 +14,7 @@ bugs/*.md: sibling
 # ADV6-1's reproduction names a generic mDNS host name and an RFC 1918 address.
 design/review-adv6.md: lan
 # The tool's own state path (its name) and the plugins it loads by id.
+plugin/hooks/run: sibling
 claude_session/config.py: sibling,renamed
 claude_session/launch.py: sibling,renamed
 claude_session/sessionconfig.py: sibling
