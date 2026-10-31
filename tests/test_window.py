@@ -702,3 +702,53 @@ def test_f1_twins_that_agree_are_not_rewritten(repo):
     before = {n: (sdir() / n).stat().st_mtime_ns for n in ("resolved.json", "resolved.yaml")}
     assert resolver.rewindow(sdir(), 1000000) is False
     assert before == {n: (sdir() / n).stat().st_mtime_ns for n in ("resolved.json", "resolved.yaml")}
+
+
+STALLED = """
+import json, os, sys, time
+from pathlib import Path
+from claude_session import resolver
+path, go, doc = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+real = os.fdopen
+def stalled(fd, *a, **kw):
+    print("in", flush=True)         # its temp file is open, nothing written yet
+    for _ in range(12000):
+        if go.exists():
+            break
+        time.sleep(0.01)
+    return real(fd, *a, **kw)
+os.fdopen = stalled
+resolver._write_atomic(path, doc)
+"""
+
+
+def test_f2_a_writer_stalled_on_its_temp_cannot_tear_another(repo, tmp_path):
+    """The stall is a real one, in another process, and the file it waits on is the only
+    clock: no sleep decides it, so a loaded Mac only makes it slower."""
+    start(repo)
+    path = sdir() / "resolved.json"
+    good = doc()
+    theirs = json.dumps({**good, "writer": "stalled"}) + "\n"
+    go = tmp_path / "go"
+    p = subprocess.Popen([sys.executable, "-B", "-c", STALLED, str(path), str(go), theirs],
+                         cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert p.stdout.readline().strip() == "in"
+        ours = {**good, "writer": "ours"}
+        resolver._write_atomic(path, json.dumps(ours, indent=2) + "\n")
+        assert json.loads(path.read_text()) == ours
+    finally:
+        go.touch()
+    p.communicate(timeout=120)
+    assert p.returncode == 0                        # its replace found its own temp
+    assert json.loads(path.read_text())["writer"] == "stalled"      # whole, last writer wins
+    assert not list(sdir().glob("*.tmp"))
+
+
+def test_f2_a_failed_write_leaves_no_temp(repo, tmp_path):
+    start(repo)
+    target = sdir() / "somewhere"
+    target.mkdir()                                  # os.replace onto a directory fails
+    with pytest.raises(OSError):
+        resolver._write_atomic(target, "x\n")
+    assert not list(sdir().glob("*.tmp"))

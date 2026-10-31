@@ -508,11 +508,18 @@ def session_dir(state: Path, session_id: str) -> Path:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
+    """Whole or not at all. The temp name is this process's: a writer that went on past
+    the lock and one stalled on its temp never share a file, so neither can tear the other."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 @contextlib.contextmanager
