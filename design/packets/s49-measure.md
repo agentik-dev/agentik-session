@@ -53,3 +53,37 @@ Transcripts; `~/.local/state`, every part; relay ledgers; the review whole. agen
 ## 6. Report (at most ten lines)
 
 The branch and sha; the gate id and exit; the measured overhead per hook call; what `claude_md_bytes` counts; anything that reads the row strictly; anything decided or left over.
+
+## 7. Amendment 1 (2026-10-31, refuter round 1 on a1fe45f, the coordinator's ruling; it overrides §2's rulings 1, 2 and 3's first clause)
+
+| item | value |
+|---|---|
+| pin | a1fe45f, this branch |
+| may touch | as above, and `design/mod-r1.md` (one amendment line), `claude_session/cli.py` (`cmd_hook`) |
+| acceptance | `.venv/bin/python -B -m pytest tests/test_s49.py tests/test_s34.py tests/test_ledger.py tests/test_precompact.py -q 2>&1 \| tail -1` reads `passed`, no `failed`; `grep -c 'hooks.jsonl' plugin/hooks/run` reads 0; `tail -1 plugin/hooks/run` reads `exec "$tool" hook "$1"`; `git diff main -- plugin/hooks/run` shows one variable and its comment and nothing else; `make hygiene` exits 0. These replace the first form's two `grep` lines |
+| verify | `agentik session gate run <worktree> -- make check`, then `agentik session gate wait <id>`, last |
+| budget | acts: 0 this section; 1 the tests, red; 2 the shim back, the CLI's row; 3 the S4s; 4 the measures, the texts; one commit per act, 90 tool calls |
+
+**Why.** Stopping `exec` changed hook behaviour, which ruling 2 forbids. F1: after a shim-only kill at a timeout the surviving PreToolUse writes `calls/<tid>` after PostToolUse closed it, and that open call holds the launcher. F2: a shim-only kill leaves the tool holding stdout, 3.7 s against 0.03 s for a parent waiting for EOF. F3: a tool killed by a signal moves the hook's status and stderr, -15 to 143 and a `Terminated` line. Whether Claude Code kills the tree or the shim alone is unsettled, so this rules it out rather than depending on it.
+
+**A1. The shim** is main's flow exactly, `exec "$tool" hook "$1"` last and the two waiting branches as main has them, plus one line before them: `AGENTIK_SESSION_HOOK_T0` exported from one `date +%s%N`, empty if `date` fails. No append, no state path, no second `date`.
+
+**A2. The row is the CLI's**, at the end of `cli.cmd_hook`, the outermost place on the hook path the parser reaches: `harness.record_hook(t0, event, code, env)`. `code` is what the process will exit with: `dispatch`'s return, a `SystemExit`'s code as Python maps it, 1 for an uncaught exception. Nothing it does moves the exit, stdout or stderr, or raises. No row: no variable, not 19 ASCII digits, an event that is not letters, a code outside 0 to 255, a clock that reads earlier than the variable, a `KeyboardInterrupt` (the process dies by the signal).
+
+**A3. The first refused reason is corrected.** The charter's "a CLI-side row could only ever read exit 0" is wrong for this form: the row takes the code from around `dispatch`, so a Stop's real code, which the shim discards, is recorded right. What is genuinely lost, all acceptable and all absent, never wrong: a CLI older than the plugin, an argparse refusal before the handler, an interpreter failure, and a kill.
+
+**A4. Stdout goes first.** Teardown's flush of a closed stdout turns exit 0 into 120. `record_hook` flushes before it writes: a flush that fails writes no row, and teardown fails as it would have. So `ms` includes the flush and excludes only the interpreter's teardown after the append; it also starts after the `date` fork, so the shim's own start is not in it.
+
+**A5. The variable dies with the call.** `cmd_hook` pops it from `os.environ` on entry, before anything can spawn, so no child of a hook inherits it and no nested `hook` call writes a row from it. Only `cmd_hook` reads it.
+
+**A6. The file:** opened `O_APPEND|O_CREAT|O_NOFOLLOW|O_NONBLOCK`, mode 0600, and written only if `fstat` says regular (F4): a dangling link, a link to a file, a FIFO, a directory, an absent state folder write nothing and make nothing. `rotate` takes `lstat`, regular only.
+
+**A7. The S4s.**
+- F5: `report --hooks --since X` says the hook table is unfiltered and the ledger filter applied; the bytes line tells "no ledger row since X" from "no row since X carries it". `--json` adds `since`, `events_filtered: false` and `ledger_rows`.
+- F6: `harness._walk` runs on a deque, each path queued once, at most `MD_MAX_QUEUE` queued, at most `MD_SCAN_CAP` bytes scanned; past either the figure is a floor, as past `MD_MAX_FILES`. A file that cannot be read is not counted and the rest stand: it no longer nulls the row's figure.
+- F7: `read_hooks` reads regular files only, never through a link, never blocks on a FIFO, and skips a line too deep to parse.
+- `rate_limits`: `measure.json` carries its own `at`, so the row gains `rate_limits_at`, null when that is not a time (22 keys). `measure.stated_limits(sdir) -> (list | None, str | None)`.
+- `design/mod-r1.md` §7.3 gains the line that SessionEnd opens `measure.json` through `harness`: it copies, and decides nothing.
+- `.hygiene-allow` and `tests/test_s34.py` go back to main's: the shim no longer names the old folder.
+
+**Interfaces, added:** `harness.HOOK_T0 = "AGENTIK_SESSION_HOOK_T0"`; `harness.take_t0(env) -> str | None`; `harness.record_hook(t0, event, code, env) -> None`, never raises; `harness.exit_status(code) -> int`; `harness.claude_md_line(rows, since=None)`.
