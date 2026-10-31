@@ -5,8 +5,8 @@ Usage: scripts/bare-proof [--transcript PATH] [--runs N] [--keep]
 
 From HEAD it assembles a mock install in a temp home: `git archive HEAD plugin` into
 $T/.claude/plugins/cache/agentik/session/<version>/, and, since sc1 moves no code, `git
-archive HEAD claude_session` into its lib/, a four-line runner and the launcher of design/04
-§2. Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
+archive HEAD claude_session` into its lib/, a runner (design/04 §2's four lines and a watch,
+at RUNNER) and the launcher of §2. Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
 CLAUDE_PLUGIN_DATA, in a temp git repo holding a decoy package; no clone path, no venv, no
 launcher on PATH. The repo's shim stays as it is: only the mock's copy gains a line putting
 its bin/ first on PATH, so the env stays exact.
@@ -39,6 +39,7 @@ import tempfile
 import time
 import uuid
 
+HERE = os.path.dirname(os.path.realpath(__file__))
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
           "PostToolUseFailure", "PostToolBatch", "PreCompact", "Stop", "StopFailure",
           "SessionEnd")
@@ -178,15 +179,12 @@ class Proof:
     def __init__(self, args):
         self.args = args
         self.rows, self.failed = [], []
-        self.top = self.git("rev-parse", "--show-toplevel")
-        common = self.git("rev-parse", "--git-common-dir")
-        self.clones = sorted({self.top, os.path.dirname(os.path.realpath(os.path.join(self.top, common)))})
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="bare-proof."))
         self.watch = os.path.join(self.t, ".swallowed")
 
     def git(self, *argv):
         return subprocess.run(["git", *argv], check=True, capture_output=True, text=True,
-                              cwd=os.path.dirname(os.path.realpath(__file__))).stdout.strip()
+                              cwd=HERE).stdout.strip()
 
     def said(self, r):
         """A child's stderr as one line, its last: the row's line stays one line, a dead tool's
@@ -241,6 +239,10 @@ class Proof:
         return dest
 
     def assemble(self):
+        self.top = self.git("rev-parse", "--show-toplevel")
+        # Relative in a plain clone, to the folder git ran in.
+        common = os.path.join(HERE, self.git("rev-parse", "--git-common-dir"))
+        self.clones = sorted({self.top, os.path.dirname(os.path.realpath(common))})
         with open(os.path.join(self.top, "plugin", ".claude-plugin", "plugin.json")) as fh:
             self.version = json.load(fh)["version"]
         self.root = os.path.join(self.t, ".claude", "plugins", "cache", "agentik", "session", self.version)
@@ -404,6 +406,10 @@ class Proof:
         r = self.tool_run(["charter", "open", "--dir", "history/sittings", "proof " + tag], extra)
         charter = r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else ""
         out.append(("charter open", r.returncode, self.said(r)))
+        # In the temp repo, the launcher's cwd kept: its flags alone cannot show a `cd`.
+        landed = os.path.realpath(os.path.join(self.repo, charter))
+        out.append(("the charter in the temp repo", 0 if landed.startswith(self.repo + os.sep) and os.path.isfile(landed) else 1,
+                    "not under the temp repo"))
         r = self.tool_run(["charter", "close", "--exit", "X", charter], extra)
         out.append(("charter close --exit X FILE", r.returncode, self.said(r)))
         r = self.tool_run(["gate", "run", self.repo, "--label", "t", "--", "true"], extra)
@@ -644,7 +650,8 @@ class Proof:
             "the outputs identical" if same else "the outputs differ", tail))
 
     def sentinel(self):
-        """HOME reached every child; nothing wrote outside $T. The detector proves itself first."""
+        """HOME reached every child, and the audit hook saw no in-process write outside $T; a
+        child process's own write goes unseen. The detector proves itself first."""
         d = os.path.join(self.t, "sentinel")
         os.makedirs(d)
         log, homes = os.path.join(d, "outside.log"), os.path.join(d, "home.log")
@@ -849,7 +856,10 @@ def main():
     try:
         return proof.run()
     finally:
-        proof.stop_serve()
+        try:
+            proof.stop_serve()
+        except Exception as e:      # noqa: BLE001
+            print("bare-proof: stop runner: %s: %s" % (type(e).__name__, str(e)[:160]), file=sys.stderr)
         if args.keep:
             print("kept: " + proof.t)
         else:

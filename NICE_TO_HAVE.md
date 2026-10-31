@@ -356,4 +356,5 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `mod -- -h` now prints help and exits 0, where base refused it: newly accepted, as are `gate run R a --label t b` and `charter close F --exit X G`, the charter's two forms.
 - `gate.py:640`: a non-UTF-8 gate command crashes the runner with UnicodeEncodeError, at base too.
 - `gate wait` exits 0 whatever the job's code, as the README states, so a background Bash's exit reads green on a red job. Lead: a `--code` flag that exits the job's code.
+- `_Parser._get_values` holds only `nargs=None`, so a synthetic `--o=--` with `?`, `*`, `+` or `1` still differs on 3.9. No CLI option has those nargs.
 - `scripts/bare-proof`'s write detector is a Python audit hook: it sees the tool's own process, and a child's HOME, not what `git` or the gate's detached runner write themselves. The runner's state is read under `$T` and its job's HOME is asserted.
