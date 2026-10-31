@@ -308,3 +308,11 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `admission.py:298-299`, `_rows` lets RecursionError out on a ledger line nested past the stack; `read_band`'s shape on the ledger. A hook path was not traced.
 - `demand.py:153`, `_shift`'s 1-second stop is unpinned: a mutant at 120 seconds passes. Pin a mid-gap stamp and a cut at the second pass's last minute.
 - `--`, `2026-10-30` and `1e3` bind as band names; `Good` binds and `next` never names it.
+
+## S47's leftovers (2026-10-30, packet S47; S4)
+
+- `cli.py`'s `gate` help says "one gate command at a time per Mac" and `plugin/commands/gate.md` says "the running gate", both past the packet's may-touch. Reword both to one per repo under a load ceiling.
+- An entry queued by alpha.31 keys on its repo's realpath and a new one in that repo on its `.git`, so the two may run together once, across the upgrade. Ruling 1 reads it so; it ends with the old queue.
+- `notify`'s POST holds the runner's loop up to its 5 s timeout, so another child's wall cut can land 5 s late. Post from a thread if a late cut ever matters.
+- A hand-written entry with no `repo` or `command` raises in `_start`, as in S38's `_run`; the respawned runner then kills the running set each time. Close such an entry with 127.
+- `_recover` kills a dead runner's groups in turn, a grace each, up to 15 s at three. Signal them together if a cold start ever feels it.

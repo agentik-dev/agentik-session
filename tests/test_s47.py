@@ -60,7 +60,7 @@ def w(tmp_path):
 
 def _git(*argv, cwd):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t",
                     "-c", "commit.gpgsign=false", *argv], cwd=cwd, env=env, check=True,
                    capture_output=True)
 

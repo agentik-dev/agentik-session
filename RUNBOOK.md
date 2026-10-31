@@ -435,9 +435,10 @@ hang-up the launcher writes nothing more to the terminal).
 ## 5. The gate queue
 
 A full gate can take an hour behind one lock (the TLC lock is a directory with
-a pid file). `agentik session gate` queues gate commands: one runs at a time
-per state root, so one per Mac unless `XDG_STATE_HOME` differs, each in its
-repo as argv under the environment `run` saw.
+a pid file). `agentik session gate` queues gate commands per state root, so
+one queue per Mac unless `XDG_STATE_HOME` differs, each in its repo as argv
+under the environment `run` saw. One runs per key, and a one-minute gate of one
+repo does not wait behind a long gate of another.
 
 ```bash
 agentik session gate run . --lock <tlc-lock-dir> --label "land s38" -- make check
@@ -455,30 +456,51 @@ agentik session gate status                       # running, queued, the last fi
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.
-- `--lock PATH` (repeatable) holds the entry while PATH exists; a younger entry
-  with no lock may run first. `--wall SECONDS` cuts the command (default
-  `gate.wall`, 5400). `--wait` waits after queueing.
+- The key is the realpath of `git -C <repo> rev-parse --git-common-dir`, taken
+  at `run`, so a repo and all its worktrees are one key; not a git tree, or git
+  failing, the repo's realpath, and an older queue's entry, with no key, reads
+  that too. A younger entry of a key never passes an older one of that key.
+- `--lock PATH` (repeatable) holds the entry while PATH exists, and while a
+  running entry names PATH, whatever its key, since that command may not have
+  made it yet: one TLC at a time passes its lock this way. A younger entry of
+  another key with no lock may run first. `--wall SECONDS` cuts the command
+  (default `gate.wall`, 5400). `--wait` waits after queueing.
+- The ceiling. With nothing running, the oldest free entry starts whatever the
+  load. With one or more running, another starts only when all three hold:
+  fewer than `gate.max_running` run (3); the 1-minute load average is under
+  `gate.load_ceiling` (0.75 of the cores, a failed read counting as over); and
+  60 s have passed since the last start, since a load average lags. Above the
+  ceiling the queue runs one at a time. Both keys are read from
+  `~/.claude/agentik/profiles.yaml`; a bad value reads as the default, one line
+  in `runner.log`.
+- `gate status` says why each entry waits: `waits on lock PATH`, `waits on key
+  <repo's name>`, `waits on load <x> over <c>`, `waits on running <n> of <m>`,
+  `waits on settle <s> s`. In `--json`, `running` is a list of `{id, repo, label,
+  since, seconds}`, empty with nothing running, and each queued entry adds `key`
+  and `wait`.
 - Exit codes. `wait` exits 0 whatever the gate's code, 2 for an unknown id, 1
   past `--timeout`. A result holds the command's own code, or 124 (the wall cut
   its process group, SIGTERM then SIGKILL), 125 (its runner died; the next
-  runner killed the group), 126 (a lock held past the wall; never run) or 127
-  (it could not start).
+  runner killed each running group), 126 (a lock held past the wall; never run:
+  the wall counts while the lock alone holds the oldest waiting entry, not behind
+  its own key or a running entry naming that path) or 127 (it could not start).
 - ntfy: with `gate: {ntfy_url: <url>, ntfy_topic: <topic>}` in
   `~/.claude/agentik/profiles.yaml` the runner POSTs each result line to
   `<url>/<topic>`, `Title: gate <repo>: exit <code>`; a failure is one line in
   `runner.log`. The runner reads that user layer alone, since it serves every
   repo.
 
-The runner (`gate serve`, internal) is spawned detached by `run`, `wait` and
-`status` while the queue is not empty, and exits after 60 s idle. The state,
+The runner (`gate serve`, internal), one process holding a set of children it
+polls, is spawned detached by `run`, `wait` and `status` while the queue is not
+empty, and exits after 60 s with nothing running or queued. The state,
 under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 `claude-code-session` there when only that pre-rename folder exists):
 
 | path | what |
 |---|---|
-| `gate/queue/<id>.json` | an entry: id, repo, command, env, locks, wall, label, caller, queued (0600) |
+| `gate/queue/<id>.json` | an entry: id, repo, command, env, locks, wall, label, caller, queued, key (0600) |
 | `gate/queue.lock`, `gate/counter` | the id's counter, taken under flock |
-| `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running, pgid |
+| `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running (a list of `{id, pgid}`) |
 | `gate/runner.log` | the runner's stdout and stderr |
 | `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |

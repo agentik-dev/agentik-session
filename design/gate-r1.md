@@ -27,3 +27,12 @@
 - The wake: the Bash tool's background tasks die when their session respawns, so a sitting lists its open gate ids in its state file's `## Gates` section (S39) and the successor re-arms each `gate wait <id>` from there.
 - Amendment 1 (refuter round 1, F1): the 126 cut counts the wall from the moment the runner first sees the entry as a locked head (its own memory, dropped when that head is seen unlocked or leaves the head), never from `queued`.
 - Amendment 1 (F2): a pid is alive when `kill(pid, 0)` succeeds and, when it is this process's own child (a runner spawned by `wait` or `run --wait`), `waitpid(pid, WNOHANG)` reaps nothing; a reaped zombie is dead, so `wait` respawns the runner and the 125 recovery runs.
+- 2026-10-30, packet S47 (`design/packets/s47-gate-key.md`), which replaces section 2's one command at a time: one running per key, a lock exclusive across keys, a load ceiling before a second start, and the runner a set of children; its rulings stand in the packet, and the choices below are its builder's, one sentence each.
+- `waits on key` names the repo, not the key's literal basename, since that is `.git` for every repo with a work tree.
+- `git` runs with no `GIT_*` in its environment, since a `GIT_DIR` from a hook would name another tree.
+- The load ceiling's two keys appear in `gate_config`'s answer only when set well, and `gate.py` holds their defaults, since one follows the core count and the three-key answer stays as S38 pinned it.
+- A head's wall ticks only while its lock alone keeps it from starting: not behind a running entry of its own key, and not on a path a running entry names, whose holder has a wall of its own; so S47 never cuts a gate 126 sooner than S38 would have.
+- A wall cut's grace is kept at the poll: SIGTERM at the wall, SIGKILL a grace later, with the child not polled between them, as S38's order; `_recover` still kills each group in turn, since nothing runs beside it then.
+- The running entry's start, in `status` and in the 125 result, is its directory's mtime, since `runner.json` is now rewritten at every start and finish; a directory not there yet reads that file.
+- `status` also says `waits on running <n> of <m>` and `waits on settle <s> s`, the two bars ruling 4 gave no words, so an entry never waits unexplained; one entry shows one wait, a lock before a key before the ceiling.
+- A command that cannot start (127) counts as no start: it adds no load, so it sets no settle.

@@ -200,7 +200,9 @@ agentik-session gate wait <id> --timeout <s>   # its result line; run it in a ba
 agentik-session gate status     # what runs, what waits, the last five done
 ```
 
-The gate queue runs one gate at a time per Mac. Its result reaches the caller two ways:
+The gate queue runs one gate per repo (a repo and its worktrees are one) under a load
+ceiling, and a lock path one running gate names holds every other gate that names it.
+Its result reaches the caller two ways:
 `gate wait <id>` in a background Bash with a timeout past the gate's length, or the
 UserPromptSubmit and PostToolUse hooks' line at the next prompt or tool call. A respawn
 kills background tasks: list each open gate id in the state file's `## Gates`, and the

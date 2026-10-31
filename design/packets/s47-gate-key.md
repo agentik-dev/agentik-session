@@ -12,7 +12,7 @@
 
 ## 1. What the source says, and the readings
 
-The intake's acceptance: "A client gate queued behind a syrvis gate starts at once; the load average at the 1 min mark stays under the core count during both." Its other line: "One TLC at a time, after the OOM of 2026-10-22."
+The intake's acceptance: "A client gate queued behind a [long, private repo's] gate starts at once; the load average at the 1 min mark stays under the core count during both." Its other line: "One TLC at a time, after the OOM of 2026-10-22."
 
 Readings, 16 cores: the FIFO held a one-minute gate and the eleven behind it an hour (load 20, 41, 43, 2026-10-30 04:17); on 2026-10-30 a two-minute gate waited 64 minutes behind a 96-minute one; on the same evening an 840 s `make check` was cut by its own wall at load 20 with the queue running one entry at a time, so load comes from outside the queue too and more concurrency must never be added on top of it.
 
@@ -34,7 +34,7 @@ Readings, 16 cores: the FIFO held a one-minute gate and the eleven behind it an 
 
 ## 4. Findings that name this row
 
-None. The syrvis organisation's sitting consumes this and passes its TLC lock by `--lock`, as today.
+None. A private organisation's sitting consumes this and passes its TLC lock by `--lock`, as today.
 
 ## 5. Forbidden reads
 
