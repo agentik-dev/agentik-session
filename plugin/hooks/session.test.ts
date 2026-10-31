@@ -314,8 +314,9 @@ test('another mod\'s line is kept under the two', async (t: any, on: any) => {
 
 // Fix round 1: the classic SessionStart hook makes the session dir after the module's
 // session.start has run, so `mod start` is retried on every 5 s tick until it answers.
-const retrying = async (t: any, on: any, failures: number) => {
+const retrying = async (t: any, on: any, failures: number, refuse: { sleep?: any, invalidate?: any } = {}) => {
   const argvs: string[] = []
+  const logged: unknown[] = []
   const sleepers: Array<(v: unknown) => void> = []
   on('session.start', ($: any, e: any) => e)
   on('session.id', () => ({ value: 'sess-1' }))
@@ -333,10 +334,11 @@ const retrying = async (t: any, on: any, failures: number) => {
   })
   on('clock.now', () => ({ value: NOW }))
   // Only the band's 5 s tick is driven; admission's 1 s bounds (fix round 1, F2) never pass.
-  on('clock.sleep', ($: any, e: any) => Number(e.ms) === 5000
-    ? new Promise(resolve => { sleepers.push(resolve) }) : new Promise(() => {}))
-  on('ui.invalidate', () => ({ value: undefined }))
-  await t.session.start({ cwd: '/repo' })
+  on('clock.sleep', refuse.sleep ?? (($: any, e: any) => Number(e.ms) === 5000
+    ? new Promise(resolve => { sleepers.push(resolve) }) : new Promise(() => {})))
+  on('ui.invalidate', refuse.invalidate ?? (() => ({ value: undefined })))
+  on('ui.log', ($: any, e: any) => { logged.push(e); return { value: undefined } })
+  const answered = await t.session.start({ cwd: '/repo' })
   // A tick ends when the loop is parked on its next 5 s sleep (S41 Amendment 1): a fixed
   // 20 ms let a loaded machine end the test first, and the loop's late clock.sleep, with
   // the test's handlers gone, was a rejection nothing handled (the file did not run to its end).
@@ -345,7 +347,7 @@ const retrying = async (t: any, on: any, failures: number) => {
     for (let i = 0; i < 400 && sleepers.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
   }
   const draw = async () => ((await t.ui.render(PROPS(120))) as any).children[0].children[0] as string
-  return { argvs, tick, draw }
+  return { argvs, logged, answered, sleepers, tick, draw }
 }
 
 test('mod start failing twice: the third try, on the second tick, draws the meter', async (t: any, on: any) => {
@@ -365,6 +367,50 @@ test('mod start never answering: 24 tries, then the doctor line', async (t: any,
   for (let i = 0; i < 30; i++) await tick()
   expect(argvs.length).toBe(24)
   expect(await draw()).toBe(NO_METER)
+})
+
+// Packet S50: a refused clock ends the band's loop, silently; a refused redraw does not.
+test('clock.sleep refusing the loop: no stray rejection, no further call, session.start answered', async (t: any, on: any) => {
+  let refused = 0
+  // A loop that went on past a refusal would spin: the fourth call parks it, so that loop
+  // fails the count below rather than the runner's wall.
+  const sleep = ($: any, e: any) => {
+    if (Number(e.ms) !== 5000 || refused >= 3) return new Promise(() => {})
+    refused += 1
+    return { deny: 'the clock refuses' }
+  }
+  const { argvs, logged, answered, draw } = await retrying(t, on, 0, { sleep })
+  // A stray rejection fails the file, not this test: the runner's own `the file ran to its end`
+  // names the deny's text (this sandbox has no `process` to listen on). These two turns of the
+  // event loop let the loop's refusal land; no timer's length is what the test waits on.
+  for (let i = 0; i < 2; i++) await new Promise(resolve => setTimeout(resolve, 0))
+  expect(refused).toBe(1)
+  expect(answered).toEqual({ cwd: '/repo' })
+  expect(argvs).toEqual([JSON.stringify(ARGV)])
+  expect(logged).toEqual([])
+  expect(await draw()).toBe('session: ctx 62% · turns 31% · notice')
+})
+
+test('ui.invalidate refusing once on a tick: the next tick still runs and draws the meter', async (t: any, on: any) => {
+  let redraws = 0
+  // The first is session.start's own redraw, outside the loop; the second is the first tick's.
+  // This engine drops a refused redraw (`$.ui.invalidate dropped`) and answers the module, so
+  // this test holds the outcome and passes on either loop; the loop's `try` is for an engine
+  // that rejects. Every answer tried: a throw, a rejection, `{ deny }`, a bad result.
+  const invalidate = () => {
+    redraws += 1
+    return redraws === 2 ? { deny: 'the redraw refuses' } : { value: undefined }
+  }
+  const { argvs, logged, tick, draw } = await retrying(t, on, 2, { invalidate })
+  expect(await draw()).toBe(NO_METER)
+  await tick()
+  expect(redraws).toBe(2)
+  expect(await draw()).toBe(NO_METER)
+  await tick()
+  expect(redraws).toBe(3)
+  expect(argvs.length).toBe(3)
+  expect(logged).toEqual([])
+  expect(await draw()).toBe('session: ctx 62% · turns 31% · notice')
 })
 
 // Packet M2: every session.measure sends one `measure record` (the four figures, never a
