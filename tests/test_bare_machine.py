@@ -155,10 +155,14 @@ def test_a_root_with_a_space_runs(tmp_path):
 # ---- the switch (design/04 §3, both states) --------------------------------------------
 
 def _off(box, events=EVENTS, env=None):
+    """No marker, and the plugin's own code ran: an exit 0 alone is also a shim that found nothing."""
+    rows = box.t / ".local" / "state" / "agentik-session" / "hooks.jsonl"
+    before = len(rows.read_text().splitlines()) if rows.exists() else 0
     for event in events:
         r = box.hook(event, env=env)
         assert r.returncode == 0, (event, r.stderr)
     assert box.marks() == []
+    assert len(rows.read_text().splitlines()) == before + len(events)
 
 
 def test_switch_off_ten_events_no_marker_with_the_decoy_first_on_path_and_xdg_holding_the_file(box):
@@ -185,6 +189,15 @@ def test_switch_on_a_marker_per_event_the_shims_exits_and_after_rm_none(box):
     box.switch.unlink()
     box.marker.unlink()
     _off(box)
+
+
+def test_switch_on_the_target_is_the_fixed_path_never_one_on_path(box):
+    box.decoy()
+    box.on()
+    other = box.t / "other" / "agentik-session"
+    _exe(other, '#!/bin/sh\ncat >/dev/null\necho "$2" >> "%s.other"\nexit 0\n' % box.marker)
+    box.hook("Stop", env=box.env(PATH="%s:/usr/bin:/bin" % other.parent))
+    assert box.marks() == ["Stop"] and not Path(str(box.marker) + ".other").exists()
 
 
 @pytest.mark.parametrize("state", ["no launcher", "symlink", "dangling symlink", "directory", "25 h"])
