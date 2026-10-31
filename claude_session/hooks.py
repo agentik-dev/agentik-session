@@ -450,13 +450,16 @@ def _charter(resolved: dict) -> str:
 
 def _signal(m: meter.Meter) -> bool:
     """D13: silent under checkpoint_at; the first crossing, then every tenth
-    tool; at or past 100% every tool. Updates m.signal; True to speak."""
+    tool; at or past 100% every tool. A share back under checkpoint_at, as a wider
+    window gives, clears the latch, so the next crossing speaks at once. Updates
+    m.signal; True to speak."""
     sig = m.signal
     pct = m.used_pct
     if pct >= 100.0:
         sig.update(crossed=True, tools_since=0)
         return True
     if pct < 100.0 * float(m.checkpoint_at):
+        sig.update(crossed=False, tools_since=0)
         return False
     if not sig.get("crossed"):
         sig.update(crossed=True, tools_since=0)

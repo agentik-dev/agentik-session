@@ -825,3 +825,27 @@ def test_f3_write_goes_on_past_the_bound(held, repo):
 
 def test_f3_the_bound_is_shorter_than_the_modules_own():
     assert 0 < resolver.LOCK_WAIT < MODULE_BOUND
+
+
+def test_f4_a_wider_window_clears_the_latch_and_the_next_crossing_speaks(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "orchestrator-opus")
+    monkeypatch.setenv("CLAUDE_SESSION_MODEL", OPUS)
+    tp = transcript(tmp_path, (OPUS, 150000))
+    start(repo, tp)
+    assert "CHECKPOINT" in said(tool(repo, tp))         # 83.3% of 180000: the first crossing
+    assert meter.load(sdir())["signal"]["crossed"] is True
+    assert measured(1000000)[0] == 0
+    assert said(tool(repo, tp)) == ""                   # 37.5% of 400000: under, and it clears
+    assert meter.load(sdir())["signal"] == {"crossed": False, "tools_since": 0}
+    tp = transcript(tmp_path, (OPUS, 150000), (OPUS, 330000))
+    out = tool(repo, tp)                                # 82.5% of 400000: speaks at once
+    assert "CHECKPOINT" in said(out) and "82.5%" in said(out)
+    assert meter.load(sdir())["signal"] == {"crossed": True, "tools_since": 0}
+
+
+def test_f4_past_the_crossing_it_still_speaks_every_tenth_tool(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "builder")
+    tp = transcript(tmp_path, (OPUS, 150000))
+    start(repo, tp)
+    spoke = ["CHECKPOINT" in said(tool(repo, tp)) for _ in range(12)]
+    assert spoke == [True] + [False] * 9 + [True, False]
