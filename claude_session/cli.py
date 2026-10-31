@@ -41,7 +41,23 @@ def cmd_budget(args) -> int:
 
 
 def cmd_hook(args) -> int:
-    return hooks.dispatch(args.event)
+    """The hook, and last the row of what it did (S49 Amendment 1): `code` is what this process
+    will exit with, whichever way the handler leaves. A KeyboardInterrupt dies by the signal, so
+    it has no row. Nothing after the row but the interpreter's teardown, which record_hook's
+    flush keeps from moving the exit."""
+    t0 = harness.take_t0(os.environ)
+    code = 1                        # an uncaught exception's exit
+    try:
+        code = hooks.dispatch(args.event)
+        return code
+    except SystemExit as e:
+        code = harness.exit_status(e.code)
+        raise
+    except KeyboardInterrupt:
+        code = None
+        raise
+    finally:
+        harness.record_hook(t0, args.event, code, os.environ)
 
 
 

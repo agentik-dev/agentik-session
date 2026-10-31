@@ -83,7 +83,7 @@ def test_s34_g_the_plugin_registers_stopfailure_as_stop():
                                "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run StopFailure"}]}]
     shim = (HOOKS_DIR / "run").read_text()
     case = next(l for l in shim.splitlines() if l.strip().startswith("Stop|"))
-    assert "StopFailure" in case.split(")")[0] and ">/dev/null 2>&1; rc=$?; out=0 ;;" in case
+    assert "StopFailure" in case.split(")")[0] and ">/dev/null 2>&1; exit 0" in case
 
 
 # ---- (h) the band's limit note: one fixture, both twins --------------------------------

@@ -90,8 +90,8 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert text.endswith(MAIN_FLOW)
     assert "hooks.jsonl" not in text
     code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert code[5] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
-    assert code[1:5] + code[6:] == [
+    assert code[4] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
+    assert code[:4] + code[5:] == [
         'if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session',
         'elif command -v claude-session >/dev/null 2>&1; then tool=claude-session',
         'else exit 0', 'fi', *MAIN_FLOW.splitlines()]
@@ -430,6 +430,7 @@ def test_s49_exit_status_is_pythons_mapping(code, want):
 # ---- the variable dies with the call
 
 def test_s49_the_hook_pops_the_variable_before_it_runs(monkeypatch):
+    config.ensure_dirs()
     monkeypatch.setenv(T0, str(time.time_ns()))
     seen = {}
     def spy(_event):

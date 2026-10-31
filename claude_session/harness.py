@@ -1,11 +1,15 @@
 """What the harness costs a session (packet S49): `hooks.jsonl` and `claude_md_bytes`.
 
-`plugin/hooks/run` appends `{"event","ms","exit"}` to `<state>/hooks.jsonl` after each of
-this plugin's hooks, and nothing else: no session, time, path, prompt or tool input. It cannot
-size the file without a fork, so `hooks.dispatch` calls `rotate` on every hook: at HOOKS_CAP or
-more the file becomes `hooks.jsonl.1`, replacing the last, so the two hold at most twice the
-cap plus any line racing the rename. `report --hooks` reads both. Nothing that decides reads
-any of this, and no failure here ever reaches a hook.
+`plugin/hooks/run` exports the start in HOOK_T0 and `exec`s the tool as ever; `cli.cmd_hook`
+pops it on entry and ends with `record_hook`, which appends `{"event","ms","exit"}` to
+`<state>/hooks.jsonl` and nothing else: no session, time, path, prompt or tool input (Amendment
+1). `exit` is the tool's own, and `ms` runs from the shim's `date` to just before the append, so
+interpreter teardown is not in it. Lost, and absent rather than wrong: a CLI older than the
+plugin, an argparse refusal before the handler, an interpreter failure, a kill.
+`hooks.dispatch` calls `rotate` on every hook: at HOOKS_CAP or more the file becomes
+`hooks.jsonl.1`, replacing the last, so the two hold at most twice the cap plus any line racing
+the rename. `report --hooks` reads both. Nothing that decides reads any of this, and no failure
+here ever reaches a hook.
 """
 from __future__ import annotations
 
@@ -13,11 +17,18 @@ import json
 import math
 import os
 import re
+import stat
+import sys
+import time
 from pathlib import Path
 
+from . import config
 from .ledger import _columns
 
 HOOKS = "hooks.jsonl"
+HOOK_T0 = "AGENTIK_SESSION_HOOK_T0"     # the shim's start, in ns: read here and nowhere else
+_T0 = re.compile(r"[0-9]{19}")
+_EVENT = re.compile(r"[A-Za-z]+")
 HOOKS_CAP = 1048576
 PROJECT_FILES = ("CLAUDE.md", os.path.join(".claude", "CLAUDE.md"), "CLAUDE.local.md")
 MD_HOPS = 5                 # an import chain's depth, as Claude Code documents it
@@ -29,11 +40,59 @@ _IMPORT = re.compile(r"(?:^|(?<=\s))@(\S+)")
 
 
 def rotate(state) -> None:
-    """Past the cap, the file becomes the one generation kept. Silent: never raises."""
+    """Past the cap, the regular file becomes the one generation kept. Silent: never raises."""
     try:
         p = os.path.join(state, HOOKS)
-        if os.stat(p).st_size >= HOOKS_CAP:
+        st = os.lstat(p)
+        if stat.S_ISREG(st.st_mode) and st.st_size >= HOOKS_CAP:
             os.replace(p, p + ".1")
+    except Exception:       # noqa: BLE001 - a measure never fails a hook
+        pass
+
+
+def take_t0(env) -> str | None:
+    """The shim's start, out of the environment, so that nothing a hook spawns inherits it and
+    no nested `hook` call writes a row from it. Never raises."""
+    try:
+        return env.pop(HOOK_T0, None)
+    except Exception:       # noqa: BLE001 - a measure never fails a hook
+        return None
+
+
+def exit_status(code) -> int:
+    """What Python exits with for `SystemExit(code)`: None is 0, an int is itself, the rest 1
+    (and their text on stderr, which is Python's to print)."""
+    if code is None:
+        return 0
+    return int(code) if isinstance(code, int) else 1
+
+
+def record_hook(t0, event, code, env) -> None:
+    """The hook's row, the last thing on its path. Nothing here moves the exit, stdout or stderr,
+    or raises; any failure writes nothing and says nothing. No row for a start that is not 19
+    ASCII digits or reads ahead of the clock, an event that is not letters, or a code no exit
+    status can hold. Stdout is flushed first: teardown's flush of a closed stdout turns the exit
+    into 120, so a flush that fails here writes no row, and teardown fails as it would have.
+    Regular files only, and no link followed (`lstat`'s semantics, race-free): a dangling link,
+    a link to a file, a FIFO, a directory or an absent state folder write nothing, make nothing."""
+    try:
+        if not (isinstance(t0, str) and _T0.fullmatch(t0)
+                and isinstance(event, str) and _EVENT.fullmatch(event)
+                and type(code) is int and 0 <= code <= 255):
+            return
+        if sys.stdout is not None:
+            sys.stdout.flush()
+        ms = (time.time_ns() - int(t0)) // 1000000
+        if ms < 0:
+            return
+        fd = os.open(os.path.join(config.state_dir(env), HOOKS),
+                     os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+                     | os.O_CLOEXEC, 0o600)
+        try:
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                os.write(fd, b'{"event":"%s","ms":%d,"exit":%d}\n' % (event.encode(), ms, code))
+        finally:
+            os.close(fd)
     except Exception:       # noqa: BLE001 - a measure never fails a hook
         pass
 
