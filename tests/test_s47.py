@@ -1041,3 +1041,155 @@ def test_s47_a1_a_wall_of_exactly_the_limit_is_cut(w):
         w.killpg(pgid, sig)
     gate.serve(w.root, w.fx(killpg=killpg))
     assert at[0] == (signal.SIGTERM, T0 + 30) and w.result(a["id"])["exit"] == 124
+
+
+# ---- Amendment 2: a lock's own name stays as typed, and compares as its volume does ------
+
+def _live_link(tmp_path):
+    target, held = tmp_path / "target", tmp_path / "held"
+    target.write_text("")
+    held.symlink_to(target)
+    return target, held
+
+
+def test_s47_a2_a_lock_that_was_a_live_link_runs_once_the_link_goes(w, tmp_path):
+    # At 61fd2ad the entry stored the target, waited on it for good, and was cut 126.
+    target, held = _live_link(tmp_path)
+    w.plan = {"a": (1, 0)}
+    a = w.put_in("one", "a", locks=[str(held)], wall=30)
+    held.unlink()
+    gate.serve(w.root, w.fx())
+    assert w.result(a["id"])["exit"] == 0 and w.order() == ["a"] and target.exists()
+
+
+def test_s47_a2_a_live_link_holds_its_entry_until_it_goes(w, tmp_path):
+    _, held = _live_link(tmp_path)
+    w.plan = {"a": (1, 0)}
+    a = w.put_in("one", "a", locks=[str(held)])
+
+    def letgo(world):
+        if world.t >= T0 + 20 and held.is_symlink():
+            held.unlink()
+    w.hooks.append(letgo)
+    gate.serve(w.root, w.fx())
+    r = w.result(a["id"])
+    assert r["exit"] == 0 and r["started"] >= T0 + 20
+
+
+def test_s47_a2_enqueue_resolves_the_parent_only(w, tmp_path):
+    real, link = _linked(tmp_path)
+    (real / "target").write_text("")
+    (real / "held").symlink_to(real / "target")
+    a = w.put_in("one", "a", locks=[str(link / "held")])
+    assert a["locks"] == [os.path.join(os.path.realpath(real), "held")]
+
+
+def test_s47_a2_a_locks_key_keeps_its_own_name(tmp_path):
+    target, held = tmp_path / "target", tmp_path / "held"
+    before = gate.lock_key(str(held))
+    target.write_text("")
+    held.symlink_to(target)
+    st = os.stat(tmp_path)
+    assert gate.lock_key(str(held)) == before == f"{st.st_dev}:{st.st_ino}/held"
+    assert gate.lock_key(str(held)) != gate.lock_key(str(target))
+
+
+def _volume(monkeypatch, reads, platform="darwin"):
+    asked = []
+
+    def pathconf(path, name):
+        asked.append((path, name))
+        if isinstance(reads, Exception):
+            raise reads
+        return reads
+    monkeypatch.setattr(gate.sys, "platform", platform)
+    monkeypatch.setattr(gate.os, "pathconf", pathconf, raising=False)
+    return asked
+
+
+_SPELLINGS = [("tlc.lock", "TLC.lock"), ("nope/l", "NOPE/l"),
+              ("café.lock", "café.lock"), ("café/l", "café/l"),
+              ("É.lock", "é.lock")]
+
+
+@pytest.mark.parametrize("a, b", _SPELLINGS)
+def test_s47_a2_a_folding_volume_reads_one_lock(tmp_path, monkeypatch, a, b):
+    _volume(monkeypatch, 0)
+    assert gate.lock_key(str(tmp_path / a)) == gate.lock_key(str(tmp_path / b))
+
+
+@pytest.mark.parametrize("a, b", _SPELLINGS)
+@pytest.mark.parametrize("reads, platform", [(1, "darwin"), (OSError("no such name"), "darwin"),
+                                             (0, "linux")],
+                         ids=["case-sensitive", "oserror", "another-os"])
+def test_s47_a2_a_volume_that_does_not_fold_keeps_them_apart(tmp_path, monkeypatch, reads,
+                                                             platform, a, b):
+    _volume(monkeypatch, reads, platform)
+    assert gate.lock_key(str(tmp_path / a)) != gate.lock_key(str(tmp_path / b))
+
+
+def test_s47_a2_no_pathconf_compares_as_typed(tmp_path, monkeypatch):
+    _volume(monkeypatch, 0)
+    monkeypatch.delattr(gate.os, "pathconf")
+    assert gate.lock_key(str(tmp_path / "tlc.lock")) != gate.lock_key(str(tmp_path / "TLC.lock"))
+
+
+def test_s47_a2_the_volume_is_asked_at_the_deepest_existing_dir(tmp_path, monkeypatch):
+    asked = _volume(monkeypatch, 0)
+    st = os.stat(tmp_path)
+    key = gate.lock_key(str(tmp_path / "NOPE" / "Deep" / "L"))
+    assert key == f"{st.st_dev}:{st.st_ino}/nope/deep/l"
+    assert asked == [(os.path.realpath(tmp_path), 11)]
+
+
+def test_s47_a2_the_stored_lock_and_its_exists_test_stay_as_typed(w, tmp_path, monkeypatch):
+    _volume(monkeypatch, 0)
+    a = w.put_in("one", "a", locks=[str(tmp_path / "TLC.lock")])
+    assert a["locks"] == [os.path.join(os.path.realpath(tmp_path), "TLC.lock")]
+    assert gate._locked(a) is None
+    (tmp_path / "TLC.lock").mkdir()
+    assert gate._locked(a) == a["locks"][0]
+
+
+@pytest.mark.parametrize("reads, together", [(0, False), (1, True)],
+                         ids=["folding", "case-sensitive"])
+def test_s47_a2_two_cases_of_a_lock_across_keys(w, tmp_path, monkeypatch, reads, together):
+    _volume(monkeypatch, reads)
+    w.plan = {"a": (300, 0), "b": (5, 0)}
+    a = w.put_in("one", "a", locks=[str(tmp_path / "tlc.lock")])
+    b = w.put_in("two", "b", locks=[str(tmp_path / "TLC.lock")])
+    gate.serve(w.root, w.fx())
+    assert (w.result(b["id"])["started"] < w.result(a["id"])["ended"]) is together
+
+
+def test_s47_a2_the_real_volume_reads_as_it_behaves(tmp_path):
+    d = tmp_path / "Locks"
+    d.mkdir()
+    folds = gate.sys.platform == "darwin" and _case_insensitive(d)
+    assert (gate.lock_key(str(d / "tlc.lock")) == gate.lock_key(str(d / "TLC.lock"))) == folds
+
+
+def _named_entry(n, locks):
+    return {"id": f"20260101-000000-{n}", "repo": "/r", "key": f"k{n}", "key_name": "n",
+            "locks": locks, "command": ["x"]}
+
+
+def test_s47_a2_a_parent_made_mid_pass_cannot_read_one_spelling_as_free(tmp_path):
+    lock = str(tmp_path / "made" / "tlc.lock")
+    h = gate._holds([_named_entry(2, [str(tmp_path / "other")]), _named_entry(3, [lock])],
+                    [_named_entry(1, [lock])])
+    assert next(h)[1] is None
+    (tmp_path / "made").mkdir()                # the running command's own mkdir, between two reads
+    assert next(h)[1] == ("lock", lock)
+
+
+def test_s47_a2_a_parent_made_mid_read_does_not_tick_a_lock_wall(tmp_path, monkeypatch):
+    lock = tmp_path / "made" / "tlc.lock"
+    named = gate._named
+
+    def mid(running):
+        out = named(running)
+        lock.mkdir(parents=True)
+        return out
+    monkeypatch.setattr(gate, "_named", mid)
+    assert gate._lock_wait(_named_entry(2, [str(lock)]), [_named_entry(1, [str(lock)])]) is None
