@@ -1,4 +1,4 @@
-.PHONY: help test doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme
+.PHONY: help test test-floor venv-floor doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme
 # The virtualenv first: `python3` and the scripts' shebangs resolve to it, never Apple's.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 # The newest installed respeak renderer, under either marketplace name.
@@ -9,6 +9,20 @@ help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
 test:  ## run the suite (no quota, fake claude)
 	./.venv/bin/python -m pytest -q
+# The floor (hq entry 6, design/04): .venv-floor is the suite's venv under the one interpreter
+# a fresh Mac and this one share. It is built once in the main checkout, and a worktree links
+# it there, as with .venv. test-floor stays out of check, the gate's largest cost (sc1 ruling 4).
+FLOOR_PYTHON ?= /usr/bin/python3
+venv-floor:  ## build .venv-floor under /usr/bin/python3 in the main checkout (pytest from pip), and link it from a worktree
+	@set -e; main=$$(git worktree list --porcelain | sed -n '1s/^worktree //p'); \
+	if [ ! -x "$$main/.venv-floor/bin/pytest" ]; then \
+	  $(FLOOR_PYTHON) -m venv "$$main/.venv-floor"; \
+	  "$$main/.venv-floor/bin/python" -m pip install -q --disable-pip-version-check 'pytest>=8'; fi; \
+	if [ "$$main" != "$(CURDIR)" ] && [ ! -e .venv-floor ]; then ln -s "$$main/.venv-floor" .venv-floor; fi; \
+	echo "venv-floor: $$main/.venv-floor, $$("$$main/.venv-floor/bin/python" --version)"
+test-floor:  ## run the suite under .venv-floor, test_bounded.py excepted (scripts/bounded is a 3.11 dev tool, never run time)
+	@[ -x .venv-floor/bin/python ] || { echo "test-floor: no .venv-floor; run make venv-floor" >&2; exit 2; }
+	PATH="$(CURDIR)/.venv-floor/bin:$$PATH" ./.venv-floor/bin/python -m pytest -q --ignore=tests/test_bounded.py
 doctor:  ## check the tool, the plugin and its dependencies on this machine
 	python3 -m claude_session doctor
 # The install's destination and interpreter; a test overrides HOME (or PREFIX) and PYTHON.
