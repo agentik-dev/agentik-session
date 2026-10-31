@@ -6,6 +6,11 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## S44, the demand bands (2026-10-30)
+- S4: a rule's cut inside a repeated hour reads its first instant, as the packet rules, so in the fold's second pass `demand` takes the band from the wall and `until` skips that cut, though the wall will cross it again. The shipped file has no cut there; a user file with one is off for at most that hour.
+- S4: `status --transcript` shows no band: it reads a transcript, not this session's band. A reader that wants one takes it from band.json.
+- S4: `grade` in `bands.yaml` is the source's text, and nothing reads it.
+
 ## S43, the lines on a login with no five-hour window (2026-10-30)
 - S4: `rules.py`'s rendered waiting rule still reads `(room for 0, or a usage limit hit)`, and `tests/test_rules.py` pins it, while the charter's pattern and the two docs now name the week and the band too; the packet allows only `lifetime` in that file. A packet that touches the rendered rules takes it.
 - S4: the twins differ on a stamp at datetime's very ends: Python's `_wall` refuses 0001-01-01 and 9999-12-31, `wall` in `session.ts` takes them. Older than this change and on both lines; `_stamp` never writes one.
