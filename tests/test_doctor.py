@@ -352,7 +352,7 @@ def test_s19_shim_never_blocks_stop(tmp_path):
     bin_.mkdir()
     _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
-    env = {"PATH": "%s:/usr/bin:/bin" % bin_}
+    env = {"PATH": "%s:/usr/bin:/bin" % bin_, "CLAUDE_PLUGIN_ROOT": str(tmp_path)}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,
                                         input='{"session_id": "s"}', capture_output=True)
     r = shim("Stop")
@@ -451,7 +451,7 @@ def test_s20b_shim_drops_post_tool_use_failure(tmp_path):
     bin_.mkdir()
     _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
-    env = {"PATH": "%s:/usr/bin:/bin" % bin_}
+    env = {"PATH": "%s:/usr/bin:/bin" % bin_, "CLAUDE_PLUGIN_ROOT": str(tmp_path)}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,
                                         input='{"session_id": "s"}', capture_output=True)
     r = shim("PostToolUseFailure")
@@ -514,7 +514,7 @@ def test_s22_shim_drops_post_tool_batch(tmp_path):
     bin_.mkdir()
     _exe(bin_ / "agentik-session", "cat >/dev/null; echo \"invalid choice: $2\" >&2; "
                                   "echo '{}'; exit 2\n")
-    env = {"PATH": "%s:/usr/bin:/bin" % bin_}
+    env = {"PATH": "%s:/usr/bin:/bin" % bin_, "CLAUDE_PLUGIN_ROOT": str(tmp_path)}
     shim = lambda event: subprocess.run([str(PLUGIN / "hooks/run"), event], env=env, text=True,
                                         input='{"session_id": "s"}', capture_output=True)
     r = shim("PostToolBatch")

@@ -1,0 +1,11 @@
+#!/bin/sh
+# agentik-session, the plugin's own launcher (design/04 §2): the runner beside it under the
+# one interpreter a fresh Mac and this one share. With no Python a hook exits 0, SessionStart
+# says so in a systemMessage, other verbs exit 3 (GUIDE §10).
+root=${0%/*}/..
+py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -x "$py" ] || py=$(command -v python3) || {
+    if [ "$1" != hook ]; then echo "agentik-session: no python3, at /usr/bin/python3 or on PATH" >&2; exit 3; fi
+    [ "$2" != SessionStart ] || printf '{"systemMessage": "agentik-session: no python3, at /usr/bin/python3 or on PATH; its hooks do nothing"}\n'
+    exit 0
+}
+exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" "$root/lib/agentik-session" "$@"

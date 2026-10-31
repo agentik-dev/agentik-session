@@ -61,7 +61,7 @@ def _scripted(box, body):
 
 def _env(box, path=None):
     return {"PATH": path or f"{box / 'bin'}:/usr/bin:/bin", "HOME": str(box / "home"),
-            "XDG_STATE_HOME": str(box / "xdg")}
+            "XDG_STATE_HOME": str(box / "xdg"), "CLAUDE_PLUGIN_ROOT": str(box)}
 
 
 def _shim(box, event="PreToolUse", path=None, stdin='{"session_id": "s"}', timeout=20):
@@ -90,11 +90,10 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert text.endswith(MAIN_FLOW)
     assert "hooks.jsonl" not in text
     code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert code[4] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
-    assert code[:4] + code[5:] == [
-        'if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session',
-        "elif command -v claude" "-session >/dev/null 2>&1; then tool=claude" "-session",
-        'else exit 0', 'fi', *MAIN_FLOW.splitlines()]
+    assert code[2] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
+    assert code[:2] + code[3:] == [
+        "tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session",
+        '[ -x "$tool" ] || exit 0', *MAIN_FLOW.splitlines()]
     assert sum("date" in ln for ln in code) == 1
 
 

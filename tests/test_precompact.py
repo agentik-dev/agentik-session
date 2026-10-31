@@ -119,7 +119,7 @@ def _fake_cli(tmp_path: Path, body: str) -> dict:
     exe = bin_ / "agentik-session"
     exe.write_text("#!/bin/sh\ncat >/dev/null\n" + body)
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
-    return {"PATH": "%s:/usr/bin:/bin" % bin_}
+    return {"PATH": "%s:/usr/bin:/bin" % bin_, "CLAUDE_PLUGIN_ROOT": str(bin_.parent)}
 
 
 def _shim(event: str, env: dict, trigger="manual"):
