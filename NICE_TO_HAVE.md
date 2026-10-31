@@ -272,7 +272,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## S41's leftovers (2026-10-30, packet S41's builder and refuter round 2; S4)
 - The band's width: with the model and window at the head, the line with both windows, `respawn marked` and the age is 82 to 93 characters, so an 80-column band loses the age and under 65 columns the zone is cut (the limit-note line is 119). Lead: drop the model part first, or put it after the zone, when the line overflows bodyColumns (`session.ts` bandLine, `mod.py` facts).
 - The band and `status` never check measure.json's `at`, so `(engine 1M)` can come from an old measure, from before a /model switch, or from a resumed session's old one. Lead: leave out the engine part past the meter's STALE_S, or show its age.
-- The band's 5 s loop (`session.ts`, about line 343) has no catch around `$.clock.sleep`, so a refused clock is an unhandled rejection. Lead: `try { await $.clock.sleep(EVERY_MS) } catch { return }`.
 - The twins disagree on windows of 1e24 or more: `windowLabel(1e24)` gives `1e+21k`, `mod.window_label(1e24)` gives `1000000000000000000000k`, and WINDOW_CASES pins only 1e400. Lead: no part from 1e21 up, in both twins.
 - Ruling 4's `model: none` is never reached from a real meter: `mod.model_line({"model":None,"window":None,"window_source":"default"},None)` returns `window from default`, and the meter always writes `window_source`; the test reaches `none` only with `window_source` None.
 - Control characters in a model id pass into the band and `status`: `modelName("claude-opus-5-5\n")` keeps the newline, and `models.family` accepts such an id. The id comes from the API, so this is unlikely.
@@ -334,5 +333,19 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - The shim's cost is its one `date` fork, 2.9 ms a call. Sampling by `$$` would cut it, at the price of `count`. Worth it only if the numbers say so.
 - A row has no time or session, by the packet, so `--since` cannot filter it and the owner's "per session" is not answerable from it. A session's own row would need a key the packet ruled out.
 - A `~` in XDG_STATE_HOME: `config.state_dir` expands it and a shell would not, so a tool that reads the variable by shell lands elsewhere. Amendment 1's row goes through `config`, which closes that split here (the first form's shim did not expand it); `scripts/p1-proof` and `scripts/window-proof` still read it by shell, proof scripts both. Read, not reproduced past the first form.
-- `session.test.ts`'s clock race, seen once at load 80: `no implementation for clock.sleep`, session.ts:397, the band's loop, on a tree that passed unchanged 3 min later. Reading only, not S49's; the line about the 5 s loop's missing catch, above, is its lead.
 - Amendment 1 says what `ms` leaves out, and a row written in the milliseconds of teardown before a kill reads the code it would have exited with. Absent would need a write after teardown, which only the shim can do, and the shim stopped being able to on the refuter's F1.
+
+## The band's loop and a refused clock (2026-10-30 and 2026-10-31, packets S41 and S49; S4; answered by S50)
+- The band's 5 s loop (`session.ts`, about line 343) has no catch around `$.clock.sleep`, so a refused clock is an unhandled rejection. Lead: `try { await $.clock.sleep(EVERY_MS) } catch { return }`.
+- `session.test.ts`'s clock race, seen once at load 80: `no implementation for clock.sleep`, session.ts:397, the band's loop, on a tree that passed unchanged 3 min later. Reading only, not S49's; the line about the 5 s loop's missing catch, above, is its lead.
+- Answered by S50: a refused `clock.sleep` ends the loop, silently; a refused `ui.invalidate` waits for the next tick. The race itself is gone: at load 8 to 26 the unchanged suite failed its file with 11 to 67 of those lines, and the changed loop shows none. The kit's engine drops a refused redraw rather than rejecting, so the catch on the redraw is tested through a fake `$` (Amendment 1).
+
+## S49's refuter, round 2 (2026-10-31, S4)
+- `harness.py:92` `record_hook`'s flush moves the exit when stdout is a failing regular file, 4097 to 8178+ bytes: main rc 120 against new rc 0; a block only if Claude Code's hook stdout is a regular file, unread.
+- `harness.py:136`: a lone-surrogate event crashes `report --hooks`.
+- `measure.stated_limits`: RecursionError.
+- A directory at `hooks.jsonl.1` stops rotation.
+
+## S50's refuter, round 1 (2026-10-31, S4)
+- `session.ts:395`: if session.start's own redraw rejects or throws, the outer catch skips the loop, so no tick ever runs. It predates S50, the kit's engine never reaches it, and only `turn.complete` retries; reproduced with a fake `$`.
+- `await start()` and the invalidate have no bound, so a never-answering `$.process.run` should park the loop; read, not run.

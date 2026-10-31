@@ -1,6 +1,7 @@
 // The band's offline tests (mod-r1 §7 criterion 6, packet M1 ruling 7), run by
 // `claude plugin test plugin`, which runs no model: the host's process, files and clock faked.
 import { test, expect } from 'claude-code/testing'
+import { register } from './session'
 
 const DIR = '/state/sessions/sess-1'
 const NOW = Date.parse('2026-10-12T12:00:00+00:00')
@@ -314,8 +315,9 @@ test('another mod\'s line is kept under the two', async (t: any, on: any) => {
 
 // Fix round 1: the classic SessionStart hook makes the session dir after the module's
 // session.start has run, so `mod start` is retried on every 5 s tick until it answers.
-const retrying = async (t: any, on: any, failures: number) => {
+const retrying = async (t: any, on: any, failures: number, refuse: { sleep?: any, invalidate?: any } = {}) => {
   const argvs: string[] = []
+  const logged: unknown[] = []
   const sleepers: Array<(v: unknown) => void> = []
   on('session.start', ($: any, e: any) => e)
   on('session.id', () => ({ value: 'sess-1' }))
@@ -333,19 +335,20 @@ const retrying = async (t: any, on: any, failures: number) => {
   })
   on('clock.now', () => ({ value: NOW }))
   // Only the band's 5 s tick is driven; admission's 1 s bounds (fix round 1, F2) never pass.
-  on('clock.sleep', ($: any, e: any) => Number(e.ms) === 5000
-    ? new Promise(resolve => { sleepers.push(resolve) }) : new Promise(() => {}))
-  on('ui.invalidate', () => ({ value: undefined }))
-  await t.session.start({ cwd: '/repo' })
+  on('clock.sleep', refuse.sleep ?? (($: any, e: any) => Number(e.ms) === 5000
+    ? new Promise(resolve => { sleepers.push(resolve) }) : new Promise(() => {})))
+  on('ui.invalidate', refuse.invalidate ?? (() => ({ value: undefined })))
+  on('ui.log', ($: any, e: any) => { logged.push(e); return { value: undefined } })
+  const answered = await t.session.start({ cwd: '/repo' })
   // A tick ends when the loop is parked on its next 5 s sleep (S41 Amendment 1): a fixed
-  // 20 ms let a loaded machine end the test first, and the loop's late clock.sleep, with
-  // the test's handlers gone, was a rejection nothing handled (the file did not run to its end).
+  // 20 ms let a loaded machine end the test first, and the counts below went with it. The
+  // loop's late clock.sleep, with the test's handlers gone, now ends that loop (S50).
   const tick = async () => {
     sleepers.shift()?.({ value: undefined })
     for (let i = 0; i < 400 && sleepers.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))
   }
   const draw = async () => ((await t.ui.render(PROPS(120))) as any).children[0].children[0] as string
-  return { argvs, tick, draw }
+  return { argvs, logged, answered, sleepers, tick, draw }
 }
 
 test('mod start failing twice: the third try, on the second tick, draws the meter', async (t: any, on: any) => {
@@ -365,6 +368,112 @@ test('mod start never answering: 24 tries, then the doctor line', async (t: any,
   for (let i = 0; i < 30; i++) await tick()
   expect(argvs.length).toBe(24)
   expect(await draw()).toBe(NO_METER)
+})
+
+// Packet S50: a refused clock ends the band's loop, silently; a refused redraw does not (the
+// catch itself is tested under Amendment 1's fake `$`, below).
+test('clock.sleep refusing the loop: no stray rejection, no further call, session.start answered', async (t: any, on: any) => {
+  let refused = 0
+  // A loop that went on past a refusal would spin: the fourth call parks this test's loop, so
+  // the count below fails. Such a `catch { continue }` is red either way: the refuter's run hit
+  // the wall instead (rc 124), since earlier tests' loops spin once their handlers are gone.
+  const sleep = ($: any, e: any) => {
+    if (Number(e.ms) !== 5000 || refused >= 3) return new Promise(() => {})
+    refused += 1
+    return { deny: 'the clock refuses' }
+  }
+  const { argvs, logged, answered, draw } = await retrying(t, on, 0, { sleep })
+  // A stray rejection fails the file, not this test: the runner's own `the file ran to its end`
+  // names the deny's text (this sandbox has no `process` to listen on). These two turns of the
+  // event loop let the loop's refusal land; no timer's length is what the test waits on.
+  for (let i = 0; i < 2; i++) await new Promise(resolve => setTimeout(resolve, 0))
+  expect(refused).toBe(1)
+  expect(answered).toEqual({ cwd: '/repo' })
+  expect(argvs).toEqual([JSON.stringify(ARGV)])
+  expect(logged).toEqual([])
+  expect(await draw()).toBe('session: ctx 62% · turns 31% · notice')
+})
+
+test('a redraw denied on a tick, the engine dropping it: the next tick still runs and draws the meter', async (t: any, on: any) => {
+  let redraws = 0
+  // The first is session.start's own redraw, outside the loop; the second is the first tick's.
+  // This engine drops a refused redraw (`$.ui.invalidate dropped`) and answers the module, so
+  // the module never sees a refusal here: this test holds the engine's outcome, on either loop,
+  // and does not reach the loop's catch. Every answer tried: a throw, a rejection, `{ deny }`,
+  // a bad result.
+  const invalidate = () => {
+    redraws += 1
+    return redraws === 2 ? { deny: 'the redraw refuses' } : { value: undefined }
+  }
+  const { argvs, logged, tick, draw } = await retrying(t, on, 2, { invalidate })
+  expect(await draw()).toBe(NO_METER)
+  await tick()
+  expect(redraws).toBe(2)
+  expect(await draw()).toBe(NO_METER)
+  await tick()
+  expect(redraws).toBe(3)
+  expect(argvs.length).toBe(3)
+  expect(logged).toEqual([])
+  expect(await draw()).toBe('session: ctx 62% · turns 31% · notice')
+})
+
+// Packet S50 Amendment 1 (the refuter's F1): the engine above never lets `$.ui.invalidate`
+// refuse the module, so ruling 2's catch is reached by calling `register` with a fake `$`.
+// Every fake answers in microtasks, so one turn of the event loop settles a tick.
+const faked = (invalidate: (n: number) => Promise<void>) => {
+  const handlers: Record<string, any> = {}
+  // The module chains `.catch` on what `on` gives for its admission hooks.
+  const on: any = (name: string, a: any, b: any) => { handlers[name] = b ?? a; return { catch: () => {} } }
+  register(on)
+  const sleepers: Array<() => void> = []
+  const seen = { sleeps: 0, redraws: 0, starts: 0 }
+  const $: any = {
+    session: { id: async () => 'sess-1' },
+    clock: {
+      now: async () => NOW,
+      // Only the band's 5 s tick is driven, as in `retrying`.
+      sleep: (ms: number) => {
+        if (ms !== 5000) return new Promise(() => {})
+        seen.sleeps += 1
+        return new Promise<void>(resolve => { sleepers.push(resolve) })
+      },
+    },
+    ui: { invalidate: () => { seen.redraws += 1; return invalidate(seen.redraws) } },
+    process: { run: async (argv: string[]) => {
+      if (argv[1] !== 'mod') return { exitCode: 0, stdout: '', stderr: '' }
+      seen.starts += 1
+      return seen.starts <= 2
+        ? { exitCode: 1, stdout: '', stderr: 'agentik-session: no session sess-1' }
+        : { exitCode: 0, stdout: JSON.stringify({ dir: DIR }), stderr: '' }
+    } },
+    fs: { read: async (path: string) => {
+      if (path !== `${DIR}/meter.json`) throw new Error(`ENOENT ${path}`)
+      return METER
+    } },
+  }
+  const start = () => handlers['session.start']($, { cwd: '/repo' }, async (e: any) => e)
+  const tick = async () => {
+    sleepers.shift()?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  const draw = async () => (await handlers['ui.render']($, PROPS(120), async () => null)).children[0].children[0] as string
+  return { seen, start, tick, draw }
+}
+
+const REFUSALS: Array<[string, () => Promise<void>]> = [
+  ['rejecting', () => Promise.reject(new Error('the redraw refuses'))],
+  ['throwing', () => { throw new Error('the redraw refuses') }],
+]
+for (const [how, refuse] of REFUSALS) test(`ui.invalidate ${how} on a tick: a later tick still runs and draws the meter`, async () => {
+  // The first redraw is session.start's own, outside the loop; the second is the first tick's.
+  const { seen, start, tick, draw } = faked(n => n === 2 ? refuse() : Promise.resolve())
+  await start()
+  await tick()
+  expect(seen).toEqual({ sleeps: 2, redraws: 2, starts: 2 })
+  expect(await draw()).toBe(NO_METER)
+  await tick()
+  expect(seen).toEqual({ sleeps: 3, redraws: 3, starts: 3 })
+  expect(await draw()).toBe('session: ctx 62% · turns 31% · notice')
 })
 
 // Packet M2: every session.measure sends one `measure record` (the four figures, never a
