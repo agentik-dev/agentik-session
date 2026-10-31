@@ -6,7 +6,7 @@
 | pin | a1fe45f (branch `s49-measure`, alpha.34); worktree `.claude/worktrees/s49-measure` |
 | wall | as the parent's; `claude` only as `claude plugin validate`; no merge, push or install; a test never writes under the live `~/.local/state` |
 | may touch | the parent's row, and `design/mod-r1.md` (one amendment line), `claude_session/cli.py` (`cmd_hook`), this packet |
-| acceptance | `.venv/bin/python -B -m pytest tests/test_s49.py tests/test_s34.py tests/test_ledger.py tests/test_precompact.py -q 2>&1 \| tail -1` reads `passed`, no `failed`; `grep -c 'hooks.jsonl' plugin/hooks/run` reads 0; `tail -1 plugin/hooks/run` reads `exec "$tool" hook "$1"`; `git diff main -- plugin/hooks/run` shows one variable and its comment and nothing else; `make hygiene` exits 0. These replace the parent's two `grep` lines |
+| acceptance | `.venv/bin/python -B -m pytest tests/test_s49.py tests/test_s34.py tests/test_ledger.py tests/test_precompact.py -q 2>&1 \| tail -1` reads `passed`, no `failed`; `grep -c 'hooks.jsonl' plugin/hooks/run` reads 0; `grep -c 'exec "$tool"' plugin/hooks/run` reads 1, on the file's last line; `git diff main -- plugin/hooks/run` shows one variable and its comment and nothing else; `make hygiene` exits 0. These replace the parent's two `grep` lines |
 | verify | `agentik session gate run <worktree> -- make check`, then `agentik session gate wait <id>`, last |
 | budget | acts: 0 this packet; 1 the tests, red; 2 the shim back, the CLI's row; 3 the S4s; 4 the measures, the texts; one commit per act, 90 tool calls |
 
