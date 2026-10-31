@@ -108,7 +108,7 @@ def test_c1_hooks_json_keeps_the_classic_eight_and_adds_precompact():
     for event, timeout in [*CLASSIC.items(), ("PreCompact", 5)]:
         assert [(h["type"], h["command"], h["timeout"]) for g in registered[event]
                 for h in g["hooks"]] == [
-            ("command", "${CLAUDE_PLUGIN_ROOT}/hooks/run " + event, timeout)], event
+            ("command", "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" " + event, timeout)], event
     assert [g.get("matcher") for g in registered["PreCompact"]] == [None]
     assert "PreCompact" in hooks.HANDLERS and "pre-compact" in hooks.HANDLERS
 
@@ -119,7 +119,7 @@ def _fake_cli(tmp_path: Path, body: str) -> dict:
     exe = bin_ / "agentik-session"
     exe.write_text("#!/bin/sh\ncat >/dev/null\n" + body)
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
-    return {"PATH": "%s:/usr/bin:/bin" % bin_}
+    return {"PATH": "%s:/usr/bin:/bin" % bin_, "CLAUDE_PLUGIN_ROOT": str(bin_.parent)}
 
 
 def _shim(event: str, env: dict, trigger="manual"):

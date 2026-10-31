@@ -3,7 +3,7 @@
 # pre-rename name, is a link to it until r2 (agentik-r1 §4.3).
 #
 # Runs a frozen copy of the package, `CODE`, extracted from one committed tree of
-# claude_session/, under the interpreter baked at install time. `-P` keeps the cwd
+# plugin/lib/claude_session/, under the interpreter baked at install time. `-P` keeps the cwd
 # off sys.path and PYTHONPATH is exactly `CODE`, so neither the directory a hook
 # fires in nor the live checkout can change what a hook runs. Re-run `make install`
 # to pick up a new commit, or when `PYTHON` or `CODE` has gone away: until then a

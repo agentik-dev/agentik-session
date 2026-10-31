@@ -3,13 +3,11 @@
 
 Usage: scripts/bare-proof [--transcript PATH] [--runs N] [--keep]
 
-From HEAD it assembles a mock install in a temp home: `git archive HEAD plugin` into
-$T/.claude/plugins/cache/agentik/session/<version>/, and, since sc1 moves no code, `git
-archive HEAD claude_session` into its lib/, a runner (design/04 §2's four lines and a watch,
-at RUNNER) and the launcher of §2. Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
-CLAUDE_PLUGIN_DATA, in a temp git repo holding a decoy package; no clone path, no venv, no
-launcher on PATH. The repo's shim stays as it is: only the mock's copy gains a line putting
-its bin/ first on PATH, so the env stays exact.
+From HEAD it assembles a mock install in a temp home: `git archive HEAD plugin`, the whole
+plugin since sc2, into $T/.claude/plugins/cache/agentik/session/<version>/; only its runner
+gains a watch (RUNNER). Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT
+and CLAUDE_PLUGIN_DATA, in a temp git repo holding a decoy package; no clone path, no venv, no
+launcher on PATH.
 
 The transcript is the newest file over 1 MB under ~/.claude/projects unless --transcript
 names one; it is copied into $T by path, and its contents are never printed.
@@ -63,7 +61,7 @@ VARIES = ("at", "ms", "ts", "ended", "resolved_at")
 # The same keys in a file that is not JSON: its lines `key: value`, resolved.yaml's.
 VARIES_LINE = re.compile(r"^(\s*(?:%s):).*$" % "|".join(VARIES), re.M)
 
-# design/04 §2's four-line runner, and one thing sc2 does not ship: a watch. `dispatch` turns an
+# design/04 §2's four-line runner, and the one thing the plugin does not ship: a watch. `dispatch` turns an
 # exception into `{}` and exit 0 whichever line raised it, so the mock's runner wraps the handler
 # table `dispatch` reads and the `rotate` it calls first, writes each exception's type and place
 # (never its message) to a file under $T, and re-raises it into `dispatch`, which goes on exactly
@@ -91,12 +89,6 @@ class Watched(dict):
 cli.hooks.HANDLERS = Watched(cli.hooks.HANDLERS)
 cli.hooks.harness.rotate = watched("rotate", cli.hooks.harness.rotate)
 raise SystemExit(cli.main())
-"""
-# design/04 §2's lines, verbatim but for <no python>, which sc3 settles.
-LAUNCHER = """#!/bin/sh
-root=${0%/*}/..
-py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -x "$py" ] || py=$(command -v python3) || { [ "$1" = hook ] && exit 0; exit 3; }
-exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" "$root/lib/agentik-session" "$@"
 """
 DECOY = "raise SystemExit(99)\n"
 # AGENTIK_PYTHON for the sentinel pass: the launcher's own flags, however many, the tool under
@@ -247,20 +239,11 @@ class Proof:
             self.version = json.load(fh)["version"]
         self.root = os.path.join(self.t, ".claude", "plugins", "cache", "agentik", "session", self.version)
         self.unpack("plugin", self.root, True)
-        self.unpack("claude_session", os.path.join(self.root, "lib"), False)
-        for rel, text in (("lib/agentik-session", RUNNER % {"log": self.watch}), ("bin/agentik-session", LAUNCHER)):
-            path = os.path.join(self.root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as fh:
-                fh.write(text)
-            os.chmod(path, 0o755)
+        # The one thing not as it ships: the runner gains the watch.
+        with open(os.path.join(self.root, "lib", "agentik-session"), "w") as fh:
+            fh.write(RUNNER % {"log": self.watch})
         self.tool = os.path.join(self.root, "bin", "agentik-session")
-        shim = os.path.join(self.root, "hooks", "run")
-        with open(shim) as fh:
-            head, rest = fh.read().split("\n", 1)
-        with open(shim, "w") as fh:
-            fh.write(head + '\nPATH="$CLAUDE_PLUGIN_ROOT/bin:$PATH"\n' + rest)
-        self.shim = shim
+        self.shim = os.path.join(self.root, "hooks", "run")
         self.data = os.path.join(self.t, ".claude", "plugins", "data", "session-agentik")
         os.makedirs(self.data)
         self.env = {"HOME": self.t, "PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": self.root,
@@ -439,16 +422,15 @@ class Proof:
         return sum(n.endswith(".pyc") for _, _, ns in os.walk(self.prefixes()[0]) for n in ns)
 
     def bytecode(self):
-        """After the first run under the prefix, none beside the sources. Elsewhere under $T a
-        count, not a failure: gate.spawn_serve drops `-I` and the prefix, and the runner's
-        .pyc land in $T/Library/Caches/com.apple.python. sc2 fixes it and makes this strict."""
+        """After the first run under the prefix, none beside the sources and none elsewhere under
+        $T, the gate's runner's with them (sc2 ruling 6)."""
         beside = [os.path.join(d, n) for d, ds, ns in os.walk(self.root) for n in ds + ns
                   if n == "__pycache__" or n.endswith(".pyc")]
         inside = tuple(p + os.sep for p in self.prefixes())
         strays = sum(n.endswith(".pyc") and not os.path.join(d, n).startswith(inside)
                      for d, _, ns in os.walk(self.t) for n in ns)
-        self.row("bytecode", self.first_pyc > 0 and not beside,
-                 "%d .pyc under the prefix after the first run, %d beside the sources; %d elsewhere under $T, gate.spawn_serve's, sc2's to fix"
+        self.row("bytecode", self.first_pyc > 0 and not beside and not strays,
+                 "%d .pyc under the prefix after the first run, %d beside the sources; %d elsewhere under $T"
                  % (self.first_pyc, len(beside), strays))
 
     def clone_paths(self, label):
@@ -636,7 +618,9 @@ class Proof:
                                cwd=self.t, env=env, timeout=60)
             outs[name] = (r.returncode, (r.stdout + r.stderr).replace(path, "<root>"))
         found = {k: FOUND.findall(v[1]) for k, v in outs.items()}
-        warnings = {k: int(v[0]) if v else -1 for k, v in found.items()}
+        # None said is none found, once it validated: `hooks.json` quotes its root since sc2.
+        warnings = {k: int(found[k][0]) if found[k] else 0 if "Validating" in outs[k][1] else -1
+                    for k in outs}
         same = outs["live"][1] == outs["mock"][1]
         # Two runs that fail alike are identical: each must pass, and count the same warnings.
         ok = same and outs["live"][0] == 0 and outs["mock"][0] == 0 and warnings["live"] == warnings["mock"] >= 0

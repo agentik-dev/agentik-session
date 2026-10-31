@@ -16,9 +16,10 @@ claude plugin install session@agentik
 make install
 ```
 
-- `make install` (from a clone) freezes the committed `claude_session/` package under `~/.local/share/agentik-session/<tree>/` and writes the launcher `~/.local/bin/agentik-session`, which runs that frozen copy with `python -P` (Python 3.11 or newer). A dirty `claude_session/` exits 2: the install is always one committed tree.
+- The plugin carries the code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`, 3.9 or newer, with no clone, venv or launcher. Hooks never use PATH, so a session keeps its version until it respawns.
+- `make install` (from a clone) gives the terminal a CLI: it freezes the committed `plugin/lib/` under `~/.local/share/agentik-session/<tree>/` and writes `~/.local/bin/agentik-session`, run with `python -P` (3.11 or newer). A dirty tree exits 2.
 - Then run `agentik session doctor` (or `/session:doctor` inside Claude Code). It checks the tool, the plugin and its hooks, one line per check, and notes each optional sibling that is absent; exit 2 names the failing check and its remedy.
-- To upgrade, install the CLI first: `make install`, then `claude plugin update session@agentik`. That order keeps the CLI current with its plugin's hooks. A CLI older than its plugin exits 2 on a hook event it does not know, and the hook shim keeps that from blocking a turn. The older CLI's own doctor reads green; only a `agentik session doctor` of 2.0.0-alpha.4 or later names an event its CLI does not handle.
+- To upgrade: `claude plugin update session@agentik`, which new sessions pick up and live ones at their respawn, then `make install` for the terminal's CLI.
 - At run time, the tool uses only the Python standard library.
 
 ## Commands and skills
@@ -62,7 +63,7 @@ Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its s
 
 ## Profiles
 
-Profiles ship in `claude_session/profiles.yaml`. The `defaults` entry carries every field; a profile names only what it changes.
+Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry carries every field; a profile names only what it changes.
 
 | profile | for |
 |---|---|
@@ -177,7 +178,7 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 
 ## Status
 
-Status: version `v2.0.0-alpha.37`, rendered `2026-10-14`, `2295` tests in the suite.
+Status: version `v2.0.0-alpha.39`, rendered `2026-10-14`, `2375` tests in the suite.
 
 ## Credit
 

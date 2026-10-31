@@ -1,11 +1,16 @@
 #!/bin/sh
-# The plugin's one hook shim: hand the event (and stdin) to the tool on PATH, by its new
-# name, else its old one, the alias until r2 (agentik-r1 §6.3 c11, packet ruling 7).
-# Without either it exits 0 silently; `agentik session doctor` reports the gap.
-if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session
-elif command -v claude-session >/dev/null 2>&1; then tool=claude-session
-else exit 0
-fi
+# The plugin's one hook shim: hand the event (and stdin) to this plugin's own launcher, never
+# one on PATH (design/04 §2). With no launcher there it exits 0 silently, as a shim always has;
+# `agentik session doctor` reports the gap.
+# The switch (design/04 §3): one file, its existence the whole state, lapsing 24 h after its
+# mtime. While on, a hook runs the launcher `make install` last wrote, as every hook did before
+# sc2; RUNBOOK has the emergency's lines. Only HOME is read here: no other variable, PATH entry
+# or settings `env` can select that launcher, so find is by its full path. A future mtime would
+# never lapse, so it is refused; the [ -e ] forks nothing while the file is absent. `date` below
+# stays by name: it selects nothing, and a wrong start only skews one row's figure.
+tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session; o=$HOME/.local/bin/agentik-session; f=$HOME/.config/agentik/hooks-follow-launcher
+if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type f -mmin -1440 ! -newermt now 2>/dev/null)" ]; then tool=$o; fi
+[ -f "$tool" ] && [ -x "$tool" ] || exit 0
 # Stop never blocks: exit 2 there holds every turn end, and a CLI older than the plugin
 # refuses `hook Stop`. (Claude Code caps the hold: after 8 consecutive Stop blocks with no
 # tool call between them it overrides the next and ends the turn, a cap set by

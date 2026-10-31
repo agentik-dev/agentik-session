@@ -14,17 +14,17 @@ bugs/*.md: sibling
 # ADV6-1's reproduction names a generic mDNS host name and an RFC 1918 address.
 design/review-adv6.md: lan
 # The tool's own state path (its name) and the plugins it loads by id.
-claude_session/config.py: sibling,renamed
-claude_session/launch.py: sibling,renamed
-claude_session/sessionconfig.py: sibling
+plugin/lib/claude_session/config.py: sibling,renamed
+plugin/lib/claude_session/launch.py: sibling,renamed
+plugin/lib/claude_session/sessionconfig.py: sibling
 tests/test_launch.py: sibling,renamed
 # The launcher's one-time marker lives under the tool's state path (ADV10-5).
 install-wrapper.sh: sibling,renamed
 tests/test_install.py: sibling,renamed
 # The manifests: the repo's name and the dependency names.
-claude_session/profiles.yaml: sibling
-claude_session/resolver.py: sibling,renamed
-claude_session/doctor.py: sibling,renamed
+plugin/lib/claude_session/profiles.yaml: sibling
+plugin/lib/claude_session/resolver.py: sibling,renamed
+plugin/lib/claude_session/doctor.py: sibling,renamed
 tests/test_resolver.py: sibling,renamed
 tests/test_doctor.py: sibling,renamed
 tests/test_hook_session_start.py: sibling
@@ -88,7 +88,7 @@ design/packets/s9-hygiene-and-charters.md: sibling
 # (config, resolver, doctor, launch), the respawn match's old spelling (hooks), the hook
 # shim's and module's old CLI (c11), and each one's test. The rows above carry it beside
 # `sibling`; the rows below are the files `sibling` never needed.
-claude_session/hooks.py: renamed
+plugin/lib/claude_session/hooks.py: renamed
 plugin/hooks/run: renamed
 plugin/hooks/session.ts: renamed
 tests/test_hooks.py: renamed

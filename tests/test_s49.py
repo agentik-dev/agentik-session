@@ -45,7 +45,7 @@ SILENT_IN_SHIM = ("Stop", "StopFailure", "PostToolUseFailure", "PostToolBatch")
 def real(box):
     """The same box with the real CLI on PATH: its row is the thing under test."""
     _exe(box / "bin" / "agentik-session",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
     return box
 
 
@@ -56,12 +56,12 @@ def _scripted(box, body):
         f"def dispatch(event):\n    {body}\n"
         "hooks.dispatch = dispatch\nraise SystemExit(cli.main(sys.argv[1:]))\n")
     _exe(box / "bin" / "agentik-session",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B "{box / "tool.py"}" "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B "{box / "tool.py"}" "$@"\n')
 
 
 def _env(box, path=None):
     return {"PATH": path or f"{box / 'bin'}:/usr/bin:/bin", "HOME": str(box / "home"),
-            "XDG_STATE_HOME": str(box / "xdg")}
+            "XDG_STATE_HOME": str(box / "xdg"), "CLAUDE_PLUGIN_ROOT": str(box)}
 
 
 def _shim(box, event="PreToolUse", path=None, stdin='{"session_id": "s"}', timeout=20):
@@ -90,11 +90,13 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert text.endswith(MAIN_FLOW)
     assert "hooks.jsonl" not in text
     code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert code[4] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
-    assert code[:4] + code[5:] == [
-        'if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session',
-        "elif command -v claude" "-session >/dev/null 2>&1; then tool=claude" "-session",
-        'else exit 0', 'fi', *MAIN_FLOW.splitlines()]
+    assert code[3] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
+    assert code[:3] + code[4:] == [
+        "tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session; o=$HOME/.local/bin/agentik-session; "
+        "f=$HOME/.config/agentik/hooks-follow-launcher",
+        'if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type f '
+        '-mmin -1440 ! -newermt now 2>/dev/null)" ]; then tool=$o; fi',
+        '[ -f "$tool" ] && [ -x "$tool" ] || exit 0', *MAIN_FLOW.splitlines()]
     assert sum("date" in ln for ln in code) == 1
 
 
@@ -211,7 +213,7 @@ def test_s49_every_event_writes_its_row_and_moves_nothing(real, event):
 
 def test_s49_ms_is_the_tools_wall_time(real):
     tool = real / "bin" / "agentik-session"
-    tool.write_text(tool.read_text().replace("exec", "sleep 0.3; exec", 1))
+    tool.write_text(tool.read_text().replace("PYTHONPATH=", "sleep 0.3; PYTHONPATH=", 1))
     _shim(real)
     ms = _rows(real)[0]["ms"]
     assert 290 <= ms < 5000, ms
@@ -462,7 +464,7 @@ def test_s49_a_nested_hook_call_writes_no_row_of_its_own(real):
     _scripted(real, 'import subprocess\n    subprocess.run(["agentik-session-real", "hook", "Stop"], '
                     'input="{}", text=True, capture_output=True)\n    return 0')
     _exe(real / "bin" / "agentik-session-real",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
     _shim(real)
     assert [r["event"] for r in _rows(real)] == ["PreToolUse"]
 
@@ -1017,7 +1019,7 @@ def test_s49_f7_read_hooks_never_blocks_on_a_fifo_and_never_follows_a_link(tmp_p
     (tmp_path / "hooks.jsonl").symlink_to(tmp_path / "real")
     code = ("import sys; from claude_session import harness; "
             f"sys.exit(len(harness.read_hooks({str(tmp_path)!r})))")
-    r = subprocess.run([sys.executable, "-B", "-c", code], env={"PYTHONPATH": str(ROOT)}, timeout=10)
+    r = subprocess.run([sys.executable, "-B", "-c", code], env={"PYTHONPATH": str(ROOT / "plugin" / "lib")}, timeout=10)
     assert r.returncode == 0
 
 

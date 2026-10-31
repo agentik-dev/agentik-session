@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+PKG = "plugin/lib/claude_session"
+MANIFEST = "plugin/.claude-plugin/plugin.json"
 DECOY = "import sys\nprint('DECOY')\nsys.exit(7)\n"
 # The launcher `make install` writes runs `python -P`, which is 3.11; sc3 moves it. Until then
 # the install's own steps run under the floor, and what runs the launcher waits for 3.11.
@@ -31,8 +33,10 @@ def repo(tmp_path):
     for f in ("Makefile", "install-wrapper.sh"):
         shutil.copy2(ROOT / f, r / f)
     shutil.copytree(ROOT / "scripts", r / "scripts")       # the install's prune-trees (F8)
-    shutil.copytree(ROOT / "claude_session", r / "claude_session",
+    shutil.copytree(ROOT / "plugin" / "lib", r / "plugin" / "lib",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    (r / "plugin" / ".claude-plugin").mkdir()
+    shutil.copy2(ROOT / MANIFEST, r / MANIFEST)
     (r / ".gitignore").write_text("__pycache__/\n*.pyc\n")
     _git(r, "init", "-q")
     _git(r, "add", "-A")
@@ -59,6 +63,14 @@ def _install(repo, home, python=sys.executable):
                           cwd=repo, env=_env(home), capture_output=True, text=True, timeout=60)
 
 
+def _tree(repo):
+    """The frozen tree's name, as the Makefile derives it from plugin/lib and plugin.json."""
+    both = subprocess.run(["git", "rev-parse", "HEAD:plugin/lib", "HEAD:" + MANIFEST], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout
+    return subprocess.run(["git", "hash-object", "--stdin"], cwd=repo, input=both,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
 def _share(home):
     return home / ".local" / "share" / "agentik-session"
 
@@ -68,7 +80,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     home = tmp_path / "home"
     r = _install(repo, home)
     assert r.returncode == 0, r.stderr
-    tree = _git(repo, "rev-parse", "HEAD:claude_session")
+    tree = _tree(repo)
     wrapper = (home / ".local" / "bin" / "agentik-session").read_text()
     assert f'CODE="{_share(home) / tree}"' in wrapper
     # the venv's link in its resolved directory, never the link's target (ADV10-5)
@@ -85,7 +97,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     assert "DECOY" not in r.stdout and r.returncode != 7, r.stdout + r.stderr
     assert r.returncode == 0, r.stderr
     # The root checkout cannot change a hook either: the installed copy is not the repo.
-    (repo / "claude_session" / "cli.py").write_text(DECOY)
+    (repo / PKG / "cli.py").write_text(DECOY)
     r = subprocess.run([str(home / ".local" / "bin" / "agentik-session"), "hook", "PostToolUse"],
                        cwd=tmp_path, input="{}", env=_env(home), capture_output=True, text=True,
                        timeout=30)
@@ -94,7 +106,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
 
 def test_dirty_package_refuses(repo, tmp_path):
     home = tmp_path / "home"
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write("# half-done\n")
     r = _install(repo, home)
     assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
@@ -102,7 +114,7 @@ def test_dirty_package_refuses(repo, tmp_path):
     assert not (home / ".local" / "bin" / "agentik-session").exists()
     assert not _share(home).exists()
     # a versioned Cellar interpreter is refused too (ADV10-5)
-    _git(repo, "checkout", "-q", "--", "claude_session")
+    _git(repo, "checkout", "-q", "--", PKG)
     cellar = tmp_path / "Cellar" / "python@3" / "bin"
     cellar.mkdir(parents=True)
     (cellar / "python3").symlink_to(sys.executable)
@@ -112,19 +124,19 @@ def test_dirty_package_refuses(repo, tmp_path):
 
 
 def test_untracked_file_in_package_refuses(repo, tmp_path):
-    (repo / "claude_session" / "stray.py").write_text("x = 1\n")
+    (repo / PKG / "stray.py").write_text("x = 1\n")
     assert _install(repo, tmp_path / "home").returncode == 2
 
 
 def test_reinstall_prunes_the_old_tree(repo, tmp_path):
     home = tmp_path / "home"
     assert _install(repo, home).returncode == 0
-    old = _git(repo, "rev-parse", "HEAD:claude_session")
+    old = _tree(repo)
     assert sorted(p.name for p in _share(home).iterdir()) == [old]
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write("# next\n")
     _git(repo, "commit", "-qam", "next")
-    new = _git(repo, "rev-parse", "HEAD:claude_session")
+    new = _tree(repo)
     assert new != old
     assert _install(repo, home).returncode == 0
     # the newest few are kept (F8); the pruning itself is test_f8_reinstall_keeps_...
@@ -175,10 +187,10 @@ def test_gone_interpreter_speaks_at_every_session_start(tmp_path):
 # process names, and the newest three; it prunes the rest.
 
 def _commit_next(repo, n):
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write(f"# next {n}\n")
     _git(repo, "commit", "-qam", f"next {n}")
-    return _git(repo, "rev-parse", "HEAD:claude_session")
+    return _tree(repo)
 
 
 def _live(home, tree):
@@ -192,7 +204,7 @@ def _live(home, tree):
 def test_f8_reinstall_keeps_a_tree_a_live_process_runs_from(repo, tmp_path):
     home = tmp_path / "home"
     assert _install(repo, home).returncode == 0
-    first = _git(repo, "rev-parse", "HEAD:claude_session")
+    first = _tree(repo)
     trees = [first]
     live = _live(home, first)
     try:
@@ -224,7 +236,8 @@ def test_r1_install_writes_the_new_name_the_link_and_the_front_door(repo, tmp_pa
     if RUNS_P:
         v = subprocess.run([str(bin_ / "agentik-session"), "--version"], env=_env(home),
                            capture_output=True, text=True, timeout=30)
-        assert (v.returncode, v.stdout, v.stderr) == (0, "agentik-session 2.0.0-alpha.37\n", "")
+        assert (v.returncode, v.stdout, v.stderr) == (
+            0, "agentik-session %s\n" % json.loads((repo / MANIFEST).read_text())["version"], "")
     # a reinstall replaces the link in place
     assert _install(repo, home).returncode == 0
     assert os.readlink(bin_ / "claude-session") == "agentik-session"
@@ -285,3 +298,25 @@ def test_r1_the_old_name_notes_once_on_a_terminal_never_in_a_hook(tmp_path):
     r = subprocess.run([str(old), "status"], env=env, capture_output=True, text=True,
                        timeout=30)
     assert note not in r.stderr          # a pipe sees nothing
+
+
+# sc2: this Mac's sessions depend on `make install` until sc3.
+@pytest.mark.skipif(not RUNS_P, reason="the baked launcher's -P is 3.11 (sc3 moves it)")
+def test_the_moved_tree_installs_and_reads_its_version_from_plugin_json(repo, tmp_path):
+    home = tmp_path / "home"
+    assert _install(repo, home).returncode == 0
+    version = json.loads((repo / MANIFEST).read_text())["version"]
+    tool = home / ".local" / "bin" / "agentik-session"
+    run = lambda: subprocess.run([str(tool), "--version"], capture_output=True, text=True,
+                                 env=_env(home), cwd=tmp_path, timeout=30).stdout.split()[-1]
+    assert run() == version
+    code = _share(home) / _tree(repo)
+    assert (code / "plugin.json").is_file() and (code / "agentik-session").is_file()
+    r = subprocess.run([sys.executable, "-I", "-B", str(code / "agentik-session"), "--version"],
+                       capture_output=True, text=True, env=_env(home), cwd=tmp_path, timeout=30)
+    assert r.stdout.split()[-1] == version      # the runner gate.spawn_serve starts
+    # A bump alone is a new tree, or `--version` would lie.
+    (repo / MANIFEST).write_text((repo / MANIFEST).read_text().replace(version, "9.9.9-alpha.1"))
+    _git(repo, "commit", "-qam", "bump")
+    assert _install(repo, home).returncode == 0
+    assert run() == "9.9.9-alpha.1"

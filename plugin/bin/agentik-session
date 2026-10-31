@@ -1,0 +1,26 @@
+#!/bin/sh
+# agentik-session, the plugin's own launcher (design/04 §2): the runner beside it under the
+# one interpreter a fresh Mac and this one share. With no Python or no runner a hook exits 0,
+# SessionStart says so in a systemMessage, other verbs exit 3 (GUIDE §10): Python's "can't open
+# file" exits 2, and exit 2 from a PreToolUse hook would deny every tool call of a session.
+root=${0%/*}/..
+refuse() {   # the reason, then this launcher's own arguments
+    why=$1
+    if [ "$2" != hook ]; then echo "agentik-session: $why" >&2; exit 3; fi
+    [ "$3" != SessionStart ] || printf '{"systemMessage": "agentik-session: %s; its hooks do nothing"}\n' "$why"
+    exit 0
+}
+[ -f "$root/lib/agentik-session" ] && [ -r "$root/lib/agentik-session" ] || refuse "no runner in this plugin, at lib/agentik-session" "$@"
+py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "no python3, at /usr/bin/python3 or on PATH" "$@"
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
+# Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
+# block, so a hook stays in this shell to read its exit. A 2, 126 or 127 from what cannot print
+# from Python exits 0: nothing started, and what that costs is this tool's own PreToolUse block,
+# as with no Python. A real Python's 2 stands. An exit 1 is no block, and stands. Apple's is
+# execed: with the runner tested above, it reaches the runner or exits 1.
+if [ "$1" = hook ] && [ "$py" != /usr/bin/python3 ]; then
+    "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"; rc=$?
+    case $rc in 2|126|127) [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "no python3 that starts: AGENTIK_PYTHON or PATH's is none" "$@" ;; esac
+    exit "$rc"
+fi
+exec "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"

@@ -20,18 +20,15 @@ const STALE_S = 120
 const EVERY_MS = 5000
 const MAX_TRIES = 24      // `mod start` retried while the dir is unknown: 2 min of ticks
 const NO_METER = 'session: no meter · agentik-session doctor'
-// agentik-r1 §6.3 c11 (packet ruling 7): the tool by its new name; when that is not on PATH
-// (the run rejects, not found), its old name, the alias until r2.
+// design/04 §2: the tool under this plugin's own root, never PATH. A rejected run is the
+// caller's one debug line, as every failure of the mod is.
 const TOOL = 'agentik-session'
-const OLD_TOOL = 'claude-session'
-const notFound = (err: any): boolean => /ENOENT|not found/i.test(String(err?.message ?? err))
 async function runTool($: EngineInterface, argv: string[], opts: any): Promise<any> {
-  try {
-    return await $.process.run(argv, opts)
-  } catch (err) {
-    if (argv[0] !== TOOL || !notFound(err)) throw err
-    return await $.process.run([OLD_TOOL, ...argv.slice(1)], opts)
-  }
+  // With no absolute root the path would be relative, `undefined/bin/...`, and could run a file
+  // in the cwd: no process, so the band says no meter, as on a refusal.
+  const root: unknown = $.plugin.root
+  if (typeof root !== 'string' || !root.startsWith('/')) throw new Error('no absolute plugin root')
+  return await $.process.run([`${root}/bin/${argv[0]}`, ...argv.slice(1)], opts)
 }
 
 const clip = (line: string, columns: number): string =>

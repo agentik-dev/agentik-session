@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentik-session"
-version = "2.0.0a37"
+dynamic = ["version"]
 description = "Re-enter the Claude Code session your usage window cut off, when the window resets."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -22,7 +22,12 @@ readme = ["pyyaml"]
 agentik-session = "claude_session.cli:main"
 
 [tool.setuptools.packages.find]
+where = ["plugin/lib"]
 include = ["claude_session*"]
+
+# The one pin is plugin.json (design/04 §6); the package reads it.
+[tool.setuptools.dynamic]
+version = { attr = "claude_session.__version__" }
 
 [tool.setuptools.package-data]
 claude_session = ["profiles.yaml", "bands.yaml"]

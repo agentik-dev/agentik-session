@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """record: serve a markdown record by sections, never whole.
 
 A section is an ATX heading (`#` to `######`, outside fenced code) with its

@@ -159,7 +159,7 @@ def test_docs_match_shipped_defaults():
     """The RUNBOOK's zone table and config table are the most drift-prone
     artefacts here, and the RUNBOOK is machine-rendered."""
     import pathlib, re
-    runbook = (pathlib.Path(cli.__file__).parents[1] / "RUNBOOK.md").read_text()
+    runbook = (pathlib.Path(cli.__file__).parents[3] / "RUNBOOK.md").read_text()
     pol = budget.Policy()
     assert f"notice | {pol.notice_pct:.0f}%" in runbook
     assert f"wind-down | {pol.winddown_pct:.0f}%" in runbook

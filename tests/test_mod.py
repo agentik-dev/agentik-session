@@ -143,7 +143,7 @@ def test_criterion_1_hooks_json_keeps_the_classic_block_and_adds_only_modules():
         [entry] = doc["hooks"][event]
         assert entry.get("matcher") == matcher
         assert entry["hooks"] == [{"type": "command", "timeout": timeout,
-                                   "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/run {event}"}]
+                                   "command": f"\"${{CLAUDE_PLUGIN_ROOT}}/hooks/run\" {event}"}]
 
 
 def _module_lines():
@@ -217,7 +217,7 @@ def test_criterion_3_the_scan_passes_what_is_not_them(text):
 
 @pytest.mark.parametrize("name", ["chain.py", "hooks.py", "budget.py"])
 def test_criterion_3_the_three_never_open_measure_or_mod_json(name):
-    text = (ROOT / "claude_session" / name).read_text()
+    text = (ROOT / "plugin" / "lib" / "claude_session" / name).read_text()
     assert "measure.json" not in text and "mod.json" not in text
     # M2's fix round: any import from .measure/.mod or claude_session's, in any form
     assert _reads_measure_or_mod(text) == []
@@ -232,7 +232,7 @@ def test_criterion_3_band_json_is_display_only():
     from claude_session import admission
     pat = re.compile(r"band\.json|\bBAND\b|read_band|band_line|_admission_line|\bband\(")
     for name in ("chain.py", "budget.py"):
-        assert not pat.search((ROOT / "claude_session" / name).read_text()), name
+        assert not pat.search((ROOT / "plugin" / "lib" / "claude_session" / name).read_text()), name
     for fn in (admission.decide, admission.project, admission.fit, admission._stale_in_flight,
                hooks.pre_tool_use):
         assert not pat.search(inspect.getsource(fn)), fn.__name__
@@ -242,7 +242,7 @@ def test_criterion_3_band_json_is_display_only():
 
 def test_criterion_5_no_test_or_module_but_this_one_reads_the_ts_files():
     pat = re.compile(r"\.ts[\"']")     # a string literal naming a .ts file: a reader
-    readers = [p.name for p in [*(ROOT / "tests").glob("*.py"), *(ROOT / "claude_session").glob("*.py")]
+    readers = [p.name for p in [*(ROOT / "tests").glob("*.py"), *(ROOT / "plugin" / "lib" / "claude_session").glob("*.py")]
                if p.name != "test_mod.py" and pat.search(p.read_text())]
     assert readers == []
     this = Path(__file__).read_text()

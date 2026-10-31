@@ -131,7 +131,7 @@ def test_shipped_file_is_the_record_s_text_and_ships():
 
 
 def test_demand_imports_no_admission():
-    tree = ast.parse((ROOT / "claude_session" / "demand.py").read_text())
+    tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "demand.py").read_text())
     names = [a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names]
     assert "admission" not in names and not any(n.endswith(".admission") for n in names)
 

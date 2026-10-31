@@ -427,13 +427,13 @@ def test_spawn_serve_runs_this_python_detached_and_only_for_a_queue(w):
     w.put("a")
     assert gate.spawn_serve(w.root, popen=popen) is True
     argv, kw = calls[0]
-    assert argv[0] == sys.executable and argv[-6:] == ["-m", "claude_session", "gate", "serve",
-                                                       "--root", str(w.root)]
+    runner = str(Path(gate.__file__).resolve().parent.parent / "agentik-session")
+    assert argv[0] == sys.executable and argv[1:3] == ["-I", "-X"]
+    assert argv[3].startswith("pycache_prefix=") and argv[3].endswith("agentik/pycache")
+    assert argv[4:] == [runner, "gate", "serve", "--root", str(w.root)]
     assert kw["start_new_session"] is True and kw["close_fds"] is True
     assert kw["stdin"] == subprocess.DEVNULL and kw["stderr"] == subprocess.STDOUT
     assert kw["stdout"].name == str(w.root / "gate" / "runner.log")
-    assert kw["env"]["PYTHONPATH"].split(os.pathsep)[0] == \
-        str(Path(gate.__file__).resolve().parent.parent)
 
 
 # ---- Amendment 1 (refuter round 1) -------------------------------------------
