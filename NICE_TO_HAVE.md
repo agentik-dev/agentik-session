@@ -338,10 +338,14 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 ## The band's loop and a refused clock (2026-10-30 and 2026-10-31, packets S41 and S49; S4; answered by S50)
 - The band's 5 s loop (`session.ts`, about line 343) has no catch around `$.clock.sleep`, so a refused clock is an unhandled rejection. Lead: `try { await $.clock.sleep(EVERY_MS) } catch { return }`.
 - `session.test.ts`'s clock race, seen once at load 80: `no implementation for clock.sleep`, session.ts:397, the band's loop, on a tree that passed unchanged 3 min later. Reading only, not S49's; the line about the 5 s loop's missing catch, above, is its lead.
-- Answered by S50: a refused `clock.sleep` ends the loop, silently; a refused `ui.invalidate` waits for the next tick. The race itself is gone: at load 8 to 26 the unchanged suite failed its file with 11 to 67 of those lines, and the changed loop shows none. This engine drops a refused redraw rather than rejecting, so S50's redraw test passes on either loop; its clock test carries the red.
+- Answered by S50: a refused `clock.sleep` ends the loop, silently; a refused `ui.invalidate` waits for the next tick. The race itself is gone: at load 8 to 26 the unchanged suite failed its file with 11 to 67 of those lines, and the changed loop shows none. The kit's engine drops a refused redraw rather than rejecting, so the catch on the redraw is tested through a fake `$` (Amendment 1).
 
 ## S49's refuter, round 2 (2026-10-31, S4)
 - `harness.py:92` `record_hook`'s flush moves the exit when stdout is a failing regular file, 4097 to 8178+ bytes: main rc 120 against new rc 0; a block only if Claude Code's hook stdout is a regular file, unread.
 - `harness.py:136`: a lone-surrogate event crashes `report --hooks`.
 - `measure.stated_limits`: RecursionError.
 - A directory at `hooks.jsonl.1` stops rotation.
+
+## S50's refuter, round 1 (2026-10-31, S4)
+- `session.ts:395`: if session.start's own redraw rejects or throws, the outer catch skips the loop, so no tick ever runs. It predates S50, the kit's engine never reaches it, and only `turn.complete` retries; reproduced with a fake `$`.
+- `await start()` and the invalidate have no bound, so a never-answering `$.process.run` should park the loop; read, not run.
