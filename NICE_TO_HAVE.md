@@ -277,3 +277,12 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - A helper under a layer's plain `ceilings` holds what the layer says: `ceilings: {context: 400000}` gave a helper 400000 on both classes, on main at a633d57 before this packet, and still. R2's clause covers `ceilings_1m` only. Lead: decide whether a helper's 180k outranks a project layer.
 - A plain `builder` or `frontier` under a project `ceilings_1m` rises to 400k on bare Opus at the first 1M reading. The layer's own comment owns it, and the record's §5 says so; noted so a later reader does not take it for a bug.
 - Unseen live, so a later reader knows: no L1 or L2 ran on Opus (both on Haiku), and no live change of value within one session has been observed. The links are proved offline (A1, A2, A13).
+
+## S45's refuter round 2 (2026-10-30; S4)
+- `hooks.py:461-463`: a share alternating across `checkpoint_at` now speaks at every crossing, against the README's "then every tenth tool". 143800/144200 for 40 tools through `post_tool_use` spoke 20 times where main's rule speaks at 0 and 20. Replaying 700 real transcripts found no such case (657 passes over 80%, 2 down-crossings, 0 gaps under ten tools). Lead: clear the latch but keep a ten-tool floor since the last speech.
+- `tests/test_window.py`, the stale-twin test: four mutants survive (`heal-writes-both`, `rewound-window-only`, `heal-returns-false`, `signal-clear-keeps-count`), since "it is not rewritten" compares bytes. Lead: compare the JSON's mtime and add a twin stale only on `ceilings`.
+- `resolver.py:570-572`: a value that does not round-trip through the YAML rewrites the YAML on every measure (a hand-written `ceilings.context` of 1e21: four `rewindow` calls each moved the YAML); U+2028 and U+0085 make the load fail outright. Not reached through a layer. Lead: have `dump` quote those values.
+- A measure that moves an older session's window makes it `resolver.newest_session`.
+- `meter.py:248` keeps a fixed temp name.
+- README:83 "ctx % at its next measure" is loose: ctx % moves at the next tool; resolved.json moves at the measure.
+- Unseen live: a change of window within one session, and a non-1M reading on Opus.
