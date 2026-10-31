@@ -301,3 +301,10 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `meter.py:248` keeps a fixed temp name.
 - README:83 "ctx % at its next measure" is loose: ctx % moves at the next tool; resolved.json moves at the measure.
 - Unseen live: a change of window within one session, and a non-1M reading on Opus.
+
+## S44's refuter round 2 (2026-10-30; S4)
+- A constant band's `until` is null, so a schedule that never changes shows no band in the line, `status` or the relay's plan. Decide whether a constant band shows.
+- `doctor` warns on a Max login too when the user's bands file is bad: every other Max output is byte-identical, and the ruling asks for it.
+- `admission.py:298-299`, `_rows` lets RecursionError out on a ledger line nested past the stack; `read_band`'s shape on the ledger. A hook path was not traced.
+- `demand.py:153`, `_shift`'s 1-second stop is unpinned: a mutant at 120 seconds passes. Pin a mid-gap stamp and a cut at the second pass's last minute.
+- `--`, `2026-10-30` and `1e3` bind as band names; `Good` binds and `next` never names it.
