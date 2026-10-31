@@ -378,8 +378,9 @@ def test_f8_shipped_gone_after_import_still_resolves(tmp_path):
             "r = resolver.resolve(sys.argv[2], 'sid', env, profile='orchestrator')\n"
             "print(r.sections['session']['profile'], r.inputs[0][1] is not None)\n")
     env = {"HOME": str(home), "XDG_STATE_HOME": str(state)}
-    r = subprocess.run([sys.executable, "-P", "-c", code, str(tree), str(repo), json.dumps(env)],
-                       env=dict(os.environ, PYTHONPATH=str(tree), **env),
+    safe = ["-P"] if sys.version_info >= (3, 11) else []   # else the cwd, which holds no package
+    r = subprocess.run([sys.executable, *safe, "-c", code, str(tree), str(repo), json.dumps(env)],
+                       env=dict(os.environ, PYTHONPATH=str(tree), **env), cwd=str(repo),
                        capture_output=True, text=True, timeout=60)
     assert not tree.exists()
     assert (r.returncode, r.stdout.strip()) == (0, "orchestrator True"), r.stderr

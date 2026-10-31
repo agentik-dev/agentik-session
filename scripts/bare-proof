@@ -1,0 +1,870 @@
+#!/usr/bin/python3 -B
+"""bare-proof: run the plugin as a bare machine would (hq design/04 §7, packet sc1).
+
+Usage: scripts/bare-proof [--transcript PATH] [--runs N] [--keep]
+
+From HEAD it assembles a mock install in a temp home: `git archive HEAD plugin` into
+$T/.claude/plugins/cache/agentik/session/<version>/, and, since sc1 moves no code, `git
+archive HEAD claude_session` into its lib/, a runner (design/04 §2's four lines and a watch,
+at RUNNER) and the launcher of §2. Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
+CLAUDE_PLUGIN_DATA, in a temp git repo holding a decoy package; no clone path, no venv, no
+launcher on PATH. The repo's shim stays as it is: only the mock's copy gains a line putting
+its bin/ first on PATH, so the env stays exact.
+
+The transcript is the newest file over 1 MB under ~/.claude/projects unless --transcript
+names one; it is copied into $T by path, and its contents are never printed.
+
+One line per acceptance row of the packet's §3, `ok` or `FAIL`, with its figure; the last
+line is `bare-proof: go`, or `bare-proof: stop: <rows>` with exit 1. Latency past design/04
+§8's bar (median over 1.25 times 3.12's, or p95 over 2.5 s) is a stop. A row that raises is
+that row's FAIL, and the later rows still print. Exit 2 is the proof's own setup failing.
+Stdlib, 3.9.
+
+`dispatch` turns a handler's exception into `{}` and exit 0, so an exit proves nothing: the
+mock's runner records every exception it swallows, the ten-events row reads that record and
+each event's effect, and `as 3.12` diffs the whole run against 3.12's on one input, the state
+files' values with them.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import signal
+import statistics
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import uuid
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+          "PostToolUseFailure", "PostToolBatch", "PreCompact", "Stop", "StopFailure",
+          "SessionEnd")
+# The shim's rules (plugin/hooks/run): these four exit 0 whatever the tool says and print
+# nothing, PreCompact exits 0 and keeps its stdout, and the others keep the tool's exit, which
+# on a fresh session is 0.
+SWALLOWED = ("Stop", "StopFailure", "PostToolUseFailure", "PostToolBatch")
+# A main thread's call to these two writes nothing: their effect is a helper's.
+HELPER = {"agent_id": "proof-helper"}
+HELPER_EVENTS = ("PostToolUseFailure", "PostToolBatch")
+MEDIAN_BAR, P95_BAR = 1.25, 2.5
+ONE_MB = 1 << 20
+FOUND = re.compile(r"(\d+) warnings?")
+# All that may differ between the interpreters' runs on one input (`as 3.12`), by key. Each is a
+# clock's reading: `at`, when a stamp was written (activity, helper-activity, limited,
+# turn-ended); `ms`, a hook row's wall time; `ts`, when meter.json was written; `ended`, when a
+# ledger row was; `resolved_at`, the mtime of the newest input to resolved.json and resolved.yaml.
+# A home's own path is the only other mask. Not `started`, the transcript's, nor a transcript's
+# inode, sha_at_end or a session id: one copy, one repo and one id serve both runs.
+VARIES = ("at", "ms", "ts", "ended", "resolved_at")
+# The same keys in a file that is not JSON: its lines `key: value`, resolved.yaml's.
+VARIES_LINE = re.compile(r"^(\s*(?:%s):).*$" % "|".join(VARIES), re.M)
+
+# design/04 §2's four-line runner, and one thing sc2 does not ship: a watch. `dispatch` turns an
+# exception into `{}` and exit 0 whichever line raised it, so the mock's runner wraps the handler
+# table `dispatch` reads and the `rotate` it calls first, writes each exception's type and place
+# (never its message) to a file under $T, and re-raises it into `dispatch`, which goes on exactly
+# as it ships. hooks.py does not change, and `cli` still imports it first, in its own order. The
+# third thing `dispatch` swallows, a payload it cannot read, leaves `{}`: the effect rows read that.
+RUNNER = """import os, sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from claude_session import cli
+def watched(where, fn):
+    def call(*args):
+        try:
+            return fn(*args)
+        except Exception as e:
+            tb = e.__traceback__
+            while tb.tb_next:
+                tb = tb.tb_next
+            with open(%(log)r, "a") as fh:
+                fh.write("%%s: %%s at %%s:%%d\\n" %% (where, type(e).__name__,
+                         os.path.basename(tb.tb_frame.f_code.co_filename), tb.tb_lineno))
+            raise
+    return call
+class Watched(dict):
+    def __getitem__(self, event):
+        return watched(event, lambda payload: dict.__getitem__(self, event)(payload))
+cli.hooks.HANDLERS = Watched(cli.hooks.HANDLERS)
+cli.hooks.harness.rotate = watched("rotate", cli.hooks.harness.rotate)
+raise SystemExit(cli.main())
+"""
+# design/04 §2's lines, verbatim but for <no python>, which sc3 settles.
+LAUNCHER = """#!/bin/sh
+root=${0%/*}/..
+py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -x "$py" ] || py=$(command -v python3) || { [ "$1" = hook ] && exit 0; exit 3; }
+exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" "$root/lib/agentik-session" "$@"
+"""
+DECOY = "raise SystemExit(99)\n"
+# AGENTIK_PYTHON for the sentinel pass: the launcher's own flags, however many, the tool under
+# audit.py, which goes in just before the runner.
+SENTINEL = """#!/bin/sh
+printf '%%s\\n' "$HOME" >> %(dir)s/home.log
+i=$#
+while [ "$i" -gt 0 ]; do
+  x=$1; shift; i=$((i - 1))
+  case "$x" in
+    */lib/agentik-session) set -- "$@" %(dir)s/audit.py "$x" ;;
+    *) set -- "$@" "$x" ;;
+  esac
+done
+exec /usr/bin/python3 "$@"
+"""
+# AGENTIK_PYTHON that only says how the launcher called it.
+FLAGS = """#!/bin/sh
+for x; do printf '%%s\\n' "$x"; done > %(out)s
+"""
+# Every module of the package, under the launcher's flags: a late import's syntax or import
+# error is otherwise swallowed by a handler's `except`, or waits on an env a fresh run lacks.
+IMPORTS = """import importlib, json, pkgutil, sys
+sys.path.insert(0, sys.argv[1])
+import claude_session
+bad, n = [], 0
+for m in pkgutil.iter_modules(claude_session.__path__):
+    if m.name == "__main__":
+        continue
+    n += 1
+    try:
+        importlib.import_module("claude_session." + m.name)
+    except Exception as e:
+        bad.append("%s: %s" % (m.name, type(e).__name__))
+print(json.dumps([n, bad]))
+"""
+# The tool's own process under an audit hook: an in-process write outside $T, a child started
+# without HOME=$T. What a child process writes for itself goes unseen (the live-state row).
+AUDIT = """import os, runpy, sys
+T, LOG = %(home)r, %(log)r
+WRITE = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+busy = []
+def note(what):
+    busy.append(1)
+    fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    os.write(fd, (what + "\\n").encode("utf-8", "replace"))
+    os.close(fd)
+    busy.pop()
+def check(event, path):
+    if isinstance(path, bytes):
+        path = os.fsdecode(path)
+    if not isinstance(path, str):
+        return
+    full = os.path.realpath(path)
+    if full != T and not full.startswith(T + os.sep) and not full.startswith("/dev/"):
+        note("%%s %%s" %% (event, full))
+PATHS = {"os.mkdir": 1, "os.rename": 2, "os.remove": 1, "os.rmdir": 1, "os.symlink": 2,
+         "os.link": 2, "os.truncate": 1, "os.chmod": 1}
+def hook(event, args):
+    if busy:
+        return
+    if event == "open":
+        if args[2] is not None and args[2] & WRITE or isinstance(args[1], str) and set(args[1]) & set("wax+"):
+            check(event, args[0])
+    elif event in PATHS:
+        for path in args[:PATHS[event]]:
+            check(event, path)
+    elif event == "subprocess.Popen":
+        env = args[3]
+        home = os.environ.get("HOME") if env is None else env.get("HOME")
+        if home != T:
+            note("child HOME %%s: %%s" %% (home, args[0]))
+sys.addaudithook(hook)
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+class Proof:
+    def __init__(self, args):
+        self.args = args
+        self.rows, self.failed = [], []
+        self.t = os.path.realpath(tempfile.mkdtemp(prefix="bare-proof."))
+        self.watch = os.path.join(self.t, ".swallowed")
+
+    def git(self, *argv):
+        return subprocess.run(["git", *argv], check=True, capture_output=True, text=True,
+                              cwd=HERE).stdout.strip()
+
+    def said(self, r):
+        """A child's stderr as one line, its last: the row's line stays one line, a dead tool's
+        traceback included."""
+        lines = r.stderr.strip().splitlines()
+        return lines[-1][:160] if lines else ""
+
+    def row(self, name, ok, figure):
+        print("%-4s %-12s %s" % ("ok" if ok else "FAIL", name, figure), flush=True)
+        self.rows.append((name, ok, figure))
+        if not ok:
+            self.failed.append(name)
+
+    # ---- the mock ------------------------------------------------------------
+
+    def unpack(self, tree, dest, strip):
+        """`git archive HEAD <tree>` into dest; strip drops its leading directory."""
+        os.makedirs(dest, exist_ok=True)
+        p = subprocess.run(["git", "archive", "HEAD", tree], check=True, capture_output=True,
+                           cwd=self.top)
+        tar = os.path.join(self.t, ".archive.tar")
+        with open(tar, "wb") as fh:
+            fh.write(p.stdout)
+        with tarfile.open(tar) as tf:
+            for m in tf.getmembers():
+                if strip:
+                    m.name = m.name.split("/", 1)[1] if "/" in m.name else "."
+                tf.extract(m, dest)
+        os.remove(tar)
+
+    def transcript(self):
+        src = self.args.transcript
+        if not src:
+            newest, base = (0, None), os.path.expanduser("~/.claude/projects")
+            for d, _, names in os.walk(base):
+                for n in names:
+                    path = os.path.join(d, n)
+                    if not n.endswith(".jsonl"):
+                        continue
+                    try:
+                        st = os.stat(path)
+                    except OSError:
+                        continue
+                    if st.st_size > ONE_MB and (st.st_mtime, path) > newest:
+                        newest = (st.st_mtime, path)
+            src = newest[1]
+        if not src or not os.path.isfile(src):
+            raise OSError("no transcript over 1 MB; name one with --transcript")
+        dest = os.path.join(self.t, ".claude", "projects", "-proof", str(uuid.uuid4()) + ".jsonl")
+        os.makedirs(os.path.dirname(dest))
+        shutil.copyfile(src, dest)
+        return dest
+
+    def assemble(self):
+        self.top = self.git("rev-parse", "--show-toplevel")
+        # Relative in a plain clone, to the folder git ran in.
+        common = os.path.join(HERE, self.git("rev-parse", "--git-common-dir"))
+        self.clones = sorted({self.top, os.path.dirname(os.path.realpath(common))})
+        with open(os.path.join(self.top, "plugin", ".claude-plugin", "plugin.json")) as fh:
+            self.version = json.load(fh)["version"]
+        self.root = os.path.join(self.t, ".claude", "plugins", "cache", "agentik", "session", self.version)
+        self.unpack("plugin", self.root, True)
+        self.unpack("claude_session", os.path.join(self.root, "lib"), False)
+        for rel, text in (("lib/agentik-session", RUNNER % {"log": self.watch}), ("bin/agentik-session", LAUNCHER)):
+            path = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(text)
+            os.chmod(path, 0o755)
+        self.tool = os.path.join(self.root, "bin", "agentik-session")
+        shim = os.path.join(self.root, "hooks", "run")
+        with open(shim) as fh:
+            head, rest = fh.read().split("\n", 1)
+        with open(shim, "w") as fh:
+            fh.write(head + '\nPATH="$CLAUDE_PLUGIN_ROOT/bin:$PATH"\n' + rest)
+        self.shim = shim
+        self.data = os.path.join(self.t, ".claude", "plugins", "data", "session-agentik")
+        os.makedirs(self.data)
+        self.env = {"HOME": self.t, "PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": self.root,
+                    "CLAUDE_PLUGIN_DATA": self.data}
+        self.script = self.transcript()
+        self.repo = os.path.join(self.t, "repo")
+        os.makedirs(os.path.join(self.repo, "claude_session"))
+        repo_git = ["git", "-c", "user.name=proof", "-c", "user.email=proof"]
+        for argv in (["git", "init", "-q"], repo_git + ["commit", "-q", "--allow-empty", "-m", "proof"]):
+            subprocess.run(argv, check=True, cwd=self.repo, env=self.env, capture_output=True)
+        for rel in ("claude_session/__init__.py", "claude_session/__main__.py", "json.py"):
+            with open(os.path.join(self.repo, rel), "w") as fh:
+                fh.write(DECOY)
+        with open(os.path.join(self.repo, ".git", "info", "exclude"), "a") as fh:
+            fh.write("claude_session\njson.py\n")
+
+    # ---- the children --------------------------------------------------------
+
+    def payload(self, event, sid, over=None):
+        p = {"session_id": sid, "transcript_path": self.script, "cwd": self.repo,
+             "hook_event_name": event, "permission_mode": "default"}
+        p.update({
+            "SessionStart": {"source": "startup", "model": "claude-opus-5-5"},
+            "UserPromptSubmit": {"prompt": "proof"},
+            "PreToolUse": {"tool_name": "Bash", "tool_input": {"command": "true"}, "tool_use_id": "t1"},
+            "PostToolUse": {"tool_name": "Bash", "tool_input": {"command": "true"},
+                            "tool_response": {"stdout": ""}, "tool_use_id": "t1"},
+            "PostToolUseFailure": {"tool_name": "Bash", "tool_input": {"command": "false"},
+                                   "error": "exit 1", "tool_use_id": "t2"},
+            "PostToolBatch": {"tool_calls": []},
+            "PreCompact": {"trigger": "manual", "custom_instructions": ""},
+            "Stop": {"stop_hook_active": False},
+            "StopFailure": {"error": "rate_limit"},
+            "SessionEnd": {"reason": "other"},
+        }[event])
+        p.update(over or {})
+        return json.dumps(p)
+
+    def hook(self, event, sid, extra=None, over=None):
+        return subprocess.run([self.shim, event], input=self.payload(event, sid, over), text=True,
+                              capture_output=True, cwd=self.repo, timeout=60,
+                              env=dict(self.env, **(extra or {})))
+
+    def tool_run(self, argv, extra=None, stdin="", timeout=180):
+        return subprocess.run([self.tool, *argv], input=stdin, text=True, capture_output=True,
+                              cwd=self.repo, timeout=timeout, env=dict(self.env, **(extra or {})))
+
+    def effect(self, event, sid, r, state):
+        """What this event's call must have left on a fresh session, or what is missing."""
+        sdir = os.path.join(state, "sessions", sid)
+
+        def load(name):
+            try:
+                with open(os.path.join(sdir, name)) as fh:
+                    return json.load(fh)
+            except (OSError, ValueError):
+                return {}
+
+        if event == "SessionStart":
+            if load("resolved.json").get("provider", {}).get("plugin") != "session":
+                return "no resolved.json"
+            try:
+                said = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+            except (ValueError, KeyError, TypeError):
+                return "stdout is not its JSON"
+            return None if said else "said nothing"
+        if event in ("UserPromptSubmit", "PreToolUse"):
+            return None if load("activity.json").get("event") == event else "no activity.json stamp"
+        if event == "PostToolUse":
+            return None if load("meter.json").get("session_id") == sid else "no meter.json"
+        if event in HELPER_EVENTS:
+            return None if load("helper-activity.json").get("event") == event else "no helper-activity.json stamp"
+        if event == "PreCompact":
+            try:
+                return None if json.loads(r.stdout)["decision"] == "block" else "no block"
+            except (ValueError, KeyError, TypeError):
+                return "no block on an automatic compaction"
+        if event == "Stop":
+            return None if "at" in load("turn-ended.json") else "no turn-ended.json"
+        if event == "StopFailure":
+            return None if load("limited.json").get("error") == "rate_limit" else "no limited.json"
+        if event == "SessionEnd":
+            rows = read_jsonl(os.path.join(state, "ledger.jsonl"))
+            return None if rows and rows[-1].get("session") == sid else "no ledger.jsonl line"
+        return "no effect named"
+
+    def events(self, sid, extra=None, log=None):
+        """The ten events on a fresh session: (all as the rules say, what went wrong). Every
+        call's exit, stdout and stderr go on `log`, for the diff against 3.12."""
+        wrong = []
+        home = (extra or {}).get("HOME", self.t)
+        state = os.path.join(home, ".local", "state", "agentik-session")
+        hooks = os.path.join(state, "hooks.jsonl")
+        for event in EVENTS:
+            before = sum(row.get("event") == event for row in read_jsonl(hooks))
+            calls = 1
+            r = self.hook(event, sid, extra)
+            log is None or log.append((event, r))
+            if r.returncode != 0:
+                wrong.append("%s exit %d" % (event, r.returncode))
+            if (event in SWALLOWED or event == "PreCompact") and r.stdout:
+                wrong.append("%s printed" % event)
+            over = HELPER if event in HELPER_EVENTS else {"trigger": "auto"} if event == "PreCompact" else None
+            if over:
+                calls = 2
+                r = self.hook(event, sid, extra, over)
+                log is None or log.append((event + " " + sorted(over)[0], r))
+                if r.returncode != 0:
+                    wrong.append("%s exit %d" % (event, r.returncode))
+            missing = self.effect(event, sid, r, state)
+            if missing:
+                wrong.append("%s: %s" % (event, missing))
+            rows = [row for row in read_jsonl(hooks) if row.get("event") == event][before:]
+            if len(rows) != calls or any(row.get("exit") != 0 for row in rows):
+                wrong.append("%s: %d hooks.jsonl rows, %d calls, exits %s" % (
+                    event, len(rows), calls, [row.get("exit") for row in rows]))
+        return wrong
+
+    def failing_tool(self):
+        """The shim's other half: a tool exiting 1 is swallowed for these five, kept for the rest."""
+        wrong = []
+        for event in EVENTS:
+            want = 0 if event in SWALLOWED + ("PreCompact",) else 1
+            r = self.hook(event, "failing", {"AGENTIK_PYTHON": "/usr/bin/false"})
+            if r.returncode != want:
+                wrong.append("%s exit %d under a failing tool, not %d" % (event, r.returncode, want))
+        return wrong
+
+    def admission(self, sid, extra=None):
+        line = json.dumps({"kind": "start", "interactive": False})
+        r = self.tool_run(["admission", "record", "--session", sid], extra, stdin=line)
+        ledger = [os.path.join(d, n) for d, _, ns in os.walk(os.path.join(self.t, ".local", "state"))
+                  for n in ns if n == "ledger.jsonl" and os.path.basename(d) == "admission"]
+        lines = 0
+        for path in ledger:
+            with open(path, errors="replace") as fh:
+                lines += sum(1 for l in fh if sid in l)
+        return r.returncode, lines, self.said(r)
+
+    def forms(self, tag, extra=None):
+        """The two named forms. Returns [(what, exit, detail)]."""
+        out = []
+        r = self.tool_run(["charter", "open", "--dir", "history/sittings", "proof " + tag], extra)
+        charter = r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else ""
+        out.append(("charter open", r.returncode, self.said(r)))
+        # In the temp repo, the launcher's cwd kept: its flags alone cannot show a `cd`.
+        landed = os.path.realpath(os.path.join(self.repo, charter))
+        out.append(("the charter in the temp repo", 0 if landed.startswith(self.repo + os.sep) and os.path.isfile(landed) else 1,
+                    "not under the temp repo"))
+        r = self.tool_run(["charter", "close", "--exit", "X", charter], extra)
+        out.append(("charter close --exit X FILE", r.returncode, self.said(r)))
+        r = self.tool_run(["gate", "run", self.repo, "--label", "t", "--", "true"], extra)
+        out.append(("gate run R --label t -- true", r.returncode, self.said(r)))
+        gate = r.stdout.split()[1] if r.returncode == 0 and len(r.stdout.split()) > 1 else "none"
+        named = re.search(r"; result (.+)$", r.stdout.strip())
+        r = self.tool_run(["gate", "wait", gate, "--timeout", "150"], extra)
+        out.append(("gate wait", r.returncode, self.said(r)))
+        # `gate wait` exits 0 whatever the job's code: the job's result is the only reading.
+        try:
+            with open(named.group(1)) as fh:
+                code = json.load(fh)["exit"]
+        except (AttributeError, OSError, ValueError, KeyError, TypeError):
+            code = -1
+        out.append(("the job's result.json", code, "no result.json" if code == -1 else ""))
+        return out
+
+    # ---- the rows ------------------------------------------------------------
+
+    def prefixes(self):
+        """The launcher's bytecode prefix under $T and under each diff home."""
+        tail = os.path.join(".cache", "agentik", "pycache")
+        homes = [self.t] + [os.path.join(self.t, "shape", k) for k in ("3.9", "3.12")]
+        return [os.path.join(home, tail) for home in homes]
+
+    def pyc_count(self):
+        return sum(n.endswith(".pyc") for _, _, ns in os.walk(self.prefixes()[0]) for n in ns)
+
+    def bytecode(self):
+        """After the first run under the prefix, none beside the sources. Elsewhere under $T a
+        count, not a failure: gate.spawn_serve drops `-I` and the prefix, and the runner's
+        .pyc land in $T/Library/Caches/com.apple.python. sc2 fixes it and makes this strict."""
+        beside = [os.path.join(d, n) for d, ds, ns in os.walk(self.root) for n in ds + ns
+                  if n == "__pycache__" or n.endswith(".pyc")]
+        inside = tuple(p + os.sep for p in self.prefixes())
+        strays = sum(n.endswith(".pyc") and not os.path.join(d, n).startswith(inside)
+                     for d, _, ns in os.walk(self.t) for n in ns)
+        self.row("bytecode", self.first_pyc > 0 and not beside,
+                 "%d .pyc under the prefix after the first run, %d beside the sources; %d elsewhere under $T, gate.spawn_serve's, sc2's to fix"
+                 % (self.first_pyc, len(beside), strays))
+
+    def clone_paths(self, label):
+        """Every entry under $T naming a clone, by content, by a link's target or by its own
+        path, a file named as Claude Code's project folders encode a path included. Excepted:
+        the copied transcript, and under a bytecode prefix the mirror of the venv the 3.12
+        baseline runs from: AGENTIK_PYTHON names it, and nothing ships it."""
+        needles = [c.encode() for c in self.clones]
+        encoded = [re.sub(r"[/.]", "-", c) for c in self.clones]
+        prefixes = self.prefixes()
+
+        def mirror_of_venv(path):
+            for pfx in prefixes:
+                if path.startswith(pfx + os.sep):
+                    mirrored = path[len(pfx):]
+                    venvs = [c + os.sep + ".venv" for c in self.clones]
+                    return any(mirrored.startswith(v) or v.startswith(mirrored + os.sep) for v in venvs)
+            return False
+
+        hits, baseline = [], 0
+        for d, ds, ns in os.walk(self.t):
+            for n in ds + ns:
+                path = os.path.join(d, n)
+                if path == self.script:
+                    continue
+                venv = mirror_of_venv(path)
+                named = path[len(self.t):]
+                if not venv and (any(c in named for c in self.clones) or any(e in n for e in encoded)):
+                    hits.append(os.path.relpath(path, self.t))
+                    continue
+                if os.path.islink(path):
+                    to = os.readlink(path)
+                    if any(c in to or c in os.path.realpath(path) for c in self.clones):
+                        hits.append(os.path.relpath(path, self.t) + " (a link)")
+                    continue
+                if n in ds:
+                    continue
+                if venv and "cpython-312" in n:
+                    baseline += 1
+                    continue
+                try:
+                    with open(path, "rb") as fh:
+                        data = fh.read()
+                except OSError:
+                    continue
+                if any(x in data for x in needles):
+                    hits.append(os.path.relpath(path, self.t))
+        self.row(label, not hits, "%d entries name a clone, by content, link or name%s; the transcript and %d .pyc of the 3.12 baseline's venv excepted"
+                 % (len(hits), ": " + ", ".join(hits[:8]) if hits else "", baseline))
+
+    def py312(self):
+        """The 3.12 baseline. The launcher falls back to the floor if AGENTIK_PYTHON is not
+        executable, and a baseline that is the floor would diff clean."""
+        py = os.path.join(self.top, ".venv", "bin", "python")
+        r = subprocess.run([py, "-I", "-c", "import sys; print(sys.version_info[:2] >= (3, 12))"],
+                           capture_output=True, text=True, env=self.env, cwd=self.t)
+        if r.stdout.strip() != "True":
+            raise RuntimeError("no 3.12 at .venv/bin/python")
+        return py
+
+    def observed(self, tag, extra):
+        """One run of the ten events in a home of its own: (wrong, calls, names, values)."""
+        home = os.path.join(self.t, "shape", tag)
+        os.makedirs(os.path.join(home, "data"))
+        extra = dict(extra, HOME=home, CLAUDE_PLUGIN_DATA=os.path.join(home, "data"))
+        log = []
+        wrong = self.events("shape", extra, log)
+        calls = {}
+        for label, r in log:
+            calls[label] = (r.returncode, r.stdout.replace(home, "<HOME>"), r.stderr.replace(home, "<HOME>"))
+        names, values = [], {}
+        for d, ds, ns in os.walk(home):
+            # Bytecode's names hold the interpreter's tag, and the prefix is the bytecode row's.
+            ds[:] = [x for x in ds if x != ".cache"]
+            for n in ns:
+                path = os.path.join(d, n)
+                rel = os.path.relpath(path, home)
+                names.append(rel)
+                values[rel] = state_value(path, home)
+        return wrong, calls, sorted(names), values
+
+    def against_312(self):
+        """Exits, stdout, stderr, the state files' names and their values, 3.9 against 3.12 on
+        one input: the same payloads, the same transcript copy, the same session id, each in a
+        fresh home. A JSON file by its values and its lists' lengths, any other by its content,
+        each under `state_value`'s masks, which name all that may differ. A difference is printed
+        by where it is, never by value: a transcript's words could stand in one."""
+        w39, c39, n39, s39 = self.observed("3.9", {})
+        w312, c312, n312, s312 = self.observed("3.12", {"AGENTIK_PYTHON": self.py312()})
+        diff = ["3.9: " + w for w in w39] + ["3.12: " + w for w in w312]
+        for label in sorted(set(c39) | set(c312)):
+            a, b = c39.get(label), c312.get(label)
+            for i, what in enumerate(("exit", "stdout", "stderr")):
+                if a is None or b is None or a[i] != b[i]:
+                    diff.append("%s's %s" % (label, what))
+        diff += ["only under 3.9: " + n for n in n39 if n not in n312]
+        diff += ["only under 3.12: " + n for n in n312 if n not in n39]
+        for name in sorted(set(s39) & set(s312)):
+            diff += [name + ": " + w for w in where_differ(s39[name], s312[name])]
+        self.row("as 3.12", not diff, "%d calls, %d state files, the exits, stdout, stderr, names and masked values %s"
+                 % (len(c39), len(n39), "differ: %s" % diff[:8] if diff else "identical"))
+
+    def launcher_flags(self):
+        """The launcher's flags as it passes them, whatever its text says."""
+        out = os.path.join(self.t, ".flags")
+        stub = os.path.join(self.t, ".flags.sh")
+        with open(stub, "w") as fh:
+            fh.write(FLAGS % {"out": out})
+        os.chmod(stub, 0o755)
+        self.tool_run(["proof"], {"AGENTIK_PYTHON": stub})
+        with open(out) as fh:
+            argv = fh.read().split("\n")
+        os.remove(out)
+        os.remove(stub)
+        return argv[:[i for i, a in enumerate(argv) if a.endswith("/lib/agentik-session")][0]]
+
+    def decoy(self):
+        """From the decoy's cwd, under the launcher's exact flags: its package and its json.py
+        must both lose. A script run puts its own folder on sys.path, never the cwd, so only
+        `-c` shows what -I holds off; the decoy's exit is 99."""
+        flags = self.launcher_flags()
+        run = lambda code: subprocess.run(["/usr/bin/python3", *flags, "-c", code], text=True,
+                                          capture_output=True, cwd=self.repo, env=self.env, timeout=60)
+        pkg = run("import claude_session")
+        std = run("import json; print(json.__file__)")
+        won = pkg.returncode == 99 or std.returncode == 99
+        ok = pkg.returncode == 1 and "ModuleNotFoundError" in pkg.stderr and std.returncode == 0 \
+            and not std.stdout.startswith(self.repo)
+        self.row("decoy", ok, "flags %s; import claude_session exit %d, import json exit %d; the decoy %s"
+                 % (" ".join(f.replace(self.t, "$T") for f in flags), pkg.returncode, std.returncode,
+                    "won" if won else "lost"))
+
+    def imports(self):
+        script = os.path.join(self.t, ".imports.py")
+        with open(script, "w") as fh:
+            fh.write(IMPORTS)
+        r = subprocess.run(["/usr/bin/python3", *self.launcher_flags(), script, os.path.join(self.root, "lib")],
+                           text=True, capture_output=True, cwd=self.repo, env=self.env, timeout=120)
+        os.remove(script)
+        n, bad = json.loads(r.stdout) if r.returncode == 0 else (0, [self.said(r)])
+        self.row("imports", n > 0 and not bad, "%d modules under the launcher's flags under 3.9%s"
+                 % (n, ", refused: %s" % bad[:6] if bad else ""))
+
+    def latency(self):
+        py312 = self.py312()
+        both = {"3.9": ("lat-39", None), "3.12": ("lat-312", {"AGENTIK_PYTHON": py312})}
+        times = {k: [] for k in both}
+        first = {}
+        for k, (sid, extra) in both.items():
+            t0 = time.perf_counter()
+            self.hook("PostToolUse", sid, extra)
+            first[k] = time.perf_counter() - t0
+        for i in range(self.args.runs):
+            for k in (("3.9", "3.12") if i % 2 == 0 else ("3.12", "3.9")):
+                sid, extra = both[k]
+                t0 = time.perf_counter()
+                r = self.hook("PostToolUse", sid, extra)
+                times[k].append(time.perf_counter() - t0)
+                if r.returncode != 0:
+                    self.row("latency", False, "%s exit %d" % (k, r.returncode))
+                    return
+        fig = {}
+        for k, ts in times.items():
+            ts.sort()
+            fig[k] = (statistics.median(ts), ts[max(0, int(0.95 * len(ts) + 0.999) - 1)])
+        ratio = fig["3.9"][0] / fig["3.12"][0]
+        ok = ratio <= MEDIAN_BAR and fig["3.9"][1] <= P95_BAR
+        self.row("latency", ok,
+                 "%d hooks each: 3.9 median %.0f ms p95 %.0f ms; 3.12 median %.0f ms p95 %.0f ms; ratio %.2f (bar %.2f, p95 bar %.1f s); first hook %.0f against %.0f ms, 3.12's cold; load %.1f"
+                 % (self.args.runs, fig["3.9"][0] * 1e3, fig["3.9"][1] * 1e3, fig["3.12"][0] * 1e3,
+                    fig["3.12"][1] * 1e3, ratio, MEDIAN_BAR, P95_BAR, first["3.9"] * 1e3,
+                    first["3.12"] * 1e3, os.getloadavg()[0]))
+
+    def validate(self):
+        claude = shutil.which("claude")
+        if not claude:
+            self.row("validate", False, "no claude on PATH")
+            return
+        live = os.path.join(self.t, "live", "plugin")
+        self.unpack("plugin", live, True)
+        outs = {}
+        for name, path in (("live", live), ("mock", self.root)):
+            env = {"HOME": self.t, "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+            r = subprocess.run([claude, "plugin", "validate", path], text=True, capture_output=True,
+                               cwd=self.t, env=env, timeout=60)
+            outs[name] = (r.returncode, (r.stdout + r.stderr).replace(path, "<root>"))
+        found = {k: FOUND.findall(v[1]) for k, v in outs.items()}
+        warnings = {k: int(v[0]) if v else -1 for k, v in found.items()}
+        same = outs["live"][1] == outs["mock"][1]
+        # Two runs that fail alike are identical: each must pass, and count the same warnings.
+        ok = same and outs["live"][0] == 0 and outs["mock"][0] == 0 and warnings["live"] == warnings["mock"] >= 0
+        tail = ""
+        if not same:
+            a, b = outs["live"][1].splitlines(), outs["mock"][1].splitlines()
+            tail = "; first difference: " + " / ".join(
+                next(("%s | %s" % (x, y) for x, y in zip(a, b) if x != y), "length"))[:200]
+        self.row("validate", ok, "exit %d and %d, warnings %d and %d, %s%s" % (
+            outs["live"][0], outs["mock"][0], warnings["live"], warnings["mock"],
+            "the outputs identical" if same else "the outputs differ", tail))
+
+    def sentinel(self):
+        """HOME reached every child, and the audit hook saw no in-process write outside $T; a
+        child process's own write goes unseen. The detector proves itself first."""
+        d = os.path.join(self.t, "sentinel")
+        os.makedirs(d)
+        log, homes = os.path.join(d, "outside.log"), os.path.join(d, "home.log")
+        with open(os.path.join(d, "audit.py"), "w") as fh:
+            fh.write(AUDIT % {"home": self.t, "log": log})
+        py = os.path.join(d, "python")
+        with open(py, "w") as fh:
+            fh.write(SENTINEL % {"dir": d})
+        os.chmod(py, 0o755)
+        extra = {"AGENTIK_PYTHON": py}
+        # A write it must see: the audit hook fires before the call, which fails on no directory.
+        probe = os.path.join(d, "probe.py")
+        with open(probe, "w") as fh:
+            fh.write("try:\n    open('/nonexistent-bare-proof/x', 'w')\nexcept OSError:\n    pass\n")
+        subprocess.run(["/usr/bin/python3", "-I", os.path.join(d, "audit.py"), probe], env=self.env, cwd=self.repo)
+        seen = os.path.exists(log) and "/nonexistent-bare-proof" in open(log).read()
+        if not seen:
+            self.row("live state", False, "the detector did not see its own probe")
+            return
+        os.remove(log)
+        wrong = self.events("sentinel", extra)
+        code, lines, _ = self.admission("sentinel", extra)
+        if code or not lines:
+            wrong.append("admission exit %d" % code)
+        wrong += ["%s exit %d" % (w, c) for w, c, _ in self.forms("sentinel", extra) if c]
+        job = os.path.join(self.repo, ".home-seen")
+        r = self.tool_run(["gate", "run", self.repo, "--label", "home", "--", "/bin/sh", "-c",
+                           'printf %s "$HOME" > .home-seen'], extra)
+        gate = r.stdout.split()[1] if r.returncode == 0 and len(r.stdout.split()) > 1 else "none"
+        self.tool_run(["gate", "wait", gate, "--timeout", "150"], extra)
+        seen_job = open(job).read() if os.path.exists(job) else None
+        with open(homes) as fh:
+            seen_homes = set(fh.read().split("\n")) - {""}
+        outside = open(log).read().splitlines() if os.path.exists(log) else []
+        real = os.path.realpath(os.path.expanduser("~/.cache/agentik"))
+        grew = os.path.exists(real) and not self.cache_there
+        ok = seen_homes == {self.t} and seen_job == self.t and not outside and not wrong and not grew
+        detail = ("the sentinel's HOME at every launch and in the gate's job; the audit hook saw %d in-process writes or children's HOME outside $T; a child process's own write is unseen"
+                  % len(outside))
+        if not ok:
+            detail += "; homes %d, job %s, wrong %s, default prefix grew %s; %s" % (
+                len(seen_homes), seen_job == self.t, wrong[:3], grew, outside[:4])
+        self.row("live state", ok, detail)
+
+    def stop_serve(self):
+        """The temp home's gate runner only, by the pid in its own runner.json; it idles out."""
+        state = os.path.join(self.t, ".local", "state")
+        for d, _, ns in os.walk(state):
+            if "runner.json" not in ns:
+                continue
+            try:
+                with open(os.path.join(d, "runner.json")) as fh:
+                    pid = int(json.load(fh)["pid"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            ps = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+            if self.t in ps.stdout:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    continue
+                for _ in range(50):
+                    if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode:
+                        break
+                    time.sleep(0.1)
+
+    def guarded(self, name, fn):
+        """A row that raises is that row's FAIL: a dead tool stops the proof by its last line,
+        never a traceback, and the later rows still print."""
+        try:
+            fn()
+        except Exception as e:      # noqa: BLE001
+            self.row(name, False, "%s: %s" % (type(e).__name__, str(e)[:160]))
+
+    def swallowed(self):
+        """What `dispatch` has swallowed so far, by the mock's runner's record."""
+        try:
+            with open(self.watch) as fh:
+                return ["swallowed " + line for line in fh.read().splitlines()]
+        except OSError:
+            return []
+
+    def ten_events(self):
+        wrong = self.events("first")
+        self.first_pyc = self.pyc_count()
+        wrong += self.failing_tool()
+        wrong += self.swallowed()
+        self.row("ten events", not wrong, "%d events, %s" % (len(EVENTS), wrong[:6] or "each one's effect read and its hooks.jsonl row, as the shim's rules say, under a tool that exits 0 and one that exits 1; SessionStart's stdout JSON"))
+
+    def admission_row(self):
+        code, lines, err = self.admission("first")
+        self.row("admission", code == 0 and lines == 1, "exit %d, %d line on the ledger under $T%s" % (code, lines, "; " + err if err else ""))
+
+    def two_forms(self):
+        forms = self.forms("first")
+        state = os.path.join(self.t, ".local", "state")
+        states = os.listdir(state) if os.path.isdir(state) else []
+        self.row("two forms", all(c == 0 for _, c, _ in forms),
+                 "; ".join("%s exit %d" % (w, c) + (" (%s)" % e if c and e else "") for w, c, e in forms)
+                 + "; state under $T: " + ", ".join(states))
+
+    def run(self):
+        self.cache_there = os.path.exists(os.path.expanduser("~/.cache/agentik"))
+        self.first_pyc = 0
+        try:
+            self.assemble()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as e:
+            print("bare-proof: stop: setup: %s: %s" % (type(e).__name__, str(e)[:160]))
+            return 2
+        print("bare-proof: %s at %s, transcript %d MB, under %s" % (
+            self.version, self.git("rev-parse", "--short", "HEAD"),
+            os.path.getsize(self.script) >> 20, sys.version.split()[0]), flush=True)
+        for name, fn in (("ten events", self.ten_events), ("as 3.12", self.against_312),
+                         ("decoy", self.decoy), ("imports", self.imports),
+                         ("admission", self.admission_row), ("two forms", self.two_forms),
+                         ("live state", self.sentinel), ("validate", self.validate),
+                         ("latency", self.latency), ("stop runner", self.stop_serve),
+                         ("bytecode", self.bytecode)):
+            self.guarded(name, fn)
+        self.guarded("no clone path", lambda: self.clone_paths("no clone path"))
+        # The ten-events row reads the first pass; this reads them all, 3.12's and the sentinel's.
+        whole = self.swallowed()
+        self.row("no swallow", not whole, "%d exceptions swallowed by dispatch in the whole run%s"
+                 % (len(whole), ": %s" % whole[:6] if whole else ""))
+        if self.failed:
+            print("bare-proof: stop: " + ", ".join(self.failed))
+            return 1
+        print("bare-proof: go")
+        return 0
+
+
+def read_jsonl(path):
+    """The file's JSON rows; a line that is not JSON reads as {}. Absent reads as none."""
+    rows = []
+    try:
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    rows.append({})
+    except OSError:
+        pass
+    return rows
+
+
+def masked(value, home):
+    """A state value with only what `VARIES` names, and the run's own home, taken out."""
+    if isinstance(value, dict):
+        return {k: "<%s>" % k if k in VARIES else masked(v, home) for k, v in value.items()}
+    if isinstance(value, list):
+        return [masked(v, home) for v in value]
+    return value.replace(home, "<HOME>") if isinstance(value, str) else value
+
+
+def state_value(path, home):
+    """One state file under the masks: JSON by its values, a .jsonl by its rows, and a line
+    that is not JSON or any other file by its text."""
+    with open(path, encoding="utf-8", errors="surrogateescape") as fh:
+        text = fh.read()
+    if path.endswith(".jsonl"):
+        rows = []
+        for line in text.splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                rows.append(VARIES_LINE.sub(r"\1 <masked>", line))
+        return masked(rows, home)
+    if path.endswith(".json"):
+        try:
+            return masked(json.loads(text), home)
+        except ValueError:
+            pass
+    return VARIES_LINE.sub(r"\1 <masked>", text).replace(home, "<HOME>")
+
+
+ABSENT = object()
+
+
+def where_differ(a, b, at=""):
+    """The paths at which two masked values differ: a key, a list's length, a list's row."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        for k in sorted(set(a) | set(b)):
+            out += where_differ(a.get(k, ABSENT), b.get(k, ABSENT), at + "." + k)
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        out = [] if len(a) == len(b) else ["%s: %d rows against %d" % (at or ".", len(a), len(b))]
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += where_differ(x, y, "%s[%d]" % (at, i))
+        return out
+    return [] if a == b else [at or "."]
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="bare-proof", description=__doc__.splitlines()[0])
+    ap.add_argument("--transcript", help="default: the newest file over 1 MB under ~/.claude/projects")
+    ap.add_argument("--runs", type=int, default=25, help="hooks per interpreter (default 25)")
+    ap.add_argument("--keep", action="store_true", help="keep the temp home and print it")
+    args = ap.parse_args()
+    proof = Proof(args)
+    try:
+        return proof.run()
+    finally:
+        try:
+            proof.stop_serve()
+        except Exception as e:      # noqa: BLE001
+            print("bare-proof: stop runner: %s: %s" % (type(e).__name__, str(e)[:160]), file=sys.stderr)
+        if args.keep:
+            print("kept: " + proof.t)
+        else:
+            shutil.rmtree(proof.t, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
