@@ -93,7 +93,7 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert code[4] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
     assert code[:4] + code[5:] == [
         'if command -v agentik-session >/dev/null 2>&1; then tool=agentik-session',
-        'elif command -v claude-session >/dev/null 2>&1; then tool=claude-session',
+        "elif command -v claude" "-session >/dev/null 2>&1; then tool=claude" "-session",
         'else exit 0', 'fi', *MAIN_FLOW.splitlines()]
     assert sum("date" in ln for ln in code) == 1
 
