@@ -978,8 +978,42 @@ def _gate_wait(root, gid: str, timeout, as_json: bool) -> int:
     return 0
 
 
+class _Parser(argparse.ArgumentParser):
+    """A verb's positionals may stand on either side of an option, on every interpreter.
+
+    Before 3.12 argparse spends a `nargs="*"` or `"?"` positional on an empty match at the
+    first option, and strips a later `--` out of what follows it (sc1, a test under the
+    floor). So a verb with one parses intermixed, and what follows the first `--` is marked
+    if it starts with a dash: only a literal NUL can make it so, and no argv holds one.
+    """
+    _mixing = False
+
+    def parse_known_args(self, args=None, namespace=None):
+        args = list(sys.argv[1:] if args is None else args)
+        if self._subparsers is not None and args[:1] == ["--"]:
+            args = args[1:]                 # before 3.12 the verb's choices refuse it
+        loose = [a for a in self._get_positional_actions() if a.nargs in ("*", "?")]
+        if self._mixing or not loose:
+            return super().parse_known_args(args, namespace)
+        if "--" in args:
+            cut = args.index("--") + 1
+            args[cut:] = ["\0" + a if a.startswith("-") else a for a in args[cut:]]
+        self._mixing = True
+        try:
+            namespace, extras = self.parse_known_intermixed_args(args, namespace)
+        finally:
+            self._mixing = False
+        for action in self._get_positional_actions():
+            got = getattr(namespace, action.dest, None)
+            if isinstance(got, list):
+                setattr(namespace, action.dest, [a.lstrip("\0") for a in got])
+            elif isinstance(got, str):
+                setattr(namespace, action.dest, got.lstrip("\0"))
+        return namespace, [a.lstrip("\0") for a in extras]
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="agentik session",
         description="Launch Claude Code with a named configuration, and keep "
                     "the session handoff-ready.",
