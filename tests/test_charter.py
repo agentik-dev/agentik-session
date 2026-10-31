@@ -462,6 +462,23 @@ def test_s29_meter_wait_keeps_the_exit(tmp_path, monkeypatch, verb):
     assert out == "" if verb == "check" else out.strip() == str(p)
 
 
+def test_charter_week_wait_is_meter_wait(tmp_path, monkeypatch):
+    """Packet S43 ruling 5: the week's words are whole words, through `charter check`; the old
+    alternatives keep their prefix match."""
+    _s21_repo(tmp_path, monkeypatch)
+
+    def err(what):
+        rc, _, text = run("charter", "check", str(_s21_charter(tmp_path, next_act=f"WAITING 1: {what}; its log")))
+        assert rc == 0
+        return text
+    for what in ("the week's reset", "the weekly limit", "7d at its ceiling", "the seven-day reading",
+                 "the band's reset", "THE WEEK", "the 5hours reset", "the metered run"):
+        assert S29_METER in err(what), what
+    for what in ("the weekend", "a banded run", "the bandwidth test", "a biweekly review", "17d of logs",
+                 "the seven-days list", "a disband"):
+        assert S29_METER not in err(what), what
+
+
 # ---- S22: close names its commit, and the respawn that follows (F13) --------
 
 def _s22_next(rel):
