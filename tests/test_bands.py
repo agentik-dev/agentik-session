@@ -49,9 +49,9 @@ def L7(p7, week=WEEK):
     return [{"kind": "seven_day", "percentUsed": p7, "resetsAt": iso(week)}]
 
 
-def L5(p5, p7=None, five=FIVE):
+def L5(p5, p7=None, five=FIVE, week=WEEK):
     out = [{"kind": "five_hour", "percentUsed": p5, "resetsAt": iso(five)}]
-    return out + (L7(p7) if p7 is not None else [])
+    return out + (L7(p7, week) if p7 is not None else [])
 
 
 def reading(t, lims, sid=SID):
@@ -391,7 +391,8 @@ def test_five_hour_never_reads_the_file(env, monkeypatch):
 
 def test_one_read_for_two_none_logins_and_none_for_a_five_hour_one(env, monkeypatch):
     other = datetime(2026, 11, 4, 15, tzinfo=UTC)
-    rows = rising(61, 62) + rising(50, 51, S2, other) + [reading(at(9), L5(40), "bands-sess-4444-5555")]
+    third = datetime(2026, 11, 3, 15, tzinfo=UTC)
+    rows = rising(61, 62) + rising(50, 51, S2, other) + [reading(at(9), L5(40, 50, week=third), "bands-sess-4444-5555")]
     calls = []
     real = demand.schedule
     monkeypatch.setattr(demand, "schedule", lambda e: calls.append(1) or real(e))
@@ -399,7 +400,8 @@ def test_one_read_for_two_none_logins_and_none_for_a_five_hour_one(env, monkeypa
     b = admission.read_band(env)
     assert calls == [1]
     with_demand = [k for k, a in b["accounts"].items() if "demand" in a]
-    assert len(with_demand) == 2 and all(b["accounts"][k]["window"] == "none" for k in with_demand)
+    assert len(b["accounts"]) == 3 and len(with_demand) == 2
+    assert all(b["accounts"][k]["window"] == "none" for k in with_demand)
 
 
 def test_a_none_answer_says_a_bad_file_and_reads_the_shipped(env):
@@ -574,21 +576,21 @@ def test_status_is_today_s_bytes_with_no_band_to_show(env, metered, b):
 
 def test_status_json_carries_window_and_demand_only_on_none(env, metered):
     plain = json.loads(run("status", "--json")[1])
-    assert "window" not in plain and "demand" not in plain
+    assert "band" not in plain
     dem = {"band": "avoid", "until": "2099-01-01T00:00:00+00:00", "next": {}}
     write_band(env, {"window": "five_hour", "P": 40, "demand": dem})
     assert json.loads(run("status", "--json")[1]) == plain
     write_band(env, {"window": "none", "demand": dem})
-    assert json.loads(run("status", "--json")[1]) == {**plain, "window": "none", "demand": dem}
+    assert json.loads(run("status", "--json")[1]) == {**plain, "band": {"window": "none", "demand": dem}}
     write_band(env, {"window": "none"})
-    assert json.loads(run("status", "--json")[1]) == {**plain, "window": "none"}
+    assert json.loads(run("status", "--json")[1]) == {**plain, "band": {"window": "none"}}
 
 
 def test_status_reads_the_session_s_account(env, metered):
     dem = {"band": "avoid", "until": "2099-01-01T00:00:00+00:00"}
     write_band(env, {"window": "five_hour", "P": 40, "accounts": {"k": {"window": "none", "demand": dem}},
                      "sessions": {SID: "k"}})
-    assert run("status")[1].splitlines()[-1].startswith("band: avoid to 00:00")
+    assert run("status")[1].splitlines()[-1] == "band: avoid to Thu 00:00"
 
 
 def test_doctor_is_silent_with_no_file_and_on_a_good_one(env):

@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import config, resolver, rules, store
+from . import demand as demand_mod
 from .hooks import _SID
 
 DIR = "admission"
@@ -375,7 +376,7 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
         line = line_for(sid, obj, env, now)
         swept = _sweep(d, sid, now) if line["kind"] == "end" else []
         _append(d, [line, *swept])
-        _write_band(d, now, rules.admission(_session_config(env, sid)))
+        _write_band(d, now, {**rules.admission(_session_config(env, sid)), "demand": _demand_once(env)})
     finally:
         os.close(fd)
     return d / LEDGER
@@ -1084,12 +1085,15 @@ def _round(x, n):
 
 def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
     """Check stdin, then inside the one lock read the ledger, decide and append one
-    `verdict` line; the answer is {verdict, mode, text, peak, window, resume_at}, and `notes` when the config
-    left any (an `enforce` read as `observe`). It never refuses a spawn."""
+    `verdict` line; the answer is {verdict, mode, text, peak, window, resume_at}, `band` too
+    on a `none` login (the band's name or null, packet S44: nothing holds on it), and `notes`
+    when the config or the bands file left any (an `enforce` read as `observe`). It never
+    refuses a spawn."""
     req = parse_admit(sid, text_in)
     now = now or datetime.now(timezone.utc)
     notes: list = []
-    settings = rules.admission(_session_config(env, sid), notes)
+    at = _demand_once(env)
+    settings = {**rules.admission(_session_config(env, sid), notes), "demand": at}
     d = directory(env)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(d, 0o700)
@@ -1107,6 +1111,10 @@ def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
     finally:
         os.close(fd)
     out = {k: v[k] for k in ("verdict", "mode", "text", "peak", "window", "resume_at")}
+    if out["window"] == NO_WINDOW:
+        dem = at(now)
+        out["band"] = dem["band"] if dem else None
+        notes += at.notes
     return {**out, "notes": notes} if notes else out
 
 
@@ -1138,17 +1146,39 @@ def _room(peak: float, each: float, T: float, settings: dict):
     return n
 
 
+def _demand_once(env):
+    """`settings["demand"]` at a band.json write (packet S44): at(now, tz) is the `demand` of
+    a `none` entry. The file is read only when one asks, and once, however many accounts do;
+    a `five_hour` login never reads it. The schedule's notes land on `at.notes`."""
+    read: list = []
+    made: dict = {}
+
+    def at(now: datetime, tz=None):
+        if not read:
+            read.append(demand_mod.schedule(env))
+            at.notes.extend(read[0][2])
+        if (now, tz) not in made:
+            made[(now, tz)] = demand_mod.demand(now, read[0][0], read[0][1], tz)
+        return made[(now, tz)]
+    at.notes = []
+    return at
+
+
 def _band_none(rows, now: datetime, settings: dict, tz, out: dict) -> dict:
     """A `none` login's entry (packet S42): the week's reading and reset, and the helpers in
-    flight; no fit, no project, no five-hour line read."""
+    flight; no fit, no project, no five-hour line read. `demand` when a write's settings
+    carry its reader and a schedule binds (packet S44)."""
     seven = [x for x in readings(rows, SEVEN) if x[3] > now]
     week = _newest(seven) if seven else None
     reset = _stamp(week[3], tz) if week else None
     rs = runs(rows)
     running = sum(1 for _ in _in_flight(rs, lives(rs), now, settings["seeds"]))
-    return {"P": None, "peak": None, "room": None, "P7": _round(week[2], 2) if week else None,
-            "ceiling_7d": settings["ceiling_7d"], "resetsAt": reset, "until": reset,
-            "bound": SEVEN, "running": running, **out}
+    entry = {"P": None, "peak": None, "room": None, "P7": _round(week[2], 2) if week else None,
+             "ceiling_7d": settings["ceiling_7d"], "resetsAt": reset, "until": reset,
+             "bound": SEVEN, "running": running, **out}
+    at = settings.get("demand")
+    dem = at(now, tz) if at else None
+    return {**entry, "demand": dem} if dem is not None else entry
 
 
 def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> dict:
@@ -1295,10 +1325,54 @@ def _line_end(b: dict, now: datetime) -> list:
     return parts
 
 
+def _band_when(v: str, w: tuple, base: datetime) -> str:
+    """A `demand` stamp `_wall` took: HH:MM within 24 hours of `base`, else Ddd HH:MM."""
+    clock = f"{w[0]}:{w[1]}"
+    return clock if w[2] - base <= timedelta(hours=24) else f"{_weekday(v)} {clock}"
+
+
+def _band_base(b: dict, now: datetime) -> datetime:
+    a = _wall(b.get("at"))
+    return a[2] if a is not None else now
+
+
+def _band_to(b: dict, now: datetime):
+    """`avoid to 11:00` from a `none` entry's `demand` (packet S44), None with no band, an
+    `until` `_wall` refuses, or an `until` not after now: `demand` is resolved only at
+    band.json writes, so an idle login's can be past its end, and then says nothing."""
+    d = b.get("demand")
+    if not isinstance(d, dict):
+        return None
+    name, u = d.get("band"), _wall(d.get("until"))
+    if not isinstance(name, str) or not name or u is None or u[2] <= now:
+        return None
+    return f"{name} to {_band_when(d['until'], u, _band_base(b, now))}"
+
+
+def band_status(b, now: datetime | None = None):
+    """`status`'s line on a `none` band with a `demand` it can draw: `band: avoid to 11:00;
+    next good 23:00, best 16:00`, a `next` listed only when present and in the future; None
+    otherwise, so a `five_hour` band leaves `status` as it was."""
+    now = now or datetime.now(timezone.utc)
+    if not isinstance(b, dict) or b.get("window") != NO_WINDOW:
+        return None
+    to = _band_to(b, now)
+    if to is None:
+        return None
+    nexts = b["demand"].get("next")
+    items = []
+    for name in demand_mod.REPORTED if isinstance(nexts, dict) else ():
+        w = _wall(nexts.get(name))
+        if w is not None and w[2] > now:
+            items.append(f"{name} {_band_when(nexts[name], w, _band_base(b, now))}")
+    return f"band: {to}" + (f"; next {', '.join(items)}" if items else "")
+
+
 def _line_none(b: dict, now: datetime) -> list:
     """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · week resets Ddd HH:MM ·
-    n helpers`, each left out with no figure; `until` first, else `resetsAt`, both the
-    week's. No countdown, ceiling, room or deferred."""
+    band avoid to 11:00 · n helpers`, each left out with no figure; `until` first, else
+    `resetsAt`, both the week's; the band's from `demand` (packet S44). No countdown,
+    ceiling, room or deferred."""
     parts = ["no 5h window"]
     p7, running = _real(b.get("P7")), _real(b.get("running"))
     if p7 is not None:
@@ -1308,6 +1382,9 @@ def _line_none(b: dict, now: datetime) -> list:
         if w is not None:
             parts.append(f"week resets {_weekday(v)} {w[0]}:{w[1]}")
             break
+    to = _band_to(b, now)
+    if to is not None:
+        parts.append(f"band {to}")
     if running is not None:
         parts.append(_count(running, "helper", "helpers"))
     return parts + _line_end(b, now)

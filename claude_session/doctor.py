@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import hooks, measure, meter, mod, resolver
+from . import demand, hooks, measure, meter, mod, resolver
 
 PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
@@ -489,6 +489,12 @@ def _check_measure(env) -> Check:
     return Check("measure", True, measure.line(sdir) + where, warn=warn)
 
 
+def _check_bands(env) -> list:
+    """A bad user bands file, or a shipped one that does not bind: a warn row each, never a
+    failure; no row at all on a good file or none (packet S44)."""
+    return [Check("bands", True, note, warn=True) for note in demand.schedule(env)[2]]
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
     cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
@@ -516,6 +522,8 @@ def run(env=None, cwd=None) -> Report:
     add(_check_measure(env))     # last (packet M2)
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
+    for row in _check_bands(env):
+        add(row)                 # packet S44: last, and only on a bad file
     return rep
 
 

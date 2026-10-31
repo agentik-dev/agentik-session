@@ -166,8 +166,21 @@ const lineEnd = (b: any, nowMs: number): string[] => {
   return parts
 }
 
+// The band's part on a `none` entry (packet S44), the twin of Python's _band_to: `avoid to
+// 11:00` within 24 hours of `at` (else now), else `best to Sun 20:00`; null with no band, a
+// stamp `wall` or `weekday` refuses, or an `until` not after now: band.json is written only
+// at a record or an admit, so an idle login's can be past its end.
+const bandTo = (b: any, nowMs: number): string | null => {
+  const d = b.demand
+  if (!d || typeof d !== 'object') return null
+  const u = wall(d.until), day = u ? weekday(String(d.until)) : null
+  if (typeof d.band !== 'string' || !d.band || !u || !day || u[2] <= nowMs) return null
+  const a = wall(b.at)
+  return `${d.band} to ${u[2] - (a ? a[2] : nowMs) <= 86400000 ? '' : `${day} `}${u[0]}:${u[1]}`
+}
+
 // A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
-// `resetsAt`, both the week's. No countdown, ceiling, room or deferred.
+// `resetsAt`, both the week's, then the band's. No countdown, ceiling, room or deferred.
 const lineNone = (b: any, nowMs: number): string[] => {
   const parts = ['no 5h window']
   const p7 = fig(b.P7), running = fig(b.running)
@@ -179,6 +192,8 @@ const lineNone = (b: any, nowMs: number): string[] => {
       break
     }
   }
+  const to = bandTo(b, nowMs)
+  if (to) parts.push(`band ${to}`)
   if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
   return [...parts, ...lineEnd(b, nowMs)]
 }

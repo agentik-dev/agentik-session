@@ -16,9 +16,7 @@ import os
 import re
 import stat
 from datetime import datetime, time, timedelta, timezone
-from importlib import resources
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from . import yamlsubset
 
@@ -61,6 +59,7 @@ def _read_user(p: Path) -> str:
 
 
 def _shipped() -> str:
+    from importlib import resources    # here, not at the top: a hook on a five-hour login never pays
     return resources.files(__package__).joinpath(FILE).read_text(encoding="utf-8")
 
 
@@ -105,7 +104,8 @@ def _slots(rules: list) -> list:
     return slots
 
 
-def _zone(v) -> ZoneInfo:
+def _zone(v):
+    from zoneinfo import ZoneInfo      # as _shipped's import
     if not isinstance(v, str):
         raise _Bad(f"tz {v!r}")
     try:
