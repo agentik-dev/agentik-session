@@ -39,12 +39,17 @@ TAKE = 3
 DONE_SHOWN = 5
 CUT_WALL, CUT_DIED, CUT_LOCK = "wall cut", "runner died", "lock wait cut"
 MORE = "{n} more: agentik session gate status"
-ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued")
+ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
+              "key")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
                "caller", "cut")
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
 RUNNER_KEYS = ("pid", "since", "running", "pgid")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": WALL}
+MAX_RUNNING = 3             # gate.max_running's default (packet S47, ruling 4)
+LOAD_SHARE = 0.75           # gate.load_ceiling's default, as a share of the cores
+START_SETTLE = 60.0         # the seconds between two starts, since a load average lags
+GIT_WAIT = 10.0
 
 
 class GateError(Exception):
@@ -131,10 +136,51 @@ def _alive(pid) -> bool:
     return reaped == 0
 
 
-def _config(env) -> dict:
-    """The gate section's user layer (packet ruling 4): ntfy_url, ntfy_topic, wall."""
+def _config(env, log=None) -> dict:
+    """The gate section's user layer (packet ruling 4): ntfy_url, ntfy_topic, wall, and
+    S47's load_ceiling and max_running when set."""
     from . import resolver
-    return resolver.gate_config(env)
+    return resolver.gate_config(env, log)
+
+
+# ---- the key -----------------------------------------------------------------
+
+def _real(path: str) -> str:
+    try:
+        return os.path.realpath(path)
+    except (OSError, ValueError):
+        return path
+
+
+def repo_key(repo: str) -> str:
+    """The realpath of `git -C <repo> rev-parse --git-common-dir`, so a repo and its
+    worktrees are one key; no git tree, or git failing, the repo's realpath. `GIT_*` in
+    the caller's environment would name another tree, so none reaches git. Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "--git-common-dir"], env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+        out = p.stdout.rstrip("\n") if p.returncode == 0 else ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        out = ""
+    return _real(os.path.join(repo, out) if out else repo)
+
+
+def entry_key(e: dict) -> str:
+    """The entry's key; an older queue's entry, with none, reads its repo's realpath."""
+    k = e.get("key")
+    if isinstance(k, str) and k:
+        return k
+    repo = e.get("repo")
+    return _real(repo) if isinstance(repo, str) else ""
+
+
+def key_name(key: str) -> str:
+    """The key's name in a `waits on key` line: the repo's, since the basename of a key
+    that ends in `.git` would name every repo alike."""
+    base = os.path.basename(key)
+    return os.path.basename(os.path.dirname(key)) if base == ".git" else base
 
 
 # ---- the queue ---------------------------------------------------------------
@@ -165,6 +211,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
         raise GateError(f"the caller is not a session id: {str(caller)[:40]!r}")
     g = gate_dir(root)
     _mkdir(_queue(root))
+    key = repo_key(real)                # outside the queue's lock: git may take its time
     with open(g / "queue.lock", "a+") as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
@@ -175,7 +222,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
         gid = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}"
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
                  "locks": [os.path.abspath(p) for p in locks], "wall": wall,
-                 "label": label or "", "caller": caller, "queued": now}
+                 "label": label or "", "caller": caller, "queued": now, "key": key}
         _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
     return entry
 
@@ -221,6 +268,64 @@ def _locked(e: dict) -> str | None:
     return None
 
 
+def _locks(e: dict) -> list[str]:
+    return [p for p in e.get("locks") or [] if isinstance(p, str)]
+
+
+def _holds(es: list[dict], running: list[dict]):
+    """Rulings 1 to 3 over the entries not running, oldest first: each with what holds it,
+    (kind, what) or None. A lock path that exists holds its entry, and so does one a running
+    entry names, whatever its key, since that command may not have made it yet. An entry
+    holds its key against every younger entry of that key, so a key stays FIFO."""
+    keys = {entry_key(x) for x in running}
+    named = {p for x in running for p in _locks(x)}
+    for e in es:
+        k = entry_key(e)
+        path = _locked(e) or next((p for p in _locks(e) if p in named), None)
+        if path:
+            yield e, ("lock", path)
+        elif k in keys:
+            yield e, ("key", key_name(k))
+        else:
+            yield e, None
+        keys.add(k)
+
+
+def _load_read(fx) -> float | None:
+    """The 1-minute load average, or None for a read that failed or is no number."""
+    try:
+        x = fx.load()
+    except Exception:                                   # noqa: BLE001 (over the ceiling)
+        return None
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return None
+    return float(x) if 0 <= x < float("inf") else None
+
+
+def _ceiling(cfg: dict, fx) -> float:
+    set_ = cfg.get("load_ceiling")
+    if set_ is not None:
+        return set_
+    try:
+        cores = fx.cores()
+    except Exception:                                   # noqa: BLE001 (one core's share)
+        cores = None
+    return LOAD_SHARE * (cores if isinstance(cores, int) and cores > 0 else 1)
+
+
+def _over(cfg: dict, fx, count: int, last, now: float):
+    """Ruling 4, with `count` > 0 running: what bars a further start, (kind, ...) or None.
+    `last` is the last start. A load read that failed is over the ceiling."""
+    most = cfg.get("max_running", MAX_RUNNING)
+    if count >= most:
+        return ("running", count, most)
+    x, c = _load_read(fx), _ceiling(cfg, fx)
+    if x is None or x >= c:
+        return ("load", x, c)
+    left = START_SETTLE - (now - last) if isinstance(last, (int, float)) else 0
+    return ("settle", left) if left > 0 else None
+
+
 def spawn_serve(root, popen=None) -> bool:
     """Start `serve` detached when the queue is not empty: this interpreter (never PATH),
     a new session, close_fds, stdio to gate/runner.log, PYTHONPATH led by this package's
@@ -256,6 +361,10 @@ def _log_line(line: str) -> None:
     print(time.strftime("%Y-%m-%d %H:%M:%S ") + line, file=sys.stderr, flush=True)
 
 
+def _load_avg() -> float:
+    return os.getloadavg()[0]
+
+
 @dataclass
 class Fx:
     """The runner's effects, each faked in tests."""
@@ -266,6 +375,8 @@ class Fx:
     killpg: Callable = os.killpg
     post: Callable = _default_post
     log: Callable[[str], None] = _log_line
+    load: Callable[[], float] = _load_avg
+    cores: Callable[[], int | None] = os.cpu_count
     env: dict = field(default_factory=lambda: dict(os.environ))
     idle: float = IDLE
     poll: float = POLL
@@ -433,8 +544,8 @@ def _step(root, fx: Fx, cfg: dict, since: float, seen: dict | None = None) -> bo
             _finish(root, fx, cfg, head, 126, first, now, CUT_LOCK,
                     note=f"lock {held} held past the wall ({wall} s); not run")
             return True
-    for e in es:
-        if not _locked(e):
+    for e, why in _holds(es, []):
+        if why is None:
             _run(root, fx, cfg, e, since)
             return True
     return False
@@ -450,7 +561,7 @@ def serve(root, fx: Fx | None = None) -> int:
     with open(g / "runner.lock", "a+") as fh:
         if not _take(fh, fx):
             return 0
-        cfg = _config(fx.env)
+        cfg = _config(fx.env, fx.log)
         _recover(root, fx, cfg)
         _prune(root, fx.now())
         while True:
