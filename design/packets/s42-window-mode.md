@@ -20,16 +20,16 @@
 
 **Detection**, `window(rows, key, now, settings) -> "five_hour" | "none"`: "1. A counted observation is a reading or spawn row for the key whose list holds seven_day at a finite percent and a future `resetsAt`, and no entry of kind five_hour. An admit request is not a row and is not evidence. 2. A list carrying five_hour is any list for the key with an entry of kind five_hour, whatever its percent, seven_day or not. An empty list, or one with neither kind, counts neither way. 3. `none` when, after the key's newest list carrying five_hour, one session holds two counted observations at least 30 minutes apart with seven_day up by at least one whole point from the earlier to the later. Otherwise `five_hour`. 4. `window` is stateless: recomputed from the rows at each call, with no stored mode. So one list carrying five_hour switches back, and a `/limit-reset` refill switches nothing. 5. On `none` the key's earlier five_hour readings are ignored: no frozen P, no `stale`, no `wait`. 6. The override: `session.admission.window: auto | five_hour | none` (default `auto`), and `windows: {Wed-1500Z: none}` per login. The slot is the weekday and minute of the seven_day `resetsAt`."
 
-**band.json**: "Each account entry gains `window` and `slot`. `accounts` is written with two or more keys, as today, or when any key is `none`. The top level is the current login's entry. A `five_hour` entry keeps today's fields and values and never carries `demand`." A `none` entry: `window, slot, P: null, peak: null, room: null, P7, ceiling_7d, resetsAt, until (each the week's reset), bound: seven_day, running, mode, at`; `fit` and `project` are skipped.
+**band.json**: "Each account entry gains `window` and `slot`. `accounts` is written with two or more keys, as today, or when any key is `none`. The top level is the current login's entry. A `five_hour` entry keeps today's fields and values and never carries `demand`." A `none` entry: `window, slot, P: null, peak: null, room: null, P7, ceiling_7d, resetsAt, until (each the week's reset), bound: seven_day, running, mode, at`; `fit`, `project` skipped.
 
 **`decide`**: `five_hour`: "ruling 4's order unchanged, plus the fixes; the answer gains `window` and `resume_at` (the five-hour reset; on a weekly denial, the week's reset)". `none`: "`denied` at P7 ≥ `ceiling_7d`, for all work; else `admitted`; the answer gains `window`, `resume_at` (the week's reset). No unread, stale, wait, deferred or band hold".
 
 ## 2. Rulings
 
 1. **The tests the record changes**, and no other: `test_band_on_a_synthetic_ledger_matches_a_hand_count`, `test_no_five_hour_reading_is_mode_and_at_only` ([none], [past-reset]), `test_record_rewrites_band_json_atomically_and_0600` for `window` and `slot`; `test_s35_two_accounts_each_session_draws_its_own_window`, `test_s35_a_session_with_no_account_draws_the_top_level` for the top level; `test_no_five_hour_reading_is_unread`: seven_day 98 alone is `denied`, neither window stays `unread`. Another that must change is a finding: stop and name it.
-2. **What a `none` account's line reads until S43**: `5h no reading · week resets HH:MM (h:mm) · 3 helpers · 7d 62% · observe`, today's `band_line` and its twin on §4's entry, unedited; `rules.lifetime` answers `(None, unknown)`, as today on such a list.
+2. **What a `none` account's line reads until S43**: `5h no reading · week resets HH:MM (h:mm) · 3 helpers · 7d 62% · observe`, today's `band_line` and its twin on §4's entry, unedited; `rules.lifetime` answers `(None, unknown)`, as today.
 3. **The band in the answer** comes with `demand` in S44: S42's answer gains `window` and `resume_at` alone. The `verdict` line is unchanged.
-4. **Forks decided here, each reversible** (the consumer in brackets).
+4. **Forks decided here, reversible**.
    - `rules.admission` carries `window` and `windows` only when set, so `test_the_defaults` stays green unchanged; `window()` reads them with defaults [`settings`].
    - "A null kind or percent" is a key present and null; a key absent stays refused, so `test_admission`'s and `test_measure`'s absent-percent cases stay green unchanged. The module sends absent as null [`rate_limits`, `measure.shape`].
    - A request with no rateLimits is judged on its session's own key when it has one, else on the current login, so `test_s35_a_verdict_projects_from_its_own_account` stays green unchanged; a relay ask has no readings [`scoped`].
@@ -38,7 +38,7 @@
    - `resume_at` is null on `unread`, `stale` and `wait`, or on a `none` account with no fresh week; a zoned local ISO time, `band`'s form [AR98's `Reset`].
    - A slot's value wins over `window`; a bad slot key or value is ignored with one note in `notes`, a bad `window` is `auto` with one note. A key the YAML subset cannot read (`Wed 15:00Z`) is refused by the loader [`rules.admission`].
    - An override with no key: `window: none` still reads `none`; `slot` is null [`band`].
-5. **The version:** 2.0.0-alpha.29 in all five pins, one bump, last; the README status line reads it and the suite's count.
+5. **The version:** 2.0.0-alpha.29 in all five pins, one bump, last; the README status reads it and the suite's count.
 
 ## 3. Interfaces (signatures, not prose)
 
@@ -46,7 +46,7 @@
 
 ## 4. Findings that name this row
 
-None open.
+None.
 
 ## 5. Forbidden reads
 
@@ -54,4 +54,4 @@ Transcripts; `~/.local/state`, but the live admission ledger, read-only, for the
 
 ## 6. Report (under 15 lines)
 
-Commits; tests red then green; each named test; the live ledger's reading through the real `window()`; forks; anything unmet.
+Commits; tests red then green; each named test; the live ledger through the real `window()`; forks; anything unmet.
