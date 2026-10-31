@@ -327,3 +327,9 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - With git hung, `main/sub` keys apart from `main`.
 - A lock's `..` through a symlink collapses lexically.
 - The pid is free between `poll` and `killpg` on an empty group, needing a pid wrap between adjacent lines.
+
+## S49's notes (2026-10-31, the builder; S4)
+
+- A lead, not confirmed: Claude Code's own per-hook timing may be readable from a debug log or a transcript, which would cover every plugin's hooks, not this one's alone. Not built; S49 read neither.
+- The shim's cost is its two `date` forks, 6.3 ms a call. Writing the row in a detached subshell would take the second off the hook's wall time, and sampling by `$$` would cut both, at the price of a racing row or of `count`. Worth it only if the numbers say so.
+- A row has no time or session, by the packet, so `--since` cannot filter it and the owner's "per session" is not answerable from it. A session's own row would need a key the packet ruled out.
