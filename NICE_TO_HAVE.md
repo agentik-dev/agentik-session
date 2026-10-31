@@ -7,13 +7,19 @@ audience: owner, agent
 # claude-code-session: what a review left open, none of it blocking
 
 ## S44, the demand bands (2026-10-30)
-- S4: a rule's cut inside a repeated hour reads its first instant, as the packet rules, so in the fold's second pass `demand` takes the band from the wall and `until` skips that cut, though the wall will cross it again. The shipped file has no cut there; a user file with one is off for at most that hour.
 - S4: `status --transcript` shows no band: it reads a transcript, not this session's band. A reader that wants one takes it from band.json.
 - S4: `grade` in `bands.yaml` is the source's text, and nothing reads it.
+- S4: the twins differ on stamps `_stamp` never writes, so `wall` could refuse what `_when` refuses.
+- S4: `status --json` passes a past-end `demand` raw, where the plain line leaves it out.
+- S4: a dangling symlink at the user's `bands.yaml` is silent: it reads as no file, with no `doctor` row.
+- S4: no real wheel was built offline; only the package-data line and the frozen tree are checked.
 
 ## S43, the lines on a login with no five-hour window (2026-10-30)
 - S4: `rules.py`'s rendered waiting rule still reads `(room for 0, or a usage limit hit)`, and `tests/test_rules.py` pins it, while the charter's pattern and the two docs now name the week and the band too; the packet allows only `lifetime` in that file. A packet that touches the rendered rules takes it.
 - S4: the twins differ on a stamp at datetime's very ends: Python's `_wall` refuses 0001-01-01 and 9999-12-31, `wall` in `session.ts` takes them. Older than this change and on both lines; `_stamp` never writes one.
+- S4: a `next week` wait hits the meter-wait return before `_red`, so a red charter with that wait exits 0; `test_s29_meter_wait_keeps_the_exit` is the pin to revisit.
+- S4: hyphens read as boundaries, so `mid-week`, `band-aid` and `7d-old` count as meter waits.
+- S4: numeric corners of `_pct` against `whole` differ (`7d 1e+21%`), unreachable from the writer.
 
 ## The research site's vendor-docs check (2026-10-14): one behaviour item left
 - S4: PreCompact's quiet pass rests on an undocumented reading, that a passing PreCompact's stdout becomes the compaction's custom instructions (observed on claude 2.1.296; `claude_session/hooks.py` `QUIET_PASS`). The "Hooks reference" of 2026-10-14 sends most events' passing stdout to the debug log and does not list PreCompact as an exception. Add a check that fails loudly when the behaviour changes, such as a `doctor` probe or a gated live test that runs a manual `/compact` under a PreCompact hook printing a marker and looks for it in the summary. It needs a real `claude`, so it waits for a sitting that may run one. Source: the research site's fix prompt, item 8.
