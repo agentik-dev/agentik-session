@@ -14,7 +14,7 @@ Keep load below 20: this Mac is shared.
 
 ## 1. What the source says: the refuter's harness, a lead to use
 
-`SP=/private/tmp/claude-501/-Users-kevinteg-code-agentik-hq/6f4a5995-fbe9-456e-a9d2-a02b6a060274/scratchpad`. `/usr/bin/python3 -I -B $SP/mut.py $SP <name>...` applies each named mutant to a scratch clone at `$SP/w/c` on branch `sc1-proof` and runs the proof at `--runs 3`. `$SP/one.py` runs one argv against a tree. Fetch your head into that clone first. It patches by exact strings, so a mutant may need its string updated; a mutant's body does not change. Latency alone going red at 3 runs does not count as caught: read the other rows.
+`SP=<the coordinator's scratchpad>`. `/usr/bin/python3 -I -B $SP/mut.py $SP <name>...` applies each named mutant to a scratch clone at `$SP/w/c` on branch `sc1-proof` and runs the proof at `--runs 3`. `$SP/one.py` runs one argv against a tree. Fetch your head into that clone first. It patches by exact strings, so a mutant may need its string updated; a mutant's body does not change. Latency alone going red at 3 runs does not count as caught: read the other rows.
 
 ## 2. Rulings: the proof (`scripts/bare-proof`)
 
