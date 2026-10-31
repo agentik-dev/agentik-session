@@ -585,7 +585,7 @@ def test_lifetime_none_by_seven_day(entry, want):
 
 
 def test_lifetime_none_by_seven_day_on_the_entry_decide_writes():
-    """test_none_line_reads_as_today_until_s43's assertion, moved (packet S43 ruling 6)."""
+    """S42's lifetime assertion on this entry, moved here and turned (packet S43 ruling 6)."""
     b = admission.band(rising(61, 62), NOW, settings(), tz=UTC)
     assert b["window"] == "none"
     assert rules.lifetime({}, "/nonexistent", b, now=NOW) == ("1h", "within plan usage, 7d 62%")
