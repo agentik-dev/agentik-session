@@ -340,8 +340,8 @@ const retrying = async (t: any, on: any, failures: number, refuse: { sleep?: any
   on('ui.log', ($: any, e: any) => { logged.push(e); return { value: undefined } })
   const answered = await t.session.start({ cwd: '/repo' })
   // A tick ends when the loop is parked on its next 5 s sleep (S41 Amendment 1): a fixed
-  // 20 ms let a loaded machine end the test first, and the loop's late clock.sleep, with
-  // the test's handlers gone, was a rejection nothing handled (the file did not run to its end).
+  // 20 ms let a loaded machine end the test first, and the counts below went with it. The
+  // loop's late clock.sleep, with the test's handlers gone, now ends that loop (S50).
   const tick = async () => {
     sleepers.shift()?.({ value: undefined })
     for (let i = 0; i < 400 && sleepers.length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5))

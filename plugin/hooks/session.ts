@@ -394,7 +394,12 @@ export const register: Register = on => {
       await start()
       await $.ui.invalidate('ui.render')
       void (async () => {
-        for (;;) { await $.clock.sleep(EVERY_MS); await start(); await $.ui.invalidate('ui.render') }
+        for (;;) {
+          // A refused sleep ends the loop: nothing is left to pace on, and a clock that refuses
+          // at once would spin. A refused redraw does not: the next tick tries again (S50).
+          try { await $.clock.sleep(EVERY_MS) } catch { return }
+          try { await start(); await $.ui.invalidate('ui.render') } catch { /* the next tick */ }
+        }
       })()
     } catch { /* the band's failure skips neither admission's part nor the answer */ }
     try { await admitStart($, e) } catch { /* admission never throws; nor does this */ }
