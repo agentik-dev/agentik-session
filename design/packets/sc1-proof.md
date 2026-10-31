@@ -12,6 +12,8 @@
 
 Read first, by sections, never whole (`/session:read`): design/04 §2, §7 (its first paragraph, the bare-machine test and item 1), §8, §9, §12; then agentik-research `research/synthesis/tools-session.md`.
 
+Amendment 1, the refuter's round 1: `design/packets/sc1-proof-a1.md`; its rulings move these where they name them.
+
 ## 1. What the source says: what is already measured (design/04 §2), not to be taken on trust
 
 Session under 3.9.6: 1953 pass, 49 fail: 20 the doctor's floor, 14 one argparse difference, 12 `scripts/bounded`'s 3.11 `process_group=` (a dev tool, never run time), 3 pass `-P` or expect the baked venv. Those figures are from before S49 and S50; read them again.
@@ -40,7 +42,7 @@ Session under 3.9.6: 1953 pass, 49 fail: 20 the doctor's floor, 14 one argparse 
 | bytecode | under the prefix after the first run, and none beside the sources |
 | latency | median and p95, 3.9 against 3.12; the proof exits nonzero past §8's bar: median over 1.25 times, or p95 over 2.5 s |
 | validate | `claude plugin validate` of the mock reads as the live plugin's: today 10 warnings on both; the two outputs diffed |
-| live state | a snapshot of `ls -la` of the live state folder is not needed: the proof asserts `HOME=$T` reached every child by a sentinel test, and fails if anything wrote outside `$T` |
+| live state | a snapshot of `ls -la` of the live state folder is not needed: the proof says what it sees and fails on it: the tool's in-process writes outside `$T`, by an audit hook; `HOME=$T` at every launch and in the gate's job, by a sentinel. A child process's own write is unseen: sandboxing is macOS-only, and sc2's test joins the suite (Amendment 1, F5) |
 
 ## 4. Findings that name this row: the stop (design/04 §8)
 
