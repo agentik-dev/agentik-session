@@ -1,14 +1,17 @@
-"""The gate queue (design/gate-r1.md, packet S38): one FIFO per state root, run by one
-detached runner, a command at a time.
+"""The gate queue (design/gate-r1.md, packets S38 and S47): one queue per state root, run
+by one detached runner, one running per key under a load ceiling.
 
-`enqueue` writes `<state>/gate/queue/<id>.json`; `serve` is the runner, which takes the
-oldest entry none of whose lock paths exists, runs it in its own process group in its
-repo, writes `<state>/gate/<id>/log` and then `result.json`, drops the entry from the
-queue, and tells the caller's inbox (and ntfy when configured). `wait`, `status` and the
-inbox are reads. The tool reports exit codes and judges none: 124 is the wall's cut, 125
-a runner that died, 126 a lock held past the wall, 127 a command that could not start.
-Every effect the runner has (the clock, spawn, flock, the group kill, the POST) is in Fx,
-so a test fakes each one.
+`enqueue` writes `<state>/gate/queue/<id>.json`, its `key` the repo's git common dir, so a
+repo and its worktrees are one key; `serve` is the runner, which holds a set of children
+and polls them. It starts the oldest entry whose key is free and none of whose lock paths
+exists or is named by a running entry; a second start waits for the ceiling (`_over`). Each
+child runs in its own process group in its repo; at its end the runner writes
+`<state>/gate/<id>/log` and then `result.json`, drops the entry from the queue, and tells
+the caller's inbox (and ntfy when configured). `wait`, `status` and the inbox are reads. The
+tool reports exit codes and judges none: 124 is the wall's cut, 125 a runner that died, 126
+a lock held past the wall, 127 a command that could not start. Every effect the runner has
+(the clock, spawn, flock, the group kill, the POST, the load, the cores) is in Fx, so a test
+fakes each one.
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller"
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
                "caller", "cut")
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
-RUNNER_KEYS = ("pid", "since", "running", "pgid")
+RUNNER_KEYS = ("pid", "since", "running")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": WALL}
 MAX_RUNNING = 3             # gate.max_running's default (packet S47, ruling 4)
 LOAD_SHARE = 0.75           # gate.load_ceiling's default, as a share of the cores
@@ -248,17 +251,40 @@ def runner_info(root) -> dict | None:
     return _load(gate_dir(root) / "runner.json")
 
 
-def _running_id(root, alive=_alive) -> str | None:
+def _pairs(r: dict | None) -> list[tuple]:
+    """A runner.json's running, as (id, pgid): `running` is a list of {id, pgid}, or the
+    old single form, an id with `pgid` beside it, which an alpha.31 runner left. What is no
+    id is skipped."""
+    run = (r or {}).get("running")
+    if isinstance(run, str):
+        run = [{"id": run, "pgid": r.get("pgid")}]
+    if not isinstance(run, list):
+        return []
+    return [(x["id"], x.get("pgid")) for x in run
+            if isinstance(x, dict) and isinstance(x.get("id"), str) and ID.match(x["id"])]
+
+
+def _running_ids(root, alive=_alive) -> list[str]:
     r = runner_info(root)
-    gid = (r or {}).get("running")
-    return gid if r and alive(r.get("pid")) and isinstance(gid, str) and ID.match(gid) else None
+    return [gid for gid, _ in _pairs(r)] if r and alive(r.get("pid")) else []
 
 
 def position(root, gid: str, alive=_alive) -> int:
-    """The place among the entries not yet started (1 is next); 0 when not queued."""
-    run = _running_id(root, alive)
-    ids = [e["id"] for e in entries(root) if e["id"] != run]
+    """The place among the entries not running (1 is next); 0 when not queued."""
+    run = _running_ids(root, alive)
+    ids = [e["id"] for e in entries(root) if e["id"] not in run]
     return ids.index(gid) + 1 if gid in ids else 0
+
+
+def _started_at(root, gid: str):
+    """When an entry started: its directory's mtime, made at the start and touched again
+    only by its result; a directory not there yet reads the runner's file."""
+    for path in (entry_dir(root, gid), gate_dir(root) / "runner.json"):
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            continue
+    return None
 
 
 def _locked(e: dict) -> str | None:
@@ -392,23 +418,49 @@ def _take(fh, fx: Fx) -> bool:
     return True
 
 
-def _runner_write(root, fx: Fx, since: float, running, pgid) -> None:
+@dataclass
+class _Child:
+    """One running entry. `term_at` and `kill_at` are the wall cut's steps, so that a cut
+    waits out its grace at the poll and never in the way of another child."""
+    e: dict
+    proc: object
+    started: float
+    term_at: float | None = None
+    kill_at: float | None = None
+
+
+@dataclass
+class _Set:
+    """The runner's memory: its children, its last start, and `seen`, when it first saw
+    each head locked."""
+    since: float
+    running: list = field(default_factory=list)
+    last_start: float | None = None
+    seen: dict = field(default_factory=dict)
+
+
+def _runner_write(root, fx: Fx, s: _Set) -> None:
+    run = [{"id": c.e["id"], "pgid": c.proc.pid} for c in s.running]
     _write_private(gate_dir(root) / "runner.json",
-                   json.dumps({"pid": fx.pid, "since": since, "running": running,
-                               "pgid": pgid}) + "\n")
+                   json.dumps({"pid": fx.pid, "since": s.since, "running": run}) + "\n")
+
+
+def _signal_group(pgid, sig, fx: Fx) -> bool:
+    """False when there is no group to signal: gone, not ours, or never a group."""
+    if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1 or pgid == os.getpgrp():
+        return False
+    try:
+        fx.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def _kill_group(pgid, fx: Fx) -> None:
     """SIGTERM to the group, the grace, then SIGKILL; a group already gone ends it."""
-    if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1 or pgid == os.getpgrp():
-        return
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            fx.killpg(pgid, sig)
-        except (ProcessLookupError, PermissionError):
-            return
-        if sig == signal.SIGTERM:
-            fx.sleep(fx.grace)
+    if _signal_group(pgid, signal.SIGTERM, fx):
+        fx.sleep(fx.grace)
+        _signal_group(pgid, signal.SIGKILL, fx)
 
 
 def _prune(root, now: float) -> None:
@@ -456,12 +508,13 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     return result
 
 
-def _run(root, fx: Fx, cfg: dict, e: dict, since: float) -> None:
+def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
+    """Spawn one entry into the set. The child holds its log; the runner reopens it at the
+    end. A command that cannot start is closed here, 127, and counts as no start."""
     gid = e["id"]
     d = entry_dir(root, gid)
     _mkdir(d)
     started = fx.now()
-    cut = None
     with _open_log(d / "log") as log:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
         log.flush()
@@ -471,69 +524,102 @@ def _run(root, fx: Fx, cfg: dict, e: dict, since: float) -> None:
                          start_new_session=True, close_fds=True)
         except (OSError, ValueError, subprocess.SubprocessError) as err:
             log.write(f"gate {gid}: cannot start: {err}\n".encode())
-            rc = 127
-        else:
-            _runner_write(root, fx, since, gid, p.pid)
-            while True:
-                code = p.poll()
-                if code is not None:
-                    rc = code if code >= 0 else 128 - code
-                    break
-                if fx.now() - started >= e["wall"]:
-                    _kill_group(p.pid, fx)
-                    try:
-                        p.wait(timeout=fx.grace)
-                    except Exception:                       # noqa: BLE001
-                        pass
-                    rc, cut = 124, CUT_WALL
-                    break
-                fx.sleep(fx.poll)
-        ended = fx.now()
-        log.write(f"gate {gid}: exit {rc} in {round(ended - started)} s\n".encode())
+            p = None
+    if p is None:
+        _close(root, fx, cfg, e, 127, started, None, s)
+        return
+    s.running.append(_Child(e, p, started))
+    s.last_start = started
+    _runner_write(root, fx, s)
+
+
+def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set) -> None:
+    ended = fx.now()
+    with _open_log(entry_dir(root, e["id"]) / "log") as log:
+        log.write(f"gate {e['id']}: exit {rc} in {round(ended - started)} s\n".encode())
     _finish(root, fx, cfg, e, rc, started, ended, cut)
-    _runner_write(root, fx, since, None, None)
+    _runner_write(root, fx, s)
+
+
+def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
+    """One look at each child, never waiting on any: a finish closes it; at its wall, the
+    group's SIGTERM, then at the grace SIGKILL (the child is not polled between them, so its
+    group's id stays its own), then 124 once it is gone or a second grace has passed. True
+    when one closed."""
+    closed = False
+    for c in list(s.running):
+        now, code, cut = fx.now(), None, None
+        if c.term_at is None:
+            code = c.proc.poll()
+            if code is not None:
+                code = code if code >= 0 else 128 - code
+            elif now - c.started >= (c.e["wall"] if isinstance(c.e.get("wall"), int) else WALL):
+                c.term_at = now
+                if not _signal_group(c.proc.pid, signal.SIGTERM, fx):
+                    c.kill_at = now
+        elif c.kill_at is None:
+            if now - c.term_at >= fx.grace:
+                _signal_group(c.proc.pid, signal.SIGKILL, fx)
+                c.kill_at = now
+        elif c.proc.poll() is not None or now - c.kill_at >= fx.grace:
+            code, cut = 124, CUT_WALL
+        if code is not None:
+            s.running.remove(c)
+            _close(root, fx, cfg, c.e, code, c.started, cut, s)
+            closed = True
+    return closed
 
 
 def _recover(root, fx: Fx, cfg: dict) -> None:
-    """A runner.json while this runner holds the flock is a dead runner's: kill its
-    group, write 125 for its entry unless a result is there, drop the file."""
+    """A runner.json while this runner holds the flock is a dead runner's: for each entry
+    it names, kill the group and write 125 unless a result is there; drop the file."""
     path = gate_dir(root) / "runner.json"
     r = runner_info(root)
     if r is None:
         _unlink(path)
         return
-    gid = r.get("running")
-    if isinstance(gid, str) and ID.match(gid):
-        _kill_group(r.get("pgid"), fx)
+    for gid, pgid in _pairs(r):
+        _kill_group(pgid, fx)
         if result_path(root, gid).exists():
             _unlink(_queue(root) / f"{gid}.json")
         else:
-            try:
-                started = path.stat().st_mtime        # rewritten when the entry started
-            except OSError:
-                started = None
             e = _load(_queue(root) / f"{gid}.json") or {"id": gid}
             e["id"] = gid
-            _finish(root, fx, cfg, e, 125, started, fx.now(), CUT_DIED,
+            _finish(root, fx, cfg, e, 125, _started_at(root, gid), fx.now(), CUT_DIED,
                     note=f"the runner (pid {r.get('pid')}) died; its group was killed")
     _unlink(path)
     fx.log(f"gate: a stale runner.json (pid {r.get('pid')}) was recovered")
 
 
-def _step(root, fx: Fx, cfg: dict, since: float, seen: dict | None = None) -> bool:
-    """One pass: True when it ran or closed an entry. `seen` is the runner's memory of
-    when it first saw each head locked: the 126 cut counts the wall from there, never
-    from `queued`, and a head seen unlocked starts again (Amendment 1, F1)."""
-    seen = {} if seen is None else seen
-    es = entries(root)
+def _lock_wait(head: dict, running: list[dict]) -> str | None:
+    """The lock that alone keeps the head from starting, for the 126 cut. An entry behind
+    its own key could not start anyway, and a path a running entry names is held by a
+    command with a wall of its own: neither ticks, which is S38's meaning, where the head's
+    wall never ran out on the entry in front of it."""
+    if entry_key(head) in {entry_key(x) for x in running}:
+        return None
+    named = {p for x in running for p in _locks(x)}
+    return next((p for p in _locks(head) if p not in named and os.path.exists(p)), None)
+
+
+def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
+    """One pass: True when it started or closed an entry. `s.seen` is the runner's memory of
+    when it first saw each head locked: the 126 cut counts the wall from there, never from
+    `queued`, and a head seen unlocked starts again (Amendment 1, F1). The head is the
+    oldest entry not running."""
+    if _reap(root, fx, cfg, s):
+        return True
+    running = [c.e for c in s.running]
+    busy = {x["id"] for x in running}
+    es = [e for e in entries(root) if e["id"] not in busy]
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
             _unlink(_queue(root) / f"{e['id']}.json")
             return True
     if not es:
         return False
-    head, now = es[0], fx.now()
-    held = _locked(head)
+    head, now, seen = es[0], fx.now(), s.seen
+    held = _lock_wait(head, running)
     wall = head.get("wall") if isinstance(head.get("wall"), int) else WALL
     for gid in [k for k in seen if k != head["id"] or not held]:
         del seen[gid]
@@ -544,17 +630,17 @@ def _step(root, fx: Fx, cfg: dict, since: float, seen: dict | None = None) -> bo
             _finish(root, fx, cfg, head, 126, first, now, CUT_LOCK,
                     note=f"lock {held} held past the wall ({wall} s); not run")
             return True
-    for e, why in _holds(es, []):
-        if why is None:
-            _run(root, fx, cfg, e, since)
-            return True
-    return False
+    e = next((x for x, why in _holds(es, running) if why is None), None)
+    if e is None or (running and _over(cfg, fx, len(running), s.last_start, now)):
+        return False
+    _start(root, fx, cfg, e, s)
+    return True
 
 
 def serve(root, fx: Fx | None = None) -> int:
     """The runner. Exits 0 when another holds gate/runner.lock; else runs the queue,
-    and after `fx.idle` seconds with nothing queued removes runner.json, releases the
-    lock, rescans, and retakes it when an entry appeared, else exits 0."""
+    and after `fx.idle` seconds with nothing running or queued removes runner.json, releases
+    the lock, rescans, and retakes it when an entry appeared, else exits 0."""
     fx = fx or Fx()
     g = gate_dir(root)
     _mkdir(_queue(root))
@@ -565,14 +651,14 @@ def serve(root, fx: Fx | None = None) -> int:
         _recover(root, fx, cfg)
         _prune(root, fx.now())
         while True:
-            since = fx.now()
-            _runner_write(root, fx, since, None, None)
-            idle_at, seen = fx.now(), {}
+            s = _Set(fx.now())
+            _runner_write(root, fx, s)
+            idle_at = fx.now()
             while True:
-                if _step(root, fx, cfg, since, seen):
+                if _step(root, fx, cfg, s):
                     idle_at = fx.now()
                     continue
-                if not entries(root) and fx.now() - idle_at >= fx.idle:
+                if not s.running and not entries(root) and fx.now() - idle_at >= fx.idle:
                     break
                 fx.sleep(fx.poll)
             _unlink(g / "runner.json")
@@ -613,25 +699,48 @@ def wait(root, gid: str, poll=WAIT_POLL, timeout=None, sleep=None, clock=None, s
         sleep(poll if left is None else min(poll, left))
 
 
-def status(root, now, alive=_alive) -> dict:
-    """{running, queued, done, runner}: the entry running, the rest in order with the
-    lock each waits on, the last five results newest first, the live runner or None."""
+def _wait_text(why) -> str | None:
+    if why is None:
+        return None
+    kind = why[0]
+    if kind == "load":
+        x = "?" if why[1] is None else f"{round(why[1], 1):g}"
+        return f"load {x} over {round(why[2], 1):g}"
+    if kind == "running":
+        return f"running {why[1]} of {why[2]}"
+    if kind == "settle":
+        return f"settle {round(why[1])} s"
+    return f"{kind} {why[1]}"
+
+
+def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
+    """{running, queued, done, runner}: the entries running, a list; the rest in order, each
+    with its key and its wait; the last five results newest first; the live runner or None.
+    The wait is the runner's own rule, from `_holds` and `_over`; the load is read only for
+    an entry nothing else holds, and only with one running."""
+    fx = fx or Fx()
     r = runner_info(root)
     live = r if r and alive(r.get("pid")) else None
-    run = _running_id(root, alive)
+    run = _running_ids(root, alive)
     es = entries(root)
-    running = None
-    if run:
-        e = next((x for x in es if x["id"] == run), {})
-        try:
-            at = (gate_dir(root) / "runner.json").stat().st_mtime
-        except OSError:
-            at = None
-        running = {"id": run, "repo": e.get("repo"), "label": e.get("label") or "",
-                   "since": at, "seconds": (now - at) if at else None}
-    queued = [{"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
-               "label": e.get("label") or ""}
-              for i, e in enumerate((x for x in es if x["id"] != run), 1)]
+    byid = {e["id"]: e for e in es}
+    running = []
+    for gid in run:
+        e = byid.get(gid, {})
+        at = _started_at(root, gid)
+        running.append({"id": gid, "repo": e.get("repo"), "label": e.get("label") or "",
+                        "since": at, "seconds": (now - at) if at else None})
+    waiting = [e for e in es if e["id"] not in run]
+    queued, over, last = [], None, None
+    for i, (e, why) in enumerate(_holds(waiting, [byid.get(g, {}) for g in run]), 1):
+        if why is None and running:
+            if last is None:
+                last = max((x["since"] for x in running if x["since"]), default=0)
+                over = _over(_config(fx.env), fx, len(running), last, now)
+            why = over
+        queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
+                       "label": e.get("label") or "", "key": entry_key(e),
+                       "wait": _wait_text(why)})
     done = []
     try:
         names = sorted((n for n in os.listdir(gate_dir(root)) if ID.match(n)),
@@ -650,12 +759,11 @@ def status(root, now, alive=_alive) -> dict:
 
 def status_lines(st: dict) -> list[str]:
     out = []
-    if st.get("running"):
-        x = st["running"]
+    for x in st.get("running") or []:
         out.append(f"running {x['id']} {x['repo']} since {_hm(x['since'])} {x['label']}".rstrip())
     for x in st.get("queued") or []:
-        lock = f" waits on lock {x['lock']}" if x.get("lock") else ""
-        out.append(f"queued {x['id']} {x['repo']} position {x['position']}{lock}")
+        wait = f" waits on {x['wait']}" if x.get("wait") else ""
+        out.append(f"queued {x['id']} {x['repo']} position {x['position']}{wait}")
     for x in st.get("done") or []:
         out.append(f"done {x['id']} {x['repo']} exit {x['exit']} {_minutes(x['seconds'])} min")
     rn = st.get("runner")

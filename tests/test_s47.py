@@ -338,9 +338,9 @@ def test_s47_the_ceiling_defaults_to_three_quarters_of_the_cores(w):
 # ---- ruling 8: the config ------------------------------------------------------
 
 def test_s47_the_config_sets_both_keys(w):
-    w.user("gate:\n  load_ceiling: 1.5\n  max_running: 2\n")
+    w.user("gate:\n  load_ceiling: 5.5\n  max_running: 2\n")
     env = {"HOME": str(w.home)}
-    assert resolver.gate_config(env)["load_ceiling"] == 1.5
+    assert resolver.gate_config(env)["load_ceiling"] == 5.5
     assert resolver.gate_config(env)["max_running"] == 2
     w.plan = {x: (1000, 0) for x in "abc"}
     for n, x in zip(("r1", "r2", "r3"), "abc"):
