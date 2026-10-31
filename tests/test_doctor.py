@@ -321,7 +321,7 @@ def test_hooks_json_is_the_shim_on_session_start_only():
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
         "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact"]
     cmd = hooks_json["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert cmd == "${CLAUDE_PLUGIN_ROOT}/hooks/run SessionStart"
+    assert cmd == "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SessionStart"
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
 
 
@@ -404,7 +404,7 @@ def test_s19_hooks_register_stop_and_every_tool():
     assert list(registered) == list(doctor.HOOK_EVENTS) == S19_EVENTS
     stop = [h for g in registered["Stop"] for h in g["hooks"]]
     assert [(h["command"], h["timeout"]) for h in stop] == [
-        ("${CLAUDE_PLUGIN_ROOT}/hooks/run Stop", 5)]
+        ("\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" Stop", 5)]
     assert [g.get("matcher") for g in registered["PreToolUse"]] == ["*"]
     assert "Stop" in hooks.HANDLERS
 
@@ -438,7 +438,7 @@ def test_s20b_hooks_register_post_tool_use_failure():
     groups = registered["PostToolUseFailure"]
     assert [g.get("matcher") for g in groups] == ["*"]
     assert [(h["type"], h["command"], h["timeout"]) for g in groups for h in g["hooks"]] == [
-        ("command", "${CLAUDE_PLUGIN_ROOT}/hooks/run PostToolUseFailure", 5)]
+        ("command", "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" PostToolUseFailure", 5)]
     # the CLI handles every event its plugin registers
     assert [e for e in registered if e not in hooks.HANDLERS] == []
 
@@ -502,7 +502,7 @@ def test_s22_hooks_register_post_tool_batch():
     assert "PostToolBatch" in doctor.HOOK_EVENTS and "PostToolBatch" in hooks.HANDLERS
     groups = registered["PostToolBatch"]
     assert [(h["type"], h["command"], h["timeout"]) for g in groups for h in g["hooks"]] == [
-        ("command", "${CLAUDE_PLUGIN_ROOT}/hooks/run PostToolBatch", 5)]
+        ("command", "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" PostToolBatch", 5)]
     assert [e for e in registered if e not in hooks.HANDLERS] == []
 
 

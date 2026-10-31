@@ -143,7 +143,7 @@ def test_criterion_1_hooks_json_keeps_the_classic_block_and_adds_only_modules():
         [entry] = doc["hooks"][event]
         assert entry.get("matcher") == matcher
         assert entry["hooks"] == [{"type": "command", "timeout": timeout,
-                                   "command": f"${{CLAUDE_PLUGIN_ROOT}}/hooks/run {event}"}]
+                                   "command": f"\"${{CLAUDE_PLUGIN_ROOT}}/hooks/run\" {event}"}]
 
 
 def _module_lines():

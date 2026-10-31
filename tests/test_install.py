@@ -297,3 +297,25 @@ def test_r1_the_old_name_notes_once_on_a_terminal_never_in_a_hook(tmp_path):
     r = subprocess.run([str(old), "status"], env=env, capture_output=True, text=True,
                        timeout=30)
     assert note not in r.stderr          # a pipe sees nothing
+
+
+# sc2: this Mac's sessions depend on `make install` until sc3.
+@pytest.mark.skipif(not RUNS_P, reason="the baked launcher's -P is 3.11 (sc3 moves it)")
+def test_the_moved_tree_installs_and_reads_its_version_from_plugin_json(repo, tmp_path):
+    home = tmp_path / "home"
+    assert _install(repo, home).returncode == 0
+    version = json.loads((repo / MANIFEST).read_text())["version"]
+    tool = home / ".local" / "bin" / "agentik-session"
+    run = lambda: subprocess.run([str(tool), "--version"], capture_output=True, text=True,
+                                 env=_env(home), cwd=tmp_path, timeout=30).stdout.split()[-1]
+    assert run() == version
+    code = _share(home) / _tree(repo)
+    assert (code / "plugin.json").is_file() and (code / "agentik-session").is_file()
+    r = subprocess.run([sys.executable, "-I", "-B", str(code / "agentik-session"), "--version"],
+                       capture_output=True, text=True, env=_env(home), cwd=tmp_path, timeout=30)
+    assert r.stdout.split()[-1] == version      # the runner gate.spawn_serve starts
+    # A bump alone is a new tree, or `--version` would lie.
+    (repo / MANIFEST).write_text((repo / MANIFEST).read_text().replace(version, "9.9.9-alpha.1"))
+    _git(repo, "commit", "-qam", "bump")
+    assert _install(repo, home).returncode == 0
+    assert run() == "9.9.9-alpha.1"

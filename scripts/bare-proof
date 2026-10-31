@@ -618,7 +618,9 @@ class Proof:
                                cwd=self.t, env=env, timeout=60)
             outs[name] = (r.returncode, (r.stdout + r.stderr).replace(path, "<root>"))
         found = {k: FOUND.findall(v[1]) for k, v in outs.items()}
-        warnings = {k: int(v[0]) if v else -1 for k, v in found.items()}
+        # None said is none found, once it validated: `hooks.json` quotes its root since sc2.
+        warnings = {k: int(found[k][0]) if found[k] else 0 if "Validating" in outs[k][1] else -1
+                    for k in outs}
         same = outs["live"][1] == outs["mock"][1]
         # Two runs that fail alike are identical: each must pass, and count the same warnings.
         ok = same and outs["live"][0] == 0 and outs["mock"][0] == 0 and warnings["live"] == warnings["mock"] >= 0

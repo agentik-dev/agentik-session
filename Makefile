@@ -7,11 +7,12 @@ RESPEAK_RENDER ?= $(shell for f in $(HOME)/.claude/plugins/cache/*/respeak/*/scr
 export RESPEAK_PYTHON ?= $(CURDIR)/.venv/bin/python
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
-test:  ## run the suite (no quota, fake claude)
+test:  ## run the suite (no quota, fake claude), under .venv and then under .venv-floor, test_bounded.py excepted (design/04 §6)
 	./.venv/bin/python -m pytest -q
+	@if [ -x .venv-floor/bin/python ]; then $(MAKE) --no-print-directory test-floor; else echo "floor: absent"; fi
 # The floor (hq entry 6, design/04): .venv-floor is the suite's venv under the one interpreter
 # a fresh Mac and this one share. It is built once in the main checkout, and a worktree links
-# it there, as with .venv. test-floor stays out of check, the gate's largest cost (sc1 ruling 4).
+# it there, as with .venv. `make test` runs it when it is there (sc2 ruling 9).
 FLOOR_PYTHON ?= /usr/bin/python3
 venv-floor:  ## build .venv-floor under /usr/bin/python3 in the main checkout (pytest from pip), and link it from a worktree
 	@set -e; main=$$(git worktree list --porcelain | sed -n '1s/^worktree //p'); \

@@ -108,7 +108,7 @@ def test_c1_hooks_json_keeps_the_classic_eight_and_adds_precompact():
     for event, timeout in [*CLASSIC.items(), ("PreCompact", 5)]:
         assert [(h["type"], h["command"], h["timeout"]) for g in registered[event]
                 for h in g["hooks"]] == [
-            ("command", "${CLAUDE_PLUGIN_ROOT}/hooks/run " + event, timeout)], event
+            ("command", "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" " + event, timeout)], event
     assert [g.get("matcher") for g in registered["PreCompact"]] == [None]
     assert "PreCompact" in hooks.HANDLERS and "pre-compact" in hooks.HANDLERS
 

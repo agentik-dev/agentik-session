@@ -80,7 +80,7 @@ def test_s34_g_dispatch_is_silent(raw):
 def test_s34_g_the_plugin_registers_stopfailure_as_stop():
     reg = json.loads((HOOKS_DIR / "hooks.json").read_text())["hooks"]["StopFailure"]
     assert reg == [{"hooks": [{"type": "command", "timeout": 5,
-                               "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run StopFailure"}]}]
+                               "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" StopFailure"}]}]
     shim = (HOOKS_DIR / "run").read_text()
     case = next(l for l in shim.splitlines() if l.strip().startswith("Stop|"))
     assert "StopFailure" in case.split(")")[0] and ">/dev/null 2>&1; exit 0" in case
