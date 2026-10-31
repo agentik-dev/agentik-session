@@ -84,6 +84,7 @@ DEFAULT_PROFILE = "frontier"
 OVERLAY_RENAMES = {"subagent_model": "subagents"}
 
 LOCK_WAIT = 2.0        # seconds a writer of the resolved file waits for the session's lock
+REWOUND = ("window", "ceilings", "window_source", "limits_source")     # what `rewindow` moves
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")      # \Z: a trailing newline never passes
 
 
@@ -556,12 +557,22 @@ def write(resolved: Resolved, state: Path) -> Path:
     return d / "resolved.json"
 
 
+def _twin_agrees(d: Path, s: dict) -> bool:
+    """The YAML twin holds the JSON's REWOUND keys; an absent or unreadable twin does not."""
+    try:
+        t = load((d / "resolved.yaml").read_text())["session"]
+        return all(t[k] == s[k] for k in REWOUND)
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
 def rewindow(sdir, n) -> bool:
     """The engine's reading `n` moves the resolved file (window-r1 R4): when `session.window`
     differs and `session.windows` holds its class, `window`, `ceilings`, `window_source` and
     `limits_source` move, in both twins, and nothing else does. It reads no env and no layer.
-    True when it wrote. A failure of any kind, the lock's included, is False and silent; the
-    next measure retries."""
+    A YAML twin that disagrees with the JSON on those keys, as a failure between the two
+    writes leaves it, is rewritten from the JSON, so the next measure really retries.
+    True when it wrote. A failure of any kind, the lock's included, is False and silent."""
     try:
         if not models.readable_window(n):
             return False
@@ -573,7 +584,10 @@ def rewindow(sdir, n) -> bool:
             s = doc["session"]
             c = s["windows"][models.window_class(n)]
             if s["window"] == n:
-                return False
+                if _twin_agrees(d, s):
+                    return False
+                _write_atomic(d / "resolved.yaml", dump(doc))
+                return True
             s["window"] = n
             s["ceilings"] = {"context": c["context"], "turns": c["turns"]}
             s["window_source"] = f"engine:{n}"

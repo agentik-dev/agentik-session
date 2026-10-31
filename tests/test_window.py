@@ -643,3 +643,62 @@ def test_a16_an_unreadable_measure_changes_nothing(repo, tmp_path, monkeypatch, 
     out = tool(repo, tp)
     assert_meter(1000000, 400000, 75.0, "engine:1000000")
     assert "CHECKPOINT" not in said(out)
+
+
+# ---- Amendment 2, refuter round 1 on 6818d45 -------------------------------------------
+
+def real_cli(*argv, stdin=""):
+    """The installed shape: the CLI in its own process, this test's state and HOME."""
+    return subprocess.run([sys.executable, "-B", "-m", "claude_session", *argv], input=stdin,
+                          capture_output=True, text=True, cwd=ROOT, env=env())
+
+
+def twins():
+    return (json.loads((sdir() / "resolved.json").read_text())["session"],
+            yaml_load((sdir() / "resolved.yaml").read_text())["session"])
+
+
+def test_f1_a_failure_between_the_twins_converges_through_the_cli(repo, monkeypatch):
+    monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "orchestrator-opus")
+    monkeypatch.setenv("CLAUDE_SESSION_MODEL", OPUS)
+    start(repo)
+    twin = sdir() / "resolved.yaml"
+    old = twin.read_text()
+    twin.unlink()
+    twin.mkdir()                                    # the YAML's write fails, the JSON's has landed
+    r = real_cli("measure", "record", "--session", SID, stdin=json.dumps(body(1000000)))
+    assert (r.returncode, r.stderr) == (0, "")
+    twin.rmdir()
+    twin.write_text(old)
+    j, y = twins()
+    assert (j["window"], y["window"]) == (1000000, 200000)      # the state a failure leaves
+    r = real_cli("measure", "record", "--session", SID, stdin=json.dumps(body(1000000)))
+    assert (r.returncode, r.stderr) == (0, "")
+    j, y = twins()
+    assert y == j and y["window"] == 1000000
+    assert y["window_source"] == "engine:1000000" and y["ceilings"]["context"] == 400000
+    r = real_cli("config", "show", "--resolved")
+    assert yaml_load(r.stdout)["session"]["window"] == 1000000
+    assert not list(sdir().glob("*.tmp"))
+
+
+def test_f1_a_stale_twin_with_a_torn_or_absent_yaml_converges(repo, monkeypatch):
+    start(repo)
+    assert measured(1000000)[0] == 0
+    before = bytes_of("resolved.json")
+    for fault in ("{torn: [", None):
+        twin = sdir() / "resolved.yaml"
+        twin.unlink()
+        if fault:
+            twin.write_text(fault)
+        assert measured(1000000)[0] == 0
+        assert yaml_load(twin.read_text()) == json.loads(before["resolved.json"])
+        assert bytes_of("resolved.json") == before      # the JSON was right: it is not rewritten
+
+
+def test_f1_twins_that_agree_are_not_rewritten(repo):
+    start(repo)
+    assert measured(1000000)[0] == 0
+    before = {n: (sdir() / n).stat().st_mtime_ns for n in ("resolved.json", "resolved.yaml")}
+    assert resolver.rewindow(sdir(), 1000000) is False
+    assert before == {n: (sdir() / n).stat().st_mtime_ns for n in ("resolved.json", "resolved.yaml")}
