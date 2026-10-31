@@ -65,6 +65,11 @@ def _git(*argv, cwd):
                    capture_output=True)
 
 
+def _ident(path):
+    st = os.stat(path)
+    return f"{st.st_dev}:{st.st_ino}"
+
+
 def _repo_and_worktree(tmp_path):
     repo, tree = tmp_path / "main", tmp_path / "tree"
     repo.mkdir()
@@ -95,7 +100,7 @@ def test_s47_a_worktree_shares_its_repos_key(w, tmp_path):
     repo, tree = _repo_and_worktree(tmp_path)
     sub = repo / "deep"
     sub.mkdir()
-    want = os.path.realpath(repo / ".git")
+    want = _ident(repo / ".git")
     assert gate.repo_key(str(repo)) == want
     assert gate.repo_key(str(tree)) == want
     assert gate.repo_key(str(sub)) == want
@@ -111,13 +116,13 @@ def test_s47_a_worktree_shares_its_repos_key(w, tmp_path):
 def test_s47_the_key_ignores_a_git_dir_in_the_environment(tmp_path, monkeypatch):
     repo, _ = _repo_and_worktree(tmp_path)
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
-    assert gate.repo_key(str(repo)) == os.path.realpath(repo / ".git")
+    assert gate.repo_key(str(repo)) == _ident(repo / ".git")
 
 
 def test_s47_no_git_tree_keys_on_the_repo(w, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert gate.repo_key(str(plain)) == os.path.realpath(plain)
+    assert gate.repo_key(str(plain)) == _ident(plain)
 
 
 @pytest.mark.parametrize("how", [OSError("no git"), subprocess.TimeoutExpired("git", 5),
@@ -128,16 +133,16 @@ def test_s47_git_failing_keys_on_the_repo_and_never_raises(tmp_path, monkeypatch
             raise how
         return subprocess.CompletedProcess(a, 128 if how == "rc" else 0, stdout="\n", stderr="")
     monkeypatch.setattr(gate.subprocess, "run", run)
-    assert gate.repo_key(str(tmp_path)) == os.path.realpath(tmp_path)
+    assert gate.repo_key(str(tmp_path)) == _ident(tmp_path)
 
 
 def test_s47_an_entry_with_no_key_reads_its_repo(w):
     a = w.put_in("r", "a")
     q = w.root / "gate" / "queue" / f"{a['id']}.json"
-    old = {k: v for k, v in a.items() if k != "key"}
+    old = {k: v for k, v in a.items() if k not in ("key", "key_name")}
     q.write_text(json.dumps(old))
     e = gate.entries(w.root)[0]
-    assert "key" not in e and gate.entry_key(e) == os.path.realpath(w.dir("r"))
+    assert "key" not in e and gate.entry_key(e) == _ident(w.dir("r"))
     assert gate.entry_key({"key": "", "repo": "/r/x"}) == os.path.realpath("/r/x")
     assert gate.entry_key({"key": 7, "repo": "/r/x"}) == os.path.realpath("/r/x")
     assert isinstance(gate.entry_key({"id": "x"}), str)            # never raises
@@ -582,10 +587,9 @@ def test_s47_status_reads_a_live_old_runner(w):
     assert [x["id"] for x in st["queued"]] == [b["id"]]
 
 
-def test_s47_the_key_name_is_the_repos_not_dot_git():
-    assert gate.key_name("/x/foo/.git") == "foo"
-    assert gate.key_name("/x/foo") == "foo"
-    assert gate.key_name("/x/foo.git") == "foo.git"
+def test_s47_the_key_name_is_the_repos_not_dot_git(w):
+    assert w.put_in("foo", "a")["key_name"] == "foo"
+    assert w.put_in("foo.git", "b")["key_name"] == "foo.git"
 
 
 # ---- the intake's acceptance, and one real pair ---------------------------------
@@ -624,3 +628,416 @@ def test_s47_two_real_children_each_keep_their_own_log(tmp_path):
         two = fh.read()
     assert "from-one" in one and "from-two" not in one
     assert "from-two" in two and "from-one" not in two
+
+
+# ---- Amendment 1: one lock, one repo, however spelled ---------------------------
+
+def _case_insensitive(path):
+    return os.path.exists(str(path).swapcase()) and os.path.samefile(path, str(path).swapcase())
+
+
+def _no_git(monkeypatch, how=OSError("no git")):
+    def run(*a, **kw):
+        raise how
+    monkeypatch.setattr(gate.subprocess, "run", run)
+
+
+def _linked(tmp_path):
+    real, link = tmp_path / "real", tmp_path / "link"
+    real.mkdir()
+    link.symlink_to(real)
+    return real, link
+
+
+def test_s47_a1_a_lock_keeps_one_identity_however_spelled(tmp_path):
+    real, link = _linked(tmp_path)
+    want = gate.lock_key(str(real / "tlc.lock"))
+    assert gate.lock_key(str(link / "tlc.lock")) == want
+    assert gate.lock_key(str(real / "x" / ".." / "tlc.lock")) == want
+    assert gate.lock_key(str(real / "tlc.lock")) != gate.lock_key(str(real / "other.lock"))
+    assert gate.lock_key(str(link / "no" / "such" / "tlc.lock")) == \
+        gate.lock_key(str(real / "no" / "such" / "tlc.lock"))    # resolves what exists
+
+
+def test_s47_a1_a_lock_reads_the_same_before_and_after_it_exists(tmp_path):
+    real, link = _linked(tmp_path)
+    before = gate.lock_key(str(link / "tlc.lock"))
+    (real / "tlc.lock").mkdir()
+    assert gate.lock_key(str(real / "tlc.lock")) == before
+
+
+def test_s47_a1_a_lock_key_never_raises():
+    assert isinstance(gate.lock_key("a\0b"), str)
+    assert isinstance(gate.lock_key("/"), str)
+    assert isinstance(gate.lock_key(""), str)
+
+
+def test_s47_a1_a_locks_parent_in_another_case_is_one_lock(tmp_path):
+    d = tmp_path / "Locks"
+    d.mkdir()
+    if not _case_insensitive(d):
+        pytest.skip("a case-sensitive disk")
+    assert gate.lock_key(str(tmp_path / "LOCKS" / "tlc.lock")) == gate.lock_key(str(d / "tlc.lock"))
+
+
+def test_s47_a1_enqueue_canonicalises_its_locks(w, tmp_path):
+    real, link = _linked(tmp_path)
+    a = w.put_in("one", "a", locks=[str(link / "tlc.lock")])
+    assert a["locks"] == [str(real / "tlc.lock")]
+
+
+def test_s47_a1_one_lock_spelled_two_ways_is_exclusive(w, tmp_path):
+    real, link = _linked(tmp_path)
+    w.plan = {"a": (300, 0), "b": (5, 0)}
+    a = w.put_in("one", "a", locks=[str(real / "tlc.lock")])
+    b = w.put_in("two", "b", locks=[str(link / "tlc.lock")])
+    gate.serve(w.root, w.fx())
+    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+
+
+def test_s47_a1_an_older_entrys_lock_compares_too(w, tmp_path):
+    # Written by the code before this one: `locks` as abspath left them, the link in place.
+    real, link = _linked(tmp_path)
+    w.plan = {"a": (300, 0), "b": (5, 0)}
+    a = w.put_in("one", "a")
+    old = dict(a, locks=[str(link / "tlc.lock")])
+    (w.root / "gate" / "queue" / f"{a['id']}.json").write_text(json.dumps(old))
+    b = w.put_in("two", "b", locks=[str(real / "tlc.lock")])
+    gate.serve(w.root, w.fx())
+    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+
+
+def test_s47_a1_a_lock_a_running_entry_names_does_not_tick_in_any_spelling(tmp_path):
+    real, link = _linked(tmp_path)
+    (real / "tlc.lock").mkdir()
+    head = {"id": "h", "repo": str(tmp_path), "key": "9:9", "locks": [str(real / "tlc.lock")]}
+    run = {"id": "r", "repo": str(tmp_path), "key": "8:8", "locks": [str(link / "tlc.lock")]}
+    assert gate._lock_wait(head, [run]) is None
+    assert gate._lock_wait(head, []) == str(real / "tlc.lock")
+
+
+def test_s47_a1_the_key_is_the_common_dirs_device_and_inode(w, tmp_path):
+    repo, tree = _repo_and_worktree(tmp_path)
+    a = gate.enqueue(w.root, str(tree), ["a"], ENV, [], 5400, "", None, w.t)
+    assert a["key"] == _ident(repo / ".git") and a["key"].count(":") == 1
+    assert a["key_name"] == "tree"
+    body = json.loads((w.root / "gate" / "queue" / f"{a['id']}.json").read_text())
+    assert (body["key"], body["key_name"]) == (a["key"], "tree")
+
+
+def test_s47_a1_one_repo_in_two_cases_is_one_key(w, tmp_path):
+    repo, _ = _repo_and_worktree(tmp_path)
+    upper = tmp_path / "MAIN"
+    if not _case_insensitive(repo):
+        pytest.skip("a case-sensitive disk")
+    assert gate.repo_key(str(upper)) == gate.repo_key(str(repo))
+    w.plan = {"a": (100, 0), "b": (5, 0)}
+    a = gate.enqueue(w.root, str(repo), ["a"], ENV, [], 5400, "", None, w.t)
+    b = gate.enqueue(w.root, str(upper), ["b"], ENV, [], 5400, "", None, w.t)
+    assert a["key"] == b["key"]
+    gate.serve(w.root, w.fx())
+    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+
+
+def test_s47_a1_a_path_that_cannot_be_statted_keeps_the_realpath(tmp_path):
+    real, link = _linked(tmp_path)
+    assert gate.repo_key(str(link / "gone")) == str(real / "gone")
+    assert gate.entry_key({"repo": str(link / "gone")}) == str(real / "gone")
+
+
+def test_s47_a1_status_names_the_repo_of_the_key_it_waits_on(w, tmp_path):
+    repo, tree = _repo_and_worktree(tmp_path)
+    run = gate.enqueue(w.root, str(repo), ["r"], ENV, [], 5400, "", None, w.t)
+    q = gate.enqueue(w.root, str(tree), ["q"], ENV, [], 5400, "", None, w.t)
+    _live_runner(w, [{"id": run["id"], "pgid": 4000}])
+    st = gate.status(w.root, T0, fx=w.fx())
+    assert st["queued"][0]["key"] == run["key"]
+    assert gate.status_lines(st)[1] == \
+        f"queued {q['id']} {q['repo']} position 1 waits on key main"
+
+
+@pytest.mark.parametrize("how", [OSError("no git"), subprocess.TimeoutExpired("git", 5)])
+def test_s47_a1_a_fallback_shares_its_siblings_key(tmp_path, monkeypatch, how):
+    repo, tree = _repo_and_worktree(tmp_path)
+    want = gate.repo_key(str(repo))
+    assert want == _ident(repo / ".git")
+    _no_git(monkeypatch, how)
+    assert gate.repo_key(str(repo)) == want
+    assert gate.repo_key(str(tree)) == want                 # a worktree's .git is a file
+    assert gate.entry_key({"repo": str(tree)}) == want
+
+
+def test_s47_a1_an_entry_with_no_key_shares_its_siblings_key(w, tmp_path):
+    repo, tree = _repo_and_worktree(tmp_path)
+    w.plan = {"a": (100, 0), "b": (5, 0)}
+    a = gate.enqueue(w.root, str(repo), ["a"], ENV, [], 5400, "", None, w.t)
+    b = gate.enqueue(w.root, str(tree), ["b"], ENV, [], 5400, "", None, w.t)
+    for e in (a, b):
+        old = {k: v for k, v in e.items() if k not in ("key", "key_name")}
+        (w.root / "gate" / "queue" / f"{e['id']}.json").write_text(json.dumps(old))
+    assert gate.entry_key(gate.entries(w.root)[0]) == _ident(repo / ".git")
+    gate.serve(w.root, w.fx())
+    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+
+
+@pytest.mark.parametrize("body", ["junk\n", "gitdir: /no/such/dir\n", "gitdir: a\0b\n",
+                                  b"\xff\xfe\n"])
+def test_s47_a1_a_dot_git_file_it_cannot_read_falls_back_to_the_repo(tmp_path, monkeypatch, body):
+    r = tmp_path / "r"
+    r.mkdir()
+    (r / ".git").write_bytes(body if isinstance(body, bytes) else body.encode())
+    _no_git(monkeypatch)
+    assert gate.repo_key(str(r)) == _ident(r)
+
+
+def test_s47_a1_a_dot_git_that_is_no_file_never_blocks(tmp_path, monkeypatch):
+    r = tmp_path / "r"
+    r.mkdir()
+    os.mkfifo(r / ".git")
+    _no_git(monkeypatch)
+    assert gate.repo_key(str(r)) == _ident(r)
+
+
+def test_s47_a1_a_gitdir_with_no_commondir_is_its_own_common_dir(tmp_path, monkeypatch):
+    # The shape of a submodule: git answers the gitdir itself.
+    mod, sub = tmp_path / "modules" / "m", tmp_path / "sub"
+    mod.mkdir(parents=True)
+    sub.mkdir()
+    (sub / ".git").write_text("gitdir: ../modules/m\n")
+    _no_git(monkeypatch)
+    assert gate.repo_key(str(sub)) == _ident(mod)
+
+
+def test_s47_a1_a_commondir_may_be_absolute(tmp_path, monkeypatch):
+    common, gd, tree = tmp_path / "c", tmp_path / "gd", tmp_path / "t"
+    for d in (common, gd, tree):
+        d.mkdir()
+    (gd / "commondir").write_text(f"{common}\n")
+    (tree / ".git").write_text(f"gitdir: {gd}\n")
+    _no_git(monkeypatch)
+    assert gate.repo_key(str(tree)) == _ident(common)
+
+
+def test_s47_a1_the_name_of_an_older_entrys_key_is_its_repos():
+    assert gate.key_name({"key_name": "foo", "repo": "/x/bar"}) == "foo"
+    assert gate.key_name({"repo": "/x/bar"}) == "bar"
+    assert gate.key_name({"key_name": 7, "repo": "/x/bar"}) == "bar"
+    assert gate.key_name({}) == ""
+
+
+class Crash(BaseException):
+    """The runner dying where the fake raises it: nothing in the gate catches it."""
+
+
+def test_s47_a1_the_id_is_written_before_the_spawn(w):
+    a, b = w.put_in("one", "a"), w.put_in("two", "b")
+    w.plan = {"a": (120, 0), "b": (1, 0)}
+    seen = []
+
+    def popen(argv, **kw):
+        seen.append(gate.runner_info(w.root)["running"])
+        return w.popen(argv, **kw)
+    gate.serve(w.root, w.fx(popen=popen))
+    assert seen == [[{"id": a["id"], "pgid": None}],
+                    [{"id": a["id"], "pgid": 4000}, {"id": b["id"], "pgid": None}]]
+
+
+@pytest.mark.parametrize("spawned", [False, True], ids=["before the spawn", "after the spawn"])
+def test_s47_a1_a_crash_at_the_spawn_closes_125_and_never_runs_twice(w, spawned):
+    a = w.put_in("one", "a", caller="sess-1")
+
+    def popen(argv, **kw):
+        if spawned:
+            w.popen(argv, **kw)
+        raise Crash()
+    with pytest.raises(Crash):
+        gate.serve(w.root, w.fx(popen=popen))
+    assert gate.runner_info(w.root)["running"] == [{"id": a["id"], "pgid": None}]
+    assert [x["id"] for x in gate.entries(w.root)] == [a["id"]]
+    n = len(w.spawned)
+    assert gate.serve(w.root, w.fx()) == 0
+    r = w.result(a["id"])
+    assert (r["exit"], r["cut"]) == (125, "runner died") and isinstance(r["seconds"], float)
+    assert len(w.spawned) == n and w.kills == []              # no pgid, no kill
+    assert gate.entries(w.root) == []
+    with open(r["log"]) as fh:
+        assert "no group was named, none was killed" in fh.read()
+    assert (w.root / "sessions" / "sess-1" / "inbox" / f"{a['id']}.json").exists()
+
+
+@pytest.mark.parametrize("pgid", [None, 0, 1, -1, True, "4242", 4242.0, [4242]])
+def test_s47_a1_recovery_kills_no_group_it_cannot_name(w, pgid):
+    a = w.put_in("one", "a")
+    _dead_runner(w, [{"id": a["id"], "pgid": pgid}])
+    assert gate.serve(w.root, w.fx()) == 0
+    assert w.kills == [] and w.result(a["id"])["exit"] == 125 and w.spawned == []
+
+
+def test_s47_a1_recovery_never_signals_its_own_group(w):
+    a = w.put_in("one", "a")
+    _dead_runner(w, [{"id": a["id"], "pgid": os.getpgrp()}])
+    assert gate.serve(w.root, w.fx()) == 0
+    assert w.kills == [] and w.result(a["id"])["exit"] == 125
+
+
+def test_s47_a1_a_command_that_cannot_start_leaves_no_id_behind(w):
+    a = w.put_in("one", "a")
+    w.plan = {"a": OSError("no such file")}
+    seen = []
+    w.hooks.append(lambda world: seen.append(gate.runner_info(w.root)["running"]))
+    gate.serve(w.root, w.fx())
+    assert w.result(a["id"])["exit"] == 127 and seen and all(x == [] for x in seen)
+
+
+def test_s47_a1_status_reads_an_entry_written_before_its_spawn(w):
+    a = w.put_in("one", "a")
+    _live_runner(w, [{"id": a["id"], "pgid": None}])
+    (w.root / "gate" / a["id"]).mkdir()
+    st = gate.status(w.root, T0, fx=w.fx())
+    assert [x["id"] for x in st["running"]] == [a["id"]] and st["queued"] == []
+    assert gate.position(w.root, a["id"]) == 0
+
+
+def test_s47_a1_a_finish_kills_its_group_before_the_key_frees(w):
+    a, b = w.put_in("one", "a"), w.put_in("one", "b")
+    w.plan = {"a": (30, 7), "b": (5, 0)}
+    at = []
+
+    def killpg(pgid, sig):
+        at.append((pgid, sig, gate.result_path(w.root, a["id"]).exists(), len(w.spawned)))
+        w.killpg(pgid, sig)
+    gate.serve(w.root, w.fx(killpg=killpg))
+    assert at[0] == (4000, signal.SIGKILL, False, 1)
+    assert [x[:2] for x in at] == [(4000, signal.SIGKILL), (4001, signal.SIGKILL)]
+    assert w.result(a["id"])["exit"] == 7 and w.result(a["id"])["cut"] is None
+    assert w.result(b["id"])["exit"] == 0
+
+
+@pytest.mark.parametrize("err", [ProcessLookupError(), PermissionError()])
+def test_s47_a1_a_finish_with_its_group_gone_closes_as_before(w, err):
+    a, b = w.put_in("one", "a"), w.put_in("one", "b")
+    w.plan = {"a": (5, 3), "b": (5, 0)}
+
+    def killpg(pgid, sig):
+        raise err
+    assert gate.serve(w.root, w.fx(killpg=killpg)) == 0
+    assert w.result(a["id"])["exit"] == 3 and w.result(b["id"])["exit"] == 0
+
+
+def test_s47_a1_a_signalled_finish_keeps_its_code(w):
+    a = w.put_in("one", "a")
+    w.plan = {"a": (5, -9)}
+    gate.serve(w.root, w.fx())
+    assert w.result(a["id"])["exit"] == 137 and w.kills == [(4000, signal.SIGKILL)]
+
+
+def test_s47_a1_a_real_grandchild_dies_with_its_finish(tmp_path):
+    w = W(tmp_path)
+    clock = [T0]
+    kid = tmp_path / "kid"
+
+    def sleep(s):
+        clock[0] += s
+        time.sleep(0.01)
+
+    def gone(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+        return out.stdout.strip().startswith("Z")
+    a = gate.enqueue(w.root, w.dir("one"), ["sh", "-c", f"sleep 60 & echo $! > {kid}; exit 3"],
+                     ENV, [], 60, "", None, T0)
+    fx = gate.Fx(now=lambda: clock[0], sleep=sleep, popen=subprocess.Popen, post=w.post,
+                 log=w.logs.append, env={"HOME": str(w.home)}, idle=0.0, poll=0.01, grace=0.01,
+                 load=lambda: 1.0, cores=lambda: 16)
+    pid = None
+    try:
+        assert gate.serve(w.root, fx) == 0
+        pid = int(kid.read_text())
+        deadline = time.monotonic() + 5
+        while not gone(pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert gone(pid)
+        assert w.result(a["id"])["exit"] == 3
+    finally:
+        pid = pid or (int(kid.read_text()) if kid.exists() else None)
+        if pid:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+# ---- Amendment 1: the mutants that lived ----------------------------------------
+
+def test_s47_a1_a_head_seen_unlocked_starts_its_lock_wall_again(w, tmp_path):
+    # Over the ceiling, an unlocked head does not start, so the lock can come back: the
+    # wall counts from the second sighting, never the first.
+    lock = tmp_path / "held.lock"
+    lock.mkdir()
+    w.load = 20.0
+    w.plan = {"a": (1000, 0), "b": (5, 0)}
+    w.put_in("one", "a")
+    b = w.put_in("two", "b", locks=[str(lock)], wall=100)
+
+    def flip(world):
+        if T0 + 50 <= world.t < T0 + 60 and lock.exists():
+            lock.rmdir()
+        elif T0 + 60 <= world.t < T0 + 140 and not lock.exists():
+            lock.mkdir()
+        elif world.t >= T0 + 140 and lock.exists():
+            lock.rmdir()
+    w.hooks.append(flip)
+    gate.serve(w.root, w.fx())
+    assert w.result(b["id"])["exit"] == 0 and w.result(b["id"])["cut"] is None
+
+
+def test_s47_a1_the_keys_git_has_a_timeout(tmp_path, monkeypatch):
+    seen = {}
+
+    def run(*a, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(a, 128, stdout="", stderr="")
+    monkeypatch.setattr(gate.subprocess, "run", run)
+    gate.repo_key(str(tmp_path))
+    assert seen["timeout"] == gate.GIT_WAIT
+
+
+def test_s47_a1_a_git_that_hangs_is_cut(tmp_path, monkeypatch):
+    repo, _ = _repo_and_worktree(tmp_path)
+    want = _ident(repo / ".git")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "git").write_text("#!/bin/sh\nexec /bin/sleep 30\n")
+    (fake / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(gate, "GIT_WAIT", 0.2)
+    t0 = time.monotonic()
+    assert gate.repo_key(str(repo)) == want
+    assert time.monotonic() - t0 < 10
+
+
+def test_s47_a1_an_entry_with_no_key_is_canonical(tmp_path):
+    repo, _ = _repo_and_worktree(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(repo)
+    assert gate.entry_key({"repo": str(link)}) == _ident(repo / ".git")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    other = tmp_path / "other"
+    other.symlink_to(plain)
+    assert gate.entry_key({"repo": str(other)}) == gate.repo_key(str(plain)) == _ident(plain)
+
+
+def test_s47_a1_a_wall_of_exactly_the_limit_is_cut(w):
+    w.plan = {"a": (100, 0)}
+    a = w.put_in("one", "a", wall=30)
+    at = []
+
+    def killpg(pgid, sig):
+        at.append((sig, w.t))
+        w.killpg(pgid, sig)
+    gate.serve(w.root, w.fx(killpg=killpg))
+    assert at[0] == (signal.SIGTERM, T0 + 30) and w.result(a["id"])["exit"] == 124

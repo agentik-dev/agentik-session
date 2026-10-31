@@ -108,7 +108,7 @@ def _results(n, repo="/r/x", root="/s"):
 
 # ---- the queue ---------------------------------------------------------------
 
-def test_enqueue_writes_a_private_entry_with_its_ten_keys(w):
+def test_enqueue_writes_a_private_entry_with_its_eleven_keys(w):
     e = w.put(label="land s38", caller="sess-1")
     p = w.root / "gate" / "queue" / f"{e['id']}.json"
     assert ID.match(e["id"]) and e["id"].endswith("-1")
@@ -117,7 +117,8 @@ def test_enqueue_writes_a_private_entry_with_its_ten_keys(w):
     assert list(body) == list(gate.ENTRY_KEYS)
     assert body == {"id": e["id"], "repo": os.path.realpath(w.repo), "command": ["a", "x"],
                     "env": ENV, "locks": [], "wall": 5400, "label": "land s38",
-                    "caller": "sess-1", "queued": T0, "key": gate.repo_key(str(w.repo))}
+                    "caller": "sess-1", "queued": T0, "key": gate.repo_key(str(w.repo)),
+                    "key_name": "repo"}
     assert [n for n in os.listdir(p.parent) if n.startswith(".")] == []   # written, renamed
 
 
