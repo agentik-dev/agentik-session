@@ -1,4 +1,10 @@
-"""The model decides the window; the role decides the ceilings within it.
+"""The engine's measured window decides, else the model; the role decides the ceilings
+within it (design/window-r1.md).
+
+The first source is what Claude Code itself measures: the measure file's
+`context.window`, which `engine_window` reads and validates, the one figure of the
+measure that decides. With no reading yet the `models:` table answers, as below; once a
+reading has arrived, a change of the transcript's model never falls back to the table.
 
 A model string names a family (`claude-opus-5-5` and `opus` are opus) and may
 carry Claude Code's 1M marker, `[1m]` (`opus[1m]`, `claude-opus-5-5[1m]`). The
@@ -6,8 +12,9 @@ carry Claude Code's 1M marker, `[1m]` (`opus[1m]`, `claude-opus-5-5[1m]`). The
 the family under the marker (a YAML-subset key holds no brackets).
 
 What each source can say (Claude Code 2.1.284, read from its own binary and from
-transcripts' `message.model` only), in the order `pick` reads them:
+transcripts' `message.model` only; 2.1.314 for the engine's), in the order `pick` reads them:
 
+  the engine       `context.window` of the engine's last measure, for this session
   the transcript   `message.model` is the API model id; Claude Code strips the
                    `[1m]` marker before the request, so a 1M Opus session reads
                    `claude-opus-5-5`, like a 200k one. It names the family, and
@@ -23,7 +30,8 @@ transcripts' `message.model` only), in the order `pick` reads them:
   the configured   `ANTHROPIC_MODEL`, then the settings `model` key (local,
                    project, user)
 
-`pick` is pure; `configured` reads the settings files' `model` key and nothing else.
+`pick` is pure; `configured` reads the settings files' `model` key and nothing else;
+`engine_window` reads one number and nothing else.
 """
 
 from __future__ import annotations
@@ -38,6 +46,27 @@ MARKER = re.compile(r"\[1m\]\s*$", re.IGNORECASE)
 SUFFIX = "-1m"
 # The two classes of window a role carries ceilings for, and the key each reads.
 CLASSES = {"200k": "ceilings", "1m": "ceilings_1m"}
+# The engine's measure, as `measure record` writes it in the session's directory.
+MEASURE = "measure.json"
+MAX_WINDOW = 10**9
+
+
+def readable_window(v) -> bool:
+    """A window the engine's reading may carry: an int, not a bool, in 1 to MAX_WINDOW."""
+    return isinstance(v, int) and not isinstance(v, bool) and 0 < v <= MAX_WINDOW
+
+
+def engine_window(sdir) -> int | None:
+    """The engine's measured window for a session directory, or None: a missing or torn
+    file, a non-object, a null context, a value `readable_window` refuses. The one reader
+    of the file among the modules that decide; it reads no other field (window-r1 R1)."""
+    try:
+        doc = json.loads((Path(sdir) / MEASURE).read_text())
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+    ctx = doc.get("context") if isinstance(doc, dict) else None
+    v = ctx.get("window") if isinstance(ctx, dict) else None
+    return v if readable_window(v) else None
 
 
 def marked(model) -> bool:
@@ -73,12 +102,15 @@ def _one_window(fam: str, table: dict) -> bool:
 
 
 def pick(table: dict, observed=None, session=None, declared=None,
-         configured=()) -> tuple[int, str]:
-    """(window, source). The transcript's model (`observed`) when it decides the
+         configured=(), engine=None) -> tuple[int, str]:
+    """(window, source). The engine's reading (`engine`) before anything else. With
+    none, by the table: the transcript's model (`observed`) when it decides the
     window; for a family with two windows, the first of the session's, the declared
     and the configured models that names the same family; with no model read yet,
     or one the table does not know, the first of those the table knows; else the
     200k default."""
+    if readable_window(engine):
+        return engine, f"engine:{engine}"
     candidates = [("session", session), ("declared", declared)] + [
         ("configured", c) for c in configured or ()]
     fam = family(observed, table)

@@ -6,9 +6,13 @@
 `{at, context, rateLimits, cost, changed}` (an absent cost null), atomically and 0600 by the
 CLI's private writer, in the directory the classic hooks made. It catches a meter that parses
 wrong: `status` and `doctor` print the drift between the engine's context tokens and the
-meter's. Nothing that decides (chain, hooks, budget) reads measure.json; the budget never does.
+meter's. What decides reads one figure of it, `context.window`, as the window pick's first
+source (design/window-r1.md §2), and only through `models.engine_window`; `record` then moves
+the resolved file by `resolver.rewindow`. The other figures decide nothing, and the budget
+never reads the file.
 The whole shape is checked against 2.1.296's SessionMeasureInput (M2's fix round, F1): an
-unknown key at any depth, a wrong type, a non-finite number or an unwritable string is refused.
+unknown key at any depth, a wrong type, a non-finite number or an unwritable string is refused,
+and so is a window `engine_window` would not read, so it never overwrites a good reading.
 """
 from __future__ import annotations
 
@@ -17,12 +21,12 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import admission, meter, resolver
+from . import admission, meter, models, resolver
 from .admission import Shape, context, items, number, only, rate_limits
 from .hooks import _SID
 from .store import _write_private
 
-MEASURE = "measure.json"
+MEASURE = models.MEASURE
 KEYS = ("context", "rateLimits", "cost", "changed")
 CHANGED = ("context", "rateLimits", "cost")     # what `changed` may name
 MAX_STDIN = admission.MAX_STDIN
@@ -48,6 +52,8 @@ def shape(obj: dict) -> None:
         if k not in obj:
             raise Shape(f"{k}: absent")
     context(obj["context"])
+    if not models.readable_window(obj["context"].get("window")):
+        raise Shape("context.window: not a whole number from 1 to 10**9")
     rate_limits(obj["rateLimits"])
     if obj.get("cost") is not None:
         only(obj["cost"], "cost", ("usd",))
@@ -78,7 +84,8 @@ def parse(sid, text: str) -> dict:
 
 
 def record(sid, text: str, env, now: datetime | None = None) -> Path:
-    """Write measure.json in the session's existing directory; return its path."""
+    """Write measure.json in the session's existing directory, then move the resolved file
+    to its window (silent on any failure; the next measure retries); return its path."""
     obj = parse(sid, text)
     sdir = resolver.session_dir(resolver.state_dir(env), sid)
     if not sdir.is_dir():
@@ -87,6 +94,9 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
     body = {"at": at, **{k: obj.get(k) for k in KEYS}}
     path = sdir / MEASURE
     _write_private(path, json.dumps(body, ensure_ascii=False, allow_nan=False) + "\n")
+    n = models.engine_window(sdir)
+    if n is not None:
+        resolver.rewindow(sdir, n)
     return path
 
 

@@ -55,6 +55,7 @@ The classic path is unchanged in every row.
 - **S1, the first slice: M1, a read-only band.** One `ui.render` hook on `AbovePrompt`, redrawn on `turn.complete` and every 5 s; it reads `meter.json`, `respawn.json` and `turn-ended.json`, writes nothing, runs only `mod start`. Offline tests (conventions amended by admission-r1's S25).
 - **C1, classic, beside S1:** the PreCompact hook: block `auto`, pass `manual` (§8, decided). The shim maps any non-zero exit of the CLI on PreCompact to 0 and keeps its stdout, so a CLI older than the plugin never blocks a compaction.
 - **S2:** M2, `measure record`; `status` and `doctor` print the drift. Built by packet M2 (2026-10-12): every `session.measure` writes `measure.json`; `status` compares its context tokens with the meter's when the two are within 120 s, and `doctor` warns at a drift of 10% or more, never failing; nothing that decides reads it.
+  Amended 2026-10-30 by design/window-r1.md §2: context.window alone is read by what decides, as the window pick's first source; tokens, percent, the rate limits and the cost still are not.
 - **S3:** admission-r1's spawn hook joins, in `observe` mode, after question 3.
 
 ## §7 Acceptance criteria
@@ -62,6 +63,7 @@ The classic path is unchanged in every row.
 1. `hooks.json` keeps the eight classic events with their commands and timeouts; S1 adds only `modules`.
 2. `grep -nE 'fs\.write|store\.set' plugin/hooks/*.js` finds no write but a `pref.` key.
 3. A pytest proves `chain.py`, `hooks.py` and `budget.py` never open `measure.json` or `mod.json`.
+   Amended 2026-10-30 by design/window-r1.md §2: context.window alone is read by what decides, as the window pick's first source; tokens, percent, the rate limits and the cost still are not.
 4. A pytest: `measure.json` at 99% beside `meter.json` at 10% gives zone `clear` and no CHECKPOINT.
 5. The pytest suite passes unchanged with `plugin/hooks/*.js` removed.
 6. Module tests: the band reads `ctx 62% · turns 31% · notice` from a fixture, `no meter` without one, its age past 120 s, and fits `bodyColumns`.

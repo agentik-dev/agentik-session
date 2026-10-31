@@ -354,6 +354,16 @@ const measuring = (on: any, fail: Record<string, 'reject' | 'hang'> = {}) => {
 
 const argvs = (calls: Array<{ argv: string[] }>) => calls.map(c => JSON.stringify(c.argv)).sort()
 
+// Packet S45, the record's A13 (a control): the window the engine reports is the figure sent.
+for (const w of [200000, 1000000]) {
+  test(`s45 a13: an event at window ${w} sends that figure on measure record's stdin`, async (t: any, on: any) => {
+    const { calls } = measuring(on)
+    await t.session.measure({ ...MEASURE_IN, context: { tokens: 20000, window: w, percent: 2 }, changed: ['context'] })
+    expect(calls[0].argv).toEqual(MEASURED)
+    expect(calls[0].stdin.context.window).toBe(w)
+  })
+}
+
 test('a measure without rateLimits changed sends one measure record and no reading', async (t: any, on: any) => {
   const { calls, seen } = measuring(on)
   const r: any = await t.session.measure({ ...MEASURE_IN, changed: ['context'] })

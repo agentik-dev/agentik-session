@@ -17,10 +17,11 @@ and `timestamp` are read; message content never is. Parsing is incremental:
 the state carries the offset with the file's inode and size, and restarts from
 0 when either says the file is not the one it read.
 
-The ceilings follow the model (models.py): the window is re-picked from the
-model read (`message.model`), else the session's, the declared and the configured
-models the resolved file carries, and the role's ceilings for that window apply; meter.json
-names both (`window_source`, `limits_source`, e.g. `role:orchestrator window:1000000`).
+The ceilings follow the engine's measured window, else the model (models.py): the
+window is re-picked at each tool from the engine's reading, else the model read
+(`message.model`), else the session's, the declared and the configured models the
+resolved file carries, and the role's ceilings for that window apply; meter.json names
+both (`window_source`, `limits_source`, e.g. `role:orchestrator window:1000000`).
 """
 
 from __future__ import annotations
@@ -224,15 +225,16 @@ def parse(path, state=None, limits=None, policy=None, session_id=None) -> Meter 
 
 def _limits(lim: dict, observed) -> tuple[dict, int | None, str, str]:
     """(ceilings, window, window_source, limits_source). With the resolved file's
-    `windows` and `models`, the window is re-picked from the model read, then the
-    session's, the declared and the configured models; else the limits as given."""
+    `windows` and `models`, the window is re-picked: the engine's reading, then the
+    model read, then the session's, the declared and the configured models; else the
+    limits as given."""
     window = lim.get("window")
     wsrc = lim.get("window_source") or "default"
     lsrc = lim.get("limits_source") or f"default window:{window}"
     windows, table = lim.get("windows"), lim.get("models")
     if isinstance(windows, dict) and isinstance(table, dict):
         w, src = models.pick(table, observed, lim.get("session_model"), lim.get("model"),
-                             lim.get("configured_models") or ())
+                             lim.get("configured_models") or (), lim.get("engine_window"))
         c = windows.get(models.window_class(w))
         if isinstance(c, dict):
             return ({"context": c.get("context"), "turns": c.get("turns")}, w, src,
@@ -265,7 +267,7 @@ LIMIT_KEYS = ("ceilings", "window", "checkpoint_at", "windows", "models", "model
 def limits_for(sdir: Path, env) -> dict:
     """The limits from resolved.json (the ceilings of both windows, the models table,
     the declared and the configured models), else the default profile resolved with no
-    repo layer."""
+    repo layer; `engine_window` beside them when the engine has given a reading."""
     s = ((_load(Path(sdir) / "resolved.json") or {}).get("session")) or {}
     if not s:
         try:
@@ -277,6 +279,9 @@ def limits_for(sdir: Path, env) -> dict:
     for k in LIMIT_KEYS:
         if s.get(k) is not None:
             out[k] = s[k]
+    engine = models.engine_window(sdir)
+    if engine is not None:
+        out["engine_window"] = engine
     return out
 
 

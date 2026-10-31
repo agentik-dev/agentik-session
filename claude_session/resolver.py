@@ -15,30 +15,38 @@ file. The profile *name* is taken from the highest layer that names one
 (launch, then local, then repo), else `frontier`; its values form the base, and
 a named launch profile re-applies its own fields above the repo files.
 
-The model decides the window and the role the ceilings within it (models.py):
-the window is the session's model's (the SessionStart payload's `model`), else
+The engine's measured window, else the model, decides the window, and the role
+the ceilings within it (models.py): the window is the engine's last reading for this
+session, else the session's model's (the SessionStart payload's `model`), else
 the declared model's (the profile's `model`), else the configured model's
 (`ANTHROPIC_MODEL`, the settings), by the `models:` table. The ceilings are,
 lowest first, the shipped defaults, the role's key for that window (`ceilings`
 on 200k, `ceilings_1m` on 1M), then any user or project layer that sets
 `ceilings` (both windows) or `ceilings_1m` (1M), field by field; the launch's
-turn cap is last. The meter re-picks the window from the model it reads, so
-both windows' ceilings are written (`windows`).
+turn cap is last. The meter re-picks the window at each tool, so both windows'
+ceilings are written (`windows`); a helper's 1M ceilings equal its 200k ones, so a
+reading moves its window and never its ceiling (design/window-r1.md R2).
 
-The output is a pure function of the inputs: `provider.resolved_at` is the
+`resolve`'s output is a pure function of its inputs: `provider.resolved_at` is the
 transcript's mtime, not the clock, and every input is listed with its sha256
 (null when absent) so a wrong layer is visible in the file itself; the models it
 read beside the layers are written as `session_model` (with `session_model_source`,
-`payload` or `CLAUDE_SESSION_MODEL`) and `configured_models`.
+`payload` or `CLAUDE_SESSION_MODEL`) and `configured_models`; the engine's reading, when
+one exists, is the input `engine:context.window`. `rewindow` then moves four keys of the
+file at the engine's next measure, and from there `window_source` names the reading, while
+`provider.inputs` still lists what the last resolve read.
 """
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import fcntl
 import hashlib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,6 +83,8 @@ DEFAULT_PROFILE = "frontier"
 # The overlay keeps its pre-profile knob names; these are the ones that differ.
 OVERLAY_RENAMES = {"subagent_model": "subagents"}
 
+LOCK_WAIT = 2.0        # seconds a writer of the resolved file waits for the session's lock
+REWOUND = ("window", "ceilings", "window_source", "limits_source")     # what `rewindow` moves
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")      # \Z: a trailing newline never passes
 
 
@@ -448,12 +458,18 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     table = _models(shipped, user)
     session_model = session_model if isinstance(session_model, str) else None
     configured = models.configured(env, cwd)
+    engine = models.engine_window(session_dir(state_dir(env), str(session_id)))
+    if engine is not None:
+        inputs.append(("engine:context.window",
+                       hashlib.sha256(json.dumps(engine).encode()).hexdigest()))
     window, window_source = models.pick(table, None, session_model, merged.get("model"),
-                                        configured)
+                                        configured, engine)
     windows, caps = {}, {}
     for cls, (ceil, src) in per.items():
         capped, caps[cls] = _turn_cap(ceil, env)
         windows[cls] = {**capped, "source": src}
+    if env.get("CLAUDE_SESSION_HELPER") == "1":     # R2: its 200k class whatever a layer sets
+        windows["1m"], caps["1m"] = dict(windows["200k"]), caps["200k"]
     here = models.window_class(window)
     session = {}
     for k in SESSION_KEYS:
@@ -492,22 +508,101 @@ def session_dir(state: Path, session_id: str) -> Path:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
+    """Whole or not at all. The temp name is this process's: a writer that went on past
+    the lock and one stalled on its temp never share a file, so neither can tear the other."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+@contextlib.contextmanager
+def _session_lock(sdir: Path):
+    """`flock` on the session directory's own descriptor, so it creates no file; yields
+    whether it is held, after at most LOCK_WAIT seconds. Closing the descriptor frees it."""
+    fd = None
+    held = False
+    try:
+        fd = os.open(sdir, os.O_RDONLY)
+        give_up = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = True
+                break
+            except BlockingIOError:
+                if time.monotonic() >= give_up:
+                    break
+                time.sleep(0.005)
+    except OSError:
+        held = False
+    try:
+        yield held
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _write_doc(d: Path, doc: dict) -> None:
+    _write_atomic(d / "resolved.json", json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    _write_atomic(d / "resolved.yaml", dump(doc))
 
 
 def write(resolved: Resolved, state: Path) -> Path:
-    """resolved.json and its .yaml twin; returns the JSON path."""
+    """resolved.json and its .yaml twin, under the session's lock (with no lock it goes on:
+    the hook never breaks a session); returns the JSON path."""
     d = session_dir(state, resolved.session_id)
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    doc = resolved.as_dict()
-    path = d / "resolved.json"
-    _write_atomic(path, json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
-    _write_atomic(d / "resolved.yaml", dump(doc))
-    return path
+    with _session_lock(d):
+        _write_doc(d, resolved.as_dict())
+    return d / "resolved.json"
+
+
+def _twin_agrees(d: Path, s: dict) -> bool:
+    """The YAML twin holds the JSON's REWOUND keys; an absent or unreadable twin does not."""
+    try:
+        t = load((d / "resolved.yaml").read_text())["session"]
+        return all(t[k] == s[k] for k in REWOUND)
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+def rewindow(sdir, n) -> bool:
+    """The engine's reading `n` moves the resolved file (window-r1 R4): when `session.window`
+    differs and `session.windows` holds its class, `window`, `ceilings`, `window_source` and
+    `limits_source` move, in both twins, and nothing else does. It reads no env and no layer.
+    A YAML twin that disagrees with the JSON on those keys, as a failure between the two
+    writes leaves it, is rewritten from the JSON, so the next measure really retries.
+    True when it wrote. A failure of any kind, the lock's included, is False and silent."""
+    try:
+        if not models.readable_window(n):
+            return False
+        d = Path(sdir)
+        with _session_lock(d) as held:
+            if not held:
+                return False
+            doc = json.loads((d / "resolved.json").read_text())
+            s = doc["session"]
+            c = s["windows"][models.window_class(n)]
+            if s["window"] == n:
+                if _twin_agrees(d, s):
+                    return False
+                _write_atomic(d / "resolved.yaml", dump(doc))
+                return True
+            s["window"] = n
+            s["ceilings"] = {"context": c["context"], "turns": c["turns"]}
+            s["window_source"] = f"engine:{n}"
+            s["limits_source"] = f"{c['source']} window:{n}"
+            _write_doc(d, doc)
+            return True
+    except Exception:                                           # noqa: BLE001
+        return False
 
 
 def save_request(sdir: Path, cwd, profile, transcript_path, model=None,

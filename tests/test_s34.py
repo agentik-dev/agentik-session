@@ -89,7 +89,10 @@ def test_s34_g_the_plugin_registers_stopfailure_as_stop():
 # ---- (h) the band's limit note: one fixture, both twins --------------------------------
 
 def _fixture() -> dict:
-    text = (HOOKS_DIR / ("session.test." + "ts")).read_text()
+    p = HOOKS_DIR / ("session.test." + "ts")
+    if not p.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    text = p.read_text()
     out = {k: re.search(rf"^const {k} = '(.*)'$", text, re.M).group(1)
            for k in ("LIMITED", "OVERLOADED", "ENDED_BEFORE", "ENDED_AFTER")}
     out["LIMIT_NOTE"] = re.search(r'^const LIMIT_NOTE = "(.*)"$', text, re.M).group(1)

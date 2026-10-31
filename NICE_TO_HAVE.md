@@ -253,3 +253,36 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 
 ## doclint's docstring still says five parts (2026-10-30, packet S40's refuter round 1; S4)
 - `scripts/doclint:5` says "five-part shape", but since packet S40 the charter has six parts (`## While waiting`, optional before alpha.24); doclint is outside S40's may touch, so no code was changed.
+
+## S41's leftovers (2026-10-30, packet S41's builder and refuter round 2; S4)
+- The band's width: with the model and window at the head, the line with both windows, `respawn marked` and the age is 82 to 93 characters, so an 80-column band loses the age and under 65 columns the zone is cut (the limit-note line is 119). Lead: drop the model part first, or put it after the zone, when the line overflows bodyColumns (`session.ts` bandLine, `mod.py` facts).
+- The band and `status` never check measure.json's `at`, so `(engine 1M)` can come from an old measure, from before a /model switch, or from a resumed session's old one. Lead: leave out the engine part past the meter's STALE_S, or show its age.
+- The band's 5 s loop (`session.ts`, about line 343) has no catch around `$.clock.sleep`, so a refused clock is an unhandled rejection. Lead: `try { await $.clock.sleep(EVERY_MS) } catch { return }`.
+- The twins disagree on windows of 1e24 or more: `windowLabel(1e24)` gives `1e+21k`, `mod.window_label(1e24)` gives `1000000000000000000000k`, and WINDOW_CASES pins only 1e400. Lead: no part from 1e21 up, in both twins.
+- Ruling 4's `model: none` is never reached from a real meter: `mod.model_line({"model":None,"window":None,"window_source":"default"},None)` returns `window from default`, and the meter always writes `window_source`; the test reaches `none` only with `window_source` None.
+- Control characters in a model id pass into the band and `status`: `modelName("claude-opus-5-5\n")` keeps the newline, and `models.family` accepts such an id. The id comes from the API, so this is unlikely.
+- `plugin/commands/status.md` still describes one line ("The line above is this session's meter") and says nothing of the `model:` line.
+
+## S45's leftovers (2026-10-30, packet S45; S4)
+- `ceilings_source` is left alone by `resolver.rewindow` (design/window-r1.md R4). Only `hooks.session_start` reads it, from its fresh resolve, never from the file; it can be wrong in the file only if a layer gives the two classes different turns and a launch cap falls between them. Lead: move it with the other four when a consumer reads it from the file.
+- No clamp on a ceiling above a small measured window (design/window-r1.md §5): a local model behind the router reading 32000 gets `window: 32000` and the 200k class's 180k, so the ceiling never trips, today as after. Lead: `min(ceiling, window)` in `meter._limits` and `resolver`, if a local sitting ever needs it.
+- `scripts/p1-proof` no longer runs from a checkout: it reads `.claude-plugin/marketplace.json` at import, and the marketplace line lives in commons now (FileNotFoundError, seen 2026-10-30 when `scripts/window-proof` first loaded it). Outside S45's may touch. Lead: name the marketplace as a constant, as `scripts/window-proof` does.
+- `scripts/window-proof` has no `--tty` path, which the record's L1 named for a `-p` child that writes no measure; on 2.1.314 a `-p` child wrote one, so it was not needed.
+
+## S45's refuter round 1, left (2026-10-30, packet S45 Amendment 2; S4)
+- A holder stalled past the 2 s lock bound can still undo a `set`: it loaded before the `set` wrote and writes after it (the window moves, the posture returns). The per-process temp name ends the tear, not this. Reproduced with a 3 s stall in `rewindow`. Lead: a re-load under a second lock pass, or `set`'s retry after the bound.
+- The SessionStart clause (`the engine's first reading replaces this`) promises a reading that never comes with no hooks module. Lead: say it only when the module was seen last time, or drop the promise's tense.
+- `resolved.json` with no `windows` block stays at `200k (engine 1M)` until a SessionStart, since `meter._limits` needs `windows` and `rewindow` finds no class. RUNBOOK says so; SKILL.md's band line and the comment in `session.ts` still say the next tool closes it, left since a file under `plugin/` would bump the version.
+- `set` from a shell with no helper mark, using a helper's session id, re-resolves without the mark and widens that helper's `windows["1m"]`. Lead: keep the helper mark in `request.json`.
+- A helper under a layer's plain `ceilings` holds what the layer says: `ceilings: {context: 400000}` gave a helper 400000 on both classes, on main at a633d57 before this packet, and still. R2's clause covers `ceilings_1m` only. Lead: decide whether a helper's 180k outranks a project layer.
+- A plain `builder` or `frontier` under a project `ceilings_1m` rises to 400k on bare Opus at the first 1M reading. The layer's own comment owns it, and the record's §5 says so; noted so a later reader does not take it for a bug.
+- Unseen live, so a later reader knows: no L1 or L2 ran on Opus (both on Haiku), and no live change of value within one session has been observed. The links are proved offline (A1, A2, A13).
+
+## S45's refuter round 2 (2026-10-30; S4)
+- `hooks.py:461-463`: a share alternating across `checkpoint_at` now speaks at every crossing, against the README's "then every tenth tool". 143800/144200 for 40 tools through `post_tool_use` spoke 20 times where main's rule speaks at 0 and 20. Replaying 700 real transcripts found no such case (657 passes over 80%, 2 down-crossings, 0 gaps under ten tools). Lead: clear the latch but keep a ten-tool floor since the last speech.
+- `tests/test_window.py`, the stale-twin test: four mutants survive (`heal-writes-both`, `rewound-window-only`, `heal-returns-false`, `signal-clear-keeps-count`), since "it is not rewritten" compares bytes. Lead: compare the JSON's mtime and add a twin stale only on `ceilings`.
+- `resolver.py:570-572`: a value that does not round-trip through the YAML rewrites the YAML on every measure (a hand-written `ceilings.context` of 1e21: four `rewindow` calls each moved the YAML); U+2028 and U+0085 make the load fail outright. Not reached through a layer. Lead: have `dump` quote those values.
+- A measure that moves an older session's window makes it `resolver.newest_session`.
+- `meter.py:248` keeps a fixed temp name.
+- README:83 "ctx % at its next measure" is loose: ctx % moves at the next tool; resolved.json moves at the measure.
+- Unseen live: a change of window within one session, and a non-1M reading on Opus.
