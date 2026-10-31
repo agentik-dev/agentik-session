@@ -20,7 +20,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The package lives in the plugin (sc2): every child the suite starts finds it the same way.
+_LIB = str(Path(__file__).resolve().parents[1] / "plugin" / "lib")
+sys.path.insert(0, _LIB)
 
 # Every session id a test uses, and the fixture transcripts' own.
 SENTINEL_SIDS = ("test-session", "cli-sess-0000-1111-2222", "sess-1", "meter-sess-1", "t",
@@ -32,6 +34,7 @@ POISON = (b'{"poisoned": "the suite read the sentinel root, not its temp state",
 _SENTINEL = Path(tempfile.mkdtemp(prefix="agentik-session-sentinel-"))
 atexit.register(shutil.rmtree, _SENTINEL, ignore_errors=True)
 _ENV = pytest.MonkeyPatch()
+_ENV.setenv("PYTHONPATH", _LIB)
 _ENV.setenv("HOME", str(_SENTINEL))
 _ENV.setenv("XDG_STATE_HOME", str(_SENTINEL / ".local" / "state"))
 # The configured model (ANTHROPIC_MODEL); the role the README's start steps export

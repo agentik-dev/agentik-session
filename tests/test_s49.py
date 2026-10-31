@@ -45,7 +45,7 @@ SILENT_IN_SHIM = ("Stop", "StopFailure", "PostToolUseFailure", "PostToolBatch")
 def real(box):
     """The same box with the real CLI on PATH: its row is the thing under test."""
     _exe(box / "bin" / "agentik-session",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
     return box
 
 
@@ -56,7 +56,7 @@ def _scripted(box, body):
         f"def dispatch(event):\n    {body}\n"
         "hooks.dispatch = dispatch\nraise SystemExit(cli.main(sys.argv[1:]))\n")
     _exe(box / "bin" / "agentik-session",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B "{box / "tool.py"}" "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B "{box / "tool.py"}" "$@"\n')
 
 
 def _env(box, path=None):
@@ -211,7 +211,7 @@ def test_s49_every_event_writes_its_row_and_moves_nothing(real, event):
 
 def test_s49_ms_is_the_tools_wall_time(real):
     tool = real / "bin" / "agentik-session"
-    tool.write_text(tool.read_text().replace("exec", "sleep 0.3; exec", 1))
+    tool.write_text(tool.read_text().replace("PYTHONPATH=", "sleep 0.3; PYTHONPATH=", 1))
     _shim(real)
     ms = _rows(real)[0]["ms"]
     assert 290 <= ms < 5000, ms
@@ -462,7 +462,7 @@ def test_s49_a_nested_hook_call_writes_no_row_of_its_own(real):
     _scripted(real, 'import subprocess\n    subprocess.run(["agentik-session-real", "hook", "Stop"], '
                     'input="{}", text=True, capture_output=True)\n    return 0')
     _exe(real / "bin" / "agentik-session-real",
-         f'PYTHONPATH="{ROOT}" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
+         f'PYTHONPATH="{ROOT}/plugin/lib" exec "{sys.executable}" -B -m claude_session.cli "$@"\n')
     _shim(real)
     assert [r["event"] for r in _rows(real)] == ["PreToolUse"]
 
@@ -1017,7 +1017,7 @@ def test_s49_f7_read_hooks_never_blocks_on_a_fifo_and_never_follows_a_link(tmp_p
     (tmp_path / "hooks.jsonl").symlink_to(tmp_path / "real")
     code = ("import sys; from claude_session import harness; "
             f"sys.exit(len(harness.read_hooks({str(tmp_path)!r})))")
-    r = subprocess.run([sys.executable, "-B", "-c", code], env={"PYTHONPATH": str(ROOT)}, timeout=10)
+    r = subprocess.run([sys.executable, "-B", "-c", code], env={"PYTHONPATH": str(ROOT / "plugin" / "lib")}, timeout=10)
     assert r.returncode == 0
 
 

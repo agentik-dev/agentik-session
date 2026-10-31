@@ -326,12 +326,12 @@ def test_a7_criterion_3_passes():
 
 @pytest.mark.parametrize("name", ["meter.py", "resolver.py", "chain.py", "hooks.py", "budget.py"])
 def test_a7_what_decides_never_names_the_file(name):
-    assert "measure.json" not in (ROOT / "claude_session" / name).read_text()
+    assert "measure.json" not in (ROOT / "plugin" / "lib" / "claude_session" / name).read_text()
 
 
 def test_a7_one_constant_one_opener():
     from claude_session import measure
-    text = (ROOT / "claude_session" / "models.py").read_text()
+    text = (ROOT / "plugin" / "lib" / "claude_session" / "models.py").read_text()
     assert text.count("measure.json") == 1
     assert models.MEASURE == "measure.json" and measure.MEASURE is models.MEASURE
     tree = ast.parse(text)

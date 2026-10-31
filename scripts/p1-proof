@@ -49,7 +49,7 @@ PROMPT = "Read the file README.md, then reply with the word ok"
 # The installed plugin's id and the tool's state dir, read off the repo so a rename follows.
 PLUGIN = json.loads((REPO / "plugin" / ".claude-plugin" / "plugin.json").read_text())["name"]
 MARKET = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())["name"]
-APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "claude_session" / "config.py").read_text())[1]
+APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "plugin" / "lib" / "claude_session" / "config.py").read_text())[1]
 SETTINGS = json.dumps({"enabledPlugins": {f"{PLUGIN}@{MARKET}": False}})
 SOCK = "p1proof"
 CASES = ("load-throw", "crash", "unload", "control", "refused")

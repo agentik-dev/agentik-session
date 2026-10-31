@@ -45,7 +45,7 @@ OPUS = "claude-opus-5-5"
 PROFILE = "orchestrator-opus"
 ONE_M, TWO_K, C1M, C200K = 1000000, 200000, 400000, 180000
 PLUGIN = json.loads((REPO / "plugin" / ".claude-plugin" / "plugin.json").read_text())["name"]
-APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "claude_session" / "config.py").read_text())[1]
+APP = re.search(r'(?m)^APP = "([^"]+)"', (REPO / "plugin" / "lib" / "claude_session" / "config.py").read_text())[1]
 SETTINGS = json.dumps({"enabledPlugins": {f"{PLUGIN}@agentik": False}})
 CONTROL = """
 import json, os, sys
@@ -113,7 +113,7 @@ def lay(out):
     tool = out / "bin" / "agentik-session"
     tool.parent.mkdir()
     tool.write_text(f"""#!/bin/sh
-HOME='{out / "home"}' PYTHONPATH='{REPO}' exec '{tool_python()}' -B -P -m claude_session "$@"
+HOME='{out / "home"}' PYTHONPATH='{REPO}/plugin/lib' exec '{tool_python()}' -B -P -m claude_session "$@"
 """)
     tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
 
@@ -121,7 +121,7 @@ HOME='{out / "home"}' PYTHONPATH='{REPO}' exec '{tool_python()}' -B -P -m claude
 def control(out, cwd, session_model):
     """The same inputs with no measure file: a state root no session has written."""
     env = {**os.environ, "HOME": str(out / "home"), "XDG_STATE_HOME": str(out / "control-state"),
-           "PYTHONPATH": str(REPO)}
+           "PYTHONPATH": str(REPO / "plugin" / "lib")}
     for k in list(env):
         if k.startswith(("CLAUDE", "RELAY_")):
             del env[k]

@@ -22,6 +22,7 @@ readme = ["pyyaml"]
 agentik-session = "claude_session.cli:main"
 
 [tool.setuptools.packages.find]
+where = ["plugin/lib"]
 include = ["claude_session*"]
 
 [tool.setuptools.package-data]

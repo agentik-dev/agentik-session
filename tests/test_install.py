@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+PKG = "plugin/lib/claude_session"
 DECOY = "import sys\nprint('DECOY')\nsys.exit(7)\n"
 # The launcher `make install` writes runs `python -P`, which is 3.11; sc3 moves it. Until then
 # the install's own steps run under the floor, and what runs the launcher waits for 3.11.
@@ -31,7 +32,7 @@ def repo(tmp_path):
     for f in ("Makefile", "install-wrapper.sh"):
         shutil.copy2(ROOT / f, r / f)
     shutil.copytree(ROOT / "scripts", r / "scripts")       # the install's prune-trees (F8)
-    shutil.copytree(ROOT / "claude_session", r / "claude_session",
+    shutil.copytree(ROOT / "plugin" / "lib" / "claude_session", r / "plugin" / "lib" / "claude_session",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (r / ".gitignore").write_text("__pycache__/\n*.pyc\n")
     _git(r, "init", "-q")
@@ -68,7 +69,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     home = tmp_path / "home"
     r = _install(repo, home)
     assert r.returncode == 0, r.stderr
-    tree = _git(repo, "rev-parse", "HEAD:claude_session")
+    tree = _git(repo, "rev-parse", "HEAD:" + PKG)
     wrapper = (home / ".local" / "bin" / "agentik-session").read_text()
     assert f'CODE="{_share(home) / tree}"' in wrapper
     # the venv's link in its resolved directory, never the link's target (ADV10-5)
@@ -85,7 +86,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
     assert "DECOY" not in r.stdout and r.returncode != 7, r.stdout + r.stderr
     assert r.returncode == 0, r.stderr
     # The root checkout cannot change a hook either: the installed copy is not the repo.
-    (repo / "claude_session" / "cli.py").write_text(DECOY)
+    (repo / PKG / "cli.py").write_text(DECOY)
     r = subprocess.run([str(home / ".local" / "bin" / "agentik-session"), "hook", "PostToolUse"],
                        cwd=tmp_path, input="{}", env=_env(home), capture_output=True, text=True,
                        timeout=30)
@@ -94,7 +95,7 @@ def test_hook_runs_installed_code_not_cwd(repo, tmp_path):
 
 def test_dirty_package_refuses(repo, tmp_path):
     home = tmp_path / "home"
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write("# half-done\n")
     r = _install(repo, home)
     assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
@@ -102,7 +103,7 @@ def test_dirty_package_refuses(repo, tmp_path):
     assert not (home / ".local" / "bin" / "agentik-session").exists()
     assert not _share(home).exists()
     # a versioned Cellar interpreter is refused too (ADV10-5)
-    _git(repo, "checkout", "-q", "--", "claude_session")
+    _git(repo, "checkout", "-q", "--", PKG)
     cellar = tmp_path / "Cellar" / "python@3" / "bin"
     cellar.mkdir(parents=True)
     (cellar / "python3").symlink_to(sys.executable)
@@ -112,19 +113,19 @@ def test_dirty_package_refuses(repo, tmp_path):
 
 
 def test_untracked_file_in_package_refuses(repo, tmp_path):
-    (repo / "claude_session" / "stray.py").write_text("x = 1\n")
+    (repo / PKG / "stray.py").write_text("x = 1\n")
     assert _install(repo, tmp_path / "home").returncode == 2
 
 
 def test_reinstall_prunes_the_old_tree(repo, tmp_path):
     home = tmp_path / "home"
     assert _install(repo, home).returncode == 0
-    old = _git(repo, "rev-parse", "HEAD:claude_session")
+    old = _git(repo, "rev-parse", "HEAD:" + PKG)
     assert sorted(p.name for p in _share(home).iterdir()) == [old]
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write("# next\n")
     _git(repo, "commit", "-qam", "next")
-    new = _git(repo, "rev-parse", "HEAD:claude_session")
+    new = _git(repo, "rev-parse", "HEAD:" + PKG)
     assert new != old
     assert _install(repo, home).returncode == 0
     # the newest few are kept (F8); the pruning itself is test_f8_reinstall_keeps_...
@@ -175,10 +176,10 @@ def test_gone_interpreter_speaks_at_every_session_start(tmp_path):
 # process names, and the newest three; it prunes the rest.
 
 def _commit_next(repo, n):
-    with open(repo / "claude_session" / "meter.py", "a") as f:
+    with open(repo / PKG / "meter.py", "a") as f:
         f.write(f"# next {n}\n")
     _git(repo, "commit", "-qam", f"next {n}")
-    return _git(repo, "rev-parse", "HEAD:claude_session")
+    return _git(repo, "rev-parse", "HEAD:" + PKG)
 
 
 def _live(home, tree):
@@ -192,7 +193,7 @@ def _live(home, tree):
 def test_f8_reinstall_keeps_a_tree_a_live_process_runs_from(repo, tmp_path):
     home = tmp_path / "home"
     assert _install(repo, home).returncode == 0
-    first = _git(repo, "rev-parse", "HEAD:claude_session")
+    first = _git(repo, "rev-parse", "HEAD:" + PKG)
     trees = [first]
     live = _live(home, first)
     try:

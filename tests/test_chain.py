@@ -97,7 +97,7 @@ def fake(tmp_path, monkeypatch):
     f.work.mkdir()
     monkeypatch.chdir(f.work)
     monkeypatch.setenv("PATH", f"{f.bin}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    monkeypatch.setenv("PYTHONPATH", str(ROOT / "plugin" / "lib"))
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     f.plan, f.log = tmp_path / "plan.json", tmp_path / "log.jsonl"
     monkeypatch.setenv("FAKE_CLAUDE_PLAN", str(f.plan))

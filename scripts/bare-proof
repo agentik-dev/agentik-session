@@ -5,7 +5,7 @@ Usage: scripts/bare-proof [--transcript PATH] [--runs N] [--keep]
 
 From HEAD it assembles a mock install in a temp home: `git archive HEAD plugin` into
 $T/.claude/plugins/cache/agentik/session/<version>/, and, since sc1 moves no code, `git
-archive HEAD claude_session` into its lib/, a runner (design/04 §2's four lines and a watch,
+archive HEAD plugin/lib/claude_session` as its lib/, a runner (design/04 §2's four lines and a watch,
 at RUNNER) and the launcher of §2. Every child gets exactly HOME=$T, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
 CLAUDE_PLUGIN_DATA, in a temp git repo holding a decoy package; no clone path, no venv, no
 launcher on PATH. The repo's shim stays as it is: only the mock's copy gains a line putting
@@ -247,7 +247,6 @@ class Proof:
             self.version = json.load(fh)["version"]
         self.root = os.path.join(self.t, ".claude", "plugins", "cache", "agentik", "session", self.version)
         self.unpack("plugin", self.root, True)
-        self.unpack("claude_session", os.path.join(self.root, "lib"), False)
         for rel, text in (("lib/agentik-session", RUNNER % {"log": self.watch}), ("bin/agentik-session", LAUNCHER)):
             path = os.path.join(self.root, rel)
             os.makedirs(os.path.dirname(path), exist_ok=True)

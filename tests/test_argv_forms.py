@@ -220,7 +220,7 @@ def test_a_refused_form_exits_2(form):
 def test_the_table_holds_under_the_floor():
     """The whole table under /usr/bin/python3, whichever interpreter runs the suite."""
     forms = [f for f, _ in ACCEPTED + WIDER] + REFUSED
-    r = subprocess.run([FLOOR, "-I", "-B", "-c", CHILD, ROOT], input=json.dumps(forms),
+    r = subprocess.run([FLOOR, "-I", "-B", "-c", CHILD, os.path.join(ROOT, "plugin", "lib")], input=json.dumps(forms),
                        capture_output=True, text=True, timeout=60,
                        cwd=os.path.dirname(ROOT))
     assert r.returncode == 0, r.stderr

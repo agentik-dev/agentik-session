@@ -326,12 +326,15 @@ def test_hooks_json_is_the_shim_on_session_start_only():
 
 
 def test_plugin_is_self_contained():
-    """No file under plugin/ names a path outside it."""
+    """No file under plugin/ names a path outside it; the package, its own home since sc2,
+    names the user's own folders in its docs, and never a clone."""
     outside = ("../", "claude_session/", "/Users/", "~/")
     for f in PLUGIN.rglob("*"):
-        if f.is_file():
-            text = f.read_text()
-            assert not [o for o in outside if o in text], f
+        if not f.is_file() or "__pycache__" in f.parts:
+            continue
+        said = ("/Users/",) if (PLUGIN / "lib") in f.parents else outside
+        text = f.read_text()
+        assert not [o for o in said if o in text], f
 
 
 def test_shim_is_silent_without_the_tool(tmp_path):
