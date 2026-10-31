@@ -222,7 +222,7 @@ and listed for the doctor as `<layer>: session.<key>.<field>`.
 
 ## 4. Budget and checkpoints as a signal
 
-The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it; `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
+The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
 
 The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `agentik session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent.
 
@@ -235,7 +235,9 @@ The same module records the engine's own measure beside the meter: every `sessio
 Budget is a signal, not a gate. The sitting's two ceilings (context, turns),
 chosen by the role within the engine's measured window (the `models:` table only
 before the first measure; a helper keeps its 200k ceilings on either window),
-drive the meter; the used share, the larger of the two, sets the zone, as the
+drive the meter. Claude Code runs Opus 4.7 and later on 1M unmarked, and a transcript's
+`message.model` never carries `[1m]`, so the table reads a bare `opus` as 200k until
+the first measure replaces it. The meter and the ceilings then follow the reading; the used share, the larger of the two, sets the zone, as the
 `session` skill states it:
 
 | zone | from | meaning |

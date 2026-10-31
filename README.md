@@ -80,7 +80,7 @@ Profiles ship in `claude_session/profiles.yaml`. The `defaults` entry carries ev
 - `agentik session start <profile>` launches Claude Code with that profile, using flags only. Nothing is written to `settings.json`. `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling. Claude Code's own `--max-turns` flag applies in print mode only. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one. A nested `start` exits 2 without `--nested`.
 - `agentik session set <knob> <value>` changes this session only. Launch-time knobs (model, effort, tools) print the in-session equivalent (`/model`, `/effort`). `posture` applies at once.
 - A session's profile is its role. The SessionStart hook takes the profile name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets). Failing that, it reads `session.profile` in `config.local.yaml`, then in `config.yaml`, then falls back to `frontier`. A helper a session spawns (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`. A helper of an orchestrator therefore keeps 180000 context tokens.
-- Claude Code's measured window (`context.window`) decides, so a model change moves window, ceilings and ctx % at its next measure. Before the first, the `models:` table in `profiles.yaml` does: fable and mythos 1M; opus 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; for Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, then the settings'.
+- Claude Code's measured window (`context.window`) decides: a model change moves window, ceilings and ctx % at its next measure. Before the first, `profiles.yaml`'s `models:` table does: fable and mythos 1M; opus 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, the settings'.
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 
@@ -96,11 +96,11 @@ CLAUDE_SESSION_PROFILE=orchestrator claude --model fable               # Fable 5
 CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'     # Opus 5.5, 1M
 ```
 
-For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window. A bare `opus` reads 200k until a measure. `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
+For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window. A bare `opus` reads the table's 200k only until the first measure. `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
 
 ## Budget
 
-- The meter: after every tool, the PostToolUse hook reads the transcript's new lines and writes `meter.json`, which holds the used share of each of two ceilings, context and turns (`frontier`: 180000 context tokens, 400 turns, on either window). It re-picks the window, the engine's first, and records `window_source` and `limits_source`.
+- The meter: after every tool, the PostToolUse hook reads the transcript's new lines and writes `meter.json`, which holds the used share of each of two ceilings, context and turns (`frontier`: 180000 context tokens, 400 turns, on either window). It re-picks the window, engine's first, and records `window_source` and `limits_source`.
 - Zones, by the larger share: clear from 0%, notice from 80%, wind-down from 90%, reserve from 92%, exhausted at 100%.
 - `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80%), then every tenth tool: bring the charter current, commit, run `agentik session checkpoint`.
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
@@ -177,7 +177,7 @@ A full gate can run an hour behind a lock, so gates queue: one at a time per sta
 
 ## Status
 
-Status: version `v2.0.0-alpha.28`, rendered `2026-10-14`, `1604` tests in the suite.
+Status: version `v2.0.0-alpha.28`, rendered `2026-10-14`, `1614` tests in the suite.
 
 ## Credit
 

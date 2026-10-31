@@ -761,7 +761,7 @@ fcntl.flock(fd, fcntl.LOCK_EX)
 print("held", flush=True)
 sys.stdin.read()                    # until the test closes it, or dies
 """
-MODULE_BOUND = 5.0                  # session.ts's bound on `measure record`, in seconds
+MODULE_BOUND = 5.0                  # the hooks module's bound on `measure record`, in seconds
 HANG = 60                           # only a blocking lock ever waits this long
 
 
