@@ -985,17 +985,21 @@ class _Parser(argparse.ArgumentParser):
     first option, and strips a later `--` out of what follows it (sc1, a test under the
     floor). So a verb with one parses intermixed, and what follows the first `--` is marked
     if it starts with a dash: only a literal NUL can make it so, and no argv holds one.
-    `_get_value` takes the mark off, so no value or message holds it. Before 3.12 an option's
-    attached `--`, as in `--exit=--`, is dropped and the option reads as []: `_get_values`
-    holds it.
+    `_get_value` takes the mark off, so no value holds it; `error` takes it off any message,
+    since 3.12.7's ambiguous-option error names the last argument raw. Before 3.11 a lone
+    `--` given as one single-valued argument's own, as in `--exit=--` or `set K -- --`, is
+    dropped and it reads as []: `_get_values` holds it.
     """
     _mixing = False
+
+    def error(self, message):
+        super().error(message.replace("\0", ""))
 
     def _get_value(self, action, arg_string):
         return super()._get_value(action, arg_string.lstrip("\0"))
 
     def _get_values(self, action, arg_strings):
-        if action.option_strings and action.nargs is None and arg_strings == ["--"]:
+        if action.nargs is None and arg_strings == ["--"]:
             value = self._get_value(action, "--")
             self._check_value(action, value)
             return value

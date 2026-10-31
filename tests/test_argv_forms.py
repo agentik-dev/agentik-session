@@ -113,6 +113,11 @@ ACCEPTED = [
     ("gate run R --label=-- -- x", {"repo": "R", "label": "--", "command": ["x"]}),
     ("gate run R --lock=-- --lock=b x", {"repo": "R", "lock": ["--", "b"], "command": ["x"]}),
     ("gate wait --json I", {"id": "I", "json": True}),
+    # a positional's own value is `--`: before 3.11 it read as [] (Amendment 2, F11)
+    ("set K V", {"key": "K", "value": "V"}),
+    ("set K -- --", {"key": "K", "value": "--"}),
+    ("set checkpoint -- --", {"key": "checkpoint", "value": "--"}),
+    ("set -- K --", {"key": "K", "value": "--"}),
 ]
 
 REFUSED = [
@@ -136,6 +141,10 @@ REFUSED = [
     "config show N -- -x",
     "charter -- -x",
     "gate run --bogus=--",
+    "gate run R --wa -- -x",
+    "gate run R --wa -- --",
+    "set K --",
+    "config -- --",
 ]
 
 # A refusal's message names the argument as it was typed, on every interpreter (F4).
@@ -144,6 +153,9 @@ MESSAGES = [
     ("charter -- -x", "'-x'"),
     ("config show N -- -x", "-x"),
     ("gate run R --wall=-- x", "'--'"),
+    # 3.12.7 names the last argument here, the others --wa: either way, as typed (F10)
+    ("gate run R --wa -- -x", "ambiguous option"),
+    ("config -- --", "invalid choice"),
 ]
 
 # Refused by 3.12's stock parser, a positional on both sides of an option, and read alike on
@@ -188,8 +200,8 @@ def parse(form):
 
 
 def marked(text):
-    """The parser's mark, raw or as a message's repr prints it."""
-    return "\0" in text or "\\x00" in text
+    """The parser's mark: raw, as a repr prints it, or as json.dumps does."""
+    return "\0" in text or "\\x00" in text or "\\u0000" in text
 
 
 @pytest.mark.parametrize("form,want", ACCEPTED + WIDER, ids=[f for f, _ in ACCEPTED + WIDER])
