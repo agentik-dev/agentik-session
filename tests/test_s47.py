@@ -388,8 +388,8 @@ def test_s47_a_wall_cut_leaves_the_other_running(w):
     gate.serve(w.root, w.fx())
     ra, rb = w.result(a["id"]), w.result(b["id"])
     pa, pb = w.spawned[0][2].pid, w.spawned[1][2].pid
-    assert w.kills == [(pa, signal.SIGTERM), (pa, signal.SIGKILL)]
-    assert all(pg != pb for pg, _ in w.kills)
+    assert [k for k in w.kills if k[0] == pa] == [(pa, signal.SIGTERM), (pa, signal.SIGKILL)]
+    assert [k for k in w.kills if k[0] == pb] == [(pb, signal.SIGKILL)]      # its own finish's
     assert (ra["exit"], ra["cut"], rb["exit"], rb["cut"]) == (124, "wall cut", 0, None)
     assert rb["seconds"] == 42 and rb["ended"] == T0 + 102
     assert rb["ended"] < ra["ended"]
@@ -861,7 +861,7 @@ def test_s47_a1_a_crash_at_the_spawn_closes_125_and_never_runs_twice(w, spawned)
     assert len(w.spawned) == n and w.kills == []              # no pgid, no kill
     assert gate.entries(w.root) == []
     with open(r["log"]) as fh:
-        assert "no group was named, none was killed" in fh.read()
+        assert "no group to kill" in fh.read()
     assert (w.root / "sessions" / "sess-1" / "inbox" / f"{a['id']}.json").exists()
 
 

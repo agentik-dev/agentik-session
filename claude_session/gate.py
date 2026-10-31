@@ -1,9 +1,9 @@
 """The gate queue (design/gate-r1.md, packets S38 and S47): one queue per state root, run
 by one detached runner, one running per key under a load ceiling.
 
-`enqueue` writes `<state>/gate/queue/<id>.json`, its `key` the repo's git common dir, so a
-repo and its worktrees are one key; `serve` is the runner, which holds a set of children
-and polls them. It starts the oldest entry whose key is free and none of whose lock paths
+`enqueue` writes `<state>/gate/queue/<id>.json`, its `key` the device and inode of the repo's
+git common dir, so a repo and its worktrees are one key however they are spelled; `serve` is
+the runner, which holds a set of children and polls them. It starts the oldest entry whose key is free and none of whose lock paths
 exists or is named by a running entry; a second start waits for the ceiling (`_over`). Each
 child runs in its own process group in its repo; at its end the runner writes
 `<state>/gate/<id>/log` and then `result.json`, drops the entry from the queue, and tells
@@ -43,7 +43,7 @@ DONE_SHOWN = 5
 CUT_WALL, CUT_DIED, CUT_LOCK = "wall cut", "runner died", "lock wait cut"
 MORE = "{n} more: agentik session gate status"
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
-              "key")
+              "key", "key_name")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
                "caller", "cut")
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
@@ -53,6 +53,7 @@ MAX_RUNNING = 3             # gate.max_running's default (packet S47, ruling 4)
 LOAD_SHARE = 0.75           # gate.load_ceiling's default, as a share of the cores
 START_SETTLE = 60.0         # the seconds between two starts, since a load average lags
 GIT_WAIT = 10.0
+DOT_GIT_MOST = 4096         # a `.git` file or a `commondir` is one short line
 
 
 class GateError(Exception):
@@ -155,10 +156,54 @@ def _real(path: str) -> str:
         return path
 
 
+def _stat_key(path: str) -> str:
+    """`<st_dev>:<st_ino>`, since on a case-insensitive disk realpath keeps the typed case;
+    a path that cannot be statted keeps its realpath."""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return _real(path)
+    return f"{st.st_dev}:{st.st_ino}"
+
+
+def _short_read(path: str) -> str | None:
+    """A regular file's head, or None: a FIFO at `.git` must not hold the runner."""
+    try:
+        if not os.path.isfile(path):
+            return None
+        with open(path, errors="replace") as fh:
+            return fh.read(DOT_GIT_MOST)
+    except (OSError, ValueError):
+        return None
+
+
+def _common_dir(repo: str) -> str | None:
+    """With no git to ask: `<repo>/.git`, or, where that is a file, the common dir its
+    `gitdir:` leads to, by the same two reads git makes (`commondir`, relative to the
+    gitdir, is absent in a submodule's, which is its own common dir). None for no `.git`,
+    or one that leads nowhere."""
+    dot = os.path.join(repo, ".git")
+    if os.path.isdir(dot):
+        return dot
+    text = _short_read(dot)
+    if text is None or not text.startswith("gitdir:"):
+        return None
+    gitdir = os.path.join(repo, text[len("gitdir:"):].strip())
+    back = (_short_read(os.path.join(gitdir, "commondir")) or "").strip()
+    common = os.path.join(gitdir, back) if back else gitdir
+    return common if os.path.isdir(common) else None
+
+
+def _fallback_key(repo: str) -> str:
+    """The key with no answer from git, computed as a sibling's was: the common dir's when
+    it can be found, else the repo's own."""
+    return _stat_key(_common_dir(repo) or repo)
+
+
 def repo_key(repo: str) -> str:
-    """The realpath of `git -C <repo> rev-parse --git-common-dir`, so a repo and its
-    worktrees are one key; no git tree, or git failing, the repo's realpath. `GIT_*` in
-    the caller's environment would name another tree, so none reaches git. Never raises."""
+    """The identity of `git -C <repo> rev-parse --git-common-dir`, so a repo and its
+    worktrees are one key; no git tree, or git failing, `_fallback_key`. `GIT_*` in the
+    caller's environment would name another tree, so none reaches git. Never raises."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         p = subprocess.run(["git", "-C", repo, "rev-parse", "--git-common-dir"], env=env,
@@ -167,23 +212,46 @@ def repo_key(repo: str) -> str:
         out = p.stdout.rstrip("\n") if p.returncode == 0 else ""
     except (OSError, ValueError, subprocess.SubprocessError):
         out = ""
-    return _real(os.path.join(repo, out) if out else repo)
+    return _stat_key(os.path.join(repo, out)) if out else _fallback_key(repo)
 
 
 def entry_key(e: dict) -> str:
-    """The entry's key; an older queue's entry, with none, reads its repo's realpath."""
+    """The entry's key; an older queue's entry, with none, computes it from its repo."""
     k = e.get("key")
     if isinstance(k, str) and k:
         return k
     repo = e.get("repo")
-    return _real(repo) if isinstance(repo, str) else ""
+    return _fallback_key(repo) if isinstance(repo, str) else ""
 
 
-def key_name(key: str) -> str:
-    """The key's name in a `waits on key` line: the repo's, since the basename of a key
-    that ends in `.git` would name every repo alike."""
-    base = os.path.basename(key)
-    return os.path.basename(os.path.dirname(key)) if base == ".git" else base
+def key_name(e: dict) -> str:
+    """The name of an entry's key in a `waits on key` line, since a device and an inode
+    name no repo: its repo's basename, written beside the key, or read from an older
+    entry's repo."""
+    n = e.get("key_name")
+    if isinstance(n, str) and n:
+        return n
+    repo = e.get("repo")
+    return os.path.basename(repo) if isinstance(repo, str) else ""
+
+
+def lock_key(path: str) -> str:
+    """One lock's identity, for comparing: its realpath's nearest parent that exists, as
+    device and inode, then the rest of the path by name. So a lock reads the same however
+    it is spelled, its parent's case too on a case-insensitive disk, and the same before
+    and after it exists, as the parent is what is statted, never the lock. Never raises."""
+    real = _real(os.path.abspath(path))
+    at, rest = os.path.dirname(real), [os.path.basename(real)]
+    while True:
+        try:
+            st = os.stat(at)
+        except (OSError, ValueError):
+            up = os.path.dirname(at)
+            if up == at:
+                return real
+            at, rest = up, [os.path.basename(at), *rest]
+            continue
+        return f"{st.st_dev}:{st.st_ino}/" + "/".join(rest)
 
 
 # ---- the queue ---------------------------------------------------------------
@@ -224,8 +292,9 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
         _write_private(g / "counter", f"{n}\n")
         gid = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}"
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
-                 "locks": [os.path.abspath(p) for p in locks], "wall": wall,
-                 "label": label or "", "caller": caller, "queued": now, "key": key}
+                 "locks": [_real(os.path.abspath(p)) for p in locks], "wall": wall,
+                 "label": label or "", "caller": caller, "queued": now, "key": key,
+                 "key_name": os.path.basename(real)}
         _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
     return entry
 
@@ -298,23 +367,31 @@ def _locks(e: dict) -> list[str]:
     return [p for p in e.get("locks") or [] if isinstance(p, str)]
 
 
+def _named(running: list[dict]) -> set[str]:
+    return {lock_key(p) for x in running for p in _locks(x)}
+
+
 def _holds(es: list[dict], running: list[dict]):
     """Rulings 1 to 3 over the entries not running, oldest first: each with what holds it,
     (kind, what) or None. A lock path that exists holds its entry, and so does one a running
     entry names, whatever its key, since that command may not have made it yet. An entry
-    holds its key against every younger entry of that key, so a key stays FIFO."""
-    keys = {entry_key(x) for x in running}
-    named = {p for x in running for p in _locks(x)}
+    holds its key against every younger entry of that key, so a key stays FIFO. A wait on a
+    key names the repo of the entry that holds it. Locks compare by `lock_key`, read here
+    and not trusted from the entry, so an older entry's spelling compares too."""
+    keys = {}
+    for x in running:
+        keys.setdefault(entry_key(x), key_name(x))
+    named = _named(running)
     for e in es:
         k = entry_key(e)
-        path = _locked(e) or next((p for p in _locks(e) if p in named), None)
+        path = _locked(e) or next((p for p in _locks(e) if lock_key(p) in named), None)
         if path:
             yield e, ("lock", path)
         elif k in keys:
-            yield e, ("key", key_name(k))
+            yield e, ("key", keys[k])
         else:
             yield e, None
-        keys.add(k)
+        keys.setdefault(k, key_name(e))
 
 
 def _load_read(fx) -> float | None:
@@ -431,16 +508,19 @@ class _Child:
 
 @dataclass
 class _Set:
-    """The runner's memory: its children, its last start, and `seen`, when it first saw
-    each head locked."""
+    """The runner's memory: its children, the id it is about to spawn, its last start, and
+    `seen`, when it first saw each head locked."""
     since: float
     running: list = field(default_factory=list)
+    starting: str | None = None
     last_start: float | None = None
     seen: dict = field(default_factory=dict)
 
 
 def _runner_write(root, fx: Fx, s: _Set) -> None:
     run = [{"id": c.e["id"], "pgid": c.proc.pid} for c in s.running]
+    if s.starting is not None:
+        run.append({"id": s.starting, "pgid": None})
     _write_private(gate_dir(root) / "runner.json",
                    json.dumps({"pid": fx.pid, "since": s.since, "running": run}) + "\n")
 
@@ -456,11 +536,14 @@ def _signal_group(pgid, sig, fx: Fx) -> bool:
     return True
 
 
-def _kill_group(pgid, fx: Fx) -> None:
-    """SIGTERM to the group, the grace, then SIGKILL; a group already gone ends it."""
-    if _signal_group(pgid, signal.SIGTERM, fx):
-        fx.sleep(fx.grace)
-        _signal_group(pgid, signal.SIGKILL, fx)
+def _kill_group(pgid, fx: Fx) -> bool:
+    """SIGTERM to the group, the grace, then SIGKILL; a group already gone ends it. False
+    when nothing was signalled, as with no pgid: recovery never guesses a group."""
+    if not _signal_group(pgid, signal.SIGTERM, fx):
+        return False
+    fx.sleep(fx.grace)
+    _signal_group(pgid, signal.SIGKILL, fx)
+    return True
 
 
 def _prune(root, now: float) -> None:
@@ -509,11 +592,16 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
 
 
 def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
-    """Spawn one entry into the set. The child holds its log; the runner reopens it at the
-    end. A command that cannot start is closed here, 127, and counts as no start."""
+    """Spawn one entry into the set. Its id goes to runner.json first, its `pgid` null until
+    the spawn answers, so a runner that dies in between leaves the entry named and the next
+    one closes it, 125, and never runs it twice; with no pgid, `_recover` signals nothing.
+    The child holds its log; the runner reopens it at the end. A command that cannot start
+    is closed here, 127, and counts as no start."""
     gid = e["id"]
     d = entry_dir(root, gid)
     _mkdir(d)
+    s.starting = gid
+    _runner_write(root, fx, s)
     started = fx.now()
     with _open_log(d / "log") as log:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
@@ -525,6 +613,7 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
         except (OSError, ValueError, subprocess.SubprocessError) as err:
             log.write(f"gate {gid}: cannot start: {err}\n".encode())
             p = None
+    s.starting = None
     if p is None:
         _close(root, fx, cfg, e, 127, started, None, s)
         return
@@ -542,8 +631,9 @@ def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set) -> 
 
 
 def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
-    """One look at each child, never waiting on any: a finish closes it; at its wall, the
-    group's SIGTERM, then at the grace SIGKILL (the child is not polled between them, so its
+    """One look at each child, never waiting on any: a finish kills what its group left
+    running, since the key frees here and the next of that key would overlap it, and closes
+    it with the command's own code; at its wall, the group's SIGTERM, then at the grace SIGKILL (the child is not polled between them, so its
     group's id stays its own), then 124 once it is gone or a second grace has passed. True
     when one closed."""
     closed = False
@@ -553,6 +643,7 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             code = c.proc.poll()
             if code is not None:
                 code = code if code >= 0 else 128 - code
+                _signal_group(c.proc.pid, signal.SIGKILL, fx)
             elif now - c.started >= (c.e["wall"] if isinstance(c.e.get("wall"), int) else WALL):
                 c.term_at = now
                 if not _signal_group(c.proc.pid, signal.SIGTERM, fx):
@@ -572,21 +663,23 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
 
 def _recover(root, fx: Fx, cfg: dict) -> None:
     """A runner.json while this runner holds the flock is a dead runner's: for each entry
-    it names, kill the group and write 125 unless a result is there; drop the file."""
+    it names, kill the group, when it names one, and write 125 unless a result is there;
+    drop the file."""
     path = gate_dir(root) / "runner.json"
     r = runner_info(root)
     if r is None:
         _unlink(path)
         return
     for gid, pgid in _pairs(r):
-        _kill_group(pgid, fx)
+        killed = _kill_group(pgid, fx)
         if result_path(root, gid).exists():
             _unlink(_queue(root) / f"{gid}.json")
         else:
             e = _load(_queue(root) / f"{gid}.json") or {"id": gid}
             e["id"] = gid
+            what = "its group was killed" if killed else "no group to kill"
             _finish(root, fx, cfg, e, 125, _started_at(root, gid), fx.now(), CUT_DIED,
-                    note=f"the runner (pid {r.get('pid')}) died; its group was killed")
+                    note=f"the runner (pid {r.get('pid')}) died; {what}")
     _unlink(path)
     fx.log(f"gate: a stale runner.json (pid {r.get('pid')}) was recovered")
 
@@ -598,8 +691,8 @@ def _lock_wait(head: dict, running: list[dict]) -> str | None:
     wall never ran out on the entry in front of it."""
     if entry_key(head) in {entry_key(x) for x in running}:
         return None
-    named = {p for x in running for p in _locks(x)}
-    return next((p for p in _locks(head) if p not in named and os.path.exists(p)), None)
+    named = _named(running)
+    return next((p for p in _locks(head) if lock_key(p) not in named and os.path.exists(p)), None)
 
 
 def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
