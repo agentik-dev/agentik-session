@@ -64,6 +64,8 @@ The band is one line in `AbovePrompt`, cut to `bodyColumns`. It yields while `ha
 
 Amended 2026-10-30 by packet S42: each entry gains `window` and `slot`, band.json's top level is the current login's entry rather than a mix, `accounts` is also written when any key is `none`, and a `none` entry carries the week's reading and reset with no peak or room.
 
+Amended 2026-10-30 by packet S43: a `none` entry draws `no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe` in both twins, the weekday from the stamp's own date digits, and any other `window` draws the line above byte for byte. `rules.lifetime` reads a `none` entry's seven-day reading: 5m at PLAN or past, 1h below it, unknown with no reading or a passed reset. The charter's meter-wait pattern gains the whole words `week`, `weekly`, `7d`, `seven-day` and `band`, in every mode.
+
 ### §3.6 Using 90% without crossing 100
 
 The target is a floor on use, and the ceiling is a cap. A spawn is refused only at the cap. A deferral ends as soon as it fits. "Room for N" tells the orchestrator to pull work forward. `report` prints each window's last reading as `held` (spawns waited) or `idle` (nothing waited). The Mod cannot make work, so an idle window under 90 is reported, never hidden.
