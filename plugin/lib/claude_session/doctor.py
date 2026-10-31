@@ -495,6 +495,16 @@ def _check_bands(env) -> list:
     return [Check("bands", True, note, warn=True) for note in demand.schedule(env)[2]]
 
 
+def _check_follow(env) -> Check | None:
+    """Only while the shim's switch is on (design/04 §3), so no other row moves."""
+    if not hooks.follow_launcher_on(env):
+        return None
+    return Check("hooks-follow-launcher", True,
+                 "on: hooks run the launcher, not the plugin's pinned code; it lapses 24 h after "
+                 "its mtime; rm ~/.config/agentik/hooks-follow-launcher once sessions have respawned",
+                 warn=True)
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
     cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
@@ -523,7 +533,10 @@ def run(env=None, cwd=None) -> Report:
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):
-        add(row)                 # packet S44: last, and only on a bad file
+        add(row)                 # packet S44: only on a bad file
+    follow = _check_follow(env)
+    if follow:
+        add(follow)              # sc2: last, and only while on
     return rep
 
 

@@ -90,9 +90,12 @@ def test_s49_the_shim_is_mains_flow_and_one_variable():
     assert text.endswith(MAIN_FLOW)
     assert "hooks.jsonl" not in text
     code = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-    assert code[2] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
-    assert code[:2] + code[3:] == [
-        "tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session",
+    assert code[3] == f'export {T0}="$(date +%s%N 2>/dev/null)"'
+    assert code[:3] + code[4:] == [
+        "tool=${CLAUDE_PLUGIN_ROOT}/bin/agentik-session; o=$HOME/.local/bin/agentik-session; "
+        "f=$HOME/.config/agentik/hooks-follow-launcher",
+        'if [ -e "$f" ] && [ -x "$o" ] && [ -n "$(find "$f" -type f -mmin -1440 2>/dev/null)" ]; '
+        'then tool=$o; fi',
         '[ -x "$tool" ] || exit 0', *MAIN_FLOW.splitlines()]
     assert sum("date" in ln for ln in code) == 1
 

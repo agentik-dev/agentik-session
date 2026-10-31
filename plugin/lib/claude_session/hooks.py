@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
+import stat
 import sys
 import time
 from dataclasses import replace
@@ -355,6 +357,34 @@ def launch_profile(env) -> str | None:
     return env.get("CLAUDE_SESSION_PROFILE") or env.get("CLAUDE_SESSION_CONFIG") or None
 
 
+def follow_launcher_on(env=None, now=None) -> bool:
+    """The shim's switch as `plugin/hooks/run` reads it (design/04 §3): the file a regular file,
+    never a link, under 24 h by mtime, and the launcher there. Only HOME is read."""
+    env = os.environ if env is None else env
+    home = env.get("HOME")
+    if not home:
+        return False
+    try:
+        st = os.lstat(os.path.join(home, ".config", "agentik", "hooks-follow-launcher"))
+    except OSError:
+        return False
+    age = (time.time() if now is None else now) - st.st_mtime
+    return (stat.S_ISREG(st.st_mode) and math.ceil(age / 60) < 1440   # as `find -mmin -1440`
+            and os.access(os.path.join(home, ".local", "bin", "agentik-session"), os.X_OK))
+
+
+FOLLOW_NOTE = ("agentik-session: hooks-follow-launcher is on: hooks run the launcher in "
+               "~/.local/bin, not this plugin's pinned code; rm "
+               "~/.config/agentik/hooks-follow-launcher once sessions have respawned")
+
+
+def _follow_said(out: dict, env) -> dict:
+    """SessionStart's one line while the switch is on, whichever way the handler ended."""
+    if follow_launcher_on(env):
+        out["systemMessage"] = FOLLOW_NOTE
+    return out
+
+
 def session_start(payload: dict, env=None) -> dict:
     """Resolve every layer for this session and write resolved.json (§2.3).
 
@@ -385,7 +415,7 @@ def session_start(payload: dict, env=None) -> dict:
                               payload.get("transcript_path"), model, source)
     except Exception as e:                              # noqa: BLE001
         print(f"agentik-session: SessionStart resolved nothing: {e}", file=sys.stderr)
-        return {}
+        return _follow_said({}, env)
     s = r.sections["session"]
     c = s["ceilings"]
     src = s.get("ceilings_source")
@@ -400,8 +430,8 @@ def session_start(payload: dict, env=None) -> dict:
     line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
-    return {"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                   "additionalContext": line}}
+    return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                "additionalContext": line}}, env)
 
 
 def _charter_reminder(session: dict, cwd) -> str:
