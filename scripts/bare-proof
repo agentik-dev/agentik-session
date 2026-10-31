@@ -21,8 +21,9 @@ that row's FAIL, and the later rows still print. Exit 2 is the proof's own setup
 Stdlib, 3.9.
 
 `dispatch` turns a handler's exception into `{}` and exit 0, so an exit proves nothing: the
-ten-events row reads each event's effect, and `as 3.12` diffs the whole run against 3.12's on
-one input.
+mock's runner records every exception it swallows, the ten-events row reads that record and
+each event's effect, and `as 3.12` diffs the whole run against 3.12's on one input, the state
+files' values with them.
 """
 import argparse
 import json
@@ -51,11 +52,44 @@ HELPER_EVENTS = ("PostToolUseFailure", "PostToolBatch")
 MEDIAN_BAR, P95_BAR = 1.25, 2.5
 ONE_MB = 1 << 20
 FOUND = re.compile(r"(\d+) warnings?")
+# All that may differ between the interpreters' runs on one input (`as 3.12`), by key. Each is a
+# clock's reading: `at`, when a stamp was written (activity, helper-activity, limited,
+# turn-ended); `ms`, a hook row's wall time; `ts`, when meter.json was written; `ended`, when a
+# ledger row was; `resolved_at`, the mtime of the newest input to resolved.json and resolved.yaml.
+# A home's own path is the only other mask. Not `started`, the transcript's, nor a transcript's
+# inode, sha_at_end or a session id: one copy, one repo and one id serve both runs.
+VARIES = ("at", "ms", "ts", "ended", "resolved_at")
+# The same keys in a file that is not JSON: its lines `key: value`, resolved.yaml's.
+VARIES_LINE = re.compile(r"^(\s*(?:%s):).*$" % "|".join(VARIES), re.M)
 
+# design/04 §2's four-line runner, and one thing sc2 does not ship: a watch. `dispatch` turns an
+# exception into `{}` and exit 0 whichever line raised it, so the mock's runner wraps the handler
+# table `dispatch` reads and the `rotate` it calls first, writes each exception's type and place
+# (never its message) to a file under $T, and re-raises it into `dispatch`, which goes on exactly
+# as it ships. hooks.py does not change, and `cli` still imports it first, in its own order. The
+# third thing `dispatch` swallows, a payload it cannot read, leaves `{}`: the effect rows read that.
 RUNNER = """import os, sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from claude_session.cli import main
-raise SystemExit(main())
+from claude_session import cli
+def watched(where, fn):
+    def call(*args):
+        try:
+            return fn(*args)
+        except Exception as e:
+            tb = e.__traceback__
+            while tb.tb_next:
+                tb = tb.tb_next
+            with open(%(log)r, "a") as fh:
+                fh.write("%%s: %%s at %%s:%%d\\n" %% (where, type(e).__name__,
+                         os.path.basename(tb.tb_frame.f_code.co_filename), tb.tb_lineno))
+            raise
+    return call
+class Watched(dict):
+    def __getitem__(self, event):
+        return watched(event, lambda payload: dict.__getitem__(self, event)(payload))
+cli.hooks.HANDLERS = Watched(cli.hooks.HANDLERS)
+cli.hooks.harness.rotate = watched("rotate", cli.hooks.harness.rotate)
+raise SystemExit(cli.main())
 """
 # design/04 §2's lines, verbatim but for <no python>, which sc3 settles.
 LAUNCHER = """#!/bin/sh
@@ -148,6 +182,7 @@ class Proof:
         common = self.git("rev-parse", "--git-common-dir")
         self.clones = sorted({self.top, os.path.dirname(os.path.realpath(os.path.join(self.top, common)))})
         self.t = os.path.realpath(tempfile.mkdtemp(prefix="bare-proof."))
+        self.watch = os.path.join(self.t, ".swallowed")
 
     def git(self, *argv):
         return subprocess.run(["git", *argv], check=True, capture_output=True, text=True,
@@ -211,7 +246,7 @@ class Proof:
         self.root = os.path.join(self.t, ".claude", "plugins", "cache", "agentik", "session", self.version)
         self.unpack("plugin", self.root, True)
         self.unpack("claude_session", os.path.join(self.root, "lib"), False)
-        for rel, text in (("lib/agentik-session", RUNNER), ("bin/agentik-session", LAUNCHER)):
+        for rel, text in (("lib/agentik-session", RUNNER % {"log": self.watch}), ("bin/agentik-session", LAUNCHER)):
             path = os.path.join(self.root, rel)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as fh:
@@ -469,7 +504,7 @@ class Proof:
         return py
 
     def observed(self, tag, extra):
-        """One run of the ten events in a home of its own: (wrong, calls, names, shapes)."""
+        """One run of the ten events in a home of its own: (wrong, calls, names, values)."""
         home = os.path.join(self.t, "shape", tag)
         os.makedirs(os.path.join(home, "data"))
         extra = dict(extra, HOME=home, CLAUDE_PLUGIN_DATA=os.path.join(home, "data"))
@@ -478,7 +513,7 @@ class Proof:
         calls = {}
         for label, r in log:
             calls[label] = (r.returncode, r.stdout.replace(home, "<HOME>"), r.stderr.replace(home, "<HOME>"))
-        names, shapes = [], {}
+        names, values = [], {}
         for d, ds, ns in os.walk(home):
             # Bytecode's names hold the interpreter's tag, and the prefix is the bytecode row's.
             ds[:] = [x for x in ds if x != ".cache"]
@@ -486,21 +521,15 @@ class Proof:
                 path = os.path.join(d, n)
                 rel = os.path.relpath(path, home)
                 names.append(rel)
-                if n.endswith(".jsonl"):
-                    shapes[rel] = shape_of(read_jsonl(path))
-                elif n.endswith(".json"):
-                    with open(path) as fh:
-                        shapes[rel] = shape_of(json.load(fh))
-        return wrong, calls, sorted(names), shapes
+                values[rel] = state_value(path, home)
+        return wrong, calls, sorted(names), values
 
     def against_312(self):
-        """Exits, stdout, stderr, the state files' names and their JSON shapes, 3.9 against 3.12
-        on one input: the same payloads, the same transcript copy, the same session id, each in
-        a fresh home. Only each home's own path is replaced in what they print. Every value
-        inside a state file is ignored, its keys and types read: times (`at`, `ts`,
-        `resolved_at`, a hook row's `ms`), ids (`session`, a transcript's inode in
-        meter-state.json) and `sha_at_end` vary by run or by home. A difference is printed by
-        where it is, never by value: a transcript's words could stand in one."""
+        """Exits, stdout, stderr, the state files' names and their values, 3.9 against 3.12 on
+        one input: the same payloads, the same transcript copy, the same session id, each in a
+        fresh home. A JSON file by its values and its lists' lengths, any other by its content,
+        each under `state_value`'s masks, which name all that may differ. A difference is printed
+        by where it is, never by value: a transcript's words could stand in one."""
         w39, c39, n39, s39 = self.observed("3.9", {})
         w312, c312, n312, s312 = self.observed("3.12", {"AGENTIK_PYTHON": self.py312()})
         diff = ["3.9: " + w for w in w39] + ["3.12: " + w for w in w312]
@@ -513,8 +542,8 @@ class Proof:
         diff += ["only under 3.12: " + n for n in n312 if n not in n39]
         for name in sorted(set(s39) & set(s312)):
             diff += [name + ": " + w for w in where_differ(s39[name], s312[name])]
-        self.row("as 3.12", not diff, "%d calls, %d state files, the exits, stdout, stderr, names and JSON shapes %s"
-                 % (len(c39), len(n39), "differ: %s" % diff[:6] if diff else "identical"))
+        self.row("as 3.12", not diff, "%d calls, %d state files, the exits, stdout, stderr, names and masked values %s"
+                 % (len(c39), len(n39), "differ: %s" % diff[:8] if diff else "identical"))
 
     def launcher_flags(self):
         """The launcher's flags as it passes them, whatever its text says."""
@@ -690,10 +719,19 @@ class Proof:
         except Exception as e:      # noqa: BLE001
             self.row(name, False, "%s: %s" % (type(e).__name__, str(e)[:160]))
 
+    def swallowed(self):
+        """What `dispatch` has swallowed so far, by the mock's runner's record."""
+        try:
+            with open(self.watch) as fh:
+                return ["swallowed " + line for line in fh.read().splitlines()]
+        except OSError:
+            return []
+
     def ten_events(self):
         wrong = self.events("first")
         self.first_pyc = self.pyc_count()
         wrong += self.failing_tool()
+        wrong += self.swallowed()
         self.row("ten events", not wrong, "%d events, %s" % (len(EVENTS), wrong[:6] or "each one's effect read and its hooks.jsonl row, as the shim's rules say, under a tool that exits 0 and one that exits 1; SessionStart's stdout JSON"))
 
     def admission_row(self):
@@ -727,6 +765,10 @@ class Proof:
                          ("bytecode", self.bytecode)):
             self.guarded(name, fn)
         self.guarded("no clone path", lambda: self.clone_paths("no clone path"))
+        # The ten-events row reads the first pass; this reads them all, 3.12's and the sentinel's.
+        whole = self.swallowed()
+        self.row("no swallow", not whole, "%d exceptions swallowed by dispatch in the whole run%s"
+                 % (len(whole), ": %s" % whole[:6] if whole else ""))
         if self.failed:
             print("bare-proof: stop: " + ", ".join(self.failed))
             return 1
@@ -749,21 +791,50 @@ def read_jsonl(path):
     return rows
 
 
-def shape_of(value):
-    """A JSON value's keys and types, its values gone; a list as the set of its rows' shapes."""
+def masked(value, home):
+    """A state value with only what `VARIES` names, and the run's own home, taken out."""
     if isinstance(value, dict):
-        return {k: shape_of(v) for k, v in value.items()}
+        return {k: "<%s>" % k if k in VARIES else masked(v, home) for k, v in value.items()}
     if isinstance(value, list):
-        return sorted({json.dumps(shape_of(v), sort_keys=True) for v in value})
-    return type(value).__name__
+        return [masked(v, home) for v in value]
+    return value.replace(home, "<HOME>") if isinstance(value, str) else value
+
+
+def state_value(path, home):
+    """One state file under the masks: JSON by its values, a .jsonl by its rows, and a line
+    that is not JSON or any other file by its text."""
+    with open(path, encoding="utf-8", errors="surrogateescape") as fh:
+        text = fh.read()
+    if path.endswith(".jsonl"):
+        rows = []
+        for line in text.splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                rows.append(VARIES_LINE.sub(r"\1 <masked>", line))
+        return masked(rows, home)
+    if path.endswith(".json"):
+        try:
+            return masked(json.loads(text), home)
+        except ValueError:
+            pass
+    return VARIES_LINE.sub(r"\1 <masked>", text).replace(home, "<HOME>")
+
+
+ABSENT = object()
 
 
 def where_differ(a, b, at=""):
-    """The key paths at which two shapes differ."""
+    """The paths at which two masked values differ: a key, a list's length, a list's row."""
     if isinstance(a, dict) and isinstance(b, dict):
         out = []
         for k in sorted(set(a) | set(b)):
-            out += where_differ(a.get(k), b.get(k), at + "." + k)
+            out += where_differ(a.get(k, ABSENT), b.get(k, ABSENT), at + "." + k)
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        out = [] if len(a) == len(b) else ["%s: %d rows against %d" % (at or ".", len(a), len(b))]
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += where_differ(x, y, "%s[%d]" % (at, i))
         return out
     return [] if a == b else [at or "."]
 
