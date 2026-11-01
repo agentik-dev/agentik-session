@@ -320,3 +320,101 @@ def test_the_moved_tree_installs_and_reads_its_version_from_plugin_json(repo, tm
     _git(repo, "commit", "-qam", "bump")
     assert _install(repo, home).returncode == 0
     assert run() == "9.9.9-alpha.1"
+
+
+# ---- sc3: the verb, on a bare machine ---------------------------------------------------
+
+BARE = "/usr/bin:/bin"
+
+
+def _plugin(tmp_path, version=None):
+    """This tree's plugin as a marketplace would lay it out, its version as given."""
+    p = tmp_path / "cache" / "session" / "v"
+    shutil.copytree(ROOT / "plugin", p, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "node_modules"))
+    if version:
+        m = p / ".claude-plugin" / "plugin.json"
+        data = json.loads(m.read_text())
+        data["version"] = version
+        m.write_text(json.dumps(data))
+    return p
+
+
+def _bare(home, **extra):
+    return {"HOME": str(home), "PATH": BARE, **extra}
+
+
+def _verb(plugin, home, *args, **env):
+    return subprocess.run([str(plugin / "bin" / "agentik-session"), "install-cli", *args],
+                          env=_bare(home, **env), capture_output=True, text=True, timeout=60,
+                          cwd=home)
+
+
+def _bins(home):
+    return home / ".local" / "bin"
+
+
+def _trees(home):
+    return sorted(p.name for p in _share(home).iterdir() if not p.name.startswith("."))
+
+
+def test_sc3_the_verb_on_a_bare_machine_writes_launcher_link_door_and_tree(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = _plugin(tmp_path, "2.0.0-alpha.77")
+    r = _verb(plugin, home)
+    assert r.returncode == 0, r.stderr
+    tool = _bins(home) / "agentik-session"
+    assert os.access(tool, os.X_OK)
+    assert "VERSION=2.0.0-alpha.77\n" in tool.read_text()
+    assert os.readlink(_bins(home) / "claude-session") == "agentik-session"
+    assert (_bins(home) / "agentik").read_bytes() == (plugin / "bin" / "agentik").read_bytes()
+    assert os.access(_bins(home) / "agentik", os.X_OK)
+    [tree] = _trees(home)
+    code = _share(home) / tree
+    assert (code / "plugin.json").is_file() and (code / "agentik-session").is_file()
+    assert (code / "claude_session" / "install.py").is_file()
+    assert not list(code.rglob("__pycache__"))
+    # No clone, no venv: the launcher alone, from anywhere, under the bare PATH.
+    shutil.rmtree(plugin)
+    v = subprocess.run([str(tool), "--version"], env=_bare(home), capture_output=True, text=True,
+                       cwd=tmp_path, timeout=30)
+    assert (v.returncode, v.stdout, v.stderr) == (0, "agentik-session 2.0.0-alpha.77\n", "")
+    d = subprocess.run([str(_bins(home) / "agentik"), "session", "--version"],
+                       env={"HOME": str(home), "PATH": "%s:%s" % (_bins(home), BARE)},
+                       capture_output=True, text=True, timeout=30)
+    assert (d.returncode, d.stdout) == (0, "agentik-session 2.0.0-alpha.77\n"), d.stderr
+    assert not list(_bins(home).glob(".*tmp"))
+
+
+def test_sc3_the_name_is_the_content_and_the_verb_runs_from_a_frozen_tree_too(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = _plugin(tmp_path, "2.0.0-alpha.77")
+    assert _verb(plugin, home).returncode == 0
+    [tree] = _trees(home)
+    # Its own runner's path, whichever it runs from: the frozen tree gives the same tree.
+    before = (_bins(home) / "agentik-session").read_bytes()
+    r = subprocess.run([str(_bins(home) / "agentik-session"), "install-cli"], env=_bare(home),
+                       capture_output=True, text=True, timeout=60, cwd=home)
+    assert r.returncode == 0, r.stderr
+    assert _trees(home) == [tree] and (_bins(home) / "agentik-session").read_bytes() == before
+    # A bump alone is a new tree, or `--version` would lie.
+    assert _verb(_plugin(tmp_path / "next", "2.0.0-alpha.78"), home).returncode == 0
+    assert len(_trees(home)) == 2 and tree in _trees(home)
+
+
+def test_sc3_prefix_aims_it_elsewhere_and_writes_nothing_under_home(tmp_path):
+    home, prefix = tmp_path / "home", tmp_path / "pfx"
+    home.mkdir()
+    r = _verb(_plugin(tmp_path), home, "--prefix", str(prefix))
+    assert r.returncode == 0, r.stderr
+    assert (prefix / "bin" / "agentik-session").is_file()
+    assert not (home / ".local" / "bin").exists() and not (home / ".local" / "share").exists()
+
+
+def test_sc3_a_failure_says_so_and_exits_non_zero(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".local").write_text("a file where a folder goes")
+    r = _verb(_plugin(tmp_path), home)
+    assert r.returncode == 1 and "install-cli" in r.stderr and "Traceback" not in r.stderr

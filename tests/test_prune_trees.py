@@ -1,4 +1,4 @@
-"""scripts/prune-trees (F8): `make install` keeps the new tree, every tree a live process
+"""claude_session.prune (F8): an install keeps the new tree, every tree a live process
 names in its environment or command line, and the newest few; it prunes the rest, and when
 it cannot see the processes' environments it prunes nothing."""
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "prune-trees"
+LIB = Path(__file__).resolve().parents[1] / "plugin" / "lib"
 NAMES = ["t0", "t1", "t2", "t3", "t4", "t5"]                 # oldest first
 
 
@@ -22,8 +22,9 @@ def share(tmp_path):
 
 
 def _prune(share, new, *extra):
-    return subprocess.run([sys.executable, str(SCRIPT), "--share", str(share), "--new", new,
-                           *extra], capture_output=True, text=True, timeout=60)
+    return subprocess.run([sys.executable, "-m", "claude_session.prune", "--share", str(share),
+                           "--new", new, *extra], capture_output=True, text=True, timeout=60,
+                          env=dict(os.environ, PYTHONPATH=str(LIB)))
 
 
 def _left(share):

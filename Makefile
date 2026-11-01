@@ -60,7 +60,7 @@ install:  ## freeze plugin/lib under $(PREFIX)/share/agentik-session/<tree>, lau
 	chmod 755 "$$bin/agentik-session.tmp"; mv -f "$$bin/agentik-session.tmp" "$$bin/agentik-session"; \
 	rm -f "$$bin/.claude-session.tmp"; ln -s agentik-session "$$bin/.claude-session.tmp"; mv -f "$$bin/.claude-session.tmp" "$$bin/claude-session"; \
 	cp scripts/agentik "$$bin/.agentik.tmp"; chmod 755 "$$bin/.agentik.tmp"; mv -f "$$bin/.agentik.tmp" "$$bin/agentik"; \
-	"$$py" scripts/prune-trees --share "$$share" --new "$$tree" || echo "install: the prune failed; every old tree kept" >&2; \
+	PYTHONPATH=plugin/lib "$$py" -m claude_session.prune --share "$$share" --new "$$tree" || echo "install: the prune failed; every old tree kept" >&2; \
 	state="$${XDG_STATE_HOME:-$$HOME/.local/state}"; dir="$$state/agentik-session"; \
 	[ -e "$$dir" ] || [ ! -e "$$state/claude-code-session" ] || dir="$$state/claude-code-session"; \
 	rm -f "$$dir/install-needed"; \

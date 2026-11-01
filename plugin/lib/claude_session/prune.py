@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
-"""prune-trees: the old frozen trees `make install` removes, and the ones it keeps (F8).
+"""prune: the old frozen trees an install removes, and the ones it keeps (F8).
 
-`make install` freezes plugin/lib/claude_session/ under <share>/<tree> and points the launcher at the
-new tree. A launcher already running keeps PYTHONPATH=<share>/<its tree> for its whole
-life, which for a respawn chain is hours, so deleting every other tree pulled the code out
-from under it. The prune keeps:
+`install-cli` freezes the plugin's lib/ under <share>/<tree> and points the launcher at the new
+tree. A launcher already running keeps its tree for its whole life, which for a respawn chain is
+hours: the new form names it on its command line (`Python -I ... <tree>/agentik-session run`),
+the old one in its environment (PYTHONPATH=<tree>), and an old launcher runs for a day or more,
+so both count. Deleting every other tree pulled the code out from under it. The prune keeps:
 
   - the new tree (its mtime set to now, so a re-install of an old tree counts as newest);
   - every entry a running process names in its command line or its environment, read from
@@ -15,19 +15,21 @@ from under it. The prune keeps:
     launcher just before it was replaced and has not yet exec'd python, and any process
     ps could not see;
 
-and removes the rest. It fails safe: when ps cannot run, exits non-zero, or shows no
-environment (a probe variable set in ps's own environment is missing from its output),
-nothing is removed and stderr says `keeping every tree`.
+and removes the rest. An entry whose name starts with a dot is the install's own (its lock, its
+staging folder) and no tree: it is neither counted nor removed. It fails safe: when ps cannot
+run, exits non-zero, or shows no environment (a probe variable set in ps's own environment is
+missing from its output), nothing is removed and it says `keeping every tree`.
 
 The limit: macOS hides the environment of its platform binaries (Apple-signed ones such as
 /bin/sleep or /usr/bin/perl) even from their own user, and the probe cannot tell, since ps
 shows its own. A tree named only in such a process's environment is not seen, and is
-removed unless it is among the newest KEEP. A launcher is seen: every python the install
-can bake (a venv's, homebrew's) shows its environment.
+removed unless it is among the newest KEEP. A launcher is seen: the new form by its command
+line, the old by its environment, since every python the old install could bake (a venv's,
+homebrew's) shows it, and /usr/bin/python3's shows it too (sc3, measured).
 
-Usage: prune-trees --share DIR --new NAME [--keep N] [--ps PROGRAM]
+Usage: python -m claude_session.prune --share DIR --new NAME [--keep N] [--ps PROGRAM]
 Exit 0 when it pruned or kept, 2 on a usage error (NAME is not a directory under DIR).
-Stdlib only.
+Stdlib only: `install-cli` runs it with no checkout.
 """
 import argparse
 import os
@@ -88,28 +90,22 @@ def remove(path):
         path.unlink()
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(prog="prune-trees", description=__doc__.split("\n")[0])
-    ap.add_argument("--share", required=True, type=Path)
-    ap.add_argument("--new", required=True)
-    ap.add_argument("--keep", type=int, default=3)
-    ap.add_argument("--ps", default="ps")
-    a = ap.parse_args(argv)
-    new = a.share / a.new
-    if a.keep < 1 or "/" in a.new or a.new in ("", ".", "..") or not new.is_dir():
-        print(f"prune-trees: {a.new} is not a tree under {a.share} (or --keep < 1)",
-              file=sys.stderr)
-        return 2
-    os.utime(new)
-    text, why = processes(a.ps)
+def prune(share, new, keep=3, ps="ps"):
+    """(exit code, the lines to say). Never removes `new`; on doubt removes nothing."""
+    share = Path(share)
+    tree = share / new
+    if keep < 1 or "/" in new or new in ("", ".", "..") or not tree.is_dir():
+        return 2, [f"prune-trees: {new} is not a tree under {share} (or --keep < 1)"]
+    os.utime(tree)
+    text, why = processes(ps)
     if text is None:
-        print(f"prune-trees: {why}; keeping every tree", file=sys.stderr)
-        return 0
-    live = named(text, a.share)
-    entries = sorted(a.share.iterdir(), key=lambda p: (p.lstat().st_mtime_ns, p.name),
-                     reverse=True)
-    newest = {p.name for p in entries[:a.keep]} | {a.new}
+        return 0, [f"prune-trees: {why}; keeping every tree"]
+    live = named(text, share)
+    entries = sorted((p for p in share.iterdir() if not p.name.startswith(".")),
+                     key=lambda p: (p.lstat().st_mtime_ns, p.name), reverse=True)
+    newest = {p.name for p in entries[:keep]} | {new}
     seen = [p for p in entries if p.name in live]
+    lines = []
     removed, failed = 0, 0
     for p in entries:
         if p.name in newest or p.name in live:
@@ -119,10 +115,23 @@ def main(argv=None):
             removed += 1
         except OSError as e:
             failed += 1
-            print(f"prune-trees: {p}: {e}", file=sys.stderr)
-    print(f"prune-trees: removed {removed}, kept {len(entries) - removed}"
-          f" ({len(seen)} live, the newest {a.keep})" + (f", {failed} failed" if failed else ""))
-    return 0
+            lines.append(f"prune-trees: {p}: {e}")
+    lines.append(f"prune-trees: removed {removed}, kept {len(entries) - removed}"
+                 f" ({len(seen)} live, the newest {keep})" + (f", {failed} failed" if failed else ""))
+    return 0, lines
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="prune-trees", description=__doc__.split("\n")[0])
+    ap.add_argument("--share", required=True, type=Path)
+    ap.add_argument("--new", required=True)
+    ap.add_argument("--keep", type=int, default=3)
+    ap.add_argument("--ps", default="ps")
+    a = ap.parse_args(argv)
+    code, lines = prune(a.share, a.new, a.keep, a.ps)
+    for line in lines:
+        print(line, file=sys.stdout if line.startswith("prune-trees: removed") else sys.stderr)
+    return code
 
 
 if __name__ == "__main__":
