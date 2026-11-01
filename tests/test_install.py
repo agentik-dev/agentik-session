@@ -725,3 +725,79 @@ def test_sc3_refresh_race_two_at_once_twenty_rounds(old_install):
             assert "systemMessage" not in json.loads(out), outs
         assert _version(tool, home) == NEW, "round %d" % round_
         _whole(home)
+
+
+# ---- sc3 act 6: Apple's variables ----------------------------------------------------------
+
+FIVE = ("SDKROOT", "CPATH", "LIBRARY_PATH", "MANPATH", "LC_CTYPE")
+
+
+def _env_file(path):
+    return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+
+
+def test_sc3_apples_python_does_add_them_or_this_test_proves_nothing(tmp_path):
+    r = subprocess.run(["/usr/bin/python3", "-I", "-c", "import os; print(sorted(os.environ))"],
+                       env={"HOME": str(tmp_path), "PATH": BARE}, capture_output=True, text=True)
+    assert all(v in r.stdout for v in FIVE), r.stdout
+
+
+@pytest.mark.parametrize("parent", ({}, {"MANPATH": "/parent/man", "CPATH": "/parent/include",
+                                         "SDKROOT": "", "LC_CTYPE": "en_US.UTF-8"}))
+def test_sc3_a_launchers_claude_sees_what_its_parent_had(box, tmp_path, parent):
+    home, tool, _ = box
+    out = tmp_path / "seen"
+    out.mkdir()
+    _stub_claude(tmp_path / "stubs", out)
+    env = _bare(home, PATH="%s:%s" % (tmp_path / "stubs", BARE), **parent)
+    code, said = _pty_run([str(tool), "run", "--chain", "x"], env, home)
+    assert (out / "env").exists(), (code, said)
+    seen = _env_file(out / "env")
+    assert {k: seen.get(k) for k in FIVE} == {k: parent.get(k) for k in FIVE}
+    assert not [k for k in seen if k.startswith("AGENTIK_PARENT")]
+
+
+def _stop_gate_runner(home):
+    """The temp home's gate runner only, by the pid in its own runner.json, as scripts/bare-proof
+    does: it would idle out in a minute."""
+    import signal
+    for found in (home / ".local" / "state").rglob("runner.json"):
+        pid = int(json.loads(found.read_text())["pid"])
+        line = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True,
+                              text=True).stdout
+        if str(home) in line:
+            os.kill(pid, signal.SIGTERM)
+
+
+@pytest.mark.parametrize("parent", ({}, {"MANPATH": "/parent/man", "LIBRARY_PATH": "/parent/lib"}))
+def test_sc3_a_gate_job_sees_what_its_parent_had(box, tmp_path, parent):
+    home, tool, _ = box
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = _bare(home, **parent)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+    seen = tmp_path / "job-env"
+    try:
+        r = _call(tool, home, "gate", "run", str(repo), "--label", "t", "--", "/bin/sh", "-c",
+                  '/usr/bin/env > "%s"' % seen, env=env, cwd=repo)
+        assert r.returncode == 0, r.stderr
+        job = r.stdout.split()[1]
+        r = subprocess.run([str(tool), "gate", "wait", job, "--timeout", "200"], env=env, cwd=repo,
+                           capture_output=True, text=True, timeout=260)
+        assert seen.exists(), r
+        got = _env_file(seen)
+        assert {k: got.get(k) for k in FIVE} == {k: parent.get(k) for k in FIVE}
+        assert not [k for k in got if k.startswith("AGENTIK_PARENT")]
+    finally:
+        _stop_gate_runner(home)
+
+
+def test_sc3_the_serve_child_is_handed_the_record(box, tmp_path):
+    from claude_session import install
+    live = {"MANPATH": "/m", "PATH": "/p"}
+    assert install.parent_record(live) == {"AGENTIK_PARENT_ENV": "1", "AGENTIK_PARENT_MANPATH": "/m"}
+    assert install.restore_parent_env(live) is False and live == {"MANPATH": "/m", "PATH": "/p"}
+    live = {"AGENTIK_PARENT_ENV": "1", "AGENTIK_PARENT_CPATH": "/mine", "CPATH": "/mine:/usr/local/include",
+            "LC_CTYPE": "C.UTF-8", "SDKROOT": "/sdk", "PATH": "/p"}
+    assert install.restore_parent_env(live) is True
+    assert live == {"CPATH": "/mine", "PATH": "/p"}

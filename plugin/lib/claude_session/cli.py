@@ -1213,6 +1213,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    install.restore_parent_env()    # before anything can spawn (design/04 §3)
     raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(raw)
     args.raw_argv = raw             # `run` prints its own start line from it

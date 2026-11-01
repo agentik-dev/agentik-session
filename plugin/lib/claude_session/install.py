@@ -14,6 +14,10 @@ SHARE = "agentik-session"
 NAME = "agentik-session"
 MANIFEST = "plugin.json"
 DOOR = "agentik"
+# What Apple's /usr/bin/python3 adds to the environment (design/04 §3), and the prefix under which
+# the launcher records what its parent really had.
+APPLE = ("SDKROOT", "CPATH", "LIBRARY_PATH", "MANPATH", "LC_CTYPE")
+SAVED = "AGENTIK_PARENT_"
 SKIP_DIRS = ("__pycache__",)
 SKIP_FILES = (".DS_Store",)
 # The launcher's old name: the package's, spelled with a hyphen.
@@ -66,6 +70,14 @@ wanted=${AGENTIK_PYTHON:-/usr/bin/python3}; py=$wanted
 [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "$wanted" "$@"
 [ -f "$TREE/agentik-session" ] || refuse "$TREE" "$@"
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
+# /usr/bin/python3 adds SDKROOT and LC_CTYPE where unset, and adds to CPATH, LIBRARY_PATH and
+# MANPATH even where set (measured, sc3). What a chain's `claude` or a gate job may see is what
+# this shell saw: record it here, and the package restores it first thing (restore_parent_env).
+for v in __APPLE__; do
+    unset "AGENTIK_PARENT_$v"
+    eval "[ -z \"\${$v+x}\" ] || export AGENTIK_PARENT_$v=\"\$$v\""
+done
+export AGENTIK_PARENT_ENV=1
 # Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
 # block, so a hook stays in this shell to read its exit, as the plugin's launcher does. Apple's
 # is execed: with the runner tested above, it reaches the runner or exits 1.
@@ -76,6 +88,31 @@ if [ "$1" = hook ] && [ "$py" != /usr/bin/python3 ]; then
 fi
 exec "$py" -I -X pycache_prefix="$cache" "$TREE/agentik-session" "$@"
 '''
+
+
+def restore_parent_env(environ=os.environ):
+    """The launcher's record, undone: each of APPLE back to what the launcher's shell saw, absent
+    where it was absent, and the record gone, so nothing this process spawns sees either. With no
+    record (the plugin's own launcher, a test) nothing moves. True when it restored."""
+    if environ.pop(SAVED + "ENV", None) is None:
+        return False
+    for name in APPLE:
+        saved = environ.pop(SAVED + name, None)
+        if saved is None:
+            environ.pop(name, None)
+        else:
+            environ[name] = saved
+    return True
+
+
+def parent_record(environ=os.environ):
+    """The record for a child Python this process spawns by itself, past the launcher: it may
+    add LC_CTYPE again as it starts, and restores from this."""
+    record = {SAVED + "ENV": "1"}
+    for name in APPLE:
+        if name in environ:
+            record[SAVED + name] = environ[name]
+    return record
 
 
 def _source():
@@ -166,6 +203,7 @@ def launcher_text(tree, version):
     import shlex
     from . import config
     return (LAUNCHER.replace("__OLD_NAME__", OLD_NAME).replace("__OLD_APP__", config.OLD_APP)
+            .replace("__APPLE__", " ".join(APPLE))
             .replace("__VERSION__", version).replace("__TREE__", shlex.quote(str(tree))))
 
 
