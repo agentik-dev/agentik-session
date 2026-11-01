@@ -418,3 +418,175 @@ def test_sc3_a_failure_says_so_and_exits_non_zero(tmp_path):
     (home / ".local").write_text("a file where a folder goes")
     r = _verb(_plugin(tmp_path), home)
     assert r.returncode == 1 and "install-cli" in r.stderr and "Traceback" not in r.stderr
+
+
+# ---- sc3 act 2: the launcher's form ------------------------------------------------------
+
+@pytest.fixture
+def box(tmp_path):
+    """A temp home with a launcher `install-cli` wrote from a plugin copy."""
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin = _plugin(tmp_path)
+    r = _verb(plugin, home)
+    assert r.returncode == 0, r.stderr
+    return home, _bins(home) / "agentik-session", plugin
+
+
+def _call(tool, home, *argv, env=None, stdin="{}", cwd=None):
+    return subprocess.run([str(tool), *argv], input=stdin, env=env or _bare(home), cwd=cwd or home,
+                          capture_output=True, text=True, timeout=60)
+
+
+def _the_three_reads(tool, home, env, gone):
+    """A verb exits 3; `hook` exits 0; SessionStart a valid JSON systemMessage, every time;
+    other events say it once, by the marker."""
+    r = _call(tool, home, "status", env=env)
+    assert r.returncode == 3 and gone in r.stderr and "/session:install-cli" in r.stderr, r
+    for _ in range(2):
+        r = _call(tool, home, "hook", "SessionStart", env=env)
+        assert r.returncode == 0, r.stderr
+        said = json.loads(r.stdout)
+        assert list(said) == ["systemMessage"]
+        assert gone in said["systemMessage"] and "/session:install-cli" in said["systemMessage"]
+    marker = home / ".local" / "state" / "agentik-session" / "install-needed"
+    assert marker.read_text().strip() == gone
+    r = _call(tool, home, "hook", "PreToolUse", env=env)
+    assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+    marker.unlink()
+    said = [_call(tool, home, "hook", "PostToolUse", env=env) for _ in range(2)]
+    assert [(h.returncode, gone in h.stderr) for h in said] == [(0, True), (0, False)]
+    assert marker.read_text().strip() == gone
+
+
+def test_sc3_a_gone_interpreter(box, tmp_path):
+    home, tool, _ = box
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    gone = "/nowhere/python3"
+    _the_three_reads(tool, home, _bare(home, AGENTIK_PYTHON=gone, PATH=str(empty)), gone)
+    # A folder at the path is as gone, and PATH's python3 is the fallback when there is one.
+    r = _call(tool, home, "--version", env=_bare(home, AGENTIK_PYTHON="/usr"))
+    assert r.returncode == 0 and r.stdout.startswith("agentik-session ")
+
+
+def test_sc3_an_interpreter_that_is_none_never_blocks_a_hook(box, tmp_path):
+    home, tool, _ = box
+    fake = tmp_path / "fake-python"
+    fake.write_text("#!/bin/sh\nexit 2\n")
+    fake.chmod(0o755)
+    env = _bare(home, AGENTIK_PYTHON=str(fake))
+    r = _call(tool, home, "hook", "PreToolUse", env=env)
+    assert r.returncode == 0, r
+    r = _call(tool, home, "hook", "SessionStart", env=env)
+    assert r.returncode == 0 and "systemMessage" in json.loads(r.stdout)
+
+
+def test_sc3_a_gone_tree(box):
+    home, tool, _ = box
+    [tree] = _trees(home)
+    shutil.rmtree(_share(home) / tree)
+    _the_three_reads(tool, home, _bare(home), str(_share(home) / tree))
+
+
+def test_sc3_a_path_that_needs_quoting_stays_valid(tmp_path):
+    from claude_session import install
+    weird = tmp_path / 'we"ird\\ $HOME `x` tree'
+    tool = tmp_path / "agentik-session"
+    tool.write_text(install.launcher_text(weird, "2.0.0-alpha.1"))
+    tool.chmod(0o755)
+    r = _call(tool, tmp_path, "hook", "SessionStart")
+    assert r.returncode == 0, r.stderr
+    assert str(weird) in json.loads(r.stdout)["systemMessage"]
+
+
+def test_sc3_decoys_change_nothing_the_launcher_runs(box, tmp_path):
+    home, tool, _ = box
+    cwd, decoys = tmp_path / "cwd", tmp_path / "decoys"
+    for d in (cwd, decoys):
+        (d / "claude_session").mkdir(parents=True)
+        for f in ("__init__.py", "__main__.py", "cli.py"):
+            (d / "claude_session" / f).write_text(DECOY)
+    real = _call(tool, home, "--version")
+    assert real.returncode == 0
+    for argv in (("--version",), ("hook", "PostToolUse")):
+        r = _call(tool, home, *argv, env=_bare(home, PYTHONPATH=str(decoys), PYTHONHOME=str(decoys)),
+                  cwd=cwd)
+        assert r.returncode == 0 and "DECOY" not in r.stdout + r.stderr, r
+    assert _call(tool, home, "--version", cwd=cwd).stdout == real.stdout
+    # The plugin it was frozen from cannot change it either.
+    (box[2] / "lib" / "claude_session" / "cli.py").write_text(DECOY)
+    assert _call(tool, home, "--version").stdout == real.stdout
+
+
+def test_sc3_the_old_name_notes_once_on_a_terminal_never_in_a_hook(box):
+    home, tool, _ = box
+    old = _bins(home) / "claude-session"
+    note = "claude-session: renamed; use 'agentik session …' (ends 2026-12-31)"
+    code, err = _on_tty([str(old), "--version"], _bare(home))
+    assert code == 0 and err.splitlines()[0].strip() == note
+    for argv in ([str(tool), "--version"], [str(old), "hook", "PreToolUse"]):
+        assert note not in _on_tty(argv, _bare(home))[1], argv
+    assert note not in _call(old, home, "--version").stderr
+
+
+def _launcher_form(words):
+    """agentik-observer's sources.py:_launcher, its match copied here (it is read-only and never
+    imported): a word whose basename is agentik-session, directly followed by `run`."""
+    names = [os.path.basename(w) for w in words]
+    return any(n == "agentik-session" and "run" in names[i + 1:i + 2] for i, n in enumerate(names))
+
+
+def _pty_run(argv, env, cwd, timeout=60):
+    """argv on a terminal to its end; (exit, what it wrote)."""
+    import pty
+    import select
+    import time
+    master, slave = pty.openpty()
+    p = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, env=env, cwd=cwd)
+    os.close(slave)
+    out, end = b"", time.time() + timeout
+    try:
+        while time.time() < end:
+            chunk = b""
+            if select.select([master], [], [], 0.2)[0]:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    pass
+            out += chunk
+            if p.poll() is not None and not chunk:
+                return p.returncode, out.decode(errors="replace")
+        p.terminate()
+        p.wait(timeout=30)
+        raise AssertionError("no end: " + out.decode(errors="replace"))
+    finally:
+        os.close(master)
+
+
+def _stub_claude(stubs, out):
+    """A fake `claude`: its own environment, and its parent's command line, then a clean end."""
+    stubs.mkdir(parents=True, exist_ok=True)
+    (stubs / "claude").write_text(
+        '#!/bin/sh\n/usr/bin/env > "%s/env"\n/bin/ps -o command= -p "$PPID" > "%s/parent"\nexit 0\n'
+        % (out, out))
+    (stubs / "claude").chmod(0o755)
+
+
+def test_sc3_run_reaches_its_first_spawn_at_3_9_and_ps_reads_the_form(box, tmp_path):
+    home, tool, _ = box
+    out = tmp_path / "seen"
+    out.mkdir()
+    _stub_claude(tmp_path / "stubs", out)
+    env = _bare(home, PATH="%s:%s" % (tmp_path / "stubs", BARE))
+    code, said = _pty_run([str(tool), "run", "--chain", "x"], env, home)
+    assert (out / "parent").exists(), (code, said)
+    line = (out / "parent").read_text().strip()
+    words = line.split()
+    assert os.path.basename(words[0]).lower().startswith("python"), line
+    assert words[1:3] == ["-I", "-X"] and words[3].startswith("pycache_prefix="), line
+    assert str(_share(home)) in words[4] and words[4].endswith("/agentik-session"), line
+    assert words[5:8] == ["run", "--chain", "x"], line
+    assert _launcher_form(words), line
+    assert "3.9" in subprocess.run(["/usr/bin/python3", "-c", "import sys; print(sys.version)"],
+                                   capture_output=True, text=True).stdout
