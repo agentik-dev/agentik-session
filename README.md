@@ -13,13 +13,12 @@ Several plugins cooperate in unattended relay runs: a driver spawns builder sess
 ```bash
 claude plugin marketplace add agentik-dev/agentik-commons
 claude plugin install session@agentik
-make install
 ```
 
 - The plugin carries the code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`, 3.9 or newer, with no clone, venv or launcher. Hooks never use PATH, so a session keeps its version until it respawns.
-- `make install` (from a clone) gives the terminal a CLI: it freezes the committed `plugin/lib/` under `~/.local/share/agentik-session/<tree>/` and writes `~/.local/bin/agentik-session`, run with `python -P` (3.11 or newer). A dirty tree exits 2.
+- `/session:install-cli` gives the terminal a CLI, which a fresh Mac's relay band needs: it freezes the plugin's `lib/` under `~/.local/share/agentik-session/<hash>/` and writes `~/.local/bin/agentik-session`, run with `-I` under `/usr/bin/python3`. From a clone, `make install`; a dirty tree exits 2.
 - Then run `agentik session doctor` (or `/session:doctor` inside Claude Code). It checks the tool, the plugin and its hooks, one line per check, and notes each optional sibling that is absent; exit 2 names the failing check and its remedy.
-- To upgrade: `claude plugin update session@agentik`, which new sessions pick up and live ones at their respawn, then `make install` for the terminal's CLI.
+- To upgrade: `claude plugin update session@agentik`; new sessions pick it up, live ones at their respawn; a new session moves a launcher forward.
 - At run time, the tool uses only the Python standard library.
 
 ## Commands and skills
@@ -35,6 +34,7 @@ Each command wraps one CLI verb.
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
 | `/session:gate` | `/session:gate --json` | the gate queue: running, queued, the last five done |
+| `/session:install-cli` | `/session:install-cli` | write the terminal's launcher |
 
 Skills:
 
@@ -178,7 +178,7 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 
 ## Status
 
-Status: version `v2.0.0-alpha.39`, rendered `2026-10-14`, `2375` tests in the suite.
+Status: version `v2.0.0-alpha.40`, rendered `2026-10-14`, `2422` tests in the suite.
 
 ## Credit
 

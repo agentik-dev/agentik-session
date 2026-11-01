@@ -351,7 +351,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `await start()` and the invalidate have no bound, so a never-answering `$.process.run` should park the loop; read, not run.
 
 ## sc1, the bare-machine proof (2026-10-31, S4)
-- Until sc3 the doctor passes 3.9 while `make install`'s launcher still runs `python -P` and its interpreter search wants 3.11 (`Makefile`, `install-wrapper.sh`), so `make install PYTHON=<a 3.9>` writes a launcher that exits 2. Named for sc3; two install tests wait for 3.11 under the floor.
 - `-- -- budget`: base's stock parser under 3.12.7 refuses it; head accepts it on 3.12 and refuses it on 3.9. A form with no use, left out of the table.
 - `mod -- -h` now prints help and exits 0, where base refused it: newly accepted, as are `gate run R a --label t b` and `charter close F --exit X G`, the charter's two forms.
 - `gate.py:640`: a non-UTF-8 gate command crashes the runner with UnicodeEncodeError, at base too.
@@ -360,7 +359,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `scripts/bare-proof`'s write detector is a Python audit hook: it sees the tool's own process, and a child's HOME, not what `git` or the gate's detached runner write themselves. The runner's state is read under `$T` and its job's HOME is asserted.
 - sc2: `pyproject.toml` reads its version by setuptools' `attr`, which nothing has built since the move; `make install` does not read that file. A guess until someone builds it. (agentik-session, sc2)
 - sc2: `__init__._pin` opens one or two files at each import. The proof's median holds, and a hook's cost is the canary's to read. (agentik-session, sc2)
-- sc2: `git hash-object` names a frozen tree since sc2, so `prune-trees` and the README's `<tree>` no longer equal `git rev-parse HEAD:<path>`. Nothing reads them so, and sc3's `install-cli` chooses its own content hash. (agentik-session, sc2)
 
 ## sc2's refuter, round 1 (2026-10-31, S4)
 - `hooks.py`, `follow_launcher_on`: the doctor is not "as `find -mmin -1440`" on this Mac: at 1439 m and 1440 m `/usr/bin/find` matched while `follow_launcher_on` said False, so the hooks follow for up to 2 minutes with no warning.
@@ -378,3 +376,6 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `plugin/bin/agentik-session:21-25`: under any interpreter string other than `/usr/bin/python3`, a hook keeps a wrapper shell; stdin still arrives.
 - `hooks/run:12` against `hooks.py:374`: they disagree on an mtime under a second ahead, since find compares whole seconds: ahead 0.4 s read shim on, doctor off. At 0.9 s and past, both off.
 - `tests/test_bare_machine.py`: two mutants survive that file, Apple's hook 2 swallowed and `2|126|127` to `2|126`; other test files were not run on them. Lead: pin a hook's 2 through Apple's path.
+- sc3: `.hygiene-allow`'s `install-wrapper.sh` row and its comment name a file that is gone; the file was outside sc3's `may touch`. (agentik-session, sc3)
+- sc3: `resolver.py`'s "the shipped profiles.yaml is gone: ...; run make install" still names the clone's verb, outside sc3's named modules; `/session:install-cli` is the remedy now. (agentik-session, sc3)
+- sc3: `/session:install-cli` runs `${CLAUDE_PLUGIN_ROOT}/bin/agentik-session` under a `*/bin/agentik-session install-cli*` allowed-tools line; no real session has run it (design/04 §9 item 1). (agentik-session, sc3)
