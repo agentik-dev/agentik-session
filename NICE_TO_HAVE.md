@@ -6,6 +6,20 @@ audience: owner, agent
 ---
 # claude-code-session: what a review left open, none of it blocking
 
+## The canary, the doctor on a wake, sc3 round 2 (2026-10-31, hq sitting 2026-10-31-4, S4)
+- S4: the canary: `hooks.jsonl` rows hold no time, version or session, so a canary splits them by row number.
+- S4: `doctor` reads FAIL meter on the first tool call after an idle wake and green on the next (2026-10-31 20:30, 2835 s). Repro: run it first on a wake.
+- S4: sc3 round 2: `/usr/bin/false` as the interpreter leaves `hook SessionStart` at rc 1 with no stdout.
+- S4: sc3 round 2: a non-UTF-8 byte in `AGENTIK_PYTHON` breaks its JSON.
+- S4: sc3 round 2: "is gone" misleads for an interpreter that exists and fails.
+
+## S51's refuter, at c8af266 (2026-10-31, hq sitting 2026-10-31-4)
+- S4: `bands()` raises KeyError(None) when no keyed reading has a session (`admission.py:1237`; `_write_band` keeps the old band.json; `record` cannot write such a row). Fix: return `band()` when `current` is None. The probes (`s51probe/probe.py`, `roll.py` in the scratchpad) were lost with the session.
+- S4: MAX_ACCOUNTS crowding: at 17 or more keys in the ledger, the oldest sessions fall out of `sessions` and draw another login's top level. Fix: rank `keep` by the sessions' newest first.
+- S4, a design question: after a login switch, `decide` keys on the old login's five-hour reading (admitted, P from A); pre-existing, and a verdict change.
+- S4: a week roll adds the same login's dead old key to `accounts`.
+- S4: `rules.lifetime` needs `bound` seven-day, and `band_line` does not.
+
 ## S44, the demand bands (2026-10-30)
 - S4: `status --transcript` shows no band: it reads a transcript, not this session's band. A reader that wants one takes it from band.json.
 - S4: `grade` in `bands.yaml` is the source's text, and nothing reads it.
