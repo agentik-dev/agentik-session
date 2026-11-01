@@ -613,8 +613,8 @@ def test_s47_two_real_children_each_keep_their_own_log(tmp_path):
     def sleep(s):
         clock[0] += 60.0                               # past the settle at the first poll
         time.sleep(0.01)
-    a = gate.enqueue(w.root, w.dir("one"), ["sh", "-c", "echo from-one"], ENV, [], 60, "", None, T0)
-    b = gate.enqueue(w.root, w.dir("two"), ["sh", "-c", "echo from-two; exit 4"], ENV, [], 60,
+    a = gate.enqueue(w.root, w.dir("one"), ["sh", "-c", "echo from-one"], ENV, [], 86400, "", None, T0)
+    b = gate.enqueue(w.root, w.dir("two"), ["sh", "-c", "echo from-two; exit 4"], ENV, [], 86400,
                      "", None, T0)
     fx = gate.Fx(now=lambda: clock[0], sleep=sleep, popen=subprocess.Popen, killpg=w.killpg,
                  post=w.post, log=w.logs.append, env={"HOME": str(w.home)}, idle=0.0,

@@ -29,7 +29,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import (budget, charter, gate, harness, ledger, meter, policystore, resolver, rules,
+from . import (budget, charter, gate, harness, install, ledger, meter, policystore, resolver, rules,
                sessionconfig, store)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
@@ -381,9 +381,15 @@ FOLLOW_NOTE = ("agentik-session: hooks-follow-launcher is on: hooks run the laun
 
 
 def _follow_said(out: dict, env) -> dict:
-    """SessionStart's one line while the switch is on, whichever way the handler ended."""
+    """SessionStart's one line while the switch is on, whichever way the handler ended. With it
+    off, the launcher's forward refresh (design/04 §3), whose only word is its failure; with it
+    on a hook runs the launcher itself, so there is nothing to refresh from."""
     if follow_launcher_on(env):
         out["systemMessage"] = FOLLOW_NOTE
+        return out
+    said = install.refresh(env)
+    if said:
+        out["systemMessage"] = said
     return out
 
 

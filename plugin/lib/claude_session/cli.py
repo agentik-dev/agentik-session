@@ -14,8 +14,8 @@ import subprocess
 import sys
 import time
 
-from . import (admission, charter, doctor, gitinfo, harness, hooks, launch, ledger, measure, meter, mod,
-               resolver, rules, sessionconfig, store)
+from . import (admission, charter, doctor, gitinfo, harness, hooks, install, launch, ledger, measure,
+               meter, mod, resolver, rules, sessionconfig, store)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -115,6 +115,20 @@ def cmd_doctor(args) -> int:
     rep = doctor.run()
     print(json.dumps(rep.as_dict(), indent=2) if args.json else doctor.render(rep))
     return 0 if rep.ok else 2
+
+
+def cmd_install_cli(args) -> int:
+    """Freeze this code and write the launcher, the link and the door (design/04 §3)."""
+    try:
+        done = install.install(args.prefix)
+    except (OSError, KeyError, ValueError) as e:
+        print(f"agentik-session: install-cli: {e}", file=sys.stderr)
+        return 1
+    print(f"installed {done['launcher']} -> {done['tree']} ({done['version']}); "
+          f"{done['link']} links to it; {done['door']}")
+    for line in done["pruned"]:
+        print(line)
+    return 0
 
 
 def cmd_status(args) -> int:
@@ -1061,6 +1075,11 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--json", action="store_true")
     dr.set_defaults(func=cmd_doctor)
 
+    ic = sub.add_parser("install-cli", help="give the terminal the CLI: freeze this code, write "
+                        "the launcher in ~/.local/bin, its link and the agentik door, and prune")
+    ic.add_argument("--prefix", help="instead of $HOME/.local")
+    ic.set_defaults(func=cmd_install_cli)
+
     pf = sub.add_parser("profile", help="list the profiles, or show one resolved here")
     pf.add_argument("name", nargs="?")
     pf.set_defaults(func=cmd_profile)
@@ -1194,6 +1213,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    install.restore_parent_env()    # before anything can spawn (design/04 §3)
     raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(raw)
     args.raw_argv = raw             # `run` prints its own start line from it

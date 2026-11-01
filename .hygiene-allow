@@ -19,7 +19,6 @@ plugin/lib/claude_session/launch.py: sibling,renamed
 plugin/lib/claude_session/sessionconfig.py: sibling
 tests/test_launch.py: sibling,renamed
 # The launcher's one-time marker lives under the tool's state path (ADV10-5).
-install-wrapper.sh: sibling,renamed
 tests/test_install.py: sibling,renamed
 # The manifests: the repo's name and the dependency names.
 plugin/lib/claude_session/profiles.yaml: sibling
@@ -83,7 +82,7 @@ design/packets/s7-conventions-and-doctor.md: sibling
 design/packets/s8-conventions-plugins.md: sibling
 design/packets/s9-hygiene-and-charters.md: sibling
 # agentik-r1 §6.1, §6.3 (packet ruling 12): `renamed` is allowed where the old name is load-
-# bearing until r2: the alias and its note (install-wrapper.sh, Makefile), the fallbacks to the
+# bearing until r2: the alias and its note (Makefile), the fallbacks to the
 # old state, repo and user folders, section key, plugin IDs, checkout folders and local lane
 # (config, resolver, doctor, launch), the respawn match's old spelling (hooks), the hook
 # shim's and module's old CLI (c11), and each one's test. The rows above carry it beside

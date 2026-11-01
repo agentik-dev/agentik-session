@@ -95,7 +95,7 @@ def test_green_machine_in_order(machine):
     assert [c.name for c in rep.checks] == [
         "claude", "python", "state-dir", "plugin", "decisions", "respeak", "relay-plugin",
         "profiles", "resolved", "meter", "meter-hook", "config", "git", "relay", "mod",
-        "measure"]
+        "measure", "launcher"]
 
 
 def test_no_claude_on_path(machine):
@@ -176,7 +176,7 @@ def test_c1_no_sibling_is_a_note_and_doctor_stays_green(machine, monkeypatch, ca
     rep = doctor.run(machine.env, machine.repo)
     assert failing(rep) == [] and rep.ok
     notes = {c.name: c.detail for c in rep.checks if c.note}
-    assert list(notes) == ["decisions", "respeak", "relay-plugin", "relay"]
+    assert list(notes) == ["decisions", "respeak", "relay-plugin", "relay", "launcher"]
     for name in ("decisions", "respeak", "relay-plugin"):
         assert notes[name].startswith(f"not installed, optional: ")
         assert "^" not in notes[name]
@@ -460,18 +460,6 @@ def test_s20b_shim_drops_post_tool_use_failure(tmp_path):
     assert (r.returncode, r.stdout) == (2, "{}\n")
 
 
-def test_s20b_doctor_names_a_cli_older_than_the_hooks(machine, monkeypatch):
-    # The plugin registers an event this CLI does not handle: the CLI is older than the
-    # plugin's hooks, and the doctor says to install the CLI first.
-    assert failing(doctor.run(machine.env, machine.repo)) == []        # the positive control
-    handlers = {k: v for k, v in hooks.HANDLERS.items() if k != "PostToolUseFailure"}
-    monkeypatch.setattr(hooks, "HANDLERS", handlers)
-    rep = doctor.run(machine.env, machine.repo)
-    assert failing(rep) == ["plugin"]
-    detail = next(c for c in rep.checks if c.name == "plugin").detail
-    assert "PostToolUseFailure" in detail and "make install" in detail, detail
-
-
 # ---- S20b's review: the mid-upgrade remedy (F4) and a whole flag (F5) --------------
 
 def test_s20b_doctor_names_the_plugin_update_when_a_hook_is_missing(machine):
@@ -575,3 +563,58 @@ def test_f2_new_and_old_ids_both_enabled_warn_to_disable_the_old(machine):
     assert "each hook fires twice" in warns["plugin"]
     assert "disable decisions@claude-code-decisions" in warns["decisions"]
     assert "respeak" not in warns
+
+
+# ---- sc3: the launcher in ~/.local/bin ----------------------------------------------------
+
+def _launcher_at(tmp_path, *lines):
+    path = tmp_path / ".local" / "bin" / "agentik-session"
+    path.parent.mkdir(parents=True)
+    path.write_text("#!/bin/sh\n" + "".join(line + "\n" for line in lines))
+    return {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"}
+
+
+def _row(check):
+    return ("FAIL" if not check.ok else "warn" if check.warn else "note" if check.note else "ok")
+
+
+def test_sc3_no_launcher_is_a_note_naming_the_verb(tmp_path):
+    c = doctor._check_launcher({"HOME": str(tmp_path)}, None)
+    assert _row(c) == "note" and "/session:install-cli" in c.detail
+
+
+def test_sc3_a_launcher_older_than_the_plugin_warns(tmp_path):
+    env = _launcher_at(tmp_path, "VERSION=2.0.0-alpha.9", "TREE=%s" % tmp_path)
+    plugins = {doctor.PLUGIN_ID: {"enabled": True, "version": "2.0.0-alpha.10"}}
+    c = doctor._check_launcher(env, plugins)
+    assert _row(c) == "warn" and "older than the plugin's 2.0.0-alpha.10" in c.detail
+    assert _row(doctor._check_launcher(env, {doctor.PLUGIN_ID: {"enabled": True,
+                                                                "version": "2.0.0-alpha.9"}})) == "ok"
+
+
+def test_sc3_a_launcher_with_no_version_line_warns_and_a_bad_one_too(tmp_path):
+    env = _launcher_at(tmp_path, 'CODE="%s"' % tmp_path, 'PYTHON="/venv/bin/python"')
+    c = doctor._check_launcher(env, None)
+    assert _row(c) == "warn" and "no VERSION=" in c.detail
+    (tmp_path / ".local" / "bin" / "agentik-session").write_text("VERSION=banana\n")
+    c = doctor._check_launcher(env, None)
+    assert _row(c) == "warn" and "banana" in c.detail
+
+
+@pytest.mark.parametrize("line", ("TREE=%s", 'CODE="%s"'))
+def test_sc3_a_launcher_on_a_gone_tree_fails(tmp_path, line):
+    env = _launcher_at(tmp_path, "VERSION=2.0.0-alpha.9", line % (tmp_path / "gone"))
+    c = doctor._check_launcher(env, None)
+    assert _row(c) == "FAIL" and "which is gone" in c.detail and "/session:install-cli" in c.detail
+
+
+def test_sc3_the_python_row_reads_the_launchers_interpreter(tmp_path):
+    version = (3, 9, 6, "final", 0)
+    plain = {"HOME": str(tmp_path / "none"), "PATH": "/usr/bin:/bin"}
+    assert "the launcher runs" not in doctor._check_python(plain, version, "/p").detail
+    env = _launcher_at(tmp_path, "VERSION=2.0.0-alpha.9", "TREE=%s" % tmp_path)
+    c = doctor._check_python(env, version, "/p")
+    assert "the launcher runs /usr/bin/python3" in c.detail and not c.warn
+    (tmp_path / ".local" / "bin" / "agentik-session").write_text('PYTHON="/gone/python"\nCODE="/x"\n')
+    c = doctor._check_python(env, version, "/p")
+    assert "the launcher runs /gone/python, which is gone" in c.detail and c.ok and c.warn

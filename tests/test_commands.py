@@ -1,5 +1,5 @@
-"""plugin/commands: seven files, each one verb, under thirty lines (§2.5); gate.md runs
-`gate status` (S38)."""
+"""plugin/commands: eight files, each one verb, under thirty lines (§2.5); gate.md runs
+`gate status` (S38); install-cli.md runs the plugin's own launcher, never one on PATH (sc3)."""
 import re
 from pathlib import Path
 
@@ -9,12 +9,12 @@ from claude_session import cli
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = ROOT / "plugin" / "commands"
-VERBS = ("status", "profile", "set", "checkpoint", "doctor", "report", "gate")
+VERBS = ("status", "profile", "set", "checkpoint", "doctor", "report", "gate", "install-cli")
 RUNS = {"gate": "gate status"}         # a verb whose command runs one of its sub-verbs
 SKILL = ROOT / "plugin" / "skills" / "session" / "SKILL.md"
 
 
-def test_exactly_the_seven_commands():
+def test_exactly_the_eight_commands():
     assert sorted(p.stem for p in COMMANDS.glob("*.md")) == sorted(VERBS)
 
 
@@ -26,10 +26,14 @@ def test_command_runs_one_verb_under_thirty_lines(verb):
     assert lines[0] == "---"
     head = text.split("---")[1]
     assert re.search(r'^description: "[^"]+"$', head, re.M)
-    assert "allowed-tools: [Bash(agentik-session *)]" in head
     run = RUNS.get(verb, verb)
     runs = re.findall(r"agentik-session (\S+(?: \S+)?) \$ARGUMENTS", text)
     assert runs == [run]
+    if verb == "install-cli":       # the launcher on PATH may be what this repairs
+        assert "allowed-tools: [Bash(*/bin/agentik-session install-cli*)]" in head
+        assert "!`${CLAUDE_PLUGIN_ROOT}/bin/agentik-session install-cli $ARGUMENTS`" in lines
+        return
+    assert "allowed-tools: [Bash(agentik-session *)]" in head
     assert f"!`agentik-session {run} $ARGUMENTS`" in lines
 
 

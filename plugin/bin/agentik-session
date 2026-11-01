@@ -13,14 +13,24 @@ refuse() {   # the reason, then this launcher's own arguments
 [ -f "$root/lib/agentik-session" ] && [ -r "$root/lib/agentik-session" ] || refuse "no runner in this plugin, at lib/agentik-session" "$@"
 py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "no python3, at /usr/bin/python3 or on PATH" "$@"
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
+# /usr/bin/python3 adds SDKROOT and LC_CTYPE where unset, and adds to CPATH, LIBRARY_PATH and
+# MANPATH even where set. Record what this shell saw, as the launcher install-cli writes does:
+# the package restores it first thing (restore_parent_env), so a job or `claude` sees the parent's.
+for v in SDKROOT CPATH LIBRARY_PATH MANPATH LC_CTYPE; do
+    unset "AGENTIK_PARENT_$v"
+    eval "[ -z \"\${$v+x}\" ] || export AGENTIK_PARENT_$v=\"\$$v\""
+done
+export AGENTIK_PARENT_ENV=1
 # Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
-# block, so a hook stays in this shell to read its exit. A 2, 126 or 127 from what cannot print
-# from Python exits 0: nothing started, and what that costs is this tool's own PreToolUse block,
-# as with no Python. A real Python's 2 stands. An exit 1 is no block, and stands. Apple's is
-# execed: with the runner tested above, it reaches the runner or exits 1.
-if [ "$1" = hook ] && [ "$py" != /usr/bin/python3 ]; then
+# block, so this shell stays to read its exit. From what cannot print from Python, a hook's 2, 126
+# or 127 exits 0: nothing started, and what that costs is this tool's own PreToolUse block, as
+# with no Python; a hook's 1 is no block, and stands. A verb's failure exits 3. A real Python's
+# exit stands. Apple's is execed: with the runner tested above, it reaches the runner or exits 1.
+if [ "$py" != /usr/bin/python3 ]; then
     "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"; rc=$?
-    case $rc in 2|126|127) [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "no python3 that starts: AGENTIK_PYTHON or PATH's is none" "$@" ;; esac
+    if [ "$rc" != 0 ] && { [ "$1" != hook ] || [ "$rc" = 2 ] || [ "$rc" = 126 ] || [ "$rc" = 127 ]; }; then
+        [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "no python3 that starts: AGENTIK_PYTHON or PATH's is none" "$@"
+    fi
     exit "$rc"
 fi
 exec "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"

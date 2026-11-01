@@ -10,19 +10,23 @@ resolves to deny, even though Claude Code still reports success. Read section
 
 ## 1. One-time setup
 
-1. Install the terminal's launcher: `make install` from the repo root, with
-   `plugin/lib/` and `plugin.json` committed (a dirty tree exits 2). It copies
-   the committed `plugin/lib/` and `plugin.json` to
-   `~/.local/share/agentik-session/<tree>/` (`<tree>` is hashed from both, so a
+1. Install the terminal's launcher: `/session:install-cli` inside Claude Code, or
+   `<plugin>/bin/agentik-session install-cli` (`make install` from a clone refuses a dirty
+   `plugin/lib/`, `plugin/bin/agentik` or `plugin.json` with exit 2, then runs the same verb).
+   It copies the plugin's `lib/`, `plugin.json` and the `agentik` door to
+   `~/.local/share/agentik-session/<hash>/` (`<hash>` is of their names and contents, so a
    version bump alone is a new tree; an older copy is pruned unless a running
-   process names it or it is among the newest three) and writes
-   `~/.local/bin/agentik-session`, which runs that copy with `python -P`, so
-   neither the directory a command runs in nor the live checkout can change it.
-   The interpreter is baked in: the repo's `.venv/bin/python` by
-   realpath, else homebrew's `python3`, else `python3`; python 3.11 or newer.
-   Re-run `make install` after each merge you want the terminal to run, and
-   after the baked interpreter is upgraded away. `PREFIX=<dir>` (default
+   process names it, on its command line or in its environment, or it is among the newest
+   three) and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
+   runs that copy under `/usr/bin/python3` with `-I`, so
+   neither the directory a command runs in nor a checkout can change it, with no clone or
+   venv. `AGENTIK_PYTHON` names another interpreter; `python3` on PATH is the fallback. What
+   Apple's interpreter adds to the environment, the package takes back, so a chain's `claude`
+   and a gate job see what the launcher's parent had. A `SessionStart` moves a launcher that
+   exists forward to the plugin's version, never back, and creates none; a launcher with no
+   `VERSION=` is left alone, and the doctor names it. `--prefix <dir>` (default
    `~/.local`) moves both paths. Hooks do not use it, unless the switch below is on.
+   The relay on a fresh Mac needs this step for its band; nothing else about the relay moves.
 2. Install the plugin: `claude plugin marketplace add <clone>`, then
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
@@ -31,7 +35,7 @@ resolves to deny, even though Claude Code still reports success. Read section
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
-   live ones when they respawn or run `/reload-plugins`; then `make install`. With
+   live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
    on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
@@ -40,8 +44,9 @@ resolves to deny, even though Claude Code still reports success. Read section
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
    fails its `plugin` line and names an event its CLI does not handle.
 3. Run `agentik session doctor`. It checks the CLI, the python it runs under
-   (and the newest known release), the plugin and its dependencies; a failing
-   check exits 2 and names itself.
+   (and the newest known release, and the launcher's interpreter), the plugin and its
+   dependencies; it warns on a launcher older than the plugin or with no `VERSION=`, and
+   fails on a launcher whose tree is gone; a failing check exits 2 and names itself.
 
 Until the hooks fire, `agentik session status` and `budget` have no samples
 and say so.
@@ -53,7 +58,8 @@ A live session's hooks stay on the plugin version it started with until it respa
 file moves every session on this shim to the launcher on its next hook:
 
 1. Land the fix.
-2. `make install`, from that commit. Touching the file first runs the old launcher.
+2. `/session:install-cli` from a plugin holding it, or `make install` from that commit.
+   Touching the file first runs the old launcher.
 3. `touch ~/.config/agentik/hooks-follow-launcher`.
 4. `rm ~/.config/agentik/hooks-follow-launcher` once sessions have respawned.
 
@@ -358,7 +364,7 @@ prompt cache's lifetime.
   a refusal); `close`
   keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
-- Upgrade the CLI first (`make install`): it prints the block. The plugin's
+- Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
 ### Restarting a sitting: `agentik session run`

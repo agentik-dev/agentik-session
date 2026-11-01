@@ -138,7 +138,7 @@ def test_shell_preview_is_quoted(fake_bins):
 
 def test_config_env_cannot_redirect_credentials(fake_bins):
     """The local lane unsets these deliberately; the launcher must refuse them."""
-    for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "PATH", "PYTHONPATH",
+    for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "PATH", "PYTHONPATH", "AGENTIK_PYTHON",
                 "DYLD_INSERT_LIBRARIES", "CLAUDE_CODE_OAUTH_TOKEN"):
         with pytest.raises(launch.LaunchError, match=key):
             launch.build(SessionConfig(name="x", env={key: "evil"}))

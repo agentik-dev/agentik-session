@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import demand, hooks, measure, meter, mod, resolver
+from . import SEMVER, demand, hooks, install, measure, meter, mod, resolver
 
 PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
@@ -224,7 +224,53 @@ def _check_python(env, version=sys.version_info, exe=sys.executable) -> Check:
     ok = tuple(version[:2]) >= (3, 9)    # /usr/bin/python3 on a bare Mac (hq entry 6, design/04)
     newest, source = newest_known(env)
     detail = f"{ver} ({exe}); newest known {newest} ({source})"
-    return Check("python", ok, detail + ("" if ok else "; needs 3.9+"))
+    runs = _launcher_python(env)
+    gone = bool(runs) and not (os.path.isfile(runs) and os.access(runs, os.X_OK))
+    if runs:
+        detail += f"; the launcher runs {runs}" + (", which is gone" if gone else "")
+    return Check("python", ok, detail + ("" if ok else "; needs 3.9+"), warn=ok and gone)
+
+
+def _launcher_python(env):
+    """The interpreter the launcher in ~/.local/bin runs, by its own rule; None with no launcher.
+    The old form bakes one; the new form takes AGENTIK_PYTHON, Apple's, then PATH's."""
+    found = install.read_launcher(install.launcher_path(env))
+    if found is None:
+        return None
+    if found["python"]:
+        return found["python"]
+    wanted = env.get("AGENTIK_PYTHON") or "/usr/bin/python3"
+    if os.path.isfile(wanted) and os.access(wanted, os.X_OK):
+        return wanted
+    return _which("python3", env) or wanted
+
+
+def _check_launcher(env, plugins) -> Check:
+    """The launcher in ~/.local/bin (design/04 §5, §6): optional, and only a gone tree fails, since
+    every verb on the terminal then exits 3."""
+    path = install.launcher_path(env)
+    found = install.read_launcher(path)
+    remedy = "run /session:install-cli"
+    if found is None:
+        return Check("launcher", True, f"none at {path}; /session:install-cli gives the terminal "
+                     "the CLI", note=True)
+    if found["tree"] and not os.path.isdir(found["tree"]):
+        return Check("launcher", False, f"{path} runs {found['tree']}, which is gone; {remedy}")
+    version = found["version"]
+    if not version:
+        return Check("launcher", True, f"{path} has no VERSION= line, so no session refreshes it; "
+                     + remedy, warn=True)
+    theirs = install.order(version)
+    if theirs is None:
+        return Check("launcher", True, f"{path} reads VERSION={version}, which is no version, so "
+                     f"no session refreshes it; {remedy}", warn=True)
+    _, p, _ = _pick_id(plugins, PLUGIN_ID, OLD_PLUGIN_ID) if plugins is not None else (None, None, None)
+    plugin = (p or {}).get("version") or SEMVER
+    ours = install.order(plugin)
+    if ours is not None and theirs < ours:
+        return Check("launcher", True, f"{path} is {version}, older than the plugin's {plugin}; the "
+                     f"next session's start moves it, or {remedy}", warn=True)
+    return Check("launcher", True, f"{version} at {path}")
 
 
 def _check_state(env) -> Check:
@@ -272,13 +318,6 @@ def _check_plugin(plugins, err) -> Check:
         return Check("plugin", False, "hooks not registered: " + ", ".join(missing)
                      + f"; update the plugin: `claude plugin update {pid}`, then "
                      "restart Claude Code")
-    # S20 ruling 3: a CLI older than its plugin refuses an event it does not know (exit 2).
-    unknown = [e for e in registered if e not in hooks.HANDLERS]
-    if unknown:
-        return Check("plugin", False, f"{pid} {p.get('version')} registers "
-                     + ", ".join(unknown) + ", which this agentik-session does not handle: "
-                     "the CLI is older than the plugin's hooks; install the CLI first "
-                     "(`make install`), then `claude plugin update`")
     if old:
         return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
                      + _switch_note(pid, PLUGIN_ID), warn=True)
@@ -530,6 +569,7 @@ def run(env=None, cwd=None) -> Report:
         add(relay)
     add(_check_mod(env))         # the rows above keep their places
     add(_check_measure(env))     # last (packet M2)
+    add(_check_launcher(env, plugins))   # sc3: the rows above keep their places
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):

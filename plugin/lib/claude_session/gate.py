@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from . import install
+
 ID = re.compile(r"^\d{8}-\d{6}-[1-9]\d{0,11}\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")     # hooks._SID's pattern (a test pins it)
 WALL = 5400
@@ -479,7 +481,7 @@ def spawn_serve(root, popen=None) -> bool:
     argv = [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner),
             "gate", "serve", "--root", str(root)]
     with open(g / "runner.log", "ab") as log:
-        popen(argv, cwd=str(g), env=dict(os.environ), stdin=subprocess.DEVNULL, stdout=log,
+        popen(argv, cwd=str(g), env={**os.environ, **install.parent_record()}, stdin=subprocess.DEVNULL, stdout=log,
               stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
     return True
 

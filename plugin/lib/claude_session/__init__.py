@@ -6,7 +6,7 @@ import re
 
 def _pin() -> str:
     """The version, from `plugin.json`, the one pin (design/04 §6): in the plugin, its manifest;
-    in a tree `make install` froze, the copy beside the package. Never raises: an import that
+    in a tree `install-cli` froze, the copy beside the package. Never raises: an import that
     fails takes every hook with it."""
     lib = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     for path in (os.path.join(os.path.dirname(lib), ".claude-plugin", "plugin.json"),

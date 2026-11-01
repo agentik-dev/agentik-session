@@ -3,7 +3,7 @@
 # one on PATH (design/04 §2). With no launcher there it exits 0 silently, as a shim always has;
 # `agentik session doctor` reports the gap.
 # The switch (design/04 §3): one file, its existence the whole state, lapsing 24 h after its
-# mtime. While on, a hook runs the launcher `make install` last wrote, as every hook did before
+# mtime. While on, a hook runs the launcher `install-cli` last wrote, as every hook did before
 # sc2; RUNBOOK has the emergency's lines. Only HOME is read here: no other variable, PATH entry
 # or settings `env` can select that launcher, so find is by its full path. A future mtime would
 # never lapse, so it is refused; the [ -e ] forks nothing while the file is absent. `date` below
