@@ -376,6 +376,5 @@ S17 (the EXIT rule says respawn, never compact), review round 1, 2026-09-30:
 - `plugin/bin/agentik-session:21-25`: under any interpreter string other than `/usr/bin/python3`, a hook keeps a wrapper shell; stdin still arrives.
 - `hooks/run:12` against `hooks.py:374`: they disagree on an mtime under a second ahead, since find compares whole seconds: ahead 0.4 s read shim on, doctor off. At 0.9 s and past, both off.
 - `tests/test_bare_machine.py`: two mutants survive that file, Apple's hook 2 swallowed and `2|126|127` to `2|126`; other test files were not run on them. Lead: pin a hook's 2 through Apple's path.
-- sc3: `.hygiene-allow`'s `install-wrapper.sh` row and its comment name a file that is gone; the file was outside sc3's `may touch`. (agentik-session, sc3)
 - sc3: `resolver.py`'s "the shipped profiles.yaml is gone: ...; run make install" still names the clone's verb, outside sc3's named modules; `/session:install-cli` is the remedy now. (agentik-session, sc3)
 - sc3: `/session:install-cli` runs `${CLAUDE_PLUGIN_ROOT}/bin/agentik-session` under a `*/bin/agentik-session install-cli*` allowed-tools line; no real session has run it (design/04 §9 item 1). (agentik-session, sc3)

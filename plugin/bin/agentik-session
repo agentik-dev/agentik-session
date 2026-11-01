@@ -13,6 +13,14 @@ refuse() {   # the reason, then this launcher's own arguments
 [ -f "$root/lib/agentik-session" ] && [ -r "$root/lib/agentik-session" ] || refuse "no runner in this plugin, at lib/agentik-session" "$@"
 py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "no python3, at /usr/bin/python3 or on PATH" "$@"
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
+# /usr/bin/python3 adds SDKROOT and LC_CTYPE where unset, and adds to CPATH, LIBRARY_PATH and
+# MANPATH even where set. Record what this shell saw, as the launcher install-cli writes does:
+# the package restores it first thing (restore_parent_env), so a job or `claude` sees the parent's.
+for v in SDKROOT CPATH LIBRARY_PATH MANPATH LC_CTYPE; do
+    unset "AGENTIK_PARENT_$v"
+    eval "[ -z \"\${$v+x}\" ] || export AGENTIK_PARENT_$v=\"\$$v\""
+done
+export AGENTIK_PARENT_ENV=1
 # Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
 # block, so a hook stays in this shell to read its exit. A 2, 126 or 127 from what cannot print
 # from Python exits 0: nothing started, and what that costs is this tool's own PreToolUse block,

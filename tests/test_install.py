@@ -730,6 +730,18 @@ def test_sc3_refresh_race_two_at_once_twenty_rounds(old_install):
 # ---- sc3 act 6: Apple's variables ----------------------------------------------------------
 
 FIVE = ("SDKROOT", "CPATH", "LIBRARY_PATH", "MANPATH", "LC_CTYPE")
+VIAS = ("launcher", "plugin bin")
+
+
+def _via(box, tmp_path, via):
+    """(home, tool): the launcher install-cli wrote, or a machine with no install-cli at all, where
+    the plugin's own bin is the only path."""
+    home, tool, plugin = box
+    if via == "launcher":
+        return home, tool
+    bare = tmp_path / "no-install-home"
+    bare.mkdir()
+    return bare, plugin / "bin" / "agentik-session"
 
 
 def _env_file(path):
@@ -744,8 +756,9 @@ def test_sc3_apples_python_does_add_them_or_this_test_proves_nothing(tmp_path):
 
 @pytest.mark.parametrize("parent", ({}, {"MANPATH": "/parent/man", "CPATH": "/parent/include",
                                          "SDKROOT": "", "LC_CTYPE": "en_US.UTF-8"}))
-def test_sc3_a_launchers_claude_sees_what_its_parent_had(box, tmp_path, parent):
-    home, tool, _ = box
+@pytest.mark.parametrize("via", VIAS)
+def test_sc3_a_launchers_claude_sees_what_its_parent_had(box, tmp_path, parent, via):
+    home, tool = _via(box, tmp_path, via)
     out = tmp_path / "seen"
     out.mkdir()
     _stub_claude(tmp_path / "stubs", out)
@@ -770,8 +783,9 @@ def _stop_gate_runner(home):
 
 
 @pytest.mark.parametrize("parent", ({}, {"MANPATH": "/parent/man", "LIBRARY_PATH": "/parent/lib"}))
-def test_sc3_a_gate_job_sees_what_its_parent_had(box, tmp_path, parent):
-    home, tool, _ = box
+@pytest.mark.parametrize("via", VIAS)
+def test_sc3_a_gate_job_sees_what_its_parent_had(box, tmp_path, parent, via):
+    home, tool = _via(box, tmp_path, via)
     repo = tmp_path / "repo"
     repo.mkdir()
     env = _bare(home, **parent)

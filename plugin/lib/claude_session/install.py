@@ -93,7 +93,7 @@ exec "$py" -I -X pycache_prefix="$cache" "$TREE/agentik-session" "$@"
 def restore_parent_env(environ=os.environ):
     """The launcher's record, undone: each of APPLE back to what the launcher's shell saw, absent
     where it was absent, and the record gone, so nothing this process spawns sees either. With no
-    record (the plugin's own launcher, a test) nothing moves. True when it restored."""
+    record (a test, an old launcher) nothing moves. Both launchers write it. True when it restored."""
     if environ.pop(SAVED + "ENV", None) is None:
         return False
     for name in APPLE:
