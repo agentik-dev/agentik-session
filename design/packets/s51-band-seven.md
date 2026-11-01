@@ -7,15 +7,16 @@
 | wall | this repo; no push, `--amend`, rebase, merge, real `make install` or `install-cli`; `claude` only as `claude plugin validate` and `claude plugin test plugin`; a test never writes under the live `~/.local`, `~/.claude`, `~/.config/agentik`; never touch `~/.config/agentik/hooks-follow-launcher`; no relay verb; no `kill`, `pkill` or signal from a script; never a gate verb under a temp HOME |
 | may touch | `plugin/lib/claude_session/admission.py`, the hook or module that draws the band and cache lines, `tests/`, `README.md`/`design/readme/*` for the count only, `NICE_TO_HAVE.md`, `plugin/.claude-plugin/plugin.json`, this packet as `design/packets/s51-band-seven.md`, a charter |
 | verify | `agentik session gate run <absolute worktree path> -- /bin/sh -c "make check > <scratch log>"`, then `agentik session gate wait <id>` in one background Bash, last; it exits 0 whatever the code: read the code from its line |
+| acceptance | rulings 1 to 5 met; tests 4(a), 4(b) and 4(c) green by name; `scripts/doclint` exits 0 |
 | budget | 40 tool calls, 80k context; `claude-opus-5-5` |
 
-## The evidence
+## 1. What the source says: the evidence
 
 At 10:05Z the owner had switched to a Max login. The ledger (`admission/ledger.jsonl`) holds this session's reading `[{"kind": "seven_day", "percentUsed": 3, "resetsAt": "2026-11-02T23:00:00.000Z"}]`, with no `five_hour` item. `band.json`'s `accounts` holds the new key `2026-11-02T23:00Z` as `{"mode": "observe", "at": …, "window": "five_hour", "slot": "Mon-2300Z"}` and nothing else. The prompt line reads `5h no reading · observe`, with no 7d figure, week reset, demand band or cache line. The old login's entry (`window: none`) showed `no 5h window · 7d 100% · week resets Fri 13:00 · band best to …`. So the account switch is detected: a new key, and the session is mapped to it. Its week is dropped.
 
 The cause, read in code: `admission.band()` (about `:1199`) returns `out` alone when a five-hour login has no fresh five-hour reading (`if not fresh: return out`), so `P7`, the seven-day reset and the demand band are never computed for it. `_line` then draws `5h no reading` and finds no `P7`.
 
-## Rulings
+## 2. Rulings
 
 1. With no fresh five-hour reading, a five-hour login's entry still carries what its seven-day reading gives: `P7`, `resetsAt`/`until` from the seven-day reset with `bound` seven-day, and `demand` as `_band_none` computes it. `P`, `peak` and `room` stay None. Nothing about admission's verdicts changes: no reading is still `unread`.
 2. The line reads `5h no reading · 7d 3% · week resets Mon 15:00 (…) · band …`, the same parts and order `_line_none` uses for the week, with `5h no reading` first.
@@ -23,6 +24,18 @@ The cause, read in code: `admission.band()` (about `:1199`) returns `out` alone 
 4. Tests. (a) A ledger with login A's readings (five-hour and seven-day, 7d 100%) and then, for the same session id, login B's seven-day-only reading at 3%: `session_band` for that session is B's, with `P7` 3, B's week reset, and the line holding `7d 3%` and `week resets`. A's entry is unchanged. (b) The cache line for that session reads within plan. (c) A five-hour login with a fresh five-hour reading draws as before, byte for byte, through a golden or an existing test.
 5. Version `2.0.0-alpha.43`, one bump, last; the README count by hand and the sidecar re-hashed, as the repo does.
 
-## Report (at most six lines)
+## 3. Interfaces
+
+None new: `admission.band()` keeps its signature; only the entry it returns for a five-hour login with no fresh five-hour reading gains `P7`, the seven-day reset and `demand`.
+
+## 4. Findings that name this row
+
+None beyond the evidence in section 1.
+
+## 5. Forbidden reads
+
+Transcripts; `~/.local/state`, every part; relay ledgers.
+
+## 6. Report (at most six lines)
 
 The head sha; the gate's id and its code from the line; each test's name; where the cache line is drawn; anything left over.
