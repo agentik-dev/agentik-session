@@ -801,3 +801,22 @@ def test_sc3_the_serve_child_is_handed_the_record(box, tmp_path):
             "LC_CTYPE": "C.UTF-8", "SDKROOT": "/sdk", "PATH": "/p"}
     assert install.restore_parent_env(live) is True
     assert live == {"CPATH": "/mine", "PATH": "/p"}
+
+
+# ---- sc3: the latency row's bar, within the suite (the ratio is the report's, read unloaded) --
+
+def test_sc3_a_hook_through_the_launcher_is_under_the_p95_bar(box, tmp_path):
+    import time
+    home, tool, _ = box
+    payload = json.dumps({"session_id": "lat", "cwd": str(home), "hook_event_name": "PostToolUse",
+                          "tool_name": "Bash", "tool_input": {"command": "true"}, "tool_use_id": "t"})
+    times = []
+    for _ in range(25):
+        t0 = time.perf_counter()
+        r = _call(tool, home, "hook", "PostToolUse", stdin=payload)
+        times.append(time.perf_counter() - t0)
+        assert r.returncode == 0, r.stderr
+    assert sorted(times)[23] < 2.5
+    # bytecode goes under the launcher's prefix, never into the tree
+    assert (home / ".cache" / "agentik" / "pycache").is_dir()
+    assert not list(_share(home).rglob("__pycache__"))

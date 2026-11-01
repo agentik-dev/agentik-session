@@ -204,7 +204,7 @@ def launcher_text(tree, version):
     from . import config
     return (LAUNCHER.replace("__OLD_NAME__", OLD_NAME).replace("__OLD_APP__", config.OLD_APP)
             .replace("__APPLE__", " ".join(APPLE))
-            .replace("__VERSION__", version).replace("__TREE__", shlex.quote(str(tree))))
+            .replace("__VERSION__", shlex.quote(version)).replace("__TREE__", shlex.quote(str(tree))))
 
 
 def _write_launcher(path, text):
@@ -243,12 +243,6 @@ def _sweep(share):
             shutil.rmtree(os.path.join(share, name), ignore_errors=True)
 
 
-def _version_of(manifest):
-    import json
-    with open(manifest, encoding="utf-8") as fh:
-        return json.load(fh)["version"]
-
-
 def _lock(share, wait=True):
     """The install's one lock, an open file held for the process's turn; None when another
     holds it and `wait` is off."""
@@ -269,7 +263,7 @@ def _locked_install(prefix, share, env):
     os.makedirs(bin_dir, exist_ok=True)
     _sweep(share)
     lib, manifest, door = _source()
-    version = _version_of(manifest)
+    version = SEMVER
     tree = _freeze(share, lib, manifest, door)
     code = os.path.join(share, tree)
     launcher = os.path.join(bin_dir, NAME)
