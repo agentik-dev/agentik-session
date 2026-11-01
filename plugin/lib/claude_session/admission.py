@@ -1149,7 +1149,7 @@ def _room(peak: float, each: float, T: float, settings: dict):
 def _demand_once(env):
     """`settings["demand"]` at a band.json write (packet S44): at(now, tz) is the `demand` of
     a `none` entry. The file is read only when one asks, and once, however many accounts do;
-    a `five_hour` login never reads it. The schedule's notes land on `at.notes`."""
+    a `five_hour` login reads it only with no fresh five-hour reading (packet S51). The schedule's notes land on `at.notes`."""
     read: list = []
     made: dict = {}
 
@@ -1188,8 +1188,9 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
     its peak with no new spawn, the reset its background term runs to (`horizon`'s: until,
     named by bound; fix round F3), the helpers in flight, the room for spawns of the
     parent's family (each costed over the five-hour window), the held verdicts since the
-    window's start, the seven-day reading; {mode, at, window, slot} alone with no such
-    reading; `_band_none`'s on a `none` login. The times are local (`tz` for tests), so every
+    window's start, the seven-day reading; with no such reading, `_band_none`'s week
+    under this `window` (packet S51: P, peak and room None, P7 and the week's reset kept),
+    as on a `none` login. The times are local (`tz` for tests), so every
     reader draws the same HH:MM."""
     key = key or _current(_keyed(rows)[1])
     mode = mode or window(rows, key, now, settings)
@@ -1198,8 +1199,8 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
         return _band_none(rows, now, settings, tz, out)
     reads = readings(rows, FIVE)
     fresh = [x for x in reads if x[3] > now]
-    if not fresh:
-        return out
+    if not fresh:                      # a new login's week before its first five-hour (S51)
+        return _band_none(rows, now, settings, tz, out)
     _, _, P, resets = _newest(fresh)
     seeds = settings["seeds"]
     seven = readings(rows, SEVEN)
@@ -1226,13 +1227,16 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
 
 def bands(rows, now: datetime, settings: dict, tz=None) -> dict:
     """band.json's object (packet S35 ruling 4): `band()` over every line, as before; with
-    two or more account keys, or any `none` one (packet S42), also `accounts` {key: `band()`
+    two or more account keys among the keyed readings (packet S51: not only the sessions'
+    newest), or any `none` one (packet S42), also `accounts` {key: `band()`
     over its lines} for the MAX_ACCOUNTS newest and `sessions` {sid: key} for the
     MAX_SESSIONS newest of those, and the top level is the current login's entry."""
     own, of = _keyed(rows)
     newest: dict = {}
-    for t, k in of.values():
-        newest[k] = max(t, newest.get(k, t))
+    for r, k in zip(rows, own):        # every keyed reading's: a session that changed login
+        if k is not None:              # keeps the old login's entry (packet S51)
+            t = _when(r.get("ts"))
+            newest[k] = max(t, newest.get(k, t))
     modes = {k: window(rows, k, now, settings) for k in newest}
     if len(newest) < 2 and NO_WINDOW not in modes.values():
         return band(rows, now, settings, tz)
@@ -1368,12 +1372,13 @@ def band_status(b, now: datetime | None = None):
     return f"band: {to}" + (f"; next {', '.join(items)}" if items else "")
 
 
-def _line_none(b: dict, now: datetime) -> list:
+def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
     """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · week resets Ddd HH:MM ·
     band avoid to 11:00 · n helpers`, each left out with no figure; `until` first, else
     `resetsAt`, both the week's; the band's from `demand` (packet S44). No countdown,
-    ceiling, room or deferred."""
-    parts = ["no 5h window"]
+    ceiling, room or deferred. `head` is `5h no reading` on a five-hour login's week
+    (packet S51)."""
+    parts = [head]
     p7, running = _real(b.get("P7")), _real(b.get("running"))
     if p7 is not None:
         parts.append(f"7d {_pct(p7)}%")
@@ -1395,11 +1400,14 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
     n helpers, room for r · d deferred · 7d P7%`, then `observe` and the age past 120 s; a
     part with no figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` when the
     seven-day reset bounds the background term (`until`). An entry whose `window` is the
-    string `none` draws `_line_none` instead. admissionLine is its twin."""
+    string `none` draws `_line_none` instead, as does a `five_hour` one with no five-hour
+    figure and no ceiling, under `5h no reading` (packet S51). admissionLine is its twin."""
     now = now or datetime.now(timezone.utc)
     if b.get("window") == "none":
         return clip(" · ".join(_line_none(b, now)), columns)
     P, peak, c = _real(b.get("P")), _real(b.get("peak")), _real(b.get("ceiling"))
+    if b.get("window") == "five_hour" and P is None and c is None:
+        return clip(" · ".join(_line_none(b, now, "5h no reading")), columns)
     parts = ["5h no reading" if P is None
              else f"5h {_pct(P)}%" + (f" → {_pct(peak)}%" if peak is not None else "")]
     if c is not None:
