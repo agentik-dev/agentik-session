@@ -111,6 +111,7 @@ open one before the first act.
 
 ```bash
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
+agentik-session charter open --continue "<goal>"  # adopts today's newest of the suffix under 3,584 B, else as open
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to today's newest
 ```

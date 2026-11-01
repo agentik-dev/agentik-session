@@ -6,17 +6,21 @@
 | pin | session main 50cfe87, plugin 2.0.0-alpha.43; commons main 05bc434 (recordlint in `sync`); worktree `~/code/agentik-session/.claude/worktrees/s52-continue`, branch `s52-continue`, cut there |
 | wall | this repo; read `~/code/agentik-hq`, `~/code/agentik-commons` and the other `~/code/agentik-*` repos at main, never write there, except that `~/code/agentik-commons/scripts/sync <this worktree>` writes into this worktree; no push, `--amend`, rebase, merge, real `make install`, real `install-cli`; `claude` only as `claude plugin validate` and `claude plugin test plugin`; a test never writes under the live `~/.local`, `~/.claude`, `~/.config`; never touch `~/.config/agentik/hooks-follow-launcher`; no relay verb or binary; no `kill`, `pkill` or signal from a script; never a gate verb under a temp HOME; zsh here, `bash -c` for bash syntax; `rm -r` only as `"${VAR:?}"` |
 | may touch | `plugin/lib/claude_session/charter.py`, `plugin/lib/claude_session/cli.py` (the charter verb's arguments), `tests/test_charter.py` and the CLI tests that pin the charter verb, the charter skill's text where it names `open`, `scripts/` (by `sync` only), `Makefile`, `NICE_TO_HAVE.md`, `history/NICE-2026-11-01.md` (by `git mv` only), `.hygiene-allow`, `plugin/.claude-plugin/plugin.json` and the files a test pins to its version, README's charter lines and their sidecar if they exist, this packet as `design/packets/s52-continue.md`, a charter under `history/sittings/` |
-| acceptance | §2's acts; `make check` green, recordlint's line in it |
+| acceptance | §2's acts; the verify row's check green, recordlint's line in it |
 | verify | `agentik session gate run <absolute worktree path> -- /bin/sh -c "make check > <scratch log> 2>&1"`, then `agentik session gate wait <id>` in one background Bash, last. It exits 0 whatever the job's code: read the code from its line |
 | budget | One commit per act. **Stop at 120k context or 90 tool calls:** commit the act in flight, write the exact resume line, report. `claude-opus-5-5` |
 
 Read first, by sections (`record <file> --sections`, then `--section`): design/05 §3, §4, §6; `plugin/lib/claude_session/charter.py:20-60,238-330`; `cli.py:359-420` and the charter parser near `:1158`; `tests/test_charter.py`'s `open` tests; commons `GUIDE.md` §9's rows paragraph.
 
-## 1. What this is
+## 1. What the source says
+
+Copied from hq's `history/sessions/BRIEF-2026-11-01-s52.md`; for this repo's doclint the sections are re-headed to GUIDE §9's six and the acceptance cell names the verify row's check, the text otherwise as written.
 
 A sitting continues the day's charter instead of opening a new one each respawn; then session converts its NICE. **Not here:** any other repo's conversion; changing plain `open`'s behaviour; the respawn path (`RESPAWN:`, `checkpoint --respawn --charter`, the state file), which design/05 §6 keeps.
 
-## 2. Acts
+## 2. Rulings
+
+The acts.
 
 0. This packet, committed first.
 1. **`--continue`.** `charter open --continue "<goal>"`: when today's newest charter of the same suffix (`_numbered`, the suffix as `open` derives it) is under 3,584 B, it records that file as this sitting's (as `cli.py:691` does for a new one), prints it and writes nothing to it; otherwise it writes `<today>-<n+1>` as `open` does. Tests: adopt; spill at exactly 3,584 B (3,583 adopts); none today writes `-1`; another suffix is not adopted; the record written; the adopted file's bytes unchanged.
@@ -27,10 +31,22 @@ A sitting continues the day's charter instead of opening a new one each respawn;
 6. **The version.** Plugin 2.0.0-alpha.44, one bump, last; the files a test pins move with it. If `plugin-version-check` asks again after a later change, bump again.
 7. The gate, last.
 
-## 3. The stop
+### The stop
 
 Stop and report, committing what is there, on: `--continue` needing a change to plain `open`'s output; a test of today's behaviour that must change; hygiene red on a file you cannot allow without a new reason row. A stop is a result.
 
-## 4. Report (at most ten lines)
+## 3. Interfaces
+
+`charter open --continue "<goal>"` (act 1); `--row NAME` (act 2).
+
+## 4. Findings that name this row
+
+None beyond act 5's NICE.
+
+## 5. Forbidden reads
+
+The wall's; a long record whole.
+
+## 6. Report (at most ten lines)
 
 The branch and sha; each act's commit; the gate's id and its code from its line; the suite's counts; `--row` built or cut; the NICE rows kept (ids, levels, one line each); anything left over, and if you stopped, the exact resume line.
