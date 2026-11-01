@@ -169,7 +169,8 @@ def test_a_damaged_plugin_never_blocks_a_hook(box, how):
         r = box.tool("hook", event, stdin=json.dumps(box.payload(event)))
         assert (r.returncode, r.stderr) == (0, ""), (event, r.stderr)
         if event == "SessionStart":
-            assert "no runner" in json.loads(r.stdout)["systemMessage"]
+            said = "no names" if how == "no lib" else "no runner"
+            assert said in json.loads(r.stdout)["systemMessage"]
         else:
             assert r.stdout == "", event
         s = box.hook(event)
@@ -183,7 +184,8 @@ def test_a_damaged_plugin_other_verbs_exit_3_with_one_line(box, how, verb):
     _damage(box, how)
     r = box.tool(*verb)
     assert (r.returncode, r.stdout) == (3, "")
-    assert len(r.stderr.splitlines()) == 1 and "no runner" in r.stderr
+    said = "no names" if how == "no lib" else "no runner"
+    assert len(r.stderr.splitlines()) == 1 and said in r.stderr
 
 
 def _not_python(box, kind):
