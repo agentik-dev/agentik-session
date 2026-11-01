@@ -260,19 +260,42 @@ def test_s52_continue_adopts_only_its_own_suffix(tmp_path, monkeypatch):
     (tmp_path / f"{t}-1-s6.md").write_text("x")
     (tmp_path / f"{t}-2.md").write_text("x")
     for row, want in (("s7", f"{t}-3-s7.md"),       # no s7 today: the next number
-                      ("s6", f"{t}-1-s6.md"),       # its own suffix, though not the newest
-                      (None, f"{t}-2.md"),          # no row: the bare name only
-                      ("../x", f"{t}-2.md")):       # a bad row is ignored, as `open` does
+                      ("s7", f"{t}-3-s7.md"),       # its own suffix and the newest: adopted
+                      ("s6", f"{t}-4-s6.md"),       # its own suffix, not the newest: n+1 (a2 F1)
+                      (None, f"{t}-5.md"),          # no row: the bare name, -2 not the newest
+                      ("../x", f"{t}-5.md")):       # a bad row is ignored, as `open` does
         if row is None:
             monkeypatch.delenv("RELAY_ROW", raising=False)
         else:
             monkeypatch.setenv("RELAY_ROW", row)
         assert _cont(tmp_path)[:2] == (0, f"{tmp_path / want}\n"), row
-    (tmp_path / f"{t}-4-s6.md").write_bytes(b"x" * charter.CONTINUE_BELOW)
+    (tmp_path / f"{t}-6-s6.md").write_bytes(b"x" * charter.CONTINUE_BELOW)
     monkeypatch.setenv("RELAY_ROW", "s6")
-    assert _cont(tmp_path)[:2] == (0, f"{tmp_path / (t + '-5-s6.md')}\n")   # the newest is full
-    assert _cont(tmp_path)[:2] == (0, f"{tmp_path / (t + '-5-s6.md')}\n")   # then continued
+    assert _cont(tmp_path)[:2] == (0, f"{tmp_path / (t + '-7-s6.md')}\n")   # the newest is full
+    assert _cont(tmp_path)[:2] == (0, f"{tmp_path / (t + '-7-s6.md')}\n")   # then continued
     assert (tmp_path / f"{t}-1-s6.md").read_text() == "x"
+    assert (tmp_path / f"{t}-2.md").read_text() == "x"
+
+
+def test_s52_a2_continue_never_adopts_behind_another_chain(tmp_path, monkeypatch):
+    # The refuter's round 1, F1: an hq chain, then a land chain, then hq continues. Adopting
+    # -1-hq would let a bare `close` (today's newest) write -2-land; the newest is live.
+    monkeypatch.chdir(tmp_path)
+    t = charter.today()
+    for row, verb, want in (("hq", (), "-1-hq"), ("land", (), "-2-land"),
+                            ("hq", ("--continue",), "-3-hq")):
+        monkeypatch.setenv("RELAY_ROW", row)
+        rc, out, _ = run("charter", "open", *verb, "--dir", str(tmp_path), row)
+        assert (rc, out) == (0, f"{tmp_path / (t + want + '.md')}\n"), row
+    first, land = tmp_path / f"{t}-1-hq.md", tmp_path / f"{t}-2-land.md"
+    before = first.read_bytes(), land.read_bytes()
+    third = tmp_path / f"{t}-3-hq.md"
+    opened = third.read_bytes()
+    assert run("charter", "close", "--dir", str(tmp_path), "--exit", "goal met")[0] == 0
+    assert third.read_bytes() != opened and b"goal met" in third.read_bytes()
+    assert (first.read_bytes(), land.read_bytes()) == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        f"{t}{x}.md" for x in ("-1-hq", "-2-land", "-3-hq"))
 
 
 def test_s52_continue_records_the_adopted_file(tmp_path, monkeypatch):

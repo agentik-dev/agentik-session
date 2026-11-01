@@ -258,16 +258,21 @@ def _suffix(row: str | None) -> str:
 
 
 def adoptable(dir, row: str | None = None) -> Path | None:
-    """`open --continue` (design/05 §6): today's newest charter of `open`'s suffix for `row`,
-    when it is under CONTINUE_BELOW bytes; None when there is none or it is at the mark (the
-    next sitting spills to n+1). Reads the file's size only, never its bytes."""
+    """`open --continue` (design/05 §6): today's newest charter of any suffix, the one a bare
+    `close` writes (`newest_today`), when its name carries `open`'s suffix for `row` and it is
+    under CONTINUE_BELOW bytes; None when there is none, when the newest is another suffix's
+    (the newest is live: adopting an older one would let `close` write the other chain's file)
+    or when it is at the mark (the next sitting spills to n+1). Reads the size only, never the
+    bytes."""
     date, suffix = today(), _suffix(row)
-    same = [p for n, p in _numbered(Path(dir), date) if p.name == f"{date}-{n}{suffix}.md"]
-    if not same:
+    found = _numbered(Path(dir), date)
+    if not found:
+        return None
+    n, newest = found[-1]
+    if newest.name != f"{date}-{n}{suffix}.md":
         return None
     try:
-        return same[-1] if same[-1].is_file() and same[-1].stat().st_size < CONTINUE_BELOW \
-            else None
+        return newest if newest.is_file() and newest.stat().st_size < CONTINUE_BELOW else None
     except OSError:
         return None
 

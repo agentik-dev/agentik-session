@@ -382,8 +382,8 @@ def cmd_charter(args) -> int:
             _die('charter open wants one goal: agentik-session charter open "<goal>"')
         section = _session_section(cwd)
         d, row = args.dir or _charter_dir(section), os.environ.get("RELAY_ROW")
-        # design/05 §6: --continue adopts today's newest charter of this suffix under
-        # 3,584 bytes, recorded and printed as a new one is, its bytes untouched.
+        # design/05 §6: --continue adopts today's newest charter, when it is of this suffix
+        # and under 3,584 bytes, recorded and printed as a new one is, its bytes untouched.
         path = charter.adoptable(d, row) if getattr(args, "cont", False) else None
         if path is None:
             rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
