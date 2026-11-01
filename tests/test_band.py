@@ -97,8 +97,11 @@ def test_room_is_never_below_zero():
 
 
 @pytest.mark.parametrize("rows", [[], [reading(at(9), 50, at(10))]], ids=["none", "past-reset"])
-def test_no_five_hour_reading_is_mode_and_at_only(rows):
+def test_no_five_hour_reading_is_the_week_s_entry(rows):
+    """Packet S51 ruling 1: no fresh five-hour reading keeps `_band_none`'s week, here none."""
     assert admission.band(rows, NOW, rules.admission({}), tz=UTC) == {
+        "P": None, "peak": None, "room": None, "P7": None, "ceiling_7d": 97, "resetsAt": None,
+        "until": None, "bound": "seven_day", "running": 0,
         "mode": "observe", "at": iso(NOW), "window": "five_hour", "slot": None}
 
 
@@ -126,7 +129,12 @@ def lim(pct, resets=RESETS):
 
 def test_record_rewrites_band_json_atomically_and_0600():
     record({"kind": "start", "interactive": True}, at(12))
-    assert band_file() == {"mode": "observe", "at": iso(at(12)), "window": "five_hour", "slot": None}
+    f = band_file()                    # a record's write carries the demand reader (S44, S51)
+    assert isinstance(f.pop("demand"), dict)
+    assert f == {
+        "P": None, "peak": None, "room": None, "P7": None, "ceiling_7d": 97, "resetsAt": None,
+        "until": None, "bound": "seven_day", "running": 0,
+        "mode": "observe", "at": iso(at(12)), "window": "five_hour", "slot": None}
     ino = (adir() / "band.json").stat().st_ino
     record({"kind": "reading", "rateLimits": lim(72)}, at(12, 1))
     b = band_file()

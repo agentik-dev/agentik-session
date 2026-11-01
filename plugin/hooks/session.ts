@@ -178,8 +178,9 @@ const bandTo = (b: any, nowMs: number): string | null => {
 
 // A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
 // `resetsAt`, both the week's, then the band's. No countdown, ceiling, room or deferred.
-const lineNone = (b: any, nowMs: number): string[] => {
-  const parts = ['no 5h window']
+// `head` is `5h no reading` on a five-hour login's week (packet S51).
+const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
+  const parts = [head]
   const p7 = fig(b.P7), running = fig(b.running)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
   for (const v of [b.until, b.resetsAt]) {
@@ -202,6 +203,7 @@ export const admissionLine = (band: string | null, nowMs: number, id = ''): stri
   b = sessionBand(b, id)
   if (b.window === 'none') return lineNone(b, nowMs).join(' · ')
   const P = fig(b.P), peak = fig(b.peak), c = fig(b.ceiling)
+  if (b.window === 'five_hour' && P === null && c === null) return lineNone(b, nowMs, '5h no reading').join(' · ')
   const parts = [P === null ? '5h no reading' : `5h ${whole(P)}%` + (peak !== null ? ` → ${whole(peak)}%` : '')]
   if (c !== null) parts.push(`ceiling ${String(c)}`)
   const w = wall(b.resetsAt), u = wall(b.until)
