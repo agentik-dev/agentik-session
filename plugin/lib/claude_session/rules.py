@@ -349,7 +349,7 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
     five-hour reading while its reset is ahead: 5m past plan usage (5h or 7d at PLAN or
     more), 1h within it. An entry whose `window` is `none` reads its seven-day reading the
     same way, its reset the week's (packet S43), as does a `five_hour` entry with no five-hour
-    figure and no ceiling, its reset the week's too (packet S51). `(None, UNKNOWN)` when nothing says. The
+    figure, no ceiling and the week's bound, its reset the week's too (packet S51). `(None, UNKNOWN)` when nothing says. The
     project's settings are under CLAUDE_PROJECT_DIR, which Claude's `cd` never moves; under
     `cwd` only when it is unset (fix round F1)."""
     cwd = env.get("CLAUDE_PROJECT_DIR") or cwd
@@ -373,7 +373,8 @@ def lifetime(env, cwd, band=None, now=None) -> tuple:
         return None, keyed
     b = band if isinstance(band, dict) else {}
     p, p7, resets = _percent(b.get("P")), _percent(b.get("P7")), _instant(b.get("resetsAt"))
-    if b.get("window") == "none" or (b.get("window") == "five_hour" and p is None and b.get("ceiling") is None):
+    if b.get("window") == "none" or (b.get("window") == "five_hour" and p is None and b.get("ceiling") is None
+                                    and b.get("bound") == "seven_day"):
         if p7 is None or resets is None or resets <= (now or datetime.now(timezone.utc)):
             return None, UNKNOWN
         return ("5m", f"past plan usage, 7d {p7:g}%") if p7 >= PLAN else ("1h", f"within plan usage, 7d {p7:g}%")

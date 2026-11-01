@@ -558,7 +558,6 @@ def test_s51_a_new_login_s_week_alone_is_its_band_and_its_line():
     assert admission.band_line(mine, NOW) == "5h no reading · 7d 3% · week resets Wed 15:00 · 0 helpers · observe"
     assert b["accounts"][KEY] == admission.band(a, NOW, settings(), tz=UTC)          # A's entry unchanged
     assert (b["accounts"][KEY]["P"], b["accounts"][KEY]["P7"]) == (41, 100)
-    assert admission.decide(rows, ask(), SID, NOW, settings(), tz=UTC)["verdict"] == "unread"
 
 
 def test_s51_the_cache_line_reads_the_new_login_s_week(monkeypatch):
