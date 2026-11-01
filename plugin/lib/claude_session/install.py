@@ -8,6 +8,8 @@ every hook imports it for `restore_parent_env`.
 import os
 import re
 
+from . import SEMVER
+
 SHARE = "agentik-session"
 NAME = "agentik-session"
 MANIFEST = "plugin.json"
@@ -257,3 +259,94 @@ def install(prefix=None, env=None) -> dict:
         return _locked_install(prefix, share, env)
     finally:
         lock.close()
+
+
+# ---- the forward refresh (design/04 §3, §5; packet sc3 ruling 5) ---------------------------
+
+def launcher_path(env):
+    return os.path.join(env.get("HOME") or "", ".local", "bin", NAME)
+
+
+_LINE = re.compile(r"^(VERSION|TREE|CODE|PYTHON)=(.*)$", re.M)
+
+
+def read_launcher(path):
+    """{"version", "tree", "python"} as the launcher's lines say, each None when absent; the
+    new form's TREE or the old one's CODE; None when no launcher is there to read. Never raises."""
+    try:
+        with open(path, encoding="utf-8", errors="surrogateescape") as fh:
+            text = fh.read(65536)
+    except OSError:
+        return None
+    lines = {}
+    for name, value in _LINE.findall(text):
+        lines.setdefault(name, value.strip())
+    tree = lines.get("TREE") or lines.get("CODE")
+    if tree:
+        import shlex
+        try:
+            tree = "".join(shlex.split(tree))
+        except ValueError:
+            pass
+    python = lines.get("PYTHON")
+    return {"version": lines.get("VERSION"), "tree": tree, "python": python.strip('"') if python else None}
+
+
+def order(version):
+    """What sorts it, by the package's own reading of a version; None for a version it cannot
+    read: three parts, an optional prerelease."""
+    from .doctor import _key, parse_version
+    parsed = parse_version(version) if version else None
+    if parsed is None or parsed[2] != 3:
+        return None
+    return _key(parsed[0], parsed[1])
+
+
+def _behind(path):
+    """The launcher at `path` is older than this plugin. Absent, a link, no line, no reading or
+    equal: left alone; the doctor names what wants naming."""
+    if os.path.islink(path):
+        return False
+    found = read_launcher(path)
+    version = found and found["version"]
+    if not version or version == SEMVER:
+        return False
+    theirs, ours = order(version), order(SEMVER)
+    return theirs is not None and ours is not None and ours > theirs
+
+
+def _refresh(env):
+    home, root = env.get("HOME"), env.get("CLAUDE_PLUGIN_ROOT")
+    if not home or not root:
+        return None
+    prefix = os.path.join(home, ".local")
+    path = launcher_path(env)
+    if not _behind(path):
+        return None
+    # Only the plugin Claude Code named refreshes: never a frozen tree (the switch, or a launcher
+    # run by hand), never a checkout's suite or a stray root.
+    lib = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if is_frozen(lib) or os.path.realpath(os.path.join(root, "lib")) != lib:
+        return None
+    share = os.path.join(prefix, "share", SHARE)
+    lock = _lock(share, wait=False)
+    if lock is None:                    # another session is at it; a later one sees what it left
+        return None
+    try:
+        if _behind(path):
+            _locked_install(prefix, share, env)
+    finally:
+        lock.close()
+    return None
+
+
+def refresh(env=None):
+    """On SessionStart, this plugin newer than the launcher that exists: the install, and None.
+    It creates no launcher, refuses backward and equal, reads one file on the common path, and
+    never raises: a failure is the one line for the hook's systemMessage."""
+    env = os.environ if env is None else env
+    try:
+        return _refresh(env)
+    except Exception as e:                                     # noqa: BLE001
+        return ("agentik-session: the launcher did not move to %s: %s; run /session:install-cli"
+                % (SEMVER, str(e)[:200]))

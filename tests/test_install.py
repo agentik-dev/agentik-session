@@ -554,3 +554,174 @@ def test_sc3_a_chain_under_the_new_form_keeps_its_tree_through_installs(tmp_path
         live.wait(timeout=30)
     assert _verb(_plugin(tmp_path / "p9", "2.0.0-alpha.9"), home).returncode == 0
     assert first not in _trees(home) and len(_trees(home)) == 3
+
+
+# ---- sc3 act 5: the forward refresh ------------------------------------------------------
+
+OLD, NEW = "2.0.0-alpha.39", "2.0.0-alpha.40"
+
+
+def _session_start(plugin, home, **env):
+    """The plugin's own shim, as Claude Code fires it, in a temp home."""
+    payload = {"session_id": "sess-r", "cwd": str(home), "hook_event_name": "SessionStart"}
+    return subprocess.run(
+        [str(plugin / "hooks" / "run"), "SessionStart"], input=json.dumps(payload), text=True,
+        capture_output=True, cwd=home, timeout=60,
+        env=_bare(home, CLAUDE_PLUGIN_ROOT=str(plugin), CLAUDE_PLUGIN_DATA=str(home / "data"), **env))
+
+
+@pytest.fixture
+def old_install(tmp_path):
+    """A launcher at OLD's form (the new form's words at OLD: the one from `install-wrapper.sh`
+    has no VERSION= line, and is the refusal below), and the plugin at NEW."""
+    home = tmp_path / "home"
+    home.mkdir()
+    assert _verb(_plugin(tmp_path / "old", OLD), home).returncode == 0
+    return home, _bins(home) / "agentik-session", _plugin(tmp_path / "new", NEW)
+
+
+def _version(tool, home):
+    r = _call(tool, home, "--version")
+    assert r.returncode == 0, r.stderr
+    return r.stdout.split()[-1]
+
+
+def _whole(home):
+    """No temp left, and every tree the launcher could name holds its runner."""
+    assert not [p.name for p in _bins(home).iterdir() if p.name.endswith(".tmp")]
+    assert not [p.name for p in _share(home).iterdir() if p.name.startswith(".tmp")]
+    for t in _trees(home):
+        assert (_share(home) / t / "agentik-session").is_file()
+        assert (_share(home) / t / "plugin.json").is_file()
+
+
+def test_sc3_one_session_start_moves_the_launcher_forward_and_a_second_is_a_no_op(old_install):
+    home, tool, plugin = old_install
+    r = _session_start(plugin, home)
+    assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
+    assert "VERSION=%s\n" % NEW in tool.read_text() and _version(tool, home) == NEW
+    assert os.readlink(_bins(home) / "claude-session") == "agentik-session"
+    _whole(home)
+    assert len(_trees(home)) == 2
+    seen = (tool.read_bytes(), tool.stat().st_mtime_ns, _trees(home))
+    r = _session_start(plugin, home)
+    assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
+    assert (tool.read_bytes(), tool.stat().st_mtime_ns, _trees(home)) == seen
+
+
+@pytest.mark.parametrize("version", (NEW, "2.0.0-alpha.41", "2.0.1", "3.0.0-alpha.1"))
+def test_sc3_refresh_refuses_equal_and_backward(tmp_path, version):
+    home = tmp_path / "home"
+    home.mkdir()
+    assert _verb(_plugin(tmp_path / "there", version), home).returncode == 0
+    tool = _bins(home) / "agentik-session"
+    seen = (tool.read_bytes(), tool.stat().st_mtime_ns, _trees(home))
+    r = _session_start(_plugin(tmp_path / "new", NEW), home)
+    assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
+    assert (tool.read_bytes(), tool.stat().st_mtime_ns, _trees(home)) == seen
+
+
+def test_sc3_refresh_orders_alpha_10_above_alpha_9(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    assert _verb(_plugin(tmp_path / "there", "2.0.0-alpha.9"), home).returncode == 0
+    assert _session_start(_plugin(tmp_path / "new", "2.0.0-alpha.10"), home).returncode == 0
+    assert _version(_bins(home) / "agentik-session", home) == "2.0.0-alpha.10"
+
+
+def test_sc3_refresh_never_creates_a_launcher(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    r = _session_start(_plugin(tmp_path, NEW), home)
+    assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
+    assert not (home / ".local" / "bin").exists() and not (home / ".local" / "share").exists()
+
+
+@pytest.mark.parametrize("line", ("", "VERSION=\n", "VERSION=banana\n", "VERSION=2.0\n"))
+def test_sc3_refresh_leaves_a_launcher_with_no_version_it_can_read(tmp_path, line):
+    # The wrapper of `make install` before sc3 has no VERSION= line: §5 step 3's one `make install`.
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    tool = _bins(home) / "agentik-session"
+    tool.write_text('#!/bin/sh\n%sCODE="/x"\nPYTHON="/y"\nexit 0\n' % line)
+    tool.chmod(0o755)
+    seen = (tool.read_bytes(), tool.stat().st_mtime_ns)
+    r = _session_start(_plugin(tmp_path, NEW), home)
+    assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
+    assert (tool.read_bytes(), tool.stat().st_mtime_ns) == seen
+    assert not (home / ".local" / "share").exists()
+
+
+def test_sc3_a_read_only_bin_costs_one_system_message_and_never_the_hook(old_install):
+    home, tool, plugin = old_install
+    before = tool.read_bytes()
+    _bins(home).chmod(0o555)
+    try:
+        r = _session_start(plugin, home)
+    finally:
+        _bins(home).chmod(0o755)
+    assert r.returncode == 0, r.stderr
+    said = json.loads(r.stdout)
+    assert NEW in said["systemMessage"] and "/session:install-cli" in said["systemMessage"]
+    assert "hookSpecificOutput" in said         # the session's own line stands
+    assert tool.read_bytes() == before and _version(tool, home) == OLD
+
+
+def test_sc3_under_the_switch_the_refresh_does_nothing(old_install):
+    home, tool, plugin = old_install
+    switch = home / ".config" / "agentik" / "hooks-follow-launcher"
+    switch.parent.mkdir(parents=True)
+    switch.write_text("")
+    seen = tool.read_bytes()
+    r = _session_start(plugin, home)
+    assert r.returncode == 0, r.stderr
+    assert "hooks run the launcher" in json.loads(r.stdout)["systemMessage"]
+    assert tool.read_bytes() == seen
+
+
+def test_sc3_only_the_plugin_claude_code_named_refreshes(tmp_path, monkeypatch):
+    # A checkout's own suite, a hand-run launcher: nothing moves, whatever the versions.
+    from claude_session import install
+    home = tmp_path / "home"
+    tool = home / ".local" / "bin" / "agentik-session"
+    tool.parent.mkdir(parents=True)
+    tool.write_text("#!/bin/sh\nVERSION=0.0.1\n")
+    seen = tool.read_bytes()
+    env = {"HOME": str(home)}
+    assert install.refresh(env) is None
+    assert install.refresh(dict(env, CLAUDE_PLUGIN_ROOT=str(tmp_path))) is None
+    assert tool.read_bytes() == seen and not (home / ".local" / "share").exists()
+    frozen = _call(_bins_tool(tmp_path), tmp_path, "hook", "SessionStart",
+                   env=_bare(tmp_path / "h2", CLAUDE_PLUGIN_ROOT=str(tmp_path)))
+    assert frozen.returncode == 0
+
+
+def _bins_tool(tmp_path):
+    h2 = tmp_path / "h2"
+    h2.mkdir()
+    assert _verb(_plugin(tmp_path / "p2", NEW), h2).returncode == 0
+    return _bins(h2) / "agentik-session"
+
+
+def test_sc3_refresh_race_two_at_once_twenty_rounds(old_install):
+    home, tool, plugin = old_install
+    older = tool.read_text()
+    for round_ in range(20):
+        tmp = tool.with_name("x-seed")
+        tmp.write_text(older)
+        tmp.chmod(0o755)
+        os.replace(tmp, tool)
+        payload = json.dumps({"session_id": "race-%d" % round_, "cwd": str(home),
+                              "hook_event_name": "SessionStart"})
+        env = _bare(home, CLAUDE_PLUGIN_ROOT=str(plugin), CLAUDE_PLUGIN_DATA=str(home / "data"))
+        both = [subprocess.Popen([str(plugin / "hooks" / "run"), "SessionStart"], cwd=home, env=env,
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        during = _version(tool, home)       # whole at any moment, old or new
+        assert during in (OLD, NEW)
+        outs = [p.communicate(payload, timeout=60) for p in both]
+        assert [p.returncode for p in both] == [0, 0], outs
+        for out, _ in outs:
+            assert "systemMessage" not in json.loads(out), outs
+        assert _version(tool, home) == NEW, "round %d" % round_
+        _whole(home)
