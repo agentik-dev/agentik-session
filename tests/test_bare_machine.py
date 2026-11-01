@@ -27,7 +27,7 @@ PIN = "970fff9"
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
           "PostToolBatch", "PreCompact", "Stop", "StopFailure", "SessionEnd")
 SWALLOWED = ("Stop", "StopFailure", "PostToolUseFailure", "PostToolBatch")
-RUNS_P = sys.version_info >= (3, 11)    # the previous launcher's -P, and sc3 moves it
+RUNS_P = sys.version_info >= (3, 11)    # the previous launcher's -P; sc3 moved the new one off it
 SWITCH = (".config", "agentik", "hooks-follow-launcher")
 LAUNCHER = (".local", "bin", "agentik-session")
 FUTURE = "zz_future"
@@ -630,7 +630,7 @@ def _frozen(box, rev, tree, strip, name):
     return code, wrapper.replace("__CODE__", str(code)).replace("__PYTHON__", sys.executable)
 
 
-@pytest.mark.skipif(not RUNS_P, reason="the launcher's -P is 3.11 until sc3")
+@pytest.mark.skipif(not RUNS_P, reason="the old launcher's -P is 3.11")
 @pytest.mark.skipif(not subprocess.run(["git", "cat-file", "-e", PIN], cwd=ROOT).returncode == 0,
                     reason="no previous tree in this clone's history")
 def test_the_new_plugin_with_the_previous_trees_launcher(box):
@@ -648,15 +648,42 @@ def test_the_new_plugin_with_the_previous_trees_launcher(box):
     assert box.tool("report").returncode == 0 and "sess-bar" in box.tool("report").stdout
 
 
-@pytest.mark.skipif(not RUNS_P, reason="the launcher's -P is 3.11 until sc3")
-@pytest.mark.skipif(not subprocess.run(["git", "cat-file", "-e", PIN], cwd=ROOT).returncode == 0,
-                    reason="no previous tree in this clone's history")
-def test_the_previous_plugin_with_the_new_launcher(box, tmp_path):
-    old_plugin = tmp_path / "old-plugin"
-    _archive(PIN, "plugin", old_plugin, 1)
-    code, text = _frozen(box, "HEAD", "plugin/lib", 2, "new")
-    (code / "plugin.json").write_bytes(_git("show", "HEAD:plugin/.claude-plugin/plugin.json").stdout)
+def _in_history(rev):
+    return subprocess.run(["git", "cat-file", "-e", rev], cwd=ROOT).returncode == 0
+
+
+LAST_OLD = "7bd8981"    # alpha.39, the last tree `install-wrapper.sh` froze (sc3)
+
+
+@pytest.mark.skipif(not RUNS_P, reason="the old launcher's -P is 3.11")
+@pytest.mark.skipif(not _in_history(LAST_OLD), reason="no previous tree in this clone's history")
+def test_the_new_plugin_with_the_last_old_launcher_and_no_version_line(box):
+    # sc3's first install has not run yet: the wrapper has no VERSION=, so it is left alone.
+    _, text = _frozen(box, LAST_OLD, "plugin/lib", 2, "old39")
     _exe(box.launcher, text)
+    before = box.launcher.read_bytes()
+    for event in EVENTS:
+        r = box.hook(event)
+        assert r.returncode == 0 and "Traceback" not in r.stderr, (event, r.stderr)
+    box.on()
+    for event in EVENTS:
+        r = box.hook(event)
+        assert r.returncode == 0 and "Traceback" not in r.stderr, (event, r.stderr)
+    assert box.launcher.read_bytes() == before
+
+
+@pytest.mark.parametrize("rev,follows", ((PIN, False), (LAST_OLD, True)))
+def test_the_previous_plugin_with_the_new_launcher(box, tmp_path, rev, follows):
+    # PIN's shim runs `agentik-session` off PATH; alpha.39's runs its own, or the launcher with
+    # the switch on: both reach what install-cli wrote.
+    if not _in_history(rev):
+        pytest.skip("no previous tree in this clone's history")
+    old_plugin = tmp_path / "old-plugin"
+    _archive(rev, "plugin", old_plugin, 1)
+    r = box.tool("install-cli")
+    assert r.returncode == 0, r.stderr
+    if follows:
+        box.on()
     env = box.env(PATH="%s:/usr/bin:/bin" % box.launcher.parent, CLAUDE_PLUGIN_ROOT=str(old_plugin))
     for event in EVENTS:
         r = box.hook(event, shim=old_plugin / "hooks" / "run", env=env)
