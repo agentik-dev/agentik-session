@@ -33,7 +33,7 @@ PREFIX ?= $(HOME)/.local
 PYTHON ?= $(CURDIR)/.venv/bin/python
 DOCTOR ?= 1
 install:  ## refuse a dirty plugin tree, then the plugin's install-cli: freeze under $(PREFIX)/share/agentik-session/<hash>, launcher agentik-session in $(PREFIX)/bin
-	@if [ -n "$$(git status --porcelain --ignored -- plugin/lib plugin/bin/agentik plugin/.claude-plugin/plugin.json | grep -vE '(__pycache__/|\.pyc|\.DS_Store)$$')" ]; then \
+	@if [ -n "$$(git status --porcelain --ignored=matching -- plugin/lib plugin/bin/agentik plugin/.claude-plugin/plugin.json | grep -vE '/(__pycache__/|\.DS_Store)$$|\.pyc$$')" ]; then \
 	  echo "install: plugin/lib, plugin.json or the door is dirty; commit it first (the install is one committed tree)" >&2; exit 2; fi
 	@plugin/bin/agentik-session install-cli --prefix "$(PREFIX)"
 	@[ "$(DOCTOR)" = 0 ] || { "$(PREFIX)/bin/agentik-session" doctor >/dev/null 2>&1 && echo "doctor: ok" || echo "run: agentik session doctor"; }

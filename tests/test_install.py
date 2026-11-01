@@ -932,3 +932,26 @@ def test_a2_f6_the_refresh_gives_ps_its_short_bound(old_install, monkeypatch):
     env = {"HOME": str(home), "CLAUDE_PLUGIN_ROOT": str(root), "XDG_STATE_HOME": str(home / "s")}
     assert install.refresh(env) is None
     assert seen == [install.REFRESH_PS_TIMEOUT]
+
+
+# The dirty guard's filter is anchored: only a real bytecode folder, .pyc or .DS_Store passes.
+@pytest.mark.parametrize("rel,body,rc", [
+    ("x.DS_Store", "x", 2),
+    ("foo__pycache__/evil.py", "x", 2),
+    ("evil.py", "x", 2),
+    ("config.local.yaml", "x", 2),
+    ("dist/x.txt", "x", 2),
+    (".DS_Store", "x", 0),
+    ("__pycache__/a.pyc", "", 0),
+    ("stray.pyc", "", 0),
+    ("newd/__pycache__/a.pyc", "", 0),
+])
+def test_dirty_guard_is_anchored(repo, tmp_path, rel, body, rc):
+    f = repo / PKG / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(body)
+    home = tmp_path / "home"
+    r = _install(repo, home)
+    assert r.returncode == rc, (r.returncode, r.stdout, r.stderr)
+    if rc == 0:
+        assert not list(_share(home).rglob("*.pyc")) and not list(_share(home).rglob("__pycache__"))
