@@ -540,6 +540,59 @@ def test_band_line_none_in_the_prompt_hook_with_its_cache_clause(monkeypatch):
     assert bits[bits.index(line) + 1].startswith("cache 1h (within plan usage, 7d 62%): ")
 
 
+# ---- packet S51: a new login's week before its first five-hour reading ----------------------
+
+def _switch(week=OTHER):
+    """Login A (five-hour and week, 7d 100%), then the same session on login B: its week alone, 3%."""
+    a = [reading(at(60), L5(40, 100)), reading(at(50), L5(41, 100))]
+    return a, a + [reading(at(5), L7(3, week))]
+
+
+def test_s51_a_new_login_s_week_alone_is_its_band_and_its_line():
+    a, rows = _switch()
+    b = admission.bands(rows, NOW, settings(), tz=UTC)
+    mine = admission.session_band(b, SID)
+    assert mine is b["accounts"][KEY2] and b["sessions"] == {SID: KEY2}
+    assert (mine["window"], mine["P"], mine["peak"], mine["room"], mine["P7"]) == ("five_hour", None, None, None, 3)
+    assert (mine["resetsAt"], mine["until"], mine["bound"]) == (iso(OTHER), iso(OTHER), "seven_day")
+    assert admission.band_line(mine, NOW) == "5h no reading · 7d 3% · week resets Wed 15:00 · 0 helpers · observe"
+    assert b["accounts"][KEY] == admission.band(a, NOW, settings(), tz=UTC)          # A's entry unchanged
+    assert (b["accounts"][KEY]["P"], b["accounts"][KEY]["P7"]) == (41, 100)
+    assert admission.decide(rows, ask(), SID, NOW, settings(), tz=UTC)["verdict"] == "unread"
+
+
+def test_s51_the_cache_line_reads_the_new_login_s_week(monkeypatch):
+    """Through the prompt hook: B's line, then `cache 1h` on its 3%. The week is far ahead, so
+    the real clock moves nothing."""
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    week = datetime(2099, 1, 5, 23, 0, tzinfo=UTC)
+    _, rows = _switch(week)
+    b = admission.bands(rows, NOW, settings(), tz=UTC)
+    mine = admission.session_band(b, SID)
+    assert rules.lifetime({}, "/nonexistent", mine, now=NOW) == ("1h", "within plan usage, 7d 3%")
+    assert rules.lifetime({}, "/nonexistent", {**mine, "P7": 100}, now=NOW) == ("5m", "past plan usage, 7d 100%")
+    d = config.state_dir(os.environ) / "admission"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "band.json").write_text(json.dumps(b))
+    out = hooks.user_prompt_submit({"session_id": SID})
+    bits = out["hookSpecificOutput"]["additionalContext"].split("\n\n")
+    [line] = [x for x in bits if x.startswith("5h no reading")]
+    day = admission._WEEKDAYS[week.weekday()]
+    assert line.startswith(f"5h no reading · 7d 3% · week resets {day} 23:00 · 0 helpers · observe")
+    assert bits[bits.index(line) + 1].startswith("cache 1h (within plan usage, 7d 3%): ")
+
+
+def test_s51_week_only_line_draws_the_module_s_fixture():
+    assert _ts_fixture("BAND_WEEK_ONLY_LINE") == "5h no reading · 7d 3% · week resets Mon 15:00 · 0 helpers · observe"
+    assert admission.band_line(json.loads(_ts_fixture("BAND_WEEK_ONLY")), _ts_now()) == _ts_fixture("BAND_WEEK_ONLY_LINE")
+
+
+def test_s51_an_entry_with_no_reading_at_all_draws_as_before():
+    assert admission.band_line({"mode": "observe", "at": iso(NOW), "window": "five_hour", "slot": "Fri-2100Z"},
+                               NOW) == "5h no reading · observe"
+    assert rules.lifetime({}, "/nonexistent", {"window": "five_hour", "mode": "observe"}, now=NOW) == (None, rules.UNKNOWN)
+
+
 @pytest.mark.parametrize("window", ["five_hour", "auto", "NONE", None, 7, ["none"]])
 def test_band_line_five_hour_bytes_unchanged(window):
     """Packet S43 ruling 3: today's three lines, spelled here as well as in the fixture, and any
