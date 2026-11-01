@@ -175,7 +175,7 @@ def _read_shipped(inputs: list) -> dict:
         try:
             raw = path.read_bytes()
         except FileNotFoundError:
-            raise ShippedGone(f"the shipped profiles.yaml is gone: {path}; run make install") \
+            raise ShippedGone(f"the shipped profiles.yaml is gone: {path}; run install-cli") \
                 from None
     return _parse(path, raw, inputs)
 

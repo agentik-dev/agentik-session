@@ -43,7 +43,7 @@ class LaunchError(RuntimeError):
 
 # Env keys a config may never set. Each would redirect the seat's credential,
 # swap the interpreter under every hook, or replace the auth entirely.
-_ENV_DENY_EXACT = {"PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "USER", "LOGNAME",
+_ENV_DENY_EXACT = {"PATH", "PYTHONPATH", "PYTHONHOME", "AGENTIK_PYTHON", "HOME", "USER", "LOGNAME",
                    "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
                    "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK",
                    "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CONFIG_DIR",

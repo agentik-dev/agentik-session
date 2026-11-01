@@ -1,6 +1,6 @@
 {
   "name": "session",
-  "version": "2.0.0-alpha.41",
+  "version": "2.0.0-alpha.42",
   "description": "Profiles for Claude Code sittings: one resolved configuration per session, offered to the plugins that depend on it, and a doctor that checks the setup.",
   "author": {"name": "Kevin Tegtmeier"},
   "homepage": "https://github.com/agentik-dev/agentik-session",

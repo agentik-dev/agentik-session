@@ -18,6 +18,8 @@ DOOR = "agentik"
 # the launcher records what its parent really had.
 APPLE = ("SDKROOT", "CPATH", "LIBRARY_PATH", "MANPATH", "LC_CTYPE")
 SAVED = "AGENTIK_PARENT_"
+# SessionStart's own timeout is 10 s (hooks.json): a slow ps costs the prune, never the hook.
+REFRESH_PS_TIMEOUT = 3
 SKIP_DIRS = ("__pycache__",)
 SKIP_FILES = (".DS_Store",)
 # The launcher's old name: the package's, spelled with a hyphen.
@@ -56,7 +58,7 @@ refuse() {   # the path that is gone, then this launcher's own arguments
         esc= rest=$gone
         while [ -n "$rest" ]; do
             c=${rest%"${rest#?}"}; rest=${rest#?}
-            case $c in \\|\") esc=$esc\\$c ;; *) esc=$esc$c ;; esac
+            case $c in \\|\") esc=$esc\\$c ;; [[:cntrl:]]) ;; *) esc=$esc$c ;; esac
         done
         printf '{"systemMessage": "agentik-session: %s is gone; run /session:install-cli"}\n' "$esc"
     else
@@ -68,7 +70,7 @@ refuse() {   # the path that is gone, then this launcher's own arguments
 }
 wanted=${AGENTIK_PYTHON:-/usr/bin/python3}; py=$wanted
 [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "$wanted" "$@"
-[ -f "$TREE/agentik-session" ] || refuse "$TREE" "$@"
+[ -f "$TREE/agentik-session" ] && [ -r "$TREE/agentik-session" ] || refuse "$TREE" "$@"
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
 # /usr/bin/python3 adds SDKROOT and LC_CTYPE where unset, and adds to CPATH, LIBRARY_PATH and
 # MANPATH even where set (measured, sc3). What a chain's `claude` or a gate job may see is what
@@ -79,11 +81,14 @@ for v in __APPLE__; do
 done
 export AGENTIK_PARENT_ENV=1
 # Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
-# block, so a hook stays in this shell to read its exit, as the plugin's launcher does. Apple's
-# is execed: with the runner tested above, it reaches the runner or exits 1.
-if [ "$1" = hook ] && [ "$py" != /usr/bin/python3 ]; then
+# block, so this shell stays to read its exit, as the plugin's launcher does. From what cannot
+# print from Python, a hook's 2, 126 or 127 exits 0 and a verb's failure exits 3. A real Python's
+# exit stands. Apple's is execed: with the runner tested above, it reaches the runner or exits 1.
+if [ "$py" != /usr/bin/python3 ]; then
     "$py" -I -X pycache_prefix="$cache" "$TREE/agentik-session" "$@"; rc=$?
-    case $rc in 2|126|127) [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "$py" "$@" ;; esac
+    if [ "$rc" != 0 ] && { [ "$1" != hook ] || [ "$rc" = 2 ] || [ "$rc" = 126 ] || [ "$rc" = 127 ]; }; then
+        [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "$py" "$@"
+    fi
     exit "$rc"
 fi
 exec "$py" -I -X pycache_prefix="$cache" "$TREE/agentik-session" "$@"
@@ -257,7 +262,7 @@ def _lock(share, wait=True):
     return fh
 
 
-def _locked_install(prefix, share, env):
+def _locked_install(prefix, share, env, ps_timeout=60):
     from . import prune
     bin_dir = os.path.join(prefix, "bin")
     os.makedirs(bin_dir, exist_ok=True)
@@ -271,7 +276,7 @@ def _locked_install(prefix, share, env):
     _replace(os.path.join(bin_dir, OLD_NAME), lambda temp: os.symlink(NAME, temp))
     _write_launcher(launcher, launcher_text(code, version))    # last: what a retry reads
     try:
-        pruned, lines = prune.prune(share, tree)
+        pruned, lines = prune.prune(share, tree, ps_timeout=ps_timeout)
     except Exception as e:                                     # noqa: BLE001
         pruned, lines = 1, ["prune-trees: %s" % e]
     if pruned:
@@ -366,7 +371,7 @@ def _refresh(env):
         return None
     try:
         if _behind(path):
-            _locked_install(prefix, share, env)
+            _locked_install(prefix, share, env, ps_timeout=REFRESH_PS_TIMEOUT)
     finally:
         lock.close()
     return None

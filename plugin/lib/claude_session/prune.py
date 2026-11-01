@@ -43,12 +43,12 @@ from pathlib import Path
 PROBE = "CLAUDE_SESSION_PRUNE_PROBE"
 
 
-def processes(ps):
+def processes(ps, timeout=60):
     """(every process's command line and environment as one text, None) or (None, why)."""
     token = secrets.token_hex(8)
     try:
         r = subprocess.run([ps, "-axwwE", "-o", "pid=,command="], capture_output=True,
-                           text=True, errors="replace", timeout=60,
+                           text=True, errors="replace", timeout=timeout,
                            env=dict(os.environ, **{PROBE: token}))
     except (OSError, subprocess.SubprocessError) as e:
         return None, f"{ps}: {e}"
@@ -90,14 +90,14 @@ def remove(path):
         path.unlink()
 
 
-def prune(share, new, keep=3, ps="ps"):
+def prune(share, new, keep=3, ps="ps", ps_timeout=60):
     """(exit code, the lines to say). Never removes `new`; on doubt removes nothing."""
     share = Path(share)
     tree = share / new
     if keep < 1 or "/" in new or new in ("", ".", "..") or not tree.is_dir():
         return 2, [f"prune-trees: {new} is not a tree under {share} (or --keep < 1)"]
     os.utime(tree)
-    text, why = processes(ps)
+    text, why = processes(ps, ps_timeout)
     if text is None:
         return 0, [f"prune-trees: {why}; keeping every tree"]
     live = named(text, share)

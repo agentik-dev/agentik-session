@@ -390,7 +390,7 @@ def test_f8_missing_shipped_file_names_itself(world, monkeypatch, tmp_path):
     env, _, put = world
     gone = tmp_path / "gone" / "profiles.yaml"
     monkeypatch.setattr(resolver, "SHIPPED", gone)
-    want = f"the shipped profiles.yaml is gone: {gone}; run make install"
+    want = f"the shipped profiles.yaml is gone: {gone}; run install-cli"
     with pytest.raises(ResolveError) as e:
         run(world, profile="orchestrator")
     assert str(e.value) == want

@@ -834,3 +834,101 @@ def test_sc3_a_hook_through_the_launcher_is_under_the_p95_bar(box, tmp_path):
     # bytecode goes under the launcher's prefix, never into the tree
     assert (home / ".cache" / "agentik" / "pycache").is_dir()
     assert not list(_share(home).rglob("__pycache__"))
+
+
+# ---- sc3 amendment 2: the refuter's round 1 --------------------------------------------------
+
+def test_a2_f1_an_unreadable_runner_never_blocks_a_hook(box):
+    home, tool, _ = box
+    [tree] = _trees(home)
+    runner = _share(home) / tree / "agentik-session"
+    runner.chmod(0)
+    gone = str(_share(home) / tree)
+    r = _call(tool, home, "hook", "PreToolUse")
+    assert r.returncode == 0, r
+    assert _call(tool, home, "status").returncode == 3
+    assert gone in json.loads(_call(tool, home, "hook", "SessionStart").stdout)["systemMessage"]
+
+
+@pytest.mark.parametrize("via", VIAS)
+@pytest.mark.parametrize("kind", ("no interpreter it can start", "/usr/bin/false"))
+def test_a2_f2_what_passes_x_and_cannot_run_is_a_verbs_exit_3(box, tmp_path, via, kind):
+    home, tool = _via(box, tmp_path, via)
+    dead = tmp_path / "deadpy"
+    dead.write_text("#!/nonexistent/x\n")
+    dead.chmod(0o755)
+    py = str(dead) if kind.startswith("no ") else kind
+    env = _bare(home, AGENTIK_PYTHON=py, PATH="/nonexistent")
+    assert _call(tool, home, "--version", env=env).returncode == 3
+    assert _call(tool, home, "status", env=env).returncode == 3
+    if kind.startswith("no "):
+        for event in ("PreToolUse", "SessionStart"):
+            assert _call(tool, home, "hook", event, env=env).returncode == 0
+        assert "systemMessage" in json.loads(_call(tool, home, "hook", "SessionStart", env=env).stdout)
+    else:       # a hook's 1 is no block; scripts/bare-proof's failing_tool pins it
+        assert _call(tool, home, "hook", "PreToolUse", env=env).returncode == 1
+
+
+@pytest.mark.parametrize("via", VIAS)
+def test_a2_f2_a_real_pythons_failure_stands(box, tmp_path, via):
+    home, tool = _via(box, tmp_path, via)
+    env = _bare(home, AGENTIK_PYTHON=os.path.realpath(sys.executable))
+    r = _call(tool, home, "profile", "no-such-profile", env=env)
+    assert r.returncode not in (0, 3), r
+
+
+def test_a2_f4_a_control_character_keeps_session_start_json_valid(box, tmp_path):
+    home, tool, _ = box
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    env = _bare(home, AGENTIK_PYTHON="/no\twhere\n/py\x01thon", PATH=str(empty))
+    r = _call(tool, home, "hook", "SessionStart", env=env)
+    assert r.returncode == 0, r
+    assert "/nowhere/python" in json.loads(r.stdout)["systemMessage"]
+
+
+def test_a2_f5_the_guard_sees_an_ignored_file_and_not_bytecode(repo, tmp_path):
+    home = tmp_path / "home"
+    with open(repo / ".gitignore", "a") as f:
+        f.write("*.scratch\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore")
+    cache = repo / PKG / "__pycache__"
+    cache.mkdir()
+    (cache / "x.cpython-39.pyc").write_bytes(b"x")
+    r = _install(repo, home)
+    assert r.returncode == 0, r.stderr
+    [tree] = _trees(home)
+    assert not list((_share(home) / tree).rglob("__pycache__"))
+    (repo / PKG / "stray.scratch").write_text("x = 1\n")
+    r = _install(repo, home)
+    assert r.returncode == 2 and "dirty" in r.stderr, r
+    assert _trees(home) == [tree]
+
+
+def test_a2_f6_a_slow_ps_keeps_every_tree(tmp_path):
+    from claude_session import prune
+    share = tmp_path / "share"
+    for i, name in enumerate(("t0", "t1", "t2", "t3", "t4")):
+        (share / name).mkdir(parents=True)
+        os.utime(share / name, (1000 + i, 1000 + i))
+    ps = tmp_path / "ps"
+    ps.write_text("#!/bin/sh\nexec /bin/sleep 30\n")
+    ps.chmod(0o755)
+    code, lines = prune.prune(share, "t4", ps=str(ps), ps_timeout=0.2)
+    assert code == 0 and "keeping every tree" in lines[-1], lines
+    assert len(list(share.iterdir())) == 5
+
+
+def test_a2_f6_the_refresh_gives_ps_its_short_bound(old_install, monkeypatch):
+    from claude_session import install, prune
+    assert install.REFRESH_PS_TIMEOUT <= 3
+    home, _, _ = old_install
+    seen = []
+    monkeypatch.setattr(prune, "prune", lambda *a, **k: (seen.append(k.get("ps_timeout")), (0, []))[1])
+    monkeypatch.setattr(install, "_behind", lambda path: True)
+    monkeypatch.setattr(install, "is_frozen", lambda lib: False)
+    root = Path(install.__file__).resolve().parents[2]
+    env = {"HOME": str(home), "CLAUDE_PLUGIN_ROOT": str(root), "XDG_STATE_HOME": str(home / "s")}
+    assert install.refresh(env) is None
+    assert seen == [install.REFRESH_PS_TIMEOUT]

@@ -178,7 +178,7 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 
 ## Status
 
-Status: version `v2.0.0-alpha.41`, rendered `2026-10-14`, `2426` tests in the suite.
+Status: version `v2.0.0-alpha.42`, rendered `2026-10-14`, `2437` tests in the suite.
 
 ## Credit
 
