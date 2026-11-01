@@ -590,3 +590,26 @@ def test_sc3_run_reaches_its_first_spawn_at_3_9_and_ps_reads_the_form(box, tmp_p
     assert _launcher_form(words), line
     assert "3.9" in subprocess.run(["/usr/bin/python3", "-c", "import sys; print(sys.version)"],
                                    capture_output=True, text=True).stdout
+
+
+# ---- sc3 act 3: F8 through the verb ------------------------------------------------------
+
+def test_sc3_a_chain_under_the_new_form_keeps_its_tree_through_installs(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    assert _verb(_plugin(tmp_path / "p0", "2.0.0-alpha.1"), home).returncode == 0
+    [first] = _trees(home)
+    runner = _share(home) / first / "agentik-session"
+    # The tree's real runner, as a launcher runs it, sat in `gate serve`'s place: stdin holds it.
+    live = subprocess.Popen(["/usr/bin/python3", "-I", "-X", "pycache_prefix=%s" % (tmp_path / "c"),
+                             "-c", "import sys; sys.stdin.read()", str(runner), "run", "--chain", "x"],
+                            stdin=subprocess.PIPE)
+    try:
+        for n in range(2, 7):
+            assert _verb(_plugin(tmp_path / ("p%d" % n), "2.0.0-alpha.%d" % n), home).returncode == 0
+        assert first in _trees(home) and len(_trees(home)) == 4
+    finally:
+        live.stdin.close()
+        live.wait(timeout=30)
+    assert _verb(_plugin(tmp_path / "p9", "2.0.0-alpha.9"), home).returncode == 0
+    assert first not in _trees(home) and len(_trees(home)) == 3

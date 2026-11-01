@@ -105,3 +105,71 @@ def test_f2_live_paths_are_compared_by_realpath(share, tmp_path):
     assert r.returncode == 0, r.stderr
     assert _left(share) == ["t1", "t2", "t5"], r.stdout
     assert "2 live" in r.stdout, r.stdout
+
+
+# ---- sc3 act 3: F8 under the new form ---------------------------------------------------
+
+APPLE = "/usr/bin/python3"
+READS = "import sys; sys.stdin.read()"
+
+
+@pytest.mark.skipif(not os.access(APPLE, os.X_OK), reason="no /usr/bin/python3")
+@pytest.mark.parametrize("form", ("command line", "PYTHONPATH"))
+def test_a_live_process_under_apples_python_keeps_its_tree(share, form, tmp_path):
+    # t0 is the oldest: only a live process can keep it. t1 is next, and goes.
+    runner = share / "t0" / "agentik-session"
+    runner.write_text(READS + "\n")
+    os.utime(share / "t0", (1_000_000, 1_000_000))
+    env = dict(os.environ)
+    if form == "command line":      # the launcher's own words, `run` and all
+        argv = [APPLE, "-I", "-X", f"pycache_prefix={tmp_path}/c", str(runner), "run", "--chain", "x"]
+    else:                           # an old launcher, which runs for a day or more
+        argv = [APPLE, "-c", READS]
+        env["PYTHONPATH"] = str(share / "t0")
+    live = subprocess.Popen(argv, stdin=subprocess.PIPE, env=env)
+    try:
+        assert _wait_for_ps(live.pid, argv[-1] if form == "command line" else "c")
+        r = _prune(share, "t5")
+        assert r.returncode == 0, r.stderr
+        assert _left(share) == ["t0", "t3", "t4", "t5"]
+    finally:
+        live.stdin.close()
+        live.wait(timeout=30)
+    assert _prune(share, "t5").returncode == 0
+    assert _left(share) == ["t3", "t4", "t5"]
+
+
+def _wait_for_ps(pid, word):
+    """Apple's stub execs the real Python: wait until ps reads the process past it."""
+    import time
+    for _ in range(100):
+        line = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True,
+                              text=True).stdout
+        if word in line and "/usr/bin/python3" not in line.split()[:1]:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_ps_that_fails_keeps_all(share, tmp_path):
+    ps = tmp_path / "ps"
+    ps.write_text("#!/bin/sh\nexit 1\n")
+    ps.chmod(0o755)
+    r = _prune(share, "t5", "--ps", str(ps))
+    assert r.returncode == 0 and "keeping every tree" in r.stderr
+    assert _left(share) == NAMES
+
+
+def test_it_never_removes_the_tree_it_just_wrote(share):
+    os.utime(share / "t0", (1, 1))      # the oldest of all
+    assert _prune(share, "t0", "--keep", "1").returncode == 0
+    assert _left(share) == ["t0"]
+
+
+def test_the_installs_own_dot_entries_are_no_trees(share):
+    (share / ".lock").write_text("")
+    (share / ".tmp-abc").mkdir()
+    os.utime(share / ".lock", (1, 1))
+    os.utime(share / ".tmp-abc", (1, 1))
+    assert _prune(share, "t5").returncode == 0
+    assert sorted(p.name for p in share.iterdir()) == [".lock", ".tmp-abc", "t3", "t4", "t5"]
