@@ -53,8 +53,9 @@ check-unlocked: tree-note test lint doclint hygiene plugin-version-check validat
 	else echo "readme: stale, run make readme"; exit 2; fi
 readme:  ## render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2000 s: its budget)
 	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2000 --load 4 -- scripts/readme-render
-doclint:  ## the doc gate (conventions §5)
+doclint:  ## the doc gate (conventions §5), then HANDOFF.md and NICE_TO_HAVE.md against their tables (hq design/05 §4)
 	scripts/doclint
+	scripts/recordlint
 hygiene:  ## the vendored copies' pins, then the public-hygiene scan (conventions §5, §6)
 	shasum -a 256 -c --status scripts/vendored.sha256 || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	scripts/hygiene

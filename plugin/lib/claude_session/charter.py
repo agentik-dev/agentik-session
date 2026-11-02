@@ -26,6 +26,8 @@ from pathlib import Path
 from . import rules
 
 CEILING = 4096
+# design/05 §6: `open --continue` adopts today's charter under this many bytes; at it, spills.
+CONTINUE_BELOW = 3584
 TABLE_ROWS = ("goal", "budget", "pin", "window", "agents")
 ROW_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 TITLE_RE = re.compile(r"^# Sitting (\d{4}-\d{2}-\d{2})-(\d+): (.+)$")
@@ -250,6 +252,31 @@ def newest_today(dir) -> Path | None:
     return found[-1][1] if found else None
 
 
+def _suffix(row: str | None) -> str:
+    """The name's suffix as `open` derives it: `-<row>`, or none for a row outside the set."""
+    return f"-{row}" if row and ROW_RE.match(row) else ""
+
+
+def adoptable(dir, row: str | None = None) -> Path | None:
+    """`open --continue` (design/05 §6): today's newest charter of any suffix, the one a bare
+    `close` writes (`newest_today`), when its name carries `open`'s suffix for `row` and it is
+    under CONTINUE_BELOW bytes; None when there is none, when the newest is another suffix's
+    (the newest is live: adopting an older one would let `close` write the other chain's file)
+    or when it is at the mark (the next sitting spills to n+1). Reads the size only, never the
+    bytes."""
+    date, suffix = today(), _suffix(row)
+    found = _numbered(Path(dir), date)
+    if not found:
+        return None
+    n, newest = found[-1]
+    if newest.name != f"{date}-{n}{suffix}.md":
+        return None
+    try:
+        return newest if newest.is_file() and newest.stat().st_size < CONTINUE_BELOW else None
+    except OSError:
+        return None
+
+
 def open(dir, goal: str, section: dict, head: str | None,
          repo: str | None = None, row: str | None = None) -> Path:
     """Write `<dir>/<today>-<n>.md`, or `<today>-<n>-<row>.md` when a relay row names
@@ -260,7 +287,7 @@ def open(dir, goal: str, section: dict, head: str | None,
     date = today()
     found = _numbered(dir, date)
     n = found[-1][0] + 1 if found else 1
-    suffix = f"-{row}" if row and ROW_RE.match(row) else ""
+    suffix = _suffix(row)
     goal = _one_line(goal, 300) or "?"
     repo = _one_line(repo or Path.cwd().name, 60) or "?"
     c = section.get("ceilings") or {}

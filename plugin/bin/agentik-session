@@ -1,21 +1,40 @@
 #!/bin/sh
-# agentik-session, the plugin's own launcher (design/04 §2): the runner beside it under the
-# one interpreter a fresh Mac and this one share. With no Python or no runner a hook exits 0,
-# SessionStart says so in a systemMessage, other verbs exit 3 (GUIDE §10): Python's "can't open
-# file" exits 2, and exit 2 from a PreToolUse hook would deny every tool call of a session.
+# A plugin's own launcher (hq design/04 §2), canonical in agentik-commons: scripts/sync places it at
+# plugin/bin/agentik-<tool>, byte-identical in every tool, under vendored.sha256. It runs the runner
+# in the plugin's lib/ under the one interpreter a fresh Mac and this one share, and takes the
+# tool's names from lib/agentik-tool.conf, read with no fork and never executed. With no Python, no
+# conf or no runner a hook exits 0, SessionStart says so in a systemMessage, other verbs exit 3
+# (GUIDE §10): Python's "can't open file" exits 2, and exit 2 from a PreToolUse hook would deny
+# every tool call.
 root=${0%/*}/..
+who=${0##*/}
 refuse() {   # the reason, then this launcher's own arguments
     why=$1
-    if [ "$2" != hook ]; then echo "agentik-session: $why" >&2; exit 3; fi
-    [ "$3" != SessionStart ] || printf '{"systemMessage": "agentik-session: %s; its hooks do nothing"}\n' "$why"
+    if [ "$2" != hook ]; then echo "$who: $why" >&2; exit 3; fi
+    msg="$who: $why; its hooks do nothing"   # a JSON string, with no fork: a hook may have no PATH
+    case $msg in *[\\\"[:cntrl:]]*) msg="a plugin launcher: its lib/agentik-tool.conf names what a JSON string cannot hold; its hooks do nothing" ;; esac
+    [ "$3" != SessionStart ] || printf '{"systemMessage": "%s"}\n' "$msg"
     exit 0
 }
-[ -f "$root/lib/agentik-session" ] && [ -r "$root/lib/agentik-session" ] || refuse "no runner in this plugin, at lib/agentik-session" "$@"
+conf=$root/lib/agentik-tool.conf
+[ -f "$conf" ] && [ -r "$conf" ] || refuse "no names in this plugin, at lib/agentik-tool.conf" "$@"
+tool= runner=
+# Whole lines, the last one read with no final newline too; whitespace or a CR at either end
+# refuses, as names() in agentik_install.py does.
+while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+        [[:space:]]* | *[[:space:]]) refuse "whitespace or a CR around a line of lib/agentik-tool.conf" "$@" ;;
+        tool_name=*) tool=${line#*=} ;;
+        runner=*) runner=${line#*=} ;;
+    esac
+done < "$conf"
+who=${tool:-$who}
+[ -n "$runner" ] && [ -f "$root/lib/$runner" ] && [ -r "$root/lib/$runner" ] || refuse "no runner in this plugin, at lib/$runner" "$@"
 py=${AGENTIK_PYTHON:-/usr/bin/python3}; [ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || refuse "no python3, at /usr/bin/python3 or on PATH" "$@"
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache
 # /usr/bin/python3 adds SDKROOT and LC_CTYPE where unset, and adds to CPATH, LIBRARY_PATH and
 # MANPATH even where set. Record what this shell saw, as the launcher install-cli writes does:
-# the package restores it first thing (restore_parent_env), so a job or `claude` sees the parent's.
+# the tool restores it first thing (restore_parent_env), so what it spawns sees the parent's.
 for v in SDKROOT CPATH LIBRARY_PATH MANPATH LC_CTYPE; do
     unset "AGENTIK_PARENT_$v"
     eval "[ -z \"\${$v+x}\" ] || export AGENTIK_PARENT_$v=\"\$$v\""
@@ -27,10 +46,10 @@ export AGENTIK_PARENT_ENV=1
 # with no Python; a hook's 1 is no block, and stands. A verb's failure exits 3. A real Python's
 # exit stands. Apple's is execed: with the runner tested above, it reaches the runner or exits 1.
 if [ "$py" != /usr/bin/python3 ]; then
-    "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"; rc=$?
+    "$py" -I -X pycache_prefix="$cache" "$root/lib/$runner" "$@"; rc=$?
     if [ "$rc" != 0 ] && { [ "$1" != hook ] || [ "$rc" = 2 ] || [ "$rc" = 126 ] || [ "$rc" = 127 ]; }; then
         [ "$("$py" -I -c 'print("python")' 2>/dev/null </dev/null)" = python ] || refuse "no python3 that starts: AGENTIK_PYTHON or PATH's is none" "$@"
     fi
     exit "$rc"
 fi
-exec "$py" -I -X pycache_prefix="$cache" "$root/lib/agentik-session" "$@"
+exec "$py" -I -X pycache_prefix="$cache" "$root/lib/$runner" "$@"

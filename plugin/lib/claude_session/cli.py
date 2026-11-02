@@ -358,6 +358,8 @@ def cmd_rules(args) -> int:
 
 def cmd_charter(args) -> int:
     """The sitting's charter: open, check, close (the shape of D10)."""
+    if getattr(args, "cont", False) and args.action != "open":
+        _die(f"charter --continue is read only with open, not {args.action}", 2)
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
@@ -379,12 +381,17 @@ def cmd_charter(args) -> int:
         if len(args.args) != 1:
             _die('charter open wants one goal: agentik-session charter open "<goal>"')
         section = _session_section(cwd)
-        rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
-        rc2, head = gitinfo._git(cwd, "rev-parse", "--short", "HEAD")
-        path = charter.open(args.dir or _charter_dir(section), args.args[0], section,
-                            head.strip() if rc2 == 0 else None,
-                            repo=os.path.basename(top.strip()) if rc == 0 else None,
-                            row=os.environ.get("RELAY_ROW"))
+        d, row = args.dir or _charter_dir(section), os.environ.get("RELAY_ROW")
+        # design/05 §6: --continue adopts today's newest charter, when it is of this suffix
+        # and under 3,584 bytes, recorded and printed as a new one is, its bytes untouched.
+        path = charter.adoptable(d, row) if getattr(args, "cont", False) else None
+        if path is None:
+            rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
+            rc2, head = gitinfo._git(cwd, "rev-parse", "--short", "HEAD")
+            path = charter.open(d, args.args[0], section,
+                                head.strip() if rc2 == 0 else None,
+                                repo=os.path.basename(top.strip()) if rc == 0 else None,
+                                row=row)
         _record_charter(path, section)
         print(path)
         return 0
@@ -1159,6 +1166,9 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("args", nargs="*", metavar="GOAL|FILE")
     ch.add_argument("--dir", metavar="D", help="the charter directory (open, close)")
     ch.add_argument("--exit", metavar="TEXT", help="the exit taken (close)")
+    ch.add_argument("--continue", dest="cont", action="store_true",
+                    help="open: adopt today's newest charter of the same suffix while under "
+                         "3,584 bytes, writing nothing to it; else open the next")
     ch.set_defaults(func=cmd_charter)
 
     ru = sub.add_parser("rules", help="the priority and pacing this session meets, "

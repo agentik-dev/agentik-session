@@ -16,6 +16,9 @@ design/review-adv6.md: lan
 # The tool's own state path (its name) and the plugins it loads by id.
 plugin/lib/claude_session/config.py: sibling,renamed
 plugin/lib/claude_session/launch.py: sibling,renamed
+# The conf's old names (GUIDE §10): the old launcher link and the old state folder the
+# canonical install-cli falls back on, as install.py's OLD_NAME and config's OLD_APP (s52 a2 F2).
+plugin/lib/agentik-tool.conf: sibling,renamed
 plugin/lib/claude_session/sessionconfig.py: sibling
 tests/test_launch.py: sibling,renamed
 # The launcher's one-time marker lives under the tool's state path (ADV10-5).
@@ -45,6 +48,7 @@ tests/test_readme.py: sibling
 .hygiene-allow: sibling
 # The review's open items name the repo in the title.
 NICE_TO_HAVE.md: sibling
+history/NICE-2026-11-01.md: sibling
 # The owner's question file keeps the shared heading "Decisions for the owner".
 OPEN-QUESTIONS.md: sibling
 # The rows files' `repo` is a ~-rooted path to a public plugin repo; no user name.
