@@ -51,6 +51,10 @@ HELPER_EVENTS = ("PostToolUseFailure", "PostToolBatch")
 MEDIAN_BAR, P95_BAR = 1.25, 2.5
 ONE_MB = 1 << 20
 FOUND = re.compile(r"(\d+) warnings?")
+# The one line `claude plugin validate` prints that names the copy, not the plugin (2.1.319):
+# a hash of the directory's contents. The mock's root holds the watching runner and the
+# hooks' own files, so its digest is never the live copy's; validate() drops the line.
+DIGEST = re.compile(r"^Digest: sha256-[A-Za-z0-9+/=]+$")
 # All that may differ between the interpreters' runs on one input (`as 3.12`), by key. Each is a
 # clock's reading: `at`, when a stamp was written (activity, helper-activity, limited,
 # turn-ended); `ms`, a hook row's wall time; `ts`, when meter.json was written; `ended`, when a
@@ -611,17 +615,21 @@ class Proof:
             return
         live = os.path.join(self.t, "live", "plugin")
         self.unpack("plugin", live, True)
-        outs = {}
+        outs, digests = {}, {}
         for name, path in (("live", live), ("mock", self.root)):
             env = {"HOME": self.t, "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
             r = subprocess.run([claude, "plugin", "validate", path], text=True, capture_output=True,
                                cwd=self.t, env=env, timeout=60)
-            outs[name] = (r.returncode, (r.stdout + r.stderr).replace(path, "<root>"))
+            lines = (r.stdout + r.stderr).replace(path, "<root>").split("\n")
+            kept = [x for x in lines if not DIGEST.fullmatch(x)]
+            digests[name] = len(lines) - len(kept)
+            outs[name] = (r.returncode, "\n".join(kept))
         found = {k: FOUND.findall(v[1]) for k, v in outs.items()}
         # None said is none found, once it validated: `hooks.json` quotes its root since sc2.
         warnings = {k: int(found[k][0]) if found[k] else 0 if "Validating" in outs[k][1] else -1
                     for k in outs}
-        same = outs["live"][1] == outs["mock"][1]
+        # The digest is masked like the path; a digest on one side alone is still a difference.
+        same = outs["live"][1] == outs["mock"][1] and digests["live"] == digests["mock"]
         # Two runs that fail alike are identical: each must pass, and count the same warnings.
         ok = same and outs["live"][0] == 0 and outs["mock"][0] == 0 and warnings["live"] == warnings["mock"] >= 0
         tail = ""
@@ -629,9 +637,9 @@ class Proof:
             a, b = outs["live"][1].splitlines(), outs["mock"][1].splitlines()
             tail = "; first difference: " + " / ".join(
                 next(("%s | %s" % (x, y) for x, y in zip(a, b) if x != y), "length"))[:200]
-        self.row("validate", ok, "exit %d and %d, warnings %d and %d, %s%s" % (
-            outs["live"][0], outs["mock"][0], warnings["live"], warnings["mock"],
-            "the outputs identical" if same else "the outputs differ", tail))
+        self.row("validate", ok, "exit %d and %d, warnings %d and %d, digest lines masked %d and %d, %s%s" % (
+            outs["live"][0], outs["mock"][0], warnings["live"], warnings["mock"], digests["live"],
+            digests["mock"], "the outputs identical" if same else "the outputs differ", tail))
 
     def sentinel(self):
         """HOME reached every child, and the audit hook saw no in-process write outside $T; a
