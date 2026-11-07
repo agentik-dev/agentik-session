@@ -8,8 +8,6 @@ Findings that block nothing, one row each, in agentik-hq design/05 §2's table: 
 |---|---|---|---|---|---|
 | n1 | S4 | `design/readme/source.md` | The README's source sits 2 B under its 16,384 B ceiling, so no new README line fits (s52's `--continue` line did not) until the source is trimmed or the ceiling moves | 16,382 B at 823003e; `tests/test_readme.py:25` | 2026-11-01, s52's builder |
 | n2 | S3 | `DECISIONS.md` | agentik-session has no ledger on main (no `DECISIONS.md`, no `CLAUDE.md` block), against the Mac's ledger, entry 21 (a decision lives in the root `DECISIONS.md` of the repo holding its implementation) | `git ls-tree -r main --name-only \| grep -ci decision` gives 0; `history/NICE-2026-11-01.md` holds "this repo has no ledger" | 2026-11-01, h1's refuter F1 |
-| n3 | S3 | `claude_session/hooks.py` | Lead: needs a probe. Posture `ask` may be a no-op: under bypass or `-p` the engine may settle the `ask` unasked, so a wind-down spawn passes | not confirmed: [register.ts:6-8](https://github.com/rsaryev/tokendoctor/blob/07955d5c59854ac882005f512d9dad7510d63759/hooks/register.ts#L6-L8); ours `hooks.py:211` | 2026-11-07, sitting 2026-11-07-1 |
-| n4 | S3 | `claude_session/hooks.py` | Lead: needs a probe. `pre_compact` passes every trigger but `auto` (`precompute`, say), so an idle compaction named otherwise would compact a sitting | `hooks.py:749`; not confirmed: [register.ts:146-148](https://github.com/rsaryev/tokendoctor/blob/07955d5c59854ac882005f512d9dad7510d63759/hooks/register.ts#L146-L148) | 2026-11-07, sitting 2026-11-07-1 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 

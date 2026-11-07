@@ -181,7 +181,9 @@ def _close_call(payload: dict, env) -> None:
 def pre_tool_use(payload: dict, env=None) -> dict:
     """The spawn gate (§2.2): under `ask` or `deny`, a spawn in the late zones
     asks, and under `deny` one in the reserve is refused. A subagent's call: {}.
-    Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only."""
+    Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only.
+    Under `-p` nobody answers an `ask`, so Claude Code refuses the call (probed 2026-11-07
+    on 2.1.319 in manual, dontAsk and auto modes)."""
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
     _open_call(payload, os.environ if env is None else env)
     tool = payload.get("tool_name") or ""
@@ -745,7 +747,8 @@ COMPACT_BLOCKED = ("This setup restarts a sitting rather than compacting it: bri
 def pre_compact(payload: dict, env=None) -> dict:
     """Block an automatic compaction; an owner-typed `/compact` (trigger `manual`) and any
     trigger not known pass with an empty reply, which dispatch prints as nothing (QUIET_PASS).
-    It reads and writes no state."""
+    It reads and writes no state. On 2.1.319 the trigger is `manual` or `auto`, and the
+    threshold, idle (precompute) and prompt-too-long compactions all report `auto`."""
     if payload.get("trigger") == "auto":
         return {"decision": "block", "reason": COMPACT_BLOCKED}
     return {}
