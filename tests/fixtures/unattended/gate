@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""A fake `agentik session gate` for tests/test_unattended.py: never a real gate job. Each call,
+`gate run --wait <repo> -- <land> <repo> <id> <sha> <merge-file>`, takes the next step of
+the JSON list at $FAKE_GATE_PLAN (the last repeats): `verdict`, the job's last log line with
+`{repo}` (the repo's name) and `{sha}` from its argv, and `exit`, the job's code, then the
+gate's own trailer as gate.py `_close` writes it; `no_log`, the log not written; or `no_line` with `rc`, no gate line and that exit. It writes the log
+beside $FAKE_GATE_LOG, prints `queued …` then `gate wait`'s line, and logs its argv and cwd
+to $FAKE_GATE_LOG, one JSON line."""
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+plan_path = os.environ["FAKE_GATE_PLAN"]
+with open(plan_path) as fh:
+    plan = json.load(fh)
+count = plan_path + ".n"
+n = int(open(count).read()) if os.path.exists(count) else 0
+with open(count, "w") as fh:
+    fh.write(str(n + 1))
+step = plan[min(n, len(plan) - 1)]
+with open(os.environ["FAKE_GATE_LOG"], "a") as fh:
+    fh.write(json.dumps({"argv": argv, "cwd": os.getcwd()}) + "\n")
+if step.get("no_line"):
+    print("gate run: refused", file=sys.stderr)
+    sys.exit(step.get("rc", 2))
+repo, sha = argv[2], argv[-2]
+gid = "20261107T120000-%d" % n
+log = os.path.join(os.path.dirname(os.environ["FAKE_GATE_LOG"]), "gate-%s.log" % gid)
+if not step.get("no_log"):
+    with open(log, "w") as fh:
+        fh.write("make check\n2470 passed\n%s\n\n" % step["verdict"].format(
+            repo=os.path.basename(repo), sha=sha))
+        fh.write("gate %s: exit %d in 6 s\n" % (gid, step.get("exit", 0)))   # gate.py _close's
+print("queued %s position 1 repo %s caller none; result /x/result.json" % (gid, repo), flush=True)
+print("gate %s %s: exit %d in 0.1 min; log %s" % (gid, repo, step.get("exit", 0), log), flush=True)

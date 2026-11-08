@@ -40,6 +40,7 @@ Skills:
 
 - `session`: profiles, session-only settings, the budget (the meter, the zones, CHECKPOINT and EXIT), the charter, and the priority and pacing rules.
 - `read`, invoked as `/session:read <file> [SPEC]`: reads a markdown record by sections, never whole. Example: `/session:read design/overhaul-r1.md '§5'`.
+- `unattended`, invoked as `/session:unattended [report]`: the newest run's status or report; it never starts one.
 
 CLI verbs (`agentik session --help`):
 
@@ -56,8 +57,9 @@ CLI verbs (`agentik session --help`):
 | `charter` | `agentik session charter open "render the README"` |
 | `budget` | `agentik session budget` |
 | `rules` | `agentik session rules` |
-| `run` | `agentik session run --chain night -- --model 'opus[1m]' "/loop 30m check in"` |
+| `run` | `agentik session run --chain loop -- --model 'opus[1m]' "/loop 30m check in"` |
 | `gate` | `agentik session gate run . -- make check`; `agentik session gate wait <id>` |
+| `unattended` | `agentik session unattended run . --until 06:30` |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
 
@@ -85,14 +87,9 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 
-The two orchestrator roles ship in `2.0.0-alpha.2`. Install that version of the launcher and of the plugin first, then restart Claude Code. Until then, `agentik session profile orchestrator` prints `unknown profile` and the meter falls back to `frontier`.
-
 Start an orchestrator session (quote `opus[1m]`: zsh reads brackets as a glob):
 
 ```sh
-make install                                          # from the clone: the launcher
-claude plugin update session@agentik      # the plugin; restart Claude Code
-agentik session profile orchestrator-opus              # prints the role, not unknown profile
 CLAUDE_SESSION_PROFILE=orchestrator claude --model fable               # Fable 5.1, 1M
 CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'     # Opus 5.5, 1M
 ```
@@ -153,6 +150,14 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 - Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
 - `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
 
+## The unattended loop
+
+`agentik session unattended run <repo> [--rows a,b] [--until HH:MM] [--max-rows N] [--land PATH]` runs `relay/queue.yaml`'s rows in order, a `claude -p` builder each in its worktree, never beside a relay run.
+
+
+- A `merge-on-green` row lands as one gate job through `--land` or `<repo>/scripts/land`; a verdict other than the log's `ok` or `red <step>` reads red `gate-unrun`.
+- Exit 0 at the queue's end, `--until` or `--max-rows`; 3 on a limit, an auth error or the run's `stop` file; `status` and `report` read its ledger.
+
 ## Design of record
 
 - `design/overhaul-r1.md`: the design of this version.
@@ -178,7 +183,7 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 
 ## Status
 
-Status: version `v2.0.0-alpha.47`, rendered `2026-10-14`, `2476` tests in the suite.
+Status: version `v2.0.0-alpha.49`, rendered `2026-10-14`, `2492` tests in the suite.
 
 ## Credit
 

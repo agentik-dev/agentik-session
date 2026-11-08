@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""A fake `claude -p` for tests/test_night.py: never a model request. Each start takes the
-next step of the JSON list at $FAKE_NIGHT_PLAN (the last repeats): `stream`, a fixture
+"""A fake `claude -p` for tests/test_unattended.py: never a model request. Each start takes the
+next step of the JSON list at $FAKE_UNATTENDED_PLAN (the last repeats): `stream`, a fixture
 beside this file replayed line by line; `no_result`, its result lines dropped; `commit`, a
 commit in the cwd; `dirty`, an untracked file; `sleep`, seconds before the result. It logs
-its argv, cwd, env, stdin and origin's push url to $FAKE_NIGHT_LOG, one JSON line."""
+its argv, cwd, env, stdin and origin's push url to $FAKE_UNATTENDED_LOG, one JSON line."""
 import json
 import os
 import subprocess
@@ -11,7 +11,7 @@ import sys
 import time
 
 here = os.path.dirname(os.path.abspath(__file__))
-plan_path = os.environ["FAKE_NIGHT_PLAN"]
+plan_path = os.environ["FAKE_UNATTENDED_PLAN"]
 with open(plan_path) as fh:
     plan = json.load(fh)
 count = plan_path + ".n"
@@ -22,7 +22,7 @@ step = plan[min(n, len(plan) - 1)]
 stdin = sys.stdin.read()
 push = subprocess.run(["git", "remote", "get-url", "--push", "origin"],
                       capture_output=True, text=True).stdout.strip()
-with open(os.environ["FAKE_NIGHT_LOG"], "a") as fh:
+with open(os.environ["FAKE_UNATTENDED_LOG"], "a") as fh:
     fh.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
                          "stdin": stdin, "pushurl": push}) + "\n")
 if step.get("commit"):
