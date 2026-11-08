@@ -980,6 +980,22 @@ def cmd_gate(args) -> int:
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
+def cmd_night(args) -> int:
+    """`agentik session night run|status` (hq design/07 §2, packet night-1): the overnight
+    loop without its land step. `run` exits 0 on queue-spent, 3 on another stop, 2 on a
+    refusal before the first row; `status` exits 0."""
+    from . import night
+    if args.night_verb == "status":
+        st = night.status(os.environ, time.time())
+        print(json.dumps(st, indent=2) if args.json else "\n".join(night.status_lines(st)))
+        return 0
+    keep = [r for r in (args.rows or "").split(",") if r] or None
+    try:
+        return night.run(args.repo, keep)
+    except night.NightError as err:
+        _die(f"night run: {err}", 2)
+
+
 def _gate_wall(env) -> int:
     """`run`'s default wall: the gate section's user layer, else 5400."""
     from . import gate
@@ -1215,6 +1231,17 @@ def build_parser() -> argparse.ArgumentParser:
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
+
+    nt = sub.add_parser("night", help="the overnight loop: one claude -p builder per queue "
+                                       "row, to a stop (no land step yet)")
+    nsub = nt.add_subparsers(dest="night_verb", required=True, metavar="run|status")
+    nr = nsub.add_parser("run", help="run <repo>/relay/queue.yaml's rows in file order")
+    nr.add_argument("repo", help="the repo whose queue runs")
+    nr.add_argument("--rows", metavar="A,B", help="only these row ids")
+    ns = nsub.add_parser("status", help="the newest night: rows by state, the running row, "
+                                         "the stop")
+    ns.add_argument("--json", action="store_true")
+    nt.set_defaults(func=cmd_night)
 
     hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks
     hk.add_argument("event", choices=sorted(hooks.HANDLERS))

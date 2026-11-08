@@ -216,3 +216,26 @@ def test_watchdog_kills(box):
     assert ex["rc"] < 0 and ex["subtype"] is None               # killed before its result
     assert box.rc == 0 and box.kind("stop")[0]["reason"] == "queue-spent"
     assert "stalled" in (box.dir / "log").read_text()
+
+
+def test_status_newest(box, capsys):
+    from claude_session import cli
+    assert cli.main(["night", "status"]) == 0
+    assert capsys.readouterr().out == "no night yet\n"
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"])
+    box.go([{"stream": "max-turns.jsonl"}], ["max-row"])
+    assert cli.main(["night", "status", "--json"]) == 0
+    st = json.loads(capsys.readouterr().out)
+    assert st["night"] == "night-" + box.dir.name and st["dir"] == str(box.dir)
+    assert st["rows"] == {"red": [{"row": "max-row", "reason": "no-commit", "sha": None}]}
+    assert st["stop"] == {"reason": "queue-spent", "cost": 3.5} and st["running"] is None
+    d = box.dir.with_name(box.dir.name.rsplit("-", 1)[0] + "-10")      # 10 sorts past 2
+    d.mkdir(mode=0o700)
+    (d / "ledger.jsonl").write_text(json.dumps({"ts": "t", "kind": "spawn", "row": "green-row"})
+                                    + "\nnot json\n")
+    (d / "green-row.jsonl").write_text('{"type": "system"}\n{"type": "assistant", "x": "' + "y" * 300 + '"}\n')
+    assert cli.main(["night", "status"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"night-{d.name}: {d}"
+    assert out[1].startswith("  running green-row, its last line ") and len(out[1]) < 280
+    assert out[1].endswith("y" * (200 - len('{"type": "assistant", "x": "')))  # 200 chars

@@ -698,3 +698,81 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     fx.say(f"{nid}: stop {stop}; " + ", ".join(f"{k} {len(v)}" for k, v in N.states.items())
            + f"; ${N.cost:.2f}")
     return 0 if stop == "queue-spent" else 3
+
+
+# ---- the ledger read back, and status (ruling 10) --------------------------------------
+
+def read_ledger(path: Path) -> list:
+    """The night's ledger, each line an object; a torn or foreign line is skipped and a
+    key it does not know is kept, never read."""
+    out = []
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return out
+    for ln in text.splitlines():
+        try:
+            obj = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def _last_line(path: Path) -> str:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, os.path.getsize(path) - 65536))
+            lines = fh.read().decode(errors="replace").splitlines()
+    except OSError:
+        return ""
+    return (lines[-1] if lines else "")[:200]
+
+
+def status(env, now: float) -> dict | None:
+    """The newest night: its rows by state, a running row's last stream line and its age,
+    its stop; None with no night yet."""
+    d = newest_night(env)
+    if d is None:
+        return None
+    rows, ended, spawned, stop = {}, set(), [], None
+    for e in read_ledger(d / "ledger.jsonl"):
+        k = e.get("kind")
+        if k == "row" and isinstance(e.get("state"), str):
+            rows.setdefault(e["state"], []).append(
+                {"row": e.get("row"), "reason": e.get("reason"), "sha": e.get("sha")})
+            ended.add(e.get("row"))
+        elif k == "spawn":
+            spawned.append(e.get("row"))
+        elif k == "stop":
+            stop = {"reason": e.get("reason"), "cost": e.get("cost")}
+    running = None
+    live = [r for r in spawned if r not in ended and isinstance(r, str) and ROW_ID.match(r)]
+    if live and stop is None:
+        path = d / f"{live[-1]}.jsonl"
+        try:
+            age = round(now - path.stat().st_mtime)
+        except OSError:
+            age = None
+        running = {"row": live[-1], "last": _last_line(path), "age_s": age}
+    return {"night": f"night-{d.name}", "dir": str(d), "rows": rows, "running": running,
+            "stop": stop}
+
+
+def status_lines(st: dict | None) -> list:
+    if st is None:
+        return ["no night yet"]
+    out = [f"{st['night']}: {st['dir']}"]
+    for state, rows in st["rows"].items():
+        out.append(f"  {state} {len(rows)}: " + ", ".join(
+            r["row"] + "".join(f" {x[:12] if x == r['sha'] else x}" for x in (r["reason"], r["sha"]) if x)
+            for r in rows))
+    if st["running"]:
+        r = st["running"]
+        out.append(f"  running {r['row']}, its last line {r['age_s']} s ago: {r['last']}")
+    if st["stop"]:
+        cost = st["stop"]["cost"]
+        out.append(f"  stop {st['stop']['reason']}"
+                   + (f", ${cost:.2f}" if type(cost) in (int, float) else ""))
+    return out
