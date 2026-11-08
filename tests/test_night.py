@@ -174,3 +174,34 @@ def test_no_result_stops(box):
     (row,), (stop,) = box.kind("row"), box.kind("stop")
     assert (row["state"], row["reason"]) == ("red", "sitting-failure")
     assert stop["reason"] == "sitting-failure"
+
+
+S2 = "7d2e9f10-3c4b-4e5a-8f6d-2a1b3c4d5e6f"
+
+
+def test_rate_limit_resumes_once(box):
+    box.go([{"stream": "rate-limit.jsonl"}, {"stream": "green.jsonl", "commit": True}], ["limit-row"])
+    assert box.rc == 0
+    (lim,) = box.kind("limit")
+    assert (lim["limit_kind"], lim["resets_at"], lim["source"], lim["action"]) == (
+        "five_hour", 1762520400, "event", "resume")
+    assert sum(box.slept) == 720 and max(box.slept) <= 60       # the reset plus 120 s
+    one, two = box.starts
+    a = two["argv"]
+    assert a[:3] == ["-p", "--resume", S2] and "--session-id" not in a
+    assert a[a.index("--max-turns") + 1] == "70" and a[a.index("--max-budget-usd") + 1] == "11"
+    assert two["stdin"] == "continue from your charter's act in flight; your commits stand\n"
+    assert two["cwd"] == one["cwd"] and two["env"]["CLAUDE_SESSION_PROFILE"] == "builder"
+    assert [s["part"] for s in box.kind("spawn")] == [1, 2]
+    (row,) = box.kind("row")
+    assert row["state"] == "built"
+    assert len((box.dir / "limit-row.jsonl").read_text().splitlines()) == 4 + 5   # one stream
+
+
+def test_rate_limit_twice_stops(box):
+    box.go([{"stream": "rate-limit.jsonl"}], ["limit-row", "green-row"])
+    assert box.rc == 3 and len(box.starts) == 2
+    assert [e["action"] for e in box.kind("limit")] == ["resume", "stop"]
+    (row,), (stop,) = box.kind("row"), box.kind("stop")
+    assert (row["state"], row["reason"]) == ("limit", "five_hour") and row["resume"].endswith(S2)
+    assert stop["reason"] == "usage-limit"

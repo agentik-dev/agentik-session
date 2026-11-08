@@ -481,9 +481,15 @@ class _Night:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
         print(f"night: {line}", file=sys.stderr, flush=True)
 
-    def record(self, kind: str, **kw) -> None:
+    def record(self, event: str, /, **kw) -> None:
         _append(self.dir / "ledger.jsonl",
-                json.dumps({"ts": _iso(self.fx.now()), "kind": kind, **kw}) + "\n")
+                json.dumps({"ts": _iso(self.fx.now()), "kind": event, **kw}) + "\n")
+
+    def limit(self, rid: str, lim: dict, action: str, **kw) -> None:
+        """A `limit` line: the limit's kind is `limit_kind`, since every line's `kind` is its
+        event's."""
+        self.record("limit", row=rid, limit_kind=lim["kind"], resets_at=lim["resets_at"],
+                    source=lim["source"], action=action, **kw)
 
     def row(self, p, state, reason=None, sha=None, wt=None, sid=None) -> None:
         rec = {"row": p["id"], "state": state, "reason": reason, "sha": sha,
@@ -567,9 +573,44 @@ class _Night:
         return None
 
     def limited(self, p, wt, head, part, sid, n) -> str | None:
-        self.record("limit", row=p["id"], **part.limit, action="row-limit")
-        self.row(p, "limit", part.limit["kind"], wt=wt, sid=sid)
-        return None
+        """Ruling 8: a window limit with a reset waits for it plus 120 s, an unknown one
+        1,800 s, and the row is resumed once; any other kind ends the row `limit`; a
+        weekly limit or a second one stops the night `usage-limit`. Never a kill."""
+        lim, rid = part.limit, p["id"]
+        kind, reset = lim["kind"], lim["resets_at"]
+        if n > 1 or kind.startswith("seven_day"):
+            self.limit(rid, lim, "stop")
+            self.row(p, "limit", kind, wt=wt, sid=sid)
+            return "usage-limit"
+        if kind in ("five_hour", "session") and _num(reset):
+            at = reset / 1000.0 if reset > 1e12 else float(reset)
+            wait, wait_from = max(0.0, at - self.fx.now()) + 120.0, "reset"
+        elif kind == "unknown":
+            wait, wait_from = 1800.0, "fallback"
+        else:
+            self.limit(rid, lim, "row-limit")
+            self.row(p, "limit", kind, wt=wt, sid=sid)
+            return None
+        self.limit(rid, lim, "resume", wait_s=round(wait), wait_from=wait_from)
+        self.fx.say(f"{rid}: limit {kind}; resumes in {wait / 60:.0f} min")
+        self.wait(wait)
+        if self.term:
+            self.row(p, "limit", kind, wt=wt, sid=sid)
+            return "signal"
+        r = part.result or {}
+        spent_t, spent_u = r.get("num_turns"), r.get("total_cost_usd")
+        turns = max(10, p["turns"] - (spent_t if type(spent_t) is int else 0))
+        usd = max(5, round(p["usd"] - (spent_u if type(spent_u) in (int, float) else 0), 2))
+        argv = spawn_argv(p["model"], turns, usd, resume=sid)
+        part2, rc, cut = self.part(p, wt, n + 1, argv, sid, CONTINUE + "\n", turns, usd)
+        return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
+
+    def wait(self, seconds: float) -> None:
+        """A limit's wait, in slices of at most 60 s, so a SIGTERM ends it."""
+        while seconds > 0 and not self.term:
+            step = min(seconds, 60.0)
+            self.fx.sleep(step)
+            seconds -= step
 
 
 def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float = POLL) -> int:
