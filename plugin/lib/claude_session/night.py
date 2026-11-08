@@ -200,26 +200,44 @@ _ROWS = re.compile(r"^rows\s*:\s*(#.*)?$")
 _WALL = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?\Z")
 
 
+def _scan(line: str) -> tuple:
+    """(the line less its comment, its `{` count less its `}`), by the subset's rule
+    (`yamlsubset._strip_comment`): text inside "…" and '…' is skipped, so a `''` inside
+    single quotes closes and reopens them; a comment is a `#` at the start or after a space
+    or a tab (hq NICE n4)."""
+    quote, depth = None, 0
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip(), depth
+        elif ch in "{}":
+            depth += 1 if ch == "{" else -1
+    return line.rstrip(), depth
+
+
 def _bare(line: str) -> str:
-    """The line less a comment, by the subset's rule: `#` at the start or after a space."""
-    if line.lstrip().startswith("#"):
-        return ""
-    return line.split(" #", 1)[0].rstrip()
+    """The line less a comment, outside quotes."""
+    return _scan(line)[0]
 
 
 def _joined(lines: list) -> list:
-    """Each open flow map joined onto its next lines, so the subset reads it as one line."""
+    """Each open flow map joined onto its next lines, so the subset reads it as one line;
+    a quoted `{` or `}` neither opens nor closes one."""
     out, i = [], 0
     while i < len(lines):
         ln, i = lines[i], i + 1
-        depth = _bare(ln).count("{") - _bare(ln).count("}")
+        bare, depth = _scan(ln)
         if depth > 0:
-            ln = _bare(ln)
+            ln = bare
             while depth > 0 and i < len(lines):
-                nxt, i = _bare(lines[i]).strip(), i + 1
-                if nxt:
-                    ln += " " + nxt
-                    depth += nxt.count("{") - nxt.count("}")
+                (nxt, more), i = _scan(lines[i]), i + 1
+                if nxt.strip():
+                    ln += " " + nxt.strip()
+                    depth += more
         out.append(ln)
     return out
 
@@ -237,8 +255,10 @@ def read_queue(text: str) -> dict:
     mapping, `version` is 1; else NightError."""
     head, chunks, cur, indent, in_rows = [], [], None, None, False
     for ln in _joined(text.splitlines()):
-        if in_rows and ln.strip() and not ln[:1].isspace() and not ln.startswith("#"):
-            in_rows = False
+        if (in_rows and ln.strip() and not ln[:1].isspace() and not ln.startswith("#")
+                and not ln.startswith("- ")):
+            in_rows = False      # a column-0 line that is neither an item nor a comment
+
         if in_rows:
             m = _ITEM.match(ln)
             if m and (indent is None or len(m.group(1)) == indent):

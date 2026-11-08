@@ -571,3 +571,40 @@ def test_report(box, capsys):
         with pytest.raises(SystemExit) as e:
             cli.main(["night", "report", "--night", unknown])
         assert e.value.code == 2
+
+
+def test_queue_quoted_values():                                             # hq NICE n4
+    q = night.read_queue(
+        'version: 1\n'
+        'defaults: {model: "claude {opus}", turns: 10,   # a "comment" { with a brace\n'
+        '           usd: 5}\n'
+        'words: "not # a comment"\n'
+        'rows:\n'
+        '  - id: a\n'
+        "    packet: 'p''s #1 {x}.md'\n"
+        '    parked: "waits { on # the owner"\n'
+        '  - id: b\n'
+        '    packet: "x.md"   # trailing {\n'
+        '    budget: {turns: 3, usd: "1 }"}\n')
+    assert q["defaults"] == {"model": "claude {opus}", "turns": 10, "usd": 5}
+    assert q["words"] == "not # a comment"
+    a, b = q["rows"]
+    assert a == {"id": "a", "packet": "p's #1 {x}.md", "parked": "waits { on # the owner"}
+    assert b == {"id": "b", "packet": "x.md", "budget": {"turns": 3, "usd": "1 }"}}
+    assert night._bare("x: 'it''s' # c") == "x: 'it''s'" and night._bare("  # all") == ""
+
+
+def test_queue_column_zero_items():                                         # hq NICE n4
+    q = night.read_queue(
+        'version: 1\n'
+        'rows:\n'
+        '- id: a\n'
+        '  packet: a.md\n'
+        '# a comment at column 0\n'
+        '- id: b\n'
+        '  packet: b.md\n'
+        '  budget: {turns: 5,\n'
+        '           usd: 2}\n'
+        'words: after\n')
+    assert [r["id"] for r in q["rows"]] == ["a", "b"] and q["words"] == "after"
+    assert q["rows"][1]["budget"] == {"turns": 5, "usd": 2}
