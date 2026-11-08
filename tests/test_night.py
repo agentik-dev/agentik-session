@@ -75,10 +75,12 @@ class Box:
         monkeypatch.setenv("FAKE_NIGHT_PLAN", str(self.plan))
         self.slept, self.said = [], []
 
-    def go(self, steps, rows, now=None, ps="", **kw):
+    def go(self, steps, rows, now=None, ps="", sleep=None, say=None, **kw):
         self.plan.write_text(json.dumps(steps))
-        fx = night.Fx(now=now or (lambda: T0), sleep=self.slept.append, say=self.said.append,
-                      env=dict(os.environ), ps=lambda: ps, gate=[str(FIX / "gate")])
+        fx = night.Fx(now=now or (lambda: T0), sleep=sleep or self.slept.append,
+                      say=say or self.said.append, env=dict(os.environ), ps=lambda: ps,
+                      gate=[str(FIX / "gate")])
+
         self.fx = fx
         self.rc = night.run(self.repo, rows, fx=fx, **kw)
 
@@ -380,3 +382,59 @@ def test_land_absent_builds(box, capsys):
             cli.main(["night", "run", str(box.repo), *args])
         assert e.value.code == 2
     assert sorted(os.listdir(night.nights_dir(dict(os.environ)))) == nights
+
+
+def _local(t, fmt="%Y-%m-%dT%H:%M"):
+    return time.strftime(fmt, time.localtime(t))
+
+
+def test_until_past_runs_nothing(box):
+    seven = time.mktime(time.localtime(T0)[:3] + (7, 0, 0, 0, 0, -1))
+    six = night.until_at("06:00", seven)                                    # tomorrow's
+    assert _local(six, "%H:%M") == "06:00" and seven < six < seven + 86400
+    assert night.until_at("08:30", seven) == seven + 5400
+
+    assert night.until_at("07:00", seven) == seven                          # at or after
+    for until in ("2020-01-01T00:00", _local(T0, "%H:%M")):                 # T0 is a whole minute
+        box.go([{"stream": "green.jsonl", "commit": True}], ["green-row", "max-row"], until=until)
+        assert box.rc == 0 and box.kind("row") == [] and not box.log.exists()
+        assert box.kind("stop")[0]["reason"] == "until"
+
+
+def test_until_reset_past_shelves(box):
+    box.go([{"stream": "rate-limit.jsonl"}], ["limit-row", "green-row"], until=_local(T0 + 300))
+    assert box.rc == 3 and len(box.starts) == 1 and box.slept == []
+    (lim,), (row,), (stop,) = box.kind("limit"), box.kind("row"), box.kind("stop")
+    assert (lim["action"], lim["limit_kind"], lim["wait_s"]) == ("shelve", "five_hour", 720)
+    assert (row["state"], row["reason"]) == ("limit", "five_hour") and row["resume"].endswith(S2)
+    assert stop["reason"] == "usage-limit"
+
+
+def test_max_rows(box):
+    q = box.repo / "relay" / "queue.yaml"
+    q.write_text(q.read_text().replace("  - id: max-row\n", "  - id: orch-first\n    packet: "
+                                       "design/packets/orch-row.md\n    kind: orchestrator\n"
+                                       "  - id: max-row\n"))
+    box.go([{"stream": "max-turns.jsonl"}], ["orch-first", "max-row", "limit-row"], max_rows=1)
+    assert box.rc == 0 and len(box.starts) == 1
+    got = [(r["row"], r["state"]) for r in box.kind("row")]
+    assert got == [("orch-first", "refused"), ("max-row", "red")]       # a refusal not counted
+
+    assert box.kind("stop")[0]["reason"] == "max-rows"
+
+
+def _stop_file(*_):
+    (night.newest_night(dict(os.environ)) / "stop").write_text("")
+
+
+def test_stop_file(box):
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row", "max-row"],
+           say=lambda line: line.startswith("green-row: built") and _stop_file())
+    assert box.rc == 3 and len(box.starts) == 1
+    assert [r["row"] for r in box.kind("row")] == ["green-row"]
+    assert box.kind("stop")[0]["reason"] == "owner-stop"
+    slept = []
+    box.go([{"stream": "rate-limit.jsonl"}], ["limit-row"],
+           sleep=lambda s: slept.append(s) or _stop_file())
+    assert box.rc == 3 and slept == [60.0] and len(box.starts) == 2      # one slice, no resume
+    assert box.kind("row")[0]["state"] == "limit" and box.kind("stop")[0]["reason"] == "owner-stop"

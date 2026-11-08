@@ -713,12 +713,26 @@ class _Night:
             proc.wait()
             return cut
 
+    def stopped(self) -> bool:
+        """The owner's stop file, `<night>/stop`."""
+        return os.path.lexists(self.dir / "stop")
+
+    def before(self) -> str | None:
+        """Ruling 6 and 4, before each row: the stop file, then `--until`."""
+        if self.stopped():
+            return "owner-stop"
+        if self.until is not None and self.fx.now() >= self.until:
+            return "until"
+        return None
+
     def do_row(self, p) -> str | None:
         """The row, start to end; the night's stop reason, or None to go on."""
         j = judge_row(p, self.repo)
         if j:
             self.row(p, *j)
             return None
+        if self.max_rows is not None and self.spawned >= self.max_rows:
+            return "max-rows"
         wt, head = stage(self.repo, p["id"], p["base"] or "main")
         if wt is None:
             self.log(f"{p['id']}: stage: {head}")
@@ -727,6 +741,7 @@ class _Night:
         text = prompt((self.repo / p["packet"]).read_text())
         sid = str(uuid.uuid4())
         argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid)
+        self.spawned += 1
         part, rc, cut = self.part(p, wt, 1, argv, sid, text, p["turns"], p["usd"])
         return self.end(p, wt, head, part, rc, cut, sid, 1)
 
@@ -779,12 +794,16 @@ class _Night:
             self.limit(rid, lim, "row-limit")
             self.row(p, "limit", kind, wt=wt, sid=sid)
             return None
+        if self.until is not None and self.fx.now() + wait > self.until:
+            self.limit(rid, lim, "shelve", wait_s=round(wait), wait_from=wait_from)
+            self.row(p, "limit", kind, wt=wt, sid=sid)
+            return "usage-limit"
         self.limit(rid, lim, "resume", wait_s=round(wait), wait_from=wait_from)
         self.fx.say(f"{rid}: limit {kind}; resumes in {wait / 60:.0f} min")
         self.wait(wait)
-        if self.term:
+        if self.term or self.stopped():
             self.row(p, "limit", kind, wt=wt, sid=sid)
-            return "signal"
+            return "signal" if self.term else "owner-stop"
         r = part.result or {}
         spent_t, spent_u = r.get("num_turns"), r.get("total_cost_usd")
         turns = max(10, p["turns"] - (spent_t if type(spent_t) is int else 0))
@@ -794,8 +813,8 @@ class _Night:
         return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
     def wait(self, seconds: float) -> None:
-        """A limit's wait, in slices of at most 60 s, so a SIGTERM ends it."""
-        while seconds > 0 and not self.term:
+        """A limit's wait, in slices of at most 60 s, so a SIGTERM or the stop file ends it."""
+        while seconds > 0 and not self.term and not self.stopped():
             step = min(seconds, 60.0)
             self.fx.sleep(step)
             seconds -= step
@@ -834,7 +853,7 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
         for p in rows:
             if N.term:
                 break
-            stop = N.do_row(p)
+            stop = N.before() or N.do_row(p)
             if stop:
                 break
     except BaseException as e:
@@ -853,7 +872,8 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     N.record("stop", reason=stop, rows=N.states, cost=round(N.cost, 4))
     fx.say(f"{nid}: stop {stop}; " + ", ".join(f"{k} {len(v)}" for k, v in N.states.items())
            + f"; ${N.cost:.2f}")
-    return 0 if stop == "queue-spent" else 3
+    return 0 if stop in ("queue-spent", "until", "max-rows") else 3
+
 
 
 # ---- the ledger read back, and status (ruling 10) --------------------------------------
