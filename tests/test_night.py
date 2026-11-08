@@ -73,10 +73,17 @@ class Box:
         monkeypatch.setenv("PATH", f"{FIX}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setenv("FAKE_NIGHT_LOG", str(self.log))
         monkeypatch.setenv("FAKE_NIGHT_PLAN", str(self.plan))
+        self.glog, self.gplan = tmp / "gate.log", tmp / "gate-plan.json"
+        monkeypatch.setenv("FAKE_GATE_LOG", str(self.glog))
+        monkeypatch.setenv("FAKE_GATE_PLAN", str(self.gplan))
         self.slept, self.said = [], []
 
-    def go(self, steps, rows, now=None, ps="", sleep=None, say=None, **kw):
+    def go(self, steps, rows, now=None, ps="", sleep=None, say=None, gate=(), **kw):
         self.plan.write_text(json.dumps(steps))
+        self.gplan.write_text(json.dumps(list(gate)))
+        for p in (Path(str(self.gplan) + ".n"), self.glog):
+            if p.exists():
+                p.unlink()
         fx = night.Fx(now=now or (lambda: T0), sleep=sleep or self.slept.append,
                       say=say or self.said.append, env=dict(os.environ), ps=lambda: ps,
                       gate=[str(FIX / "gate")])
@@ -88,6 +95,9 @@ class Box:
         self.ledger = [json.loads(ln) for ln in (self.dir / "ledger.jsonl").read_text().splitlines()]
         self.starts = ([json.loads(ln) for ln in self.log.read_text().splitlines()]
                        if self.log.exists() else [])
+        self.gates = ([json.loads(ln) for ln in self.glog.read_text().splitlines()]
+                      if self.glog.exists() else [])
+
         return self
 
     def kind(self, k):
@@ -438,3 +448,90 @@ def test_stop_file(box):
            sleep=lambda s: slept.append(s) or _stop_file())
     assert box.rc == 3 and slept == [60.0] and len(box.starts) == 2      # one slice, no resume
     assert box.kind("row")[0]["state"] == "limit" and box.kind("stop")[0]["reason"] == "owner-stop"
+
+
+OK = {"verdict": "land {repo}: ok {sha}, main readied", "exit": 0}
+
+
+def _land(box):
+    land = box.tmp / "land"
+    land.write_text("#!/bin/sh\nexit 9\n")          # never run: the fake gate stands for it
+    land.chmod(0o755)
+    return str(land)
+
+
+def _merge_on_green(box):
+    q = box.repo / "relay" / "queue.yaml"
+    q.write_text(q.read_text().replace("merge: branch-only, device", "merge: merge-on-green, device"))
+
+
+def test_land_ok(box):
+    q = box.repo / "relay" / "queue.yaml"
+    q.write_text(q.read_text().replace("depends_on: [green-row]", "depends_on: [limit-row]\n"
+                                       "    base: limit-row"))
+    (box.repo / "design" / "packets" / "limit-row.md").write_text(
+        "intro\n## Packet limit-row: the land step\n")
+    (box.repo / "scripts").mkdir()
+    land = box.repo / "scripts" / "land"
+    land.write_text("#!/bin/sh\nexit 9\n")
+    land.chmod(0o755)
+    (box.repo / ".venv").mkdir()
+    box.go([{"stream": "green.jsonl", "commit": True}], ["limit-row", "dep-row"], gate=[OK])
+    assert box.rc == 0
+    repo = os.path.realpath(box.repo)
+    wt = Path(repo) / ".claude" / "worktrees" / "limit-row"
+    (g,), (row, dep) = box.kind("gate"), box.kind("row")
+    sha, sid = row["sha"], box.kind("exit")[0]["session_id"]
+    assert (row["state"], row["reason"], row["worktree"]) == ("landed", None, None)
+    assert "resume" not in row and box.ledger.index(g) < box.ledger.index(row)
+    assert (g["row"], g["exit"], g["rc"], g["land_line"]) == ("limit-row", 0, 0,
+                                                              f"land repo: ok {sha}, main readied")
+    assert g["gate_id"] == "20261107T120000-0" and g["gate_line"].startswith(f"gate {g['gate_id']} {repo}: exit 0")
+    merge = box.dir / "limit-row.merge.txt"
+    assert merge.read_text() == (f"Merge limit-row: the land step\n\nRow limit-row, packet "
+                                 f"design/packets/limit-row.md, built by night-{box.dir.name} in "
+                                 f"session {sid} at {sha}.\n")
+    assert oct(merge.stat().st_mode & 0o777) == "0o600"
+    (call,) = box.gates
+    assert call["argv"] == ["run", "--wait", repo, "--", str(Path(repo) / "scripts" / "land"),
+                            repo, "limit-row", sha, str(merge)] and call["cwd"] == repo
+    assert (dep["row"], dep["state"]) == ("dep-row", "built")          # its dependency landed
+    assert os.readlink(wt / ".venv") == os.path.join(repo, ".venv")    # linked, and no dirt
+    assert box.kind("stop")[0]["rows"] == {"landed": ["limit-row"], "built": ["dep-row"]}
+
+
+def test_land_red_step(box):
+    _merge_on_green(box)
+    box.go([{"stream": "green.jsonl", "commit": True}], ["max-row", "limit-row"], land=_land(box),
+           gate=[{"verdict": "land {repo}: red check exit 2", "exit": 2},
+                 {"verdict": "land {repo}: red remove exit 1, the merge stands", "exit": 1}])
+    assert box.rc == 0 and len(box.gates) == 2
+    red, stands = box.kind("row")
+    wt = Path(os.path.realpath(box.repo)) / ".claude" / "worktrees" / "max-row"
+    assert (red["state"], red["reason"], red["worktree"]) == ("red", "land-check", str(wt))
+    assert red["resume"].startswith(f"cd {wt} && claude --resume ") and wt.is_dir()
+    assert _git(box.repo, "branch", "--list", "max-row")
+    assert (stands["state"], stands["reason"]) == ("landed", "land-remove")
+    assert [g["exit"] for g in box.kind("gate")] == [2, 1]
+
+
+def test_land_gate_unrun(box):
+    bad = [{"no_line": True, "rc": 2}, {**OK, "exit": 1}, {**OK, "no_log": True},
+           {"verdict": "make: *** [check] Error 2", "exit": 2},
+           {"verdict": "land {repo}: ok 0123abc, main readied", "exit": 0}]
+    for step in bad:
+        box.go([{"stream": "green.jsonl", "commit": True}], ["limit-row"], land=_land(box),
+               gate=[step])
+        (row,), (g,) = box.kind("row"), box.kind("gate")
+        assert (row["state"], row["reason"]) == ("red", "gate-unrun") and "resume" in row
+        assert box.rc == 0 and len(box.gates) == 1
+        _git(box.repo, "worktree", "remove", "--force", str(box.repo / ".claude" / "worktrees" / "limit-row"))
+        _git(box.repo, "branch", "-D", "limit-row")
+    assert g["rc"] == 0 and g["land_line"] == "land repo: ok 0123abc, main readied"
+
+
+def test_land_branch_only_calls_no_gate(box):
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"], land=_land(box), gate=[OK])
+    assert box.rc == 0 and box.gates == [] and box.kind("gate") == []
+    (row,) = box.kind("row")
+    assert (row["state"], row["reason"], row["merge"]) == ("built", None, "branch-only")

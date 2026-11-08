@@ -325,8 +325,9 @@ def _num(v) -> bool:
     return type(v) in (int, float) and v > 0
 
 
-def judge_row(p: dict, repo: Path):
-    """(state, reason) for a row that does not run, else None: `refused` or `skip`."""
+def judge_row(p: dict, repo: Path, landed=frozenset()):
+    """(state, reason) for a row that does not run, else None: `refused` or `skip`. A `base`
+    or a `depends_on` id is good when it landed earlier tonight (`landed`)."""
     rid = p["id"]
     if not isinstance(rid, str) or not ROW_ID.match(rid):
         return "refused", "id"
@@ -342,7 +343,7 @@ def judge_row(p: dict, repo: Path):
     real, top = os.path.realpath(repo / pk), os.path.realpath(repo)
     if not real.startswith(top + os.sep) or not os.path.isfile(real):
         return "refused", "packet"
-    if p["base"] not in (None, "main"):
+    if p["base"] not in (None, "main") and not (isinstance(p["base"], str) and p["base"] in landed):
         return "refused", "base"
     if not isinstance(p["model"], str) or not p["model"]:
         return "refused", "model"
@@ -350,7 +351,10 @@ def judge_row(p: dict, repo: Path):
         return "refused", "budget"
     if wall_seconds(p["wall"]) is None:
         return "refused", "wall"
-    if p["depends_on"]:
+    deps = [p["depends_on"]] if isinstance(p["depends_on"], str) else p["depends_on"]
+    if deps and (not isinstance(deps, list)
+                 or any(not isinstance(d, str) or d not in landed for d in deps)):
+
         return "skip", "gate-failed-dependency"
     return None
 
@@ -378,26 +382,36 @@ def _out(cwd, *args) -> str | None:
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _status(wt: Path) -> str | None:
+    """The tree's porcelain status, untracked files counted, less an untracked `.venv` link
+    at its top, as hq's `land` reads it (design/07 §9 risk 4)."""
+    out = _out(wt, "status", "--porcelain", "--untracked-files=all")
+    return None if out is None else "\n".join(ln for ln in out.splitlines() if ln != "?? .venv")
+
+
 def stage(repo: Path, rid: str, base: str) -> tuple[Path | None, str | None]:
     """`git -C <repo> worktree add .claude/worktrees/<id> -b <id> <base>`, the hq
     convention; a tree already there is reused only on branch `<id>` and clean, untracked
-    files counted. (worktree, head) or (None, why)."""
+    files counted. When `<repo>/.venv` exists and the tree has none, it is linked there,
+    absolute. (worktree, head) or (None, why)."""
     wt = repo / ".claude" / "worktrees" / rid
     if wt.exists():
         if _out(wt, "rev-parse", "--abbrev-ref", "HEAD") != rid:
             return None, f"{wt} is not on branch {rid}"
-        if _out(wt, "status", "--porcelain", "--untracked-files=all") != "":
+        if _status(wt) != "":
             return None, f"{wt} is not clean"
     else:
         r = _git(repo, "worktree", "add", str(Path(".claude") / "worktrees" / rid), "-b", rid, base)
         if r.returncode != 0:
             return None, (r.stderr.strip().splitlines() or ["git worktree add failed"])[-1][:200]
+    if (repo / ".venv").exists() and not os.path.lexists(wt / ".venv"):
+        os.symlink(str(repo / ".venv"), str(wt / ".venv"))
     head = _out(wt, "rev-parse", "HEAD")
     return (wt, head) if head else (None, "no HEAD in the worktree")
 
 
 def dirty(wt: Path) -> bool:
-    return _out(wt, "status", "--porcelain", "--untracked-files=all") != ""
+    return _status(wt) != ""
 
 
 # ---- the spawn (ruling 5) --------------------------------------------------------------
@@ -616,6 +630,56 @@ def _iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(t))
 
 
+# ---- the land step (night-2 ruling 9) --------------------------------------------------
+
+GATE_LINE = re.compile(r"^gate (\S+) (.+): exit (-?\d+) in (\S+) min; log (.+)$")  # wait_line
+LAND_OK = re.compile(r"^land (\S+): ok (\S+?)(?:,.*)?$")
+LAND_RED = re.compile(r"^land (\S+): red (\S+) exit (-?\d+)(?:,.*)?$")
+STANDS = ("remove", "branch")       # land's steps after the merge: main has moved
+
+
+def heading(text: str, rid: str) -> str | None:
+    """The packet's first heading, less a leading `Packet <id>: `."""
+    for ln in text.splitlines():
+        m = re.match(r"^#{1,6}\s+(.*\S)", ln)
+        if m:
+            h, pre = m.group(1), f"Packet {rid}: "
+            return h[len(pre):] if h.startswith(pre) else h
+    return None
+
+
+def _last_nonempty(path: str) -> str | None:
+    """A log's last non-empty line, read from its last 64 KiB; None when unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, os.path.getsize(path) - 65536))
+            lines = [ln for ln in fh.read().decode(errors="replace").splitlines() if ln.strip()]
+    except (OSError, ValueError):
+        return None
+    return lines[-1].strip() if lines else None
+
+
+def verdict(rc, out: str, sha: str) -> tuple:
+    """(state, reason, the gate's fields) from `gate run --wait`'s rc and stdout: `landed`
+    on `ok <sha>` with exit 0, or on a `remove` or `branch` red (`land-<step>`); `red
+    land-<step>` on another red; anything else `red gate-unrun`, never a pass."""
+    lines = [ln for ln in (out or "").splitlines() if ln.strip()]
+    g = GATE_LINE.match(lines[-1].strip()) if lines else None
+    rec = {"gate_id": g and g.group(1), "gate_line": g and g.group(0)[:300], "land_line": None,
+           "exit": g and int(g.group(3)), "rc": rc, "log": g and g.group(5)}
+    if rc != 0 or g is None:
+        return "red", "gate-unrun", rec
+    land = _last_nonempty(rec["log"]) or ""
+    rec["land_line"] = land[:300] or None
+    ok, red = LAND_OK.match(land), LAND_RED.match(land)
+    if ok and rec["exit"] == 0 and ok.group(2) == sha:
+        return "landed", None, rec
+    if red:
+        step = red.group(2)
+        return ("landed" if step in STANDS else "red"), f"land-{step}", rec
+    return "red", "gate-unrun", rec
+
+
 @dataclass
 class _Night:
     repo: Path
@@ -725,15 +789,53 @@ class _Night:
             return "until"
         return None
 
+    def merge_file(self, p, sha: str, sid: str) -> Path:
+        rid, path = p["id"], self.dir / f"{p['id']}.merge.txt"
+        h = heading((self.repo / p["packet"]).read_text(errors="replace"), rid) or p["packet"]
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"Merge {rid}: {h}\n\nRow {rid}, packet {p['packet']}, built by {self.nid} "
+                     f"in session {sid} at {sha}.\n")
+        return path
+
+    def land_row(self, p, wt, sha: str, sid: str) -> None:
+        """Ruling 9: one job through the gate queue, `gate run --wait <repo> -- <land> <repo>
+        <id> <sha> <merge-file>` in the repo, no timeout, in its own session so a signal
+        to the night lets the job finish; a `gate` line, then the row's."""
+        rid = p["id"]
+        merge = self.merge_file(p, sha, sid)
+        argv = [*self.fx.gate, "run", "--wait", str(self.repo), "--", self.land, str(self.repo),
+                rid, sha, str(merge)]
+        self.fx.say(f"{rid}: built {sha[:12]}; it lands through the gate")
+        err = os.fdopen(os.open(self.dir / f"{rid}.gate.stderr",
+                                os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab")
+        try:
+            proc = self.fx.popen(argv, cwd=str(self.repo), env=dict(self.fx.env),
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err,
+                                 start_new_session=True)
+            out, rc = proc.communicate()[0].decode(errors="replace"), proc.returncode
+        except OSError as e:
+            self.log(f"{rid}: gate: {type(e).__name__}: {e}"[:300])
+            out, rc = "", None
+        finally:
+            err.close()
+        state, reason, rec = verdict(rc, out, sha)
+        self.record("gate", row=rid, **rec)
+        if state == "landed":
+            self.landed.add(rid)
+            self.row(p, "landed", reason, sha=sha, wt=wt if reason else None)
+        else:
+            self.row(p, "red", reason, sha=sha, wt=wt, sid=sid)
+
     def do_row(self, p) -> str | None:
         """The row, start to end; the night's stop reason, or None to go on."""
-        j = judge_row(p, self.repo)
+        j = judge_row(p, self.repo, self.landed)
         if j:
             self.row(p, *j)
             return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
-        wt, head = stage(self.repo, p["id"], p["base"] or "main")
+        wt, head = stage(self.repo, p["id"], "main")     # a landed base is on main now
         if wt is None:
             self.log(f"{p['id']}: stage: {head}")
             self.row(p, "red", "stage")
@@ -771,8 +873,9 @@ class _Night:
             self.log(f"{p['id']}: merge-on-green with no land script; it stays on its branch")
             self.row(p, "built", "no-land", sha=sha, wt=wt)
         else:
-            self.row(p, "built", sha=sha, wt=wt)
+            self.land_row(p, wt, sha, sid)
         return None
+
 
     def limited(self, p, wt, head, part, sid, n) -> str | None:
         """Ruling 8: a window limit with a reset waits for it plus 120 s, an unknown one
