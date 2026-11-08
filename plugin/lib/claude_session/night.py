@@ -459,6 +459,31 @@ def read_stream(stdout, path: Path, part: Part) -> None:
                 classify(obj, part)
 
 
+# ---- the watchdog (ruling 9) -----------------------------------------------------------
+
+def _newest(wt: Path) -> float:
+    newest = 0.0
+    for top, dirs, files in os.walk(wt):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for name in dirs + [f for f in files if f != ".git"]:
+            try:
+                newest = max(newest, os.lstat(os.path.join(top, name)).st_mtime)
+            except OSError:
+                pass
+    return newest
+
+
+def _cpu(pgid: int) -> tuple:
+    r = subprocess.run(["ps", "-A", "-o", "pgid=,time="], capture_output=True, text=True)
+    return tuple(sorted(t for g, t in (ln.split(None, 1) for ln in r.stdout.splitlines()
+                                       if len(ln.split(None, 1)) == 2) if g == str(pgid)))
+
+
+def signals(wt: Path, pgid: int) -> tuple:
+    """The relay's three signs of work: HEAD, the newest mtime, the group's CPU time."""
+    return _out(wt, "rev-parse", "HEAD"), _newest(wt), _cpu(pgid)
+
+
 # ---- the run: the end of a row (ruling 7) ----------------------------------------------
 
 def _iso(t: float) -> str:
@@ -528,8 +553,32 @@ class _Night:
         return part, proc.returncode, cut
 
     def watch(self, proc, wt, wall) -> str | None:
-        proc.wait()
-        return None
+        """Ruling 9: every `poll` s the tree's HEAD, its newest mtime outside `.git` and the
+        group's CPU; all three unchanged for `stall` s, or the row's wall passed, and the
+        group goes (gate's `_kill_group`): `stalled` or `wall`. None on the child's exit."""
+        t0 = last = self.fx.mono()
+        seen = signals(wt, proc.pid)
+        while True:
+            try:
+                proc.wait(timeout=self.poll)
+                return None
+            except subprocess.TimeoutExpired:
+                pass
+            now = self.fx.mono()
+            if wall and now - t0 >= wall:
+                cut = "wall"
+            else:
+                cur = signals(wt, proc.pid)
+                if cur != seen:
+                    seen, last = cur, now
+                    continue
+                if now - last < self.stall:
+                    continue
+                cut = "stalled"
+            self.log(f"{wt.name}: {cut} after {now - t0:.0f} s; its group is killed")
+            gate._kill_group(proc.pid, self.fx)
+            proc.wait()
+            return cut
 
     def do_row(self, p) -> str | None:
         """The row, start to end; the night's stop reason, or None to go on."""

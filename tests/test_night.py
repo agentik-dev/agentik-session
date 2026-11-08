@@ -205,3 +205,14 @@ def test_rate_limit_twice_stops(box):
     (row,), (stop,) = box.kind("row"), box.kind("stop")
     assert (row["state"], row["reason"]) == ("limit", "five_hour") and row["resume"].endswith(S2)
     assert stop["reason"] == "usage-limit"
+
+
+def test_watchdog_kills(box):
+    t = time.monotonic()
+    box.go([{"stream": "green.jsonl", "sleep": 60}], ["green-row"], stall=1, poll=0.2)
+    assert time.monotonic() - t < 10
+    (row,), (ex,) = box.kind("row"), box.kind("exit")
+    assert (row["state"], row["reason"]) == ("red", "stalled") and "resume" in row
+    assert ex["rc"] < 0 and ex["subtype"] is None               # killed before its result
+    assert box.rc == 0 and box.kind("stop")[0]["reason"] == "queue-spent"
+    assert "stalled" in (box.dir / "log").read_text()
