@@ -288,3 +288,36 @@ def admit(night_id: str, model: str, env) -> dict:
     except Exception as e:      # noqa: BLE001  (any failure is recorded, never a stop)
         return {"error": f"{type(e).__name__}: {e}"[:200]}
     return {k: v.get(k) for k in ("mode", "text", "peak")}
+
+
+# ---- the stage (ruling 4) --------------------------------------------------------------
+
+def _git(cwd, *args) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+
+
+def _out(cwd, *args) -> str | None:
+    r = _git(cwd, *args)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def stage(repo: Path, rid: str, base: str) -> tuple[Path | None, str | None]:
+    """`git -C <repo> worktree add .claude/worktrees/<id> -b <id> <base>`, the hq
+    convention; a tree already there is reused only on branch `<id>` and clean, untracked
+    files counted. (worktree, head) or (None, why)."""
+    wt = repo / ".claude" / "worktrees" / rid
+    if wt.exists():
+        if _out(wt, "rev-parse", "--abbrev-ref", "HEAD") != rid:
+            return None, f"{wt} is not on branch {rid}"
+        if _out(wt, "status", "--porcelain", "--untracked-files=all") != "":
+            return None, f"{wt} is not clean"
+    else:
+        r = _git(repo, "worktree", "add", str(Path(".claude") / "worktrees" / rid), "-b", rid, base)
+        if r.returncode != 0:
+            return None, (r.stderr.strip().splitlines() or ["git worktree add failed"])[-1][:200]
+    head = _out(wt, "rev-parse", "HEAD")
+    return (wt, head) if head else (None, "no HEAD in the worktree")
+
+
+def dirty(wt: Path) -> bool:
+    return _out(wt, "status", "--porcelain", "--untracked-files=all") != ""
