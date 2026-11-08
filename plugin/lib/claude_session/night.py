@@ -276,3 +276,15 @@ def judge_row(p: dict, repo: Path):
     if p["depends_on"]:
         return "skip", "gate-failed-dependency"
     return None
+
+
+# ---- admission (ruling 3) --------------------------------------------------------------
+
+def admit(night_id: str, model: str, env) -> dict:
+    """Admission's verdict for one spawn, as a helper's is asked: `mode`, `text`, `peak`.
+    Admission observes and never refuses; an error is recorded and the row runs."""
+    try:
+        v = admission.admit(night_id, json.dumps({"subagentType": "night", "model": model}), env)
+    except Exception as e:      # noqa: BLE001  (any failure is recorded, never a stop)
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
+    return {k: v.get(k) for k in ("mode", "text", "peak")}
