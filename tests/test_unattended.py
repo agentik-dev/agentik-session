@@ -530,6 +530,19 @@ def test_land_gate_unrun(box):
     assert g["rc"] == 0 and g["land_line"] == "land repo: ok 0123abc, main readied"
 
 
+def test_land_verdict_skips_the_gate_trailer(tmp_path):                  # round 1 F1
+    sha, gid = "a" * 40, "20261107T120000-7"
+    for land, want in ((f"land repo: ok {sha}, main readied", ("landed", None)),
+                       ("land repo: red remove exit 1, the merge stands", ("landed", "land-remove")),
+                       (f"gate {gid}: cannot start: nope", ("red", "gate-unrun"))):
+        log = tmp_path / "log"                                     # gate.py's log, as _close ends it
+        log.write_text(f"make check\n2489 passed\n{land}\n\ngate {gid}: exit 0 in 41 s\n")
+        out = f"queued {gid} position 1\ngate {gid} /r: exit 0 in 0.7 min; log {log}\n"
+        state, reason, rec = unattended.verdict(0, out, sha)
+        assert (state, reason) == want and rec["gate_id"] == gid
+        assert rec["land_line"] == ("2489 passed" if land.startswith("gate ") else land)
+
+
 def test_land_branch_only_calls_no_gate(box):
     box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"], land=_land(box), gate=[OK])
     assert box.rc == 0 and box.gates == [] and box.kind("gate") == []

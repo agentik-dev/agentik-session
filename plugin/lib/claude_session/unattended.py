@@ -668,15 +668,19 @@ def heading(text: str, rid: str) -> str | None:
     return None
 
 
-def _last_nonempty(path: str) -> str | None:
-    """A log's last non-empty line, read from its last 64 KiB; None when unreadable."""
+def _last_nonempty(path: str, gate_id: str) -> str | None:
+    """A log's last non-empty line not the gate's own trailer, `gate <gate_id>: exit <rc> in
+    <N> s` (gate.py `_close`, written after the job ends), read from its last 64 KiB; None
+    when unreadable."""
+    skip = f"gate {gate_id}: "
     try:
         with open(path, "rb") as fh:
             fh.seek(max(0, os.path.getsize(path) - 65536))
-            lines = [ln for ln in fh.read().decode(errors="replace").splitlines() if ln.strip()]
+            lines = [ln.strip() for ln in fh.read().decode(errors="replace").splitlines()]
     except (OSError, ValueError):
         return None
-    return lines[-1].strip() if lines else None
+    lines = [ln for ln in lines if ln and not ln.startswith(skip)]
+    return lines[-1] if lines else None
 
 
 def verdict(rc, out: str, sha: str) -> tuple:
@@ -689,7 +693,7 @@ def verdict(rc, out: str, sha: str) -> tuple:
            "exit": g and int(g.group(3)), "rc": rc, "log": g and g.group(5)}
     if rc != 0 or g is None:
         return "red", "gate-unrun", rec
-    land = _last_nonempty(rec["log"]) or ""
+    land = _last_nonempty(rec["log"], rec["gate_id"]) or ""
     rec["land_line"] = land[:300] or None
     ok, red = LAND_OK.match(land), LAND_RED.match(land)
     if ok and rec["exit"] == 0 and ok.group(2) == sha:
