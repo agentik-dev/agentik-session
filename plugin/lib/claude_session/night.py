@@ -392,3 +392,68 @@ def start(argv: list, cwd: Path, env: dict, text: str, stderr_path: Path, fx: Fx
             pass
     threading.Thread(target=feed, daemon=True).start()
     return proc
+
+
+# ---- the stream (ruling 6) -------------------------------------------------------------
+
+# agentik-relay internal/stream/account.go:25-28 and limit.go's worded needle, as measured.
+USAGE_NEEDLES = ("usage limit", "rate limit", "rate_limit", "hit your limit", "5-hour limit reached",
+                 "weekly limit reached", "session limit reached")
+AUTH_NEEDLES = ("/login", "log in", "login", "expired token", "token expired", "token has expired",
+                "oauth token", "invalid api key", "authentication", "unauthorized")
+USAGE_WORDS = re.compile(r"(?:^|[^a-z0-9])(hit|reached) your ([a-z0-9-]+) limit(?:[^a-z0-9]|$)")
+
+
+@dataclass
+class Part:
+    """What one child's stream said: its last result, its first limit, an auth error."""
+    result: dict | None = None
+    limit: dict | None = None
+    auth: bool = False
+
+
+def _parse(raw: bytes):
+    """One stream line as a JSON object, else None: a stream line is never this tool's state."""
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _text(result: dict) -> str:
+    errs = result.get("errors")
+    more = " ".join(str(e) for e in errs) if isinstance(errs, list) else ""
+    return f"{result.get('result') or ''} {more}".lower()
+
+
+def classify(obj: dict, part: Part) -> None:
+    t = obj.get("type")
+    if t == "rate_limit_event":
+        info = obj.get("rate_limit_info") if isinstance(obj.get("rate_limit_info"), dict) else {}
+        st = info.get("status")
+        if isinstance(st, str) and not st.startswith("allowed") and part.limit is None:
+            part.limit = {"kind": str(info.get("rateLimitType") or "unknown"),
+                          "resets_at": info.get("resetsAt"), "source": "event"}
+    elif t == "result":
+        part.result = obj
+        if obj.get("is_error") is True and not str(obj.get("subtype") or "").startswith("error_max"):
+            text = _text(obj)
+            if "api error: 429" in text or any(n in text for n in USAGE_NEEDLES) \
+                    or USAGE_WORDS.search(text):
+                if part.limit is None:
+                    part.limit = {"kind": "unknown", "resets_at": None, "source": "text"}
+            elif "api error: 401" in text or any(n in text for n in AUTH_NEEDLES):
+                part.auth = True
+
+
+def read_stream(stdout, path: Path, part: Part) -> None:
+    """Each line to `<night>/<id>.jsonl` as it comes, then parsed; non-JSON is skipped."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "ab") as fh:
+        for raw in iter(stdout.readline, b""):
+            fh.write(raw if raw.endswith(b"\n") else raw + b"\n")
+            fh.flush()
+            obj = _parse(raw)
+            if obj is not None:
+                classify(obj, part)
