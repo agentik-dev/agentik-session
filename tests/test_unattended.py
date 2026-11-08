@@ -370,7 +370,10 @@ def test_relay_running_refused(box):
             box.go([], ["green-row"], ps=ps)
         assert len(str(e.value)) <= len("relay-running: ") + 120
     assert _no_runs() and not box.log.exists()
-    for fine in ("agentik session unattended run x", "grep agentik-relayrun", "agentik relay status"):
+    for ps in ("agentik relay run", "/x/agentik-relay run --queue q", "/x/relay run", "  relay run"):
+        assert unattended.relay_running("y\n" + ps + "\n") == ps.strip()      # round 1 F2, F3
+    for fine in ("agentik session unattended run x", "grep agentik-relayrun", "agentik relay status",
+                 "grep agentik relay run", "less /x/agentik-relay run.log", "/x/relay status run"):
         box.go([{"stream": "max-turns.jsonl"}], ["orch-row"], ps=fine + "\n")
         assert box.rc == 0
 

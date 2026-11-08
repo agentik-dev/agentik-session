@@ -88,15 +88,23 @@ class Fx:
 
 # ---- the refusals before the run's folder (rulings 2-4) ----------------------
 
-RELAY_RUN = re.compile(r"(?:^|\s)(?:agentik relay|(?:\S*/)?agentik-relay) run(?:\s|$)")
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)\Z")
 
 
+def _runs_relay(words: list) -> bool:
+    """The command's first words run the relay: `agentik relay run`, or an argv[0] whose
+    basename is `agentik-relay` or `relay`, then `run`; never a later word (`grep …`)."""
+    head = os.path.basename(words[0]) if words else ""
+    if head == "agentik":
+        return words[1:3] == ["relay", "run"]
+    return head in ("agentik-relay", "relay") and words[1:2] == ["run"]
+
+
 def relay_running(ps_text: str) -> str | None:
-    """The first `ps` line running the relay's own run, `agentik relay run` or
-    `[<path>/]agentik-relay run`, as 120 chars; None when none does."""
+    """The first `ps` line running the relay's own run (`_runs_relay`), as 120 chars; None
+    when none does."""
     for ln in ps_text.splitlines():
-        if RELAY_RUN.search(ln):
+        if _runs_relay(ln.split()):
             return ln.strip()[:120]
     return None
 
