@@ -1055,3 +1055,76 @@ def status_lines(st: dict | None) -> list:
         out.append(f"  stop {st['stop']['reason']}"
                    + (f", ${cost:.2f}" if type(cost) in (int, float) else ""))
     return out
+
+
+# ---- the morning report (night-2 ruling 10) --------------------------------------------
+
+def find_night(env, nid: str | None) -> Path | None:
+    """`--night`'s folder (`night-<date>-<n>` or `<date>-<n>`), else the newest; None when
+    there is none."""
+    if nid is None:
+        return newest_night(env)
+    name = nid[len("night-"):] if nid.startswith("night-") else nid
+    d = nights_dir(env) / name
+    return d if _key(name) and d.is_dir() else None
+
+
+def _cell(v) -> str:
+    return "-" if v is None or v == "" else str(v).replace("|", "\\|").replace("\n", " ")
+
+
+def _table(head: tuple, rows: list) -> list:
+    if not rows:
+        return ["none"]
+    return (["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+            + ["| " + " | ".join(_cell(c) for c in r) + " |" for r in rows])
+
+
+def _local_reset(v) -> str | None:
+    if not _num(v):
+        return None
+    return time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(v / 1000.0 if v > 1e12 else v))
+
+
+def report(d: Path) -> str:
+    """The morning's markdown, from the night's ledger alone (relay entry 13): its stop or
+    its running row; landed, built, red, limited, refused and skipped rows; each row's cost
+    from its `exit` lines, and the total."""
+    rows, limits, cost, spawned, stop = {}, {}, {}, [], None
+    for e in read_ledger(d / "ledger.jsonl"):
+        k, r = e.get("kind"), e.get("row")
+        if k == "row":
+            rows[r] = e
+        elif k == "limit":
+            limits[r] = e
+        elif k == "spawn":
+            spawned.append(r)
+        elif k == "exit":
+            c = e.get("total_cost_usd")
+            cost[r] = cost.get(r, 0.0) + (c if type(c) in (int, float) else 0.0)
+        elif k == "stop":
+            stop = e
+    live = [r for r in spawned if r not in rows]
+    head = f"stop {stop.get('reason')}" if stop else "running" + (f" {live[-1]}" if live else "")
+    by = {s: [e for e in rows.values() if e.get("state") == s]
+          for s in ("landed", "built", "red", "limit")}
+    out = [f"# The night night-{d.name}", "", head]
+    for title, cols, items in (
+            ("Landed", ("row", "sha", "reason"),
+             [(e["row"], (e.get("sha") or "")[:12], e.get("reason")) for e in by["landed"]]),
+            ("Built", ("row", "sha", "reason", "worktree"),
+             [(e["row"], e.get("sha"), e.get("reason"), e.get("worktree")) for e in by["built"]]),
+            ("Red", ("row", "reason", "resume"),
+             [(e["row"], e.get("reason"), e.get("resume")) for e in by["red"]]),
+            ("Limited", ("row", "limit_kind", "resets_at", "action"),
+             [(e["row"], limits.get(e["row"], {}).get("limit_kind", e.get("reason")),
+               _local_reset(limits.get(e["row"], {}).get("resets_at")),
+               limits.get(e["row"], {}).get("action")) for e in by["limit"]]),
+            ("Refused and skipped", ("row", "reason"),
+             [(e["row"], e.get("reason")) for e in rows.values()
+              if e.get("state") in ("refused", "skip")])):
+        out += ["", f"## {title}", ""] + _table(cols, items)
+    total = sum(cost.values())
+    out += ["", "## Cost", ""] + _table(("row", "usd"), [(r, f"{c:.2f}") for r, c in cost.items()]
+                                        + [("total", f"{total:.2f}")])
+    return "\n".join(out) + "\n"

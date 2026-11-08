@@ -990,6 +990,12 @@ def cmd_night(args) -> int:
         st = night.status(os.environ, time.time())
         print(json.dumps(st, indent=2) if args.json else "\n".join(night.status_lines(st)))
         return 0
+    if args.night_verb == "report":
+        d = night.find_night(os.environ, args.night)
+        if d is None and args.night is not None:
+            _die(f"night report: no night {args.night[:40]!r} under {night.nights_dir(os.environ)}", 2)
+        print(night.report(d) if d else "no night yet", end="" if d else "\n")
+        return 0
     keep = [r for r in (args.rows or "").split(",") if r] or None
     try:
         return night.run(args.repo, keep, until=args.until, max_rows=args.max_rows,
@@ -1236,7 +1242,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     nt = sub.add_parser("night", help="the overnight loop: one claude -p builder per queue "
                                        "row, landed through the gate, to a stop")
-    nsub = nt.add_subparsers(dest="night_verb", required=True, metavar="run|status")
+    nsub = nt.add_subparsers(dest="night_verb", required=True, metavar="run|status|report")
     nr = nsub.add_parser("run", help="run <repo>/relay/queue.yaml's rows in file order")
     nr.add_argument("repo", help="the repo whose queue runs")
     nr.add_argument("--rows", metavar="A,B", help="only these row ids")
@@ -1250,7 +1256,10 @@ def build_parser() -> argparse.ArgumentParser:
     ns = nsub.add_parser("status", help="the newest night: rows by state, the running row, "
                                          "the stop")
     ns.add_argument("--json", action="store_true")
+    nrp = nsub.add_parser("report", help="a night's morning report in markdown, from its ledger")
+    nrp.add_argument("--night", metavar="ID", help="the night (default: the newest)")
     nt.set_defaults(func=cmd_night)
+
 
     hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks
     hk.add_argument("event", choices=sorted(hooks.HANDLERS))

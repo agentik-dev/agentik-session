@@ -535,3 +535,39 @@ def test_land_branch_only_calls_no_gate(box):
     assert box.rc == 0 and box.gates == [] and box.kind("gate") == []
     (row,) = box.kind("row")
     assert (row["state"], row["reason"], row["merge"]) == ("built", None, "branch-only")
+
+
+def test_report(box, capsys):
+    from claude_session import cli
+    assert cli.main(["night", "report"]) == 0 and capsys.readouterr().out == "no night yet\n"
+    box.go([{"stream": "green.jsonl", "commit": True}, {"stream": "max-turns.jsonl"},
+            {"stream": "green.jsonl", "commit": True}],
+           ["green-row", "max-row", "limit-row", "orch-row", "parked-row"], land=_land(box), gate=[OK])
+    first = box.dir
+    rows = {r["row"]: r for r in box.kind("row")}
+    d = first.with_name(first.name.rsplit("-", 1)[0] + "-10")
+    d.mkdir(mode=0o700)
+    (d / "ledger.jsonl").write_text("\n".join(json.dumps(e) for e in (
+        {"kind": "spawn", "row": "limit-row"}, {"kind": "exit", "row": "limit-row", "total_cost_usd": 0.5},
+        {"kind": "limit", "row": "limit-row", "limit_kind": "seven_day", "resets_at": 1762520400000,
+         "action": "stop"},
+        {"kind": "row", "row": "limit-row", "state": "limit", "reason": "seven_day"},
+        {"kind": "spawn", "row": "green-row"})) + "\nnot json\n")
+    assert cli.main(["night", "report", "--night", "night-" + first.name]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"# The night night-{first.name}\n\nstop queue-spent\n")
+    assert f"| limit-row | {rows['limit-row']['sha'][:12]} | - |" in out
+    assert f"| green-row | {rows['green-row']['sha']} | - | {rows['green-row']['worktree']} |" in out
+    assert f"| max-row | no-commit | {rows['max-row']['resume']} |" in out
+    assert "| orch-row | kind |" in out and "| parked-row | parked |" in out
+    assert "## Limited\n\nnone\n" in out
+    assert "| green-row | 1.25 |" in out and "| max-row | 3.50 |" in out and "| total | 6.00 |" in out
+    assert cli.main(["night", "report"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"# The night night-{d.name}\n\nrunning green-row\n")
+    reset = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(1762520400))
+    assert f"| limit-row | seven_day | {reset} | stop |" in out and "| total | 0.50 |" in out
+    for unknown in ("night-2020-01-01-1", "../x"):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["night", "report", "--night", unknown])
+        assert e.value.code == 2
