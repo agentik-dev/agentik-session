@@ -109,3 +109,170 @@ def _append(path: Path, text: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as fh:
         fh.write(text)
+
+
+# ---- the queue (ruling 2) --------------------------------------------------------------
+
+HEAD_KEYS = ("version", "defaults", "rows")
+DEFAULT_KEYS = ("model", "turns", "context", "usd", "wall", "merge", "verify")
+ROW_KEYS = ("id", "packet", "model", "budget", "parked", "merge", "base", "depends_on", "kind",
+            "verify")
+BUDGET_KEYS = ("turns", "usd", "context", "wall")
+_ITEM = re.compile(r"^(\s*)- (.*)$")
+_ROWS = re.compile(r"^rows\s*:\s*(#.*)?$")
+_WALL = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?\Z")
+
+
+def _bare(line: str) -> str:
+    """The line less a comment, by the subset's rule: `#` at the start or after a space."""
+    if line.lstrip().startswith("#"):
+        return ""
+    return line.split(" #", 1)[0].rstrip()
+
+
+def _joined(lines: list) -> list:
+    """Each open flow map joined onto its next lines, so the subset reads it as one line."""
+    out, i = [], 0
+    while i < len(lines):
+        ln, i = lines[i], i + 1
+        depth = _bare(ln).count("{") - _bare(ln).count("}")
+        if depth > 0:
+            ln = _bare(ln)
+            while depth > 0 and i < len(lines):
+                nxt, i = _bare(lines[i]).strip(), i + 1
+                if nxt:
+                    ln += " " + nxt
+                    depth += nxt.count("{") - nxt.count("}")
+        out.append(ln)
+    return out
+
+
+def _load(text: str, where: str) -> dict:
+    try:
+        return yamlsubset.load(text)
+    except yamlsubset.YAMLSubsetError as e:
+        raise NightError(f"{where}: {e}") from None
+
+
+def read_queue(text: str) -> dict:
+    """The relay's queue in the subset, `yamlsubset` unchanged: the head is read whole and
+    `rows:` is cut at each `- `, every row read on its own with its `- ` blanked. A row is a
+    mapping, `version` is 1; else NightError."""
+    head, chunks, cur, indent, in_rows = [], [], None, None, False
+    for ln in _joined(text.splitlines()):
+        if in_rows and ln.strip() and not ln[:1].isspace() and not ln.startswith("#"):
+            in_rows = False
+        if in_rows:
+            m = _ITEM.match(ln)
+            if m and (indent is None or len(m.group(1)) == indent):
+                indent = len(m.group(1))
+                cur = [" " * (indent + 2) + m.group(2)]
+                chunks.append(cur)
+            elif not ln.strip() or ln.lstrip().startswith("#"):
+                pass
+            elif cur is None:
+                raise NightError(f"queue: a line under rows: before its first '- ': {ln.strip()[:60]}")
+            else:
+                cur.append(ln)
+            continue
+        if _ROWS.match(ln):
+            in_rows = True
+            continue
+        head.append(ln)
+    q = _load("\n".join(head) + "\n", "queue")
+    v = q.get("version")
+    if type(v) is not int or v != 1:
+        raise NightError(f"queue: version is {v!r}, not 1")
+    if chunks:
+        q["rows"] = [_load(textwrap.dedent("\n".join(c)) + "\n", f"queue: row {i + 1}")
+                     for i, c in enumerate(chunks)]
+    rows = q.get("rows") or []
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise NightError("queue: rows is not a list of mappings")
+    if not isinstance(q.get("defaults") or {}, dict):
+        raise NightError("queue: defaults is not a mapping")
+    q["rows"] = rows
+    return q
+
+
+def wall_seconds(v):
+    """`<n>h<n>m<n>s` or whole seconds; the default 4h; None when unreadable."""
+    if v is None:
+        return WALL
+    if type(v) is int:
+        return v if v > 0 else None
+    m = _WALL.match(str(v))
+    if not m or not any(m.groups()):
+        return None
+    h, mi, s = (int(g or 0) for g in m.groups())
+    return h * 3600 + mi * 60 + s or None
+
+
+def plan(q: dict, keep, log) -> list:
+    """Each row with the defaults under it, in file order; every key the loop does not
+    honour is one `log` line. `keep` (the `--rows` ids) keeps those; an unknown one is a
+    NightError."""
+    d = q.get("defaults") or {}
+    for k in q:
+        if k not in HEAD_KEYS:
+            log(f"ignored {k}")
+    for k in d:
+        if k not in DEFAULT_KEYS:
+            log(f"ignored defaults.{k}")
+    out = []
+    for r in q["rows"]:
+        rid = r.get("id")
+        b = r.get("budget") if isinstance(r.get("budget"), dict) else {}
+        for k in r:
+            if k not in ROW_KEYS:
+                log(f"ignored {rid}.{k}")
+        for k in b:
+            if k not in BUDGET_KEYS:
+                log(f"ignored {rid}.budget.{k}")
+        out.append({"id": rid, "packet": r.get("packet"), "model": r.get("model", d.get("model")),
+                    "turns": b.get("turns", d.get("turns")), "usd": b.get("usd", d.get("usd")),
+                    "context": b.get("context", d.get("context")),
+                    "wall": b.get("wall", d.get("wall")), "merge": r.get("merge", d.get("merge")),
+                    "verify": r.get("verify", d.get("verify")), "base": r.get("base"),
+                    "depends_on": r.get("depends_on"), "parked": r.get("parked"),
+                    "kind": r.get("kind")})
+    if keep:
+        unknown = [k for k in keep if k not in {p["id"] for p in out}]
+        if unknown:
+            raise NightError("--rows: no row " + ", ".join(repr(k)[:66] for k in unknown))
+        out = [p for p in out if p["id"] in keep]
+    return out
+
+
+def _num(v) -> bool:
+    return type(v) in (int, float) and v > 0
+
+
+def judge_row(p: dict, repo: Path):
+    """(state, reason) for a row that does not run, else None: `refused` or `skip`."""
+    rid = p["id"]
+    if not isinstance(rid, str) or not ROW_ID.match(rid):
+        return "refused", "id"
+    if p["parked"]:
+        return "skip", "parked"
+    if p["kind"] == "orchestrator":
+        return "refused", "kind"
+    if type(p["context"]) is int and p["context"] > CONTEXT_CEILING:
+        return "refused", "context"
+    pk = p["packet"]
+    if not isinstance(pk, str) or not pk or os.path.isabs(pk):
+        return "refused", "packet"
+    real, top = os.path.realpath(repo / pk), os.path.realpath(repo)
+    if not real.startswith(top + os.sep) or not os.path.isfile(real):
+        return "refused", "packet"
+    if p["base"] not in (None, "main"):
+        return "refused", "base"
+    if not isinstance(p["model"], str) or not p["model"]:
+        return "refused", "model"
+    if type(p["turns"]) is not int or p["turns"] <= 0 or not _num(p["usd"]):
+        return "refused", "budget"
+    if wall_seconds(p["wall"]) is None:
+        return "refused", "wall"
+    if p["depends_on"]:
+        return "skip", "gate-failed-dependency"
+    return None

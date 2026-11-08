@@ -1,0 +1,36 @@
+# The relay's queue, in its own shape (agentik-relay relay/queue.yaml): comments, a flow
+# map over two lines, a list of mappings, and keys the night ignores.
+version: 1
+defaults: {model: claude-opus-5-5, turns: 100, context: 130000, usd: 15, wall: 4h,
+           merge: branch-only, device: never, verify: auto}
+words: ""        # the owner's words for every run
+rows:
+  - id: green-row
+    packet: design/packets/green-row.md
+    budget: {turns: 100, context: 144000, usd: 25}
+    merge: branch-only
+    device: never
+  - id: max-row
+    packet: design/packets/max-row.md
+    model: claude-sonnet-5
+    budget: {turns: 40,
+             usd: 8, wall: 1h30m}
+    harness: none
+  # a comment between rows
+  - id: limit-row
+    packet: design/packets/limit-row.md
+    merge: merge-on-green
+  - id: orch-row
+    packet: design/packets/orch-row.md
+    kind: orchestrator
+  - id: parked-row
+    packet: design/packets/parked-row.md
+    parked: "waits on the owner"
+  - id: dep-row
+    packet: design/packets/dep-row.md
+    depends_on: [green-row]
+    may_touch: [a, b]
+  - id: big-row
+    packet: design/packets/big-row.md
+    budget: {context: 200000}
+    surprise: 1
