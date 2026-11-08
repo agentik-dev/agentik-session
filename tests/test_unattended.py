@@ -255,6 +255,14 @@ def test_status_newest(box, capsys):
     assert out[1].endswith("y" * (200 - len('{"type": "assistant", "x": "')))  # 200 chars
 
 
+def test_status_lines_row_null():                                          # round 1 F5
+    st = {"run": "2026-11-07-1", "dir": "/d", "running": None, "stop": None,
+          "rows": {"refused": [{"row": None, "reason": "id", "sha": None}],
+                   "built": [{"row": 7, "reason": None, "sha": "b" * 40}]}}
+    assert unattended.status_lines(st) == ["2026-11-07-1: /d", "  refused 1: - id",
+                                           "  built 1: 7 " + "b" * 12]
+
+
 # ---- the adversary round's fixes (F1, F2, F4, F5, F7) -----------------------------------
 
 def _result(text):

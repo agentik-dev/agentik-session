@@ -1079,14 +1079,23 @@ def status(env, now: float) -> dict | None:
             "stop": stop}
 
 
+def _row_word(r: dict) -> str:
+    """A status row: its id (`-` when the ledger's is null, a row refused `id`), its reason,
+    its sha as 12."""
+    words = ["-" if r.get("row") is None else str(r["row"])]
+    if r.get("reason"):
+        words.append(str(r["reason"]))
+    if r.get("sha"):
+        words.append(str(r["sha"])[:12])
+    return " ".join(words)
+
+
 def status_lines(st: dict | None) -> list:
     if st is None:
         return ["no run yet"]
     out = [f"{st['run']}: {st['dir']}"]
     for state, rows in st["rows"].items():
-        out.append(f"  {state} {len(rows)}: " + ", ".join(
-            r["row"] + "".join(f" {x[:12] if x == r['sha'] else x}" for x in (r["reason"], r["sha"]) if x)
-            for r in rows))
+        out.append(f"  {state} {len(rows)}: " + ", ".join(_row_word(r) for r in rows))
     if st["running"]:
         r = st["running"]
         out.append(f"  running {r['row']}, its last line {r['age_s']} s ago: {r['last']}")
