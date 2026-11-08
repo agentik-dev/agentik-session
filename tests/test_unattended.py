@@ -414,6 +414,25 @@ def test_until_past_runs_nothing(box):
         assert box.kind("stop")[0]["reason"] == "until"
 
 
+def test_until_walks_the_local_clock(monkeypatch):                        # round 1 F4
+    import calendar
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    try:
+        time.tzset()
+        start = calendar.timegm((2026, 11, 1, 8, 45, 0))                  # 01:45 PDT, autumn night
+        assert _local(start, "%H:%M %Z") == "01:45 PDT"
+        at = unattended.until_at("01:30", start)
+        assert at == start + 2700 and _local(at, "%H:%M %Z") == "01:30 PST"
+        eleven = calendar.timegm((2026, 11, 3, 7, 0, 0))                   # 23:00 PST
+        assert unattended.until_at("06:00", eleven) == eleven + 7 * 3600   # over midnight
+        spring = calendar.timegm((2027, 3, 14, 9, 45, 0))                  # 01:45 PST, 02:xx skipped
+        assert unattended.until_at("02:30", spring) == spring + 900        # the jump's end, 03:00
+        assert unattended.until_at("01:45", start + 30) == start + 3600         # 01:45 PST, the repeat
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_until_reset_past_shelves(box):
     box.go([{"stream": "rate-limit.jsonl"}], ["limit-row", "green-row"], until=_local(T0 + 300))
     assert box.rc == 3 and len(box.starts) == 1 and box.slept == []

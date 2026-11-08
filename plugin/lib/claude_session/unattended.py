@@ -123,15 +123,23 @@ def land_path(repo: Path, land) -> str | None:
 
 def until_at(text: str, start: float) -> float:
     """`--until`: `HH:MM` is its next local occurrence at or after `start`, and
-    `YYYY-MM-DDTHH:MM` is absolute, local; else UnattendedError."""
+    `YYYY-MM-DDTHH:MM` is absolute, local; else UnattendedError. `HH:MM` walks forward
+    from `start` in whole minutes to the first instant whose local clock reads it, so the
+    autumn night's repeated hour is met the first time (mktime's `isdst=-1` may pick
+    either); a clock that jumps forward over it (the spring night) takes the jump's end."""
     m = _HHMM.match(text)
     if m:
-        t = time.localtime(start)
-        for day in (t.tm_mday, t.tm_mday + 1):      # mktime carries a 32nd into the month
-            at = time.mktime((t.tm_year, t.tm_mon, day, int(m.group(1)), int(m.group(2)), 0,
-                              0, 0, -1))
-            if at >= start:
-                return at
+        want, at, prev = int(m.group(1)) * 60 + int(m.group(2)), -(-int(start) // 60) * 60, None
+        if at < start:
+            at += 60
+        for _ in range(3 * 1440):
+            t = time.localtime(at)
+            cur = t.tm_hour * 60 + t.tm_min
+            step = None if prev is None else (cur - prev) % 1440
+            if cur == want or (step is not None and 1 < step < 720
+                               and 0 < (want - prev) % 1440 < step):
+                return float(at)
+            prev, at = cur, at + 60
     try:
         return time.mktime(time.strptime(text, "%Y-%m-%dT%H:%M")[:8] + (-1,))
     except (ValueError, OverflowError):
