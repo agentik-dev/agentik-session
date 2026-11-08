@@ -981,9 +981,10 @@ def cmd_gate(args) -> int:
 
 
 def cmd_night(args) -> int:
-    """`agentik session night run|status` (hq design/07 §2, packet night-1): the overnight
-    loop without its land step. `run` exits 0 on queue-spent, 3 on another stop, 2 on a
-    refusal before the first row; `status` exits 0."""
+    """`agentik session night run|status|report` (hq design/07 §2, packets night-1 and
+    night-2): the overnight loop. `run` exits 0 on queue-spent, until or max-rows, 3 on
+    another stop, 2 on a refusal before the first row; `status` exits 0; `report` 0, 2 for
+    an unknown night."""
     from . import night
     if args.night_verb == "status":
         st = night.status(os.environ, time.time())
@@ -991,7 +992,8 @@ def cmd_night(args) -> int:
         return 0
     keep = [r for r in (args.rows or "").split(",") if r] or None
     try:
-        return night.run(args.repo, keep)
+        return night.run(args.repo, keep, until=args.until, max_rows=args.max_rows,
+                         land=args.land)
     except night.NightError as err:
         _die(f"night run: {err}", 2)
 
@@ -1233,11 +1235,18 @@ def build_parser() -> argparse.ArgumentParser:
     gt.set_defaults(func=cmd_gate)
 
     nt = sub.add_parser("night", help="the overnight loop: one claude -p builder per queue "
-                                       "row, to a stop (no land step yet)")
+                                       "row, landed through the gate, to a stop")
     nsub = nt.add_subparsers(dest="night_verb", required=True, metavar="run|status")
     nr = nsub.add_parser("run", help="run <repo>/relay/queue.yaml's rows in file order")
     nr.add_argument("repo", help="the repo whose queue runs")
     nr.add_argument("--rows", metavar="A,B", help="only these row ids")
+    nr.add_argument("--until", metavar="HH:MM", help="start no row at or past this time "
+                                                     "(HH:MM, or YYYY-MM-DDTHH:MM)")
+    nr.add_argument("--max-rows", type=_positive_int, metavar="N",
+                    help="spawn at most N rows")
+    nr.add_argument("--land", metavar="PATH",
+                    help="the land script (default: <repo>/scripts/land when executable)")
+
     ns = nsub.add_parser("status", help="the newest night: rows by state, the running row, "
                                          "the stop")
     ns.add_argument("--json", action="store_true")

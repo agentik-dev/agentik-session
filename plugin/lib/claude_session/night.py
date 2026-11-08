@@ -1,6 +1,6 @@
-"""`agentik session night`: the overnight loop beside the relay, without its land step.
+"""`agentik session night`: the overnight loop beside the relay.
 
-hq design/07 §2, packet night-1. `run` reads `<repo>/relay/queue.yaml` in the relay's
+hq design/07 §2, packets night-1 and night-2. `run` reads `<repo>/relay/queue.yaml` in the relay's
 schema and, for each row in file order, asks admission, stages a worktree, spawns one
 `claude -p` builder in it, reads its stream as it comes, and judges the row: `built
 <sha>`, `red <reason>`, `skip <reason>`, `refused <reason>` or `limit`. One JSON line per
@@ -52,6 +52,23 @@ def _sleep(seconds: float) -> None:
         time.sleep(seconds)
 
 
+def _ps() -> str | None:
+    """`ps -axo command=`, every process's command line; None when ps fails."""
+    try:
+        r = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True,
+                           errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def gate_argv() -> list:
+    """`gate`, as `gate.spawn_serve` reaches the runner: this interpreter, `-I`, the runner
+    beside this package; never PATH."""
+    return [sys.executable, "-I", str(Path(__file__).resolve().parent.parent / "agentik-session"),
+            "gate"]
+
+
 @dataclass
 class Fx:
     """The loop's effects, each faked in tests. `now` is the wall clock (the ledger's
@@ -65,6 +82,66 @@ class Fx:
     say: Callable[[str], None] = _say
     env: dict = field(default_factory=lambda: dict(os.environ))
     grace: float = gate.GRACE
+    ps: Callable[[], str | None] = _ps
+    gate: list = field(default_factory=gate_argv)
+
+
+# ---- the refusals before the night's folder (night-2 rulings 2-4) ----------------------
+
+RELAY_RUN = re.compile(r"(?:^|\s)(?:agentik relay|(?:\S*/)?agentik-relay) run(?:\s|$)")
+_HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)\Z")
+
+
+def relay_running(ps_text: str) -> str | None:
+    """The first `ps` line running the relay's night, `agentik relay run` or
+    `[<path>/]agentik-relay run`, as 120 chars; None when none does."""
+    for ln in ps_text.splitlines():
+        if RELAY_RUN.search(ln):
+            return ln.strip()[:120]
+    return None
+
+
+def land_path(repo: Path, land) -> str | None:
+    """`--land`, made absolute, which must be an executable file; else `<repo>/scripts/land`
+    when it is one; else None (a `merge-on-green` row ends `built`, `no-land`)."""
+    if land is not None:
+        p = os.path.abspath(land)
+        if not (os.path.isfile(p) and os.access(p, os.X_OK)):
+            raise NightError(f"land: {p[:200]} is not an executable file")
+        return p
+    p = repo / "scripts" / "land"
+    return str(p) if p.is_file() and os.access(p, os.X_OK) else None
+
+
+def until_at(text: str, start: float) -> float:
+    """`--until`: `HH:MM` is its next local occurrence at or after `start`, and
+    `YYYY-MM-DDTHH:MM` is absolute, local; else NightError."""
+    m = _HHMM.match(text)
+    if m:
+        t = time.localtime(start)
+        for day in (t.tm_mday, t.tm_mday + 1):      # mktime carries a 32nd into the month
+            at = time.mktime((t.tm_year, t.tm_mon, day, int(m.group(1)), int(m.group(2)), 0,
+                              0, 0, -1))
+            if at >= start:
+                return at
+    try:
+        return time.mktime(time.strptime(text, "%Y-%m-%dT%H:%M")[:8] + (-1,))
+    except (ValueError, OverflowError):
+        raise NightError(f"until: {text[:40]!r} is neither HH:MM nor YYYY-MM-DDTHH:MM") from None
+
+
+def refusals(repo: Path, fx: Fx, until, land) -> tuple:
+    """Ruling 2: (until's epoch or None, the land path or None), or NightError; `ps` read
+    once."""
+    at = until_at(until, fx.now()) if until is not None else None
+    lp = land_path(repo, land)
+    text = fx.ps()
+    if text is None:
+        raise NightError("ps: `ps -axo command=` failed")
+    line = relay_running(text)
+    if line:
+        raise NightError(f"relay-running: {line}")
+    return at, lp
 
 
 def nights_dir(env) -> Path:
@@ -551,6 +628,11 @@ class _Night:
     cost: float = 0.0
     term: bool = False
     proc: object = None
+    land: str | None = None
+    until: float | None = None
+    max_rows: int | None = None
+    spawned: int = 0
+    landed: set = field(default_factory=set)
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -668,6 +750,11 @@ class _Night:
             self.row(p, "red", "dirty-tree", sha=sha, wt=wt, sid=sid)
         elif part.result.get("is_error"):
             self.row(p, "red", "stream-error", sha=sha, wt=wt, sid=sid)
+        elif p.get("merge") != "merge-on-green":
+            self.row(p, "built", sha=sha, wt=wt)
+        elif not self.land:
+            self.log(f"{p['id']}: merge-on-green with no land script; it stays on its branch")
+            self.row(p, "built", "no-land", sha=sha, wt=wt)
         else:
             self.row(p, "built", sha=sha, wt=wt)
         return None
@@ -714,10 +801,15 @@ class _Night:
             seconds -= step
 
 
-def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float = POLL) -> int:
-    """The night: 0 on `queue-spent`, 3 on another stop; NightError before the first row."""
+def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float = POLL,
+        until: str | None = None, max_rows: int | None = None, land: str | None = None) -> int:
+    """The night: 0 on `queue-spent`, `until` or `max-rows`, 3 on another stop; NightError
+    before the night's folder."""
     fx = fx or Fx()
     repo = Path(os.path.realpath(repo))
+    if max_rows is not None and (type(max_rows) is not int or max_rows <= 0):
+        raise NightError(f"max-rows: {max_rows!r} is not a positive count")
+    at, lp = refusals(repo, fx, until, land)
     try:
         text = (repo / QUEUE).read_text()
     except (OSError, UnicodeDecodeError) as e:
@@ -725,7 +817,9 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     pending: list = []
     rows = plan(read_queue(text), keep, pending.append)
     nid, d = new_night(fx.env, fx.now())
-    N = _Night(repo, nid, d, fx, stall, poll)
+    N = _Night(repo, nid, d, fx, stall, poll, land=lp, until=at, max_rows=max_rows)
+
+
     for line in pending:
         N.log(line)
     fx.say(f"{nid}: {len(rows)} rows from {repo / QUEUE}; ledger {d / 'ledger.jsonl'}")

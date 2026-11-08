@@ -75,11 +75,13 @@ class Box:
         monkeypatch.setenv("FAKE_NIGHT_PLAN", str(self.plan))
         self.slept, self.said = [], []
 
-    def go(self, steps, rows, **kw):
+    def go(self, steps, rows, now=None, ps="", **kw):
         self.plan.write_text(json.dumps(steps))
-        fx = night.Fx(now=lambda: T0, sleep=self.slept.append, say=self.said.append,
-                      env=dict(os.environ))
+        fx = night.Fx(now=now or (lambda: T0), sleep=self.slept.append, say=self.said.append,
+                      env=dict(os.environ), ps=lambda: ps, gate=[str(FIX / "gate")])
+        self.fx = fx
         self.rc = night.run(self.repo, rows, fx=fx, **kw)
+
         self.dir = night.newest_night(fx.env)
         self.ledger = [json.loads(ln) for ln in (self.dir / "ledger.jsonl").read_text().splitlines()]
         self.starts = ([json.loads(ln) for ln in self.log.read_text().splitlines()]
@@ -339,3 +341,42 @@ def test_a_dying_night_kills_its_child(box, monkeypatch):                 # F4
     assert stop["kind"] == "stop" and stop["reason"] == "error" and "the loop broke" in stop["error"]
     with pytest.raises(ProcessLookupError):
         os.killpg(seen[0], 0)                            # the child's group is gone
+
+
+# ---- night-2: the refusals, the land step, the stops, the report -----------------------
+
+def _no_nights():
+    return not night.nights_dir(dict(os.environ)).exists()
+
+
+def test_relay_running_refused(box):
+    for ps, why in (("x\n/opt/homebrew/bin/agentik-relay run --night\n", "relay-running: "
+                     "/opt/homebrew/bin/agentik-relay run --night"),
+                    ("agentik relay run " + "q" * 200, "relay-running: agentik relay run q"),
+                    (None, "ps: ")):
+        with pytest.raises(night.NightError, match="^" + why.replace("$", r"\$")) as e:
+            box.go([], ["green-row"], ps=ps)
+        assert len(str(e.value)) <= len("relay-running: ") + 120
+    assert _no_nights() and not box.log.exists()
+    for fine in ("agentik session night run x", "grep agentik-relayrun", "agentik relay status"):
+        box.go([{"stream": "max-turns.jsonl"}], ["orch-row"], ps=fine + "\n")
+        assert box.rc == 0
+
+
+def test_land_absent_builds(box, capsys):
+    box.go([{"stream": "green.jsonl", "commit": True}], ["limit-row"])
+    (row,) = box.kind("row")
+    assert (row["state"], row["reason"]) == ("built", "no-land") and box.kind("gate") == []
+    assert "limit-row: merge-on-green with no land script" in (box.dir / "log").read_text()
+    from claude_session import cli
+    nights = sorted(os.listdir(night.nights_dir(dict(os.environ))))
+    for bad in (str(box.repo / "relay" / "queue.yaml"), str(box.tmp / "nope")):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["night", "run", str(box.repo), "--land", bad])
+        assert e.value.code == 2
+        assert "night run: land: " in capsys.readouterr().err
+    for args in (["--until", "25:00"], ["--until", "2026-02-30T06:00"], ["--max-rows", "0"]):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["night", "run", str(box.repo), *args])
+        assert e.value.code == 2
+    assert sorted(os.listdir(night.nights_dir(dict(os.environ)))) == nights
