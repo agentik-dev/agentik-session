@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""A fake `agentik session gate` for tests/test_night.py: never a real gate job. Each call,
+"""A fake `agentik session gate` for tests/test_unattended.py: never a real gate job. Each call,
 `gate run --wait <repo> -- <land> <repo> <id> <sha> <merge-file>`, takes the next step of
 the JSON list at $FAKE_GATE_PLAN (the last repeats): `verdict`, the job's last log line with
 `{repo}` (the repo's name) and `{sha}` from its argv, and `exit`, the job's code; `no_log`,

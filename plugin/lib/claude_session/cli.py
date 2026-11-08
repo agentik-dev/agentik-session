@@ -980,28 +980,29 @@ def cmd_gate(args) -> int:
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
-def cmd_night(args) -> int:
-    """`agentik session night run|status|report` (hq design/07 §2, packets night-1 and
-    night-2): the overnight loop. `run` exits 0 on queue-spent, until or max-rows, 3 on
+def cmd_unattended(args) -> int:
+    """`agentik session unattended run|status|report` (hq design/07 §2): the unattended
+    loop. `run` exits 0 on queue-spent, until or max-rows, 3 on
     another stop, 2 on a refusal before the first row; `status` exits 0; `report` 0, 2 for
-    an unknown night."""
-    from . import night
-    if args.night_verb == "status":
-        st = night.status(os.environ, time.time())
-        print(json.dumps(st, indent=2) if args.json else "\n".join(night.status_lines(st)))
+    an unknown run."""
+    from . import unattended
+    if args.unattended_verb == "status":
+        st = unattended.status(os.environ, time.time())
+        print(json.dumps(st, indent=2) if args.json else "\n".join(unattended.status_lines(st)))
         return 0
-    if args.night_verb == "report":
-        d = night.find_night(os.environ, args.night)
-        if d is None and args.night is not None:
-            _die(f"night report: no night {args.night[:40]!r} under {night.nights_dir(os.environ)}", 2)
-        print(night.report(d) if d else "no night yet", end="" if d else "\n")
+    if args.unattended_verb == "report":
+        d = unattended.find_run(os.environ, args.run)
+        if d is None and args.run is not None:
+            _die(f"unattended report: no run {args.run[:40]!r} under "
+                 f"{unattended.runs_dir(os.environ)}", 2)
+        print(unattended.report(d) if d else "no run yet", end="" if d else "\n")
         return 0
     keep = [r for r in (args.rows or "").split(",") if r] or None
     try:
-        return night.run(args.repo, keep, until=args.until, max_rows=args.max_rows,
+        return unattended.run(args.repo, keep, until=args.until, max_rows=args.max_rows,
                          land=args.land)
-    except night.NightError as err:
-        _die(f"night run: {err}", 2)
+    except unattended.UnattendedError as err:
+        _die(f"unattended run: {err}", 2)
 
 
 def _gate_wall(env) -> int:
@@ -1240,9 +1241,9 @@ def build_parser() -> argparse.ArgumentParser:
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
 
-    nt = sub.add_parser("night", help="the overnight loop: one claude -p builder per queue "
+    nt = sub.add_parser("unattended", help="the unattended loop: one claude -p builder per queue "
                                        "row, landed through the gate, to a stop")
-    nsub = nt.add_subparsers(dest="night_verb", required=True, metavar="run|status|report")
+    nsub = nt.add_subparsers(dest="unattended_verb", required=True, metavar="run|status|report")
     nr = nsub.add_parser("run", help="run <repo>/relay/queue.yaml's rows in file order")
     nr.add_argument("repo", help="the repo whose queue runs")
     nr.add_argument("--rows", metavar="A,B", help="only these row ids")
@@ -1253,12 +1254,13 @@ def build_parser() -> argparse.ArgumentParser:
     nr.add_argument("--land", metavar="PATH",
                     help="the land script (default: <repo>/scripts/land when executable)")
 
-    ns = nsub.add_parser("status", help="the newest night: rows by state, the running row, "
+    ns = nsub.add_parser("status", help="the newest run: rows by state, the running row, "
                                          "the stop")
     ns.add_argument("--json", action="store_true")
-    nrp = nsub.add_parser("report", help="a night's morning report in markdown, from its ledger")
-    nrp.add_argument("--night", metavar="ID", help="the night (default: the newest)")
-    nt.set_defaults(func=cmd_night)
+    nrp = nsub.add_parser("report", help="a run's report in markdown, from its ledger")
+    nrp.add_argument("--run", metavar="ID", help="the run (default: the newest)")
+
+    nt.set_defaults(func=cmd_unattended)
 
 
     hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks

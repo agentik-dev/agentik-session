@@ -40,7 +40,7 @@ Skills:
 
 - `session`: profiles, session-only settings, the budget (the meter, the zones, CHECKPOINT and EXIT), the charter, and the priority and pacing rules.
 - `read`, invoked as `/session:read <file> [SPEC]`: reads a markdown record by sections, never whole. Example: `/session:read design/overhaul-r1.md '§5'`.
-- `night`, invoked as `/session:night [report]`: the newest night's status or its morning report, never a night's start.
+- `unattended`, invoked as `/session:unattended [report]`: the newest run's status or report; it never starts one.
 
 CLI verbs (`agentik session --help`):
 
@@ -57,9 +57,9 @@ CLI verbs (`agentik session --help`):
 | `charter` | `agentik session charter open "render the README"` |
 | `budget` | `agentik session budget` |
 | `rules` | `agentik session rules` |
-| `run` | `agentik session run --chain night -- --model 'opus[1m]' "/loop 30m check in"` |
+| `run` | `agentik session run --chain loop -- --model 'opus[1m]' "/loop 30m check in"` |
 | `gate` | `agentik session gate run . -- make check`; `agentik session gate wait <id>` |
-| `night` | `agentik session night run . --until 06:30` |
+| `unattended` | `agentik session unattended run . --until 06:30` |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
 
@@ -150,13 +150,13 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 - Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
 - `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
 
-## The night loop
+## The unattended loop
 
-`agentik session night run <repo> [--rows a,b] [--until HH:MM] [--max-rows N] [--land PATH]` runs `relay/queue.yaml`'s rows in order, a `claude -p` builder each in its worktree, never beside the relay's night.
+`agentik session unattended run <repo> [--rows a,b] [--until HH:MM] [--max-rows N] [--land PATH]` runs `relay/queue.yaml`'s rows in order, a `claude -p` builder each in its worktree, never beside a relay run.
 
 
 - A `merge-on-green` row lands as one gate job through `--land` or `<repo>/scripts/land`; a verdict other than the log's `ok` or `red <step>` reads red `gate-unrun`.
-- Exit 0 at the queue's end, `--until` or `--max-rows`; 3 on a limit, an auth error or the night's `stop` file. `night status` and `night report` read its ledger.
+- Exit 0 at the queue's end, `--until` or `--max-rows`; 3 on a limit, an auth error or the run's `stop` file; `status` and `report` read its ledger.
 
 ## Design of record
 

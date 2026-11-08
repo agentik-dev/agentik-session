@@ -507,7 +507,7 @@ SETTINGS = {"model": "opus", "env": {"ANTHROPIC_MODEL": "m"}}
 def _modules():
     return {n: importlib.import_module("claude_session." + n) for n in (
         "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "ledger", "measure",
-        "meter", "mod", "models", "night", "policystore", "resolver", "rules", "sessionconfig", "state")}
+        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state")}
 
 
 def _state_env(d):
@@ -549,8 +549,8 @@ READERS = {
                                   lambda m, d: m["models"].engine_window(d)),
     ("models", "configured"): ("home/.claude/settings.json", SETTINGS,
                                lambda m, d: m["models"].configured(_state_env(d), d)),
-    ("night", "read_ledger"): ("ledger.jsonl", {"ts": NOW_TS, "kind": "stop", "reason": "queue-spent"},
-                               lambda m, d: m["night"].read_ledger(d / "ledger.jsonl")),
+    ("unattended", "read_ledger"): ("ledger.jsonl", {"ts": NOW_TS, "kind": "stop", "reason": "queue-spent"},
+                               lambda m, d: m["unattended"].read_ledger(d / "ledger.jsonl")),
     ("policystore", "load_policy"): ("policy.json", {"reserve_pct": 7.0}, None),
     ("resolver", "load_request"): ("request.json", {"cwd": "/r", "profile": None},
                                    lambda m, d: m["resolver"].load_request(d)),
@@ -570,7 +570,7 @@ READERS = {
 NOT_STATE = {("__init__", "_pin"), ("admission", "decode"), ("chain", "_checks"), ("cli", "_coerce"),
              ("doctor", "_plugin_list"), ("doctor", "_check_plugin"), ("doctor", "_check_meter_hook"),
              ("doctor", "hooks_of"), ("hooks", "_with_gate"), ("hooks", "dispatch"), ("hooks", "_confirm"),
-             ("ledger", "read_chains"), ("ledger", "restarts_in"), ("meter", "_scan"), ("night", "_parse"),
+             ("ledger", "read_chains"), ("ledger", "restarts_in"), ("meter", "_scan"), ("unattended", "_parse"),
              ("resolver", "resolve"), ("yamlsubset", "_scalar")}
 
 

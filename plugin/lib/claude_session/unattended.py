@@ -1,10 +1,10 @@
-"""`agentik session night`: the overnight loop beside the relay.
+"""`agentik session unattended`: the unattended loop beside the relay.
 
-hq design/07 §2, packets night-1 and night-2. `run` reads `<repo>/relay/queue.yaml` in the relay's
+hq design/07 §2. `run` reads `<repo>/relay/queue.yaml` in the relay's
 schema and, for each row in file order, asks admission, stages a worktree, spawns one
 `claude -p` builder in it, reads its stream as it comes, and judges the row: `built
 <sha>`, `red <reason>`, `skip <reason>`, `refused <reason>` or `limit`. One JSON line per
-event goes to the night's `ledger.jsonl`; `status` reads the newest. Standard library,
+event goes to the run's `ledger.jsonl`; `status` reads the newest. Standard library,
 the 3.9 floor (hq entry 6); every effect is an `Fx` field, as `gate.py`'s.
 """
 
@@ -36,10 +36,10 @@ DENIED_PUSH_URL = "relay-denies-push"                         # relay DeniedPush
 HEADING = "# The packet; the repo's CLAUDE.md carries the rules"
 CONTINUE = "continue from your charter's act in flight; your commits stand"
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}\Z")
-NIGHT = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)\Z")
+RUN = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)\Z")
 
 
-class NightError(Exception):
+class UnattendedError(Exception):
     """A refusal before the first row: `run` exits 2."""
 
 
@@ -86,14 +86,14 @@ class Fx:
     gate: list = field(default_factory=gate_argv)
 
 
-# ---- the refusals before the night's folder (night-2 rulings 2-4) ----------------------
+# ---- the refusals before the run's folder (rulings 2-4) ----------------------
 
 RELAY_RUN = re.compile(r"(?:^|\s)(?:agentik relay|(?:\S*/)?agentik-relay) run(?:\s|$)")
 _HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)\Z")
 
 
 def relay_running(ps_text: str) -> str | None:
-    """The first `ps` line running the relay's night, `agentik relay run` or
+    """The first `ps` line running the relay's own run, `agentik relay run` or
     `[<path>/]agentik-relay run`, as 120 chars; None when none does."""
     for ln in ps_text.splitlines():
         if RELAY_RUN.search(ln):
@@ -107,7 +107,7 @@ def land_path(repo: Path, land) -> str | None:
     if land is not None:
         p = os.path.abspath(land)
         if not (os.path.isfile(p) and os.access(p, os.X_OK)):
-            raise NightError(f"land: {p[:200]} is not an executable file")
+            raise UnattendedError(f"land: {p[:200]} is not an executable file")
         return p
     p = repo / "scripts" / "land"
     return str(p) if p.is_file() and os.access(p, os.X_OK) else None
@@ -115,7 +115,7 @@ def land_path(repo: Path, land) -> str | None:
 
 def until_at(text: str, start: float) -> float:
     """`--until`: `HH:MM` is its next local occurrence at or after `start`, and
-    `YYYY-MM-DDTHH:MM` is absolute, local; else NightError."""
+    `YYYY-MM-DDTHH:MM` is absolute, local; else UnattendedError."""
     m = _HHMM.match(text)
     if m:
         t = time.localtime(start)
@@ -127,25 +127,25 @@ def until_at(text: str, start: float) -> float:
     try:
         return time.mktime(time.strptime(text, "%Y-%m-%dT%H:%M")[:8] + (-1,))
     except (ValueError, OverflowError):
-        raise NightError(f"until: {text[:40]!r} is neither HH:MM nor YYYY-MM-DDTHH:MM") from None
+        raise UnattendedError(f"until: {text[:40]!r} is neither HH:MM nor YYYY-MM-DDTHH:MM") from None
 
 
 def refusals(repo: Path, fx: Fx, until, land) -> tuple:
-    """Ruling 2: (until's epoch or None, the land path or None), or NightError; `ps` read
+    """Ruling 2: (until's epoch or None, the land path or None), or UnattendedError; `ps` read
     once."""
     at = until_at(until, fx.now()) if until is not None else None
     lp = land_path(repo, land)
     text = fx.ps()
     if text is None:
-        raise NightError("ps: `ps -axo command=` failed")
+        raise UnattendedError("ps: `ps -axo command=` failed")
     line = relay_running(text)
     if line:
-        raise NightError(f"relay-running: {line}")
+        raise UnattendedError(f"relay-running: {line}")
     return at, lp
 
 
-def nights_dir(env) -> Path:
-    return resolver.state_dir(env) / "nights"
+def runs_dir(env) -> Path:
+    return resolver.state_dir(env) / "unattended"
 
 
 def _mkdir(p: Path) -> None:
@@ -153,13 +153,13 @@ def _mkdir(p: Path) -> None:
 
 
 def _key(name: str):
-    m = NIGHT.match(name)
+    m = RUN.match(name)
     return (m.group(1), int(m.group(2))) if m else None
 
 
-def new_night(env, now: float) -> tuple[str, Path]:
-    """`<state>/nights/<date>-<n>/`, n one past today's highest; its id `night-<date>-<n>`."""
-    root = nights_dir(env)
+def new_run(env, now: float) -> tuple[str, Path]:
+    """`<state>/unattended/<date>-<n>/`, n one past today's highest; its id `<date>-<n>`."""
+    root = runs_dir(env)
     _mkdir(root)
     os.chmod(root, 0o700)
     today = time.strftime("%Y-%m-%d", time.localtime(now))
@@ -171,15 +171,15 @@ def new_night(env, now: float) -> tuple[str, Path]:
         except FileExistsError:
             n += 1
             continue
-        return f"night-{today}-{n}", d
+        return f"{today}-{n}", d
 
 
-def newest_night(env) -> Path | None:
+def newest_run(env) -> Path | None:
     try:
-        names = [n for n in os.listdir(nights_dir(env)) if _key(n)]
+        names = [n for n in os.listdir(runs_dir(env)) if _key(n)]
     except OSError:
         return None
-    return nights_dir(env) / max(names, key=_key) if names else None
+    return runs_dir(env) / max(names, key=_key) if names else None
 
 
 def _append(path: Path, text: str) -> None:
@@ -246,13 +246,13 @@ def _load(text: str, where: str) -> dict:
     try:
         return yamlsubset.load(text)
     except yamlsubset.YAMLSubsetError as e:
-        raise NightError(f"{where}: {e}") from None
+        raise UnattendedError(f"{where}: {e}") from None
 
 
 def read_queue(text: str) -> dict:
     """The relay's queue in the subset, `yamlsubset` unchanged: the head is read whole and
     `rows:` is cut at each `- `, every row read on its own with its `- ` blanked. A row is a
-    mapping, `version` is 1; else NightError."""
+    mapping, `version` is 1; else UnattendedError."""
     head, chunks, cur, indent, in_rows = [], [], None, None, False
     for ln in _joined(text.splitlines()):
         if (in_rows and ln.strip() and not ln[:1].isspace() and not ln.startswith("#")
@@ -268,7 +268,7 @@ def read_queue(text: str) -> dict:
             elif not ln.strip() or ln.lstrip().startswith("#"):
                 pass
             elif cur is None:
-                raise NightError(f"queue: a line under rows: before its first '- ': {ln.strip()[:60]}")
+                raise UnattendedError(f"queue: a line under rows: before its first '- ': {ln.strip()[:60]}")
             else:
                 cur.append(ln)
             continue
@@ -279,15 +279,15 @@ def read_queue(text: str) -> dict:
     q = _load("\n".join(head) + "\n", "queue")
     v = q.get("version")
     if type(v) is not int or v != 1:
-        raise NightError(f"queue: version is {v!r}, not 1")
+        raise UnattendedError(f"queue: version is {v!r}, not 1")
     if chunks:
         q["rows"] = [_load(textwrap.dedent("\n".join(c)) + "\n", f"queue: row {i + 1}")
                      for i, c in enumerate(chunks)]
     rows = q.get("rows") or []
     if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
-        raise NightError("queue: rows is not a list of mappings")
+        raise UnattendedError("queue: rows is not a list of mappings")
     if not isinstance(q.get("defaults") or {}, dict):
-        raise NightError("queue: defaults is not a mapping")
+        raise UnattendedError("queue: defaults is not a mapping")
     q["rows"] = rows
     return q
 
@@ -308,7 +308,7 @@ def wall_seconds(v):
 def plan(q: dict, keep, log) -> list:
     """Each row with the defaults under it, in file order; every key the loop does not
     honour is one `log` line. `keep` (the `--rows` ids) keeps those; an unknown one is a
-    NightError."""
+    UnattendedError."""
     d = q.get("defaults") or {}
     for k in q:
         if k not in HEAD_KEYS:
@@ -336,7 +336,7 @@ def plan(q: dict, keep, log) -> list:
     if keep:
         unknown = [k for k in keep if k not in {p["id"] for p in out}]
         if unknown:
-            raise NightError("--rows: no row " + ", ".join(repr(k)[:66] for k in unknown))
+            raise UnattendedError("--rows: no row " + ", ".join(repr(k)[:66] for k in unknown))
         out = [p for p in out if p["id"] in keep]
     return out
 
@@ -347,7 +347,7 @@ def _num(v) -> bool:
 
 def judge_row(p: dict, repo: Path, landed=frozenset()):
     """(state, reason) for a row that does not run, else None: `refused` or `skip`. A `base`
-    or a `depends_on` id is good when it landed earlier tonight (`landed`)."""
+    or a `depends_on` id is good when it landed earlier in this run (`landed`)."""
     rid = p["id"]
     if not isinstance(rid, str) or not ROW_ID.match(rid):
         return "refused", "id"
@@ -381,11 +381,11 @@ def judge_row(p: dict, repo: Path, landed=frozenset()):
 
 # ---- admission (ruling 3) --------------------------------------------------------------
 
-def admit(night_id: str, model: str, env) -> dict:
+def admit(run_id: str, model: str, env) -> dict:
     """Admission's verdict for one spawn, as a helper's is asked: `mode`, `text`, `peak`.
     Admission observes and never refuses; an error is recorded and the row runs."""
     try:
-        v = admission.admit(night_id, json.dumps({"subagentType": "night", "model": model}), env)
+        v = admission.admit(run_id, json.dumps({"subagentType": "unattended", "model": model}), env)
     except Exception as e:      # noqa: BLE001  (any failure is recorded, never a stop)
         return {"error": f"{type(e).__name__}: {e}"[:200]}
     return {k: v.get(k) for k in ("mode", "text", "peak")}
@@ -560,7 +560,7 @@ def holds(text: str, needle: str) -> bool:
 
 
 def text_kind(text: str) -> str:
-    """The relay's `textKind` in the night's names: a window's text `session`, a weekly
+    """The relay's `textKind` in this loop's names: a window's text `session`, a weekly
     one's `seven_day`, a model's `model_<word>`, else `unknown`."""
     if holds(text, "session limit") or holds(text, "5-hour limit"):
         return "session"
@@ -608,7 +608,7 @@ def classify(obj: dict, part: Part) -> None:
 
 
 def read_stream(stdout, path: Path, part: Part) -> None:
-    """Each line to `<night>/<id>.jsonl` as it comes, then parsed; non-JSON is skipped."""
+    """Each line to `<run>/<id>.jsonl` as it comes, then parsed; non-JSON is skipped."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "ab") as fh:
         for raw in iter(stdout.readline, b""):
@@ -650,7 +650,7 @@ def _iso(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(t))
 
 
-# ---- the land step (night-2 ruling 9) --------------------------------------------------
+# ---- the land step (ruling 9) --------------------------------------------------
 
 GATE_LINE = re.compile(r"^gate (\S+) (.+): exit (-?\d+) in (\S+) min; log (.+)$")  # wait_line
 LAND_OK = re.compile(r"^land (\S+): ok (\S+?)(?:,.*)?$")
@@ -701,7 +701,7 @@ def verdict(rc, out: str, sha: str) -> tuple:
 
 
 @dataclass
-class _Night:
+class _Run:
     repo: Path
     nid: str
     dir: Path
@@ -720,7 +720,7 @@ class _Night:
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
-        print(f"night: {line}", file=sys.stderr, flush=True)
+        print(f"unattended: {line}", file=sys.stderr, flush=True)
 
     def record(self, event: str, /, **kw) -> None:
         _append(self.dir / "ledger.jsonl",
@@ -798,7 +798,7 @@ class _Night:
             return cut
 
     def stopped(self) -> bool:
-        """The owner's stop file, `<night>/stop`."""
+        """The owner's stop file, `<run>/stop`."""
         return os.path.lexists(self.dir / "stop")
 
     def before(self) -> str | None:
@@ -821,7 +821,7 @@ class _Night:
     def land_row(self, p, wt, sha: str, sid: str) -> None:
         """Ruling 9: one job through the gate queue, `gate run --wait <repo> -- <land> <repo>
         <id> <sha> <merge-file>` in the repo, no timeout, in its own session so a signal
-        to the night lets the job finish; a `gate` line, then the row's."""
+        to the run lets the job finish; a `gate` line, then the row's."""
         rid = p["id"]
         merge = self.merge_file(p, sha, sid)
         argv = [*self.fx.gate, "run", "--wait", str(self.repo), "--", self.land, str(self.repo),
@@ -848,7 +848,7 @@ class _Night:
             self.row(p, "red", reason, sha=sha, wt=wt, sid=sid)
 
     def do_row(self, p) -> str | None:
-        """The row, start to end; the night's stop reason, or None to go on."""
+        """The row, start to end; the run's stop reason, or None to go on."""
         j = judge_row(p, self.repo, self.landed)
         if j:
             self.row(p, *j)
@@ -900,7 +900,7 @@ class _Night:
     def limited(self, p, wt, head, part, sid, n) -> str | None:
         """Ruling 8: a window limit with a reset waits for it plus 120 s, an unknown one
         1,800 s, and the row is resumed once; any other kind ends the row `limit`; a
-        weekly limit or a second one stops the night `usage-limit`. Never a kill."""
+        weekly limit or a second one stops the run `usage-limit`. Never a kill."""
         lim, rid = part.limit, p["id"]
         kind, reset = lim["kind"], lim["resets_at"]
         if n > 1 or kind.startswith("seven_day"):
@@ -945,21 +945,21 @@ class _Night:
 
 def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float = POLL,
         until: str | None = None, max_rows: int | None = None, land: str | None = None) -> int:
-    """The night: 0 on `queue-spent`, `until` or `max-rows`, 3 on another stop; NightError
-    before the night's folder."""
+    """The run: 0 on `queue-spent`, `until` or `max-rows`, 3 on another stop; UnattendedError
+    before the run's folder."""
     fx = fx or Fx()
     repo = Path(os.path.realpath(repo))
     if max_rows is not None and (type(max_rows) is not int or max_rows <= 0):
-        raise NightError(f"max-rows: {max_rows!r} is not a positive count")
+        raise UnattendedError(f"max-rows: {max_rows!r} is not a positive count")
     at, lp = refusals(repo, fx, until, land)
     try:
         text = (repo / QUEUE).read_text()
     except (OSError, UnicodeDecodeError) as e:
-        raise NightError(f"queue: {repo / QUEUE}: {e.__class__.__name__}") from None
+        raise UnattendedError(f"queue: {repo / QUEUE}: {e.__class__.__name__}") from None
     pending: list = []
     rows = plan(read_queue(text), keep, pending.append)
-    nid, d = new_night(fx.env, fx.now())
-    N = _Night(repo, nid, d, fx, stall, poll, land=lp, until=at, max_rows=max_rows)
+    nid, d = new_run(fx.env, fx.now())
+    N = _Run(repo, nid, d, fx, stall, poll, land=lp, until=at, max_rows=max_rows)
 
 
     for line in pending:
@@ -980,9 +980,9 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
             if stop:
                 break
     except BaseException as e:
-        # The night dies with a child running: its group goes, and the stop line says so.
+        # The run dies with a child running: its group goes, and the stop line says so.
         if N.proc is not None and N.proc.poll() is None:
-            N.log(f"the night dies ({type(e).__name__}); the running child's group is killed")
+            N.log(f"the run dies ({type(e).__name__}); the running child's group is killed")
             gate._kill_group(N.proc.pid, fx)
             N.proc.wait()
         N.record("stop", reason="error", error=f"{type(e).__name__}: {e}"[:200], rows=N.states,
@@ -1002,7 +1002,7 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
 # ---- the ledger read back, and status (ruling 10) --------------------------------------
 
 def read_ledger(path: Path) -> list:
-    """The night's ledger, each line an object; a torn or foreign line is skipped and a
+    """The run's ledger, each line an object; a torn or foreign line is skipped and a
     key it does not know is kept, never read."""
     out = []
     try:
@@ -1030,9 +1030,9 @@ def _last_line(path: Path) -> str:
 
 
 def status(env, now: float) -> dict | None:
-    """The newest night: its rows by state, a running row's last stream line and its age,
-    its stop; None with no night yet."""
-    d = newest_night(env)
+    """The newest run: its rows by state, a running row's last stream line and its age,
+    its stop; None with no run yet."""
+    d = newest_run(env)
     if d is None:
         return None
     rows, ended, spawned, stop = {}, set(), [], None
@@ -1055,14 +1055,14 @@ def status(env, now: float) -> dict | None:
         except OSError:
             age = None
         running = {"row": live[-1], "last": _last_line(path), "age_s": age}
-    return {"night": f"night-{d.name}", "dir": str(d), "rows": rows, "running": running,
+    return {"run": d.name, "dir": str(d), "rows": rows, "running": running,
             "stop": stop}
 
 
 def status_lines(st: dict | None) -> list:
     if st is None:
-        return ["no night yet"]
-    out = [f"{st['night']}: {st['dir']}"]
+        return ["no run yet"]
+    out = [f"{st['run']}: {st['dir']}"]
     for state, rows in st["rows"].items():
         out.append(f"  {state} {len(rows)}: " + ", ".join(
             r["row"] + "".join(f" {x[:12] if x == r['sha'] else x}" for x in (r["reason"], r["sha"]) if x)
@@ -1077,15 +1077,15 @@ def status_lines(st: dict | None) -> list:
     return out
 
 
-# ---- the morning report (night-2 ruling 10) --------------------------------------------
+# ---- the report (ruling 10) --------------------------------------------
 
-def find_night(env, nid: str | None) -> Path | None:
-    """`--night`'s folder (`night-<date>-<n>` or `<date>-<n>`), else the newest; None when
+def find_run(env, nid: str | None) -> Path | None:
+    """`--run`'s folder (`<date>-<n>`), else the newest; None when
     there is none."""
     if nid is None:
-        return newest_night(env)
-    name = nid[len("night-"):] if nid.startswith("night-") else nid
-    d = nights_dir(env) / name
+        return newest_run(env)
+    name = nid
+    d = runs_dir(env) / name
     return d if _key(name) and d.is_dir() else None
 
 
@@ -1107,7 +1107,7 @@ def _local_reset(v) -> str | None:
 
 
 def report(d: Path) -> str:
-    """The morning's markdown, from the night's ledger alone (relay entry 13): its stop or
+    """The run's report in markdown, from its ledger alone (relay entry 13): its stop or
     its running row; landed, built, red, limited, refused and skipped rows; each row's cost
     from its `exit` lines, and the total."""
     rows, limits, cost, spawned, stop = {}, {}, {}, [], None
@@ -1128,7 +1128,7 @@ def report(d: Path) -> str:
     head = f"stop {stop.get('reason')}" if stop else "running" + (f" {live[-1]}" if live else "")
     by = {s: [e for e in rows.values() if e.get("state") == s]
           for s in ("landed", "built", "red", "limit")}
-    out = [f"# The night night-{d.name}", "", head]
+    out = [f"# The unattended run {d.name}", "", head]
     for title, cols, items in (
             ("Landed", ("row", "sha", "reason"),
              [(e["row"], (e.get("sha") or "")[:12], e.get("reason")) for e in by["landed"]]),
