@@ -321,3 +321,74 @@ def stage(repo: Path, rid: str, base: str) -> tuple[Path | None, str | None]:
 
 def dirty(wt: Path) -> bool:
     return _out(wt, "status", "--porcelain", "--untracked-files=all") != ""
+
+
+# ---- the spawn (ruling 5) --------------------------------------------------------------
+
+def _usd(v) -> str:
+    return f"{round(float(v), 2):g}"
+
+
+def spawn_argv(model: str, turns: int, usd, sid: str | None = None,
+               resume: str | None = None) -> list:
+    """The relay's spawn line (`SpawnArgv`); a resume names its session and no new one."""
+    a = ["claude", "-p"] + (["--resume", resume] if resume else [])
+    a += ["--permission-mode", "auto", "--allowedTools", ALLOWED_TOOLS, "--model", model,
+          "--max-turns", str(turns), "--max-budget-usd", _usd(usd),
+          "--output-format", "stream-json", "--verbose"]
+    return a + (["--session-id", sid] if sid else [])
+
+
+def push_deny(env: dict, remotes: list) -> dict:
+    """The relay's `PushDenyEnv`: each remote's pushurl list reset, then set to
+    `relay-denies-push`, through GIT_CONFIG_COUNT after any entries already counted."""
+    try:
+        n = max(int(env.get("GIT_CONFIG_COUNT", "0")), 0)
+    except ValueError:
+        n = 0
+    out = {k: v for k, v in env.items() if k != "GIT_CONFIG_COUNT" and not (
+        n == 0 and (k.startswith("GIT_CONFIG_KEY_") or k.startswith("GIT_CONFIG_VALUE_")))}
+    for r in remotes:
+        for v in ("", DENIED_PUSH_URL):
+            out[f"GIT_CONFIG_KEY_{n}"], out[f"GIT_CONFIG_VALUE_{n}"] = f"remote.{r}.pushurl", v
+            n += 1
+    if n:
+        out["GIT_CONFIG_COUNT"] = str(n)
+    return out
+
+
+def child_env(environ: dict, model: str, turns: int, remotes: list) -> dict:
+    """The relay child's environment less RELAY_ROW and the depth: no CLAUDE* and no RELAY_*
+    but RELAY_DEVICE_VERBS; the builder profile, its turn cap and model; the push barrier."""
+    out = {k: v for k, v in environ.items() if not k.startswith("CLAUDE") and not (
+        k.startswith("RELAY_") and k != "RELAY_DEVICE_VERBS")}
+    out.update({"CLAUDE_SESSION_PROFILE": "builder", "CLAUDE_SESSION_MAX_TURNS": str(turns),
+                "CLAUDE_SESSION_MODEL": model, "RELAY_MEASURE_DEPTH": "1"})
+    return push_deny(out, remotes)
+
+
+def remotes(wt: Path) -> list:
+    return (_out(wt, "remote") or "").split()
+
+
+def prompt(packet_text: str) -> str:
+    return f"{HEADING}\n\n{packet_text}"
+
+
+def start(argv: list, cwd: Path, env: dict, text: str, stderr_path: Path, fx: Fx):
+    """The child in its own process group, its stdin fed on a thread and closed."""
+    err = os.fdopen(os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab")
+    try:
+        proc = fx.popen(argv, cwd=str(cwd), env=env, stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=err, start_new_session=True)
+    finally:
+        err.close()
+
+    def feed():
+        try:
+            proc.stdin.write(text.encode())
+            proc.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+    threading.Thread(target=feed, daemon=True).start()
+    return proc
