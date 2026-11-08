@@ -40,6 +40,7 @@ Skills:
 
 - `session`: profiles, session-only settings, the budget (the meter, the zones, CHECKPOINT and EXIT), the charter, and the priority and pacing rules.
 - `read`, invoked as `/session:read <file> [SPEC]`: reads a markdown record by sections, never whole. Example: `/session:read design/overhaul-r1.md '§5'`.
+- `night`, invoked as `/session:night [report]`: the newest night's status or its morning report, never a night's start.
 
 CLI verbs (`agentik session --help`):
 
@@ -58,6 +59,7 @@ CLI verbs (`agentik session --help`):
 | `rules` | `agentik session rules` |
 | `run` | `agentik session run --chain night -- --model 'opus[1m]' "/loop 30m check in"` |
 | `gate` | `agentik session gate run . -- make check`; `agentik session gate wait <id>` |
+| `night` | `agentik session night run . --until 06:30` |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
 
@@ -85,14 +87,9 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 
-The two orchestrator roles ship in `2.0.0-alpha.2`. Install that launcher and plugin first, then restart Claude Code; until then `agentik session profile orchestrator` prints `unknown profile` and the meter falls back to `frontier`.
-
 Start an orchestrator session (quote `opus[1m]`: zsh reads brackets as a glob):
 
 ```sh
-make install  # from the clone: the launcher
-claude plugin update session@agentik  # the plugin; restart Claude Code
-agentik session profile orchestrator-opus  # prints the role, not unknown profile
 CLAUDE_SESSION_PROFILE=orchestrator claude --model fable  # Fable 5.1, 1M
 CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'  # Opus 5.5, 1M
 ```
@@ -105,11 +102,11 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - Zones, by the larger share: clear from 0%, notice from 80%, wind-down from 90%, reserve from 92%, exhausted at 100%.
 - `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80%), then every tenth tool: bring the charter current, commit, run `agentik session checkpoint`.
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
-- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only its `## Next act`, whose first line must open on `RESPAWN`, or it exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
+- A RESPAWN close is the sitting's last act, through Bash: `agentik-session checkpoint --respawn --charter <file>` reads only the charter's `## Next act`, whose first line must open on `RESPAWN` (else exit 2, nothing written), checkpoints and writes `sessions/<session_id>/respawn.json`; the sitting ends its turn. `--state <s>` hands the successor a checked state file. PostToolUse confirms the mark only for the main thread's own Bash call.
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
-- `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it, waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
+- `agentik session run` is the respawn chain: the same `claude` arguments at each start, a fresh `--session-id`. Once a RESPAWN close is confirmed and the turn stood `settle` seconds with no helper call open, `run` ends the sitting, waits 10 s, writes a restart line and starts the next; it never compacts, resumes or restarts a crash. The cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`) holds a restart, which `status` names. A `/loop` of 60m or more asks at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
-- `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, from the SessionEnd hook. `report --chains` prints a chain's restart and stop lines. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured; another's are invisible to it.
+- `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session, from the SessionEnd hook. `report --chains` prints a chain's restart and stop lines. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured.
 
 ## Priority and pacing
 
@@ -125,7 +122,8 @@ At SessionStart the plugin writes the result to `${XDG_STATE_HOME:-~/.local/stat
 
 A dependent plugin takes `session_id` from hook stdin or `$CLAUDE_CODE_SESSION_ID`, accepts the file only when `provider.version` is in its range, reads its own section, and never writes the file. When the file is absent, the dependent runs alone. `agentik session config show --resolved` prints this session's file.
 
-The sibling plugins, `decisions`, `respeak` and `relay`, are optional: this plugin works with none installed and accepts any version of each, and `agentik session doctor` notes an absent one with what it adds. Nothing else outside the repo.
+The sibling plugins, `decisions`, `respeak` and `relay`, are optional: this plugin works with none installed and accepts any version of each; `agentik session doctor` notes an absent one and what it adds.
+
 
 ## The charter
 
@@ -142,8 +140,7 @@ Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); 
 ## Reading records
 
 - `scripts/record FILE --sections` lists a markdown record's sections. `scripts/record FILE --section SPEC` prints the named ones: an index `3`, a list `3,5`, a range `3-5`, or a heading prefix `'§5'`.
-- Exit 3 past `--max-bytes` (8192) without `--force`; the refusal names the subsections to ask for. Stdlib, read-only.
-- `/session:read <file> [SPEC]` wraps it: with no SPEC it prints the map and stops; it never reads the whole file.
+- Exit 3 past `--max-bytes` (8192) without `--force`; the refusal names the subsections to ask for.
 
 ## The gate queue
 
@@ -152,6 +149,14 @@ A gate can run an hour, so gates queue: one running per repo, under a load ceili
 - `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`; a lock path that exists or a running gate names holds it.
 - Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
 - `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
+
+## The night loop
+
+`agentik session night run <repo> [--rows a,b] [--until HH:MM] [--max-rows N] [--land PATH]` runs `relay/queue.yaml`'s rows in order, a `claude -p` builder each in its worktree, never beside the relay's night.
+
+
+- A `merge-on-green` row lands as one gate job through `--land` or `<repo>/scripts/land`; a verdict other than the log's `ok` or `red <step>` reads red `gate-unrun`.
+- Exit 0 at the queue's end, `--until` or `--max-rows`; 3 on a limit, an auth error or the night's `stop` file. `night status` and `night report` read its ledger.
 
 ## Design of record
 
