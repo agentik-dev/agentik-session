@@ -1,0 +1,56 @@
+#!/usr/bin/python3
+"""A fake `claude -p` for tests/test_night.py: never a model request. Each start takes the
+next step of the JSON list at $FAKE_NIGHT_PLAN (the last repeats): `stream`, a fixture
+beside this file replayed line by line; `no_result`, its result lines dropped; `commit`, a
+commit in the cwd; `dirty`, an untracked file; `sleep`, seconds before the result. It logs
+its argv, cwd, env, stdin and origin's push url to $FAKE_NIGHT_LOG, one JSON line."""
+import json
+import os
+import subprocess
+import sys
+import time
+
+here = os.path.dirname(os.path.abspath(__file__))
+plan_path = os.environ["FAKE_NIGHT_PLAN"]
+with open(plan_path) as fh:
+    plan = json.load(fh)
+count = plan_path + ".n"
+n = int(open(count).read()) if os.path.exists(count) else 0
+with open(count, "w") as fh:
+    fh.write(str(n + 1))
+step = plan[min(n, len(plan) - 1)]
+stdin = sys.stdin.read()
+push = subprocess.run(["git", "remote", "get-url", "--push", "origin"],
+                      capture_output=True, text=True).stdout.strip()
+with open(os.environ["FAKE_NIGHT_LOG"], "a") as fh:
+    fh.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
+                         "stdin": stdin, "pushurl": push}) + "\n")
+if step.get("commit"):
+    with open("work-%d.txt" % n, "w") as fh:
+        fh.write("work\n")
+    subprocess.run(["git", "add", "work-%d.txt" % n], check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fake act %d" % n], check=True)
+if step.get("dirty"):
+    with open("stray.txt", "w") as fh:
+        fh.write("stray\n")
+lines = []
+if step.get("stream"):
+    with open(os.path.join(here, step["stream"])) as fh:
+        lines = fh.read().splitlines()
+
+
+def is_result(ln):
+    try:
+        return json.loads(ln).get("type") == "result"
+    except ValueError:
+        return False
+
+
+for ln in lines:
+    if not is_result(ln):
+        print(ln, flush=True)
+time.sleep(step.get("sleep", 0))
+if not step.get("no_result"):
+    for ln in lines:
+        if is_result(ln):
+            print(ln, flush=True)

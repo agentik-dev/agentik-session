@@ -457,3 +457,154 @@ def read_stream(stdout, path: Path, part: Part) -> None:
             obj = _parse(raw)
             if obj is not None:
                 classify(obj, part)
+
+
+# ---- the run: the end of a row (ruling 7) ----------------------------------------------
+
+def _iso(t: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(t))
+
+
+@dataclass
+class _Night:
+    repo: Path
+    nid: str
+    dir: Path
+    fx: Fx
+    stall: float
+    poll: float
+    states: dict = field(default_factory=dict)
+    cost: float = 0.0
+    term: bool = False
+
+    def log(self, line: str) -> None:
+        _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
+        print(f"night: {line}", file=sys.stderr, flush=True)
+
+    def record(self, kind: str, **kw) -> None:
+        _append(self.dir / "ledger.jsonl",
+                json.dumps({"ts": _iso(self.fx.now()), "kind": kind, **kw}) + "\n")
+
+    def row(self, p, state, reason=None, sha=None, wt=None, sid=None) -> None:
+        rec = {"row": p["id"], "state": state, "reason": reason, "sha": sha,
+               "worktree": str(wt) if wt else None, "merge": p.get("merge"),
+               "verify": p.get("verify")}
+        if state in ("red", "limit") and wt and sid:
+            rec["resume"] = f"cd {wt} && claude --resume {sid}"
+        self.record("row", **rec)
+        self.states.setdefault(state, []).append(p["id"])
+        self.fx.say(f"{p['id']}: {state}" + "".join(f" {x}" for x in (reason, sha) if x))
+
+    def part(self, p, wt, n, argv, sid, text, turns, usd):
+        """One child to its exit: (Part, rc, the watchdog's cut or None)."""
+        rid = p["id"]
+        adm = admit(self.nid, p["model"], self.fx.env)
+        self.record("spawn", row=rid, part=n, model=p["model"], turns=turns, usd=usd,
+                    session_id=sid, argv=argv, admission=adm)
+        env = child_env(self.fx.env, p["model"], turns, remotes(wt))
+        part = Part()
+        proc = start(argv, wt, env, text, self.dir / f"{rid}.stderr", self.fx)
+        reader = threading.Thread(target=read_stream, daemon=True,
+                                  args=(proc.stdout, self.dir / f"{rid}.jsonl", part))
+        reader.start()
+        cut = self.watch(proc, wt, wall_seconds(p["wall"]))
+        reader.join(5.0)
+        if reader.is_alive():           # a grandchild holds the pipe: the group goes
+            gate._kill_group(proc.pid, self.fx)
+            reader.join(5.0)
+        r = part.result or {}
+        cost = r.get("total_cost_usd")
+        self.cost += cost if type(cost) in (int, float) else 0
+        self.record("exit", row=rid, part=n, rc=proc.returncode, subtype=r.get("subtype"),
+                    is_error=r.get("is_error"), num_turns=r.get("num_turns"),
+                    total_cost_usd=cost, duration_ms=r.get("duration_ms"),
+                    session_id=r.get("session_id"))
+        return part, proc.returncode, cut
+
+    def watch(self, proc, wt, wall) -> str | None:
+        proc.wait()
+        return None
+
+    def do_row(self, p) -> str | None:
+        """The row, start to end; the night's stop reason, or None to go on."""
+        j = judge_row(p, self.repo)
+        if j:
+            self.row(p, *j)
+            return None
+        wt, head = stage(self.repo, p["id"], p["base"] or "main")
+        if wt is None:
+            self.log(f"{p['id']}: stage: {head}")
+            self.row(p, "red", "stage")
+            return None
+        text = prompt((self.repo / p["packet"]).read_text())
+        sid = str(uuid.uuid4())
+        argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid)
+        part, rc, cut = self.part(p, wt, 1, argv, sid, text, p["turns"], p["usd"])
+        return self.end(p, wt, head, part, rc, cut, sid, 1)
+
+    def end(self, p, wt, head, part, rc, cut, sid, n) -> str | None:
+        if cut:
+            self.row(p, "red", cut, wt=wt, sid=sid)
+            return None
+        if part.result is None or (rc is not None and rc < 0):
+            self.row(p, "red", "sitting-failure", wt=wt, sid=sid)
+            return "sitting-failure"
+        sid = part.result.get("session_id") or sid
+        if part.auth:
+            self.row(p, "red", "auth", wt=wt, sid=sid)
+            return "auth"
+        if part.limit:
+            return self.limited(p, wt, head, part, sid, n)
+        sha = _out(wt, "rev-parse", "HEAD")
+        if not sha or sha == head or _out(wt, "rev-list", "--count", f"{head}..{sha}") in (None, "0"):
+            self.row(p, "red", "no-commit", wt=wt, sid=sid)
+        elif dirty(wt):
+            self.row(p, "red", "dirty-tree", sha=sha, wt=wt, sid=sid)
+        elif part.result.get("is_error"):
+            self.row(p, "red", "stream-error", sha=sha, wt=wt, sid=sid)
+        else:
+            self.row(p, "built", sha=sha, wt=wt)
+        return None
+
+    def limited(self, p, wt, head, part, sid, n) -> str | None:
+        self.record("limit", row=p["id"], **part.limit, action="row-limit")
+        self.row(p, "limit", part.limit["kind"], wt=wt, sid=sid)
+        return None
+
+
+def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float = POLL) -> int:
+    """The night: 0 on `queue-spent`, 3 on another stop; NightError before the first row."""
+    fx = fx or Fx()
+    repo = Path(os.path.realpath(repo))
+    try:
+        text = (repo / QUEUE).read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        raise NightError(f"queue: {repo / QUEUE}: {e.__class__.__name__}") from None
+    pending: list = []
+    rows = plan(read_queue(text), keep, pending.append)
+    nid, d = new_night(fx.env, fx.now())
+    N = _Night(repo, nid, d, fx, stall, poll)
+    for line in pending:
+        N.log(line)
+    fx.say(f"{nid}: {len(rows)} rows from {repo / QUEUE}; ledger {d / 'ledger.jsonl'}")
+
+    def on_term(_sig, _frame):
+        N.term = True
+    old = signal.signal(signal.SIGTERM, on_term) \
+        if threading.current_thread() is threading.main_thread() else None
+    stop = None
+    try:
+        for p in rows:
+            if N.term:
+                break
+            stop = N.do_row(p)
+            if stop:
+                break
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGTERM, old)
+    stop = stop or ("signal" if N.term else "queue-spent")
+    N.record("stop", reason=stop, rows=N.states, cost=round(N.cost, 4))
+    fx.say(f"{nid}: stop {stop}; " + ", ".join(f"{k} {len(v)}" for k, v in N.states.items())
+           + f"; ${N.cost:.2f}")
+    return 0 if stop == "queue-spent" else 3
