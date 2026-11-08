@@ -239,3 +239,103 @@ def test_status_newest(box, capsys):
     assert out[0] == f"night-{d.name}: {d}"
     assert out[1].startswith("  running green-row, its last line ") and len(out[1]) < 280
     assert out[1].endswith("y" * (200 - len('{"type": "assistant", "x": "')))  # 200 chars
+
+
+# ---- the adversary round's fixes (F1, F2, F4, F5, F7) -----------------------------------
+
+def _result(text):
+    return {"type": "result", "subtype": "success", "is_error": True, "result": text,
+            "session_id": S2, "num_turns": 3, "total_cost_usd": 0.5}
+
+
+def _read(*events):
+    part = night.Part()
+    for e in events:
+        night.classify(e, part)
+    return part
+
+
+def test_api_status_outranks_needles_whole_words():                       # F1
+    p = _read(_result('API Error: 401 {"type":"authentication_error"} rate limit on token refresh'))
+    assert p.auth and p.limit is None                     # the status, not the needle
+    p = _read(_result("API Error: 500 internal error in the relogin step"))
+    assert not p.auth and p.limit is None                 # relogin is not the word login
+    p = _read(_result("API Error: 429 Too many requests"))
+    assert p.limit == {"kind": "unknown", "resets_at": None, "source": "text"} and not p.auth
+    p = _read(_result("Invalid API key. Please run /login"))
+    assert p.auth and p.limit is None
+    assert night.holds("x rate_limit_error y", "rate_limit") and not night.holds("relogin", "login")
+    p = _read({"type": "result", "subtype": "error_max_turns", "is_error": True,
+               "result": "API Error: 429 usage limit"})
+    assert p.limit is None                                # the sitting's own cap
+
+
+def test_text_kind_and_top_level_status():                                # F5, F7
+    assert _read(_result("API Error: 429 weekly limit reached")).limit["kind"] == "seven_day"
+    assert _read(_result("You've hit your session limit, resets 3am")).limit["kind"] == "session"
+    assert _read(_result("You've reached your Opus limit")).limit["kind"] == "model_opus"
+    assert _read(_result("you've hit your usage limit")).limit["kind"] == "unknown"
+    p = _read({"type": "rate_limit_event", "status": "rejected"})
+    assert p.limit == {"kind": "unknown", "resets_at": None, "source": "event"}
+    p = _read({"type": "rate_limit_event", "status": "rejected", "rate_limit_info": {
+        "status": "allowed", "rateLimitType": "five_hour"}})
+    assert p.limit is None                                # rate_limit_info's status rules
+    assert _read({"type": "rate_limit_event"}).limit is None
+
+
+def _stream(tmp, name, text):
+    path = tmp / name
+    path.write_text(json.dumps({"type": "system", "subtype": "init", "session_id": S2}) + "\n"
+                    + json.dumps(_result(text)) + "\n")
+    return str(path)
+
+
+def test_unknown_limit_waits_as_fallback(box):                            # F2
+    s = _stream(box.tmp, "unknown.jsonl", "API Error: 429 Too many requests")
+    box.go([{"stream": s}, {"stream": "green.jsonl", "commit": True}], ["limit-row"])
+    (lim,) = box.kind("limit")
+    assert (lim["limit_kind"], lim["source"], lim["wait_from"], lim["action"]) == (
+        "unknown", "fallback", "fallback", "resume")
+    assert sum(box.slept) == 1800 and box.kind("row")[0]["state"] == "built"
+
+
+def test_weekly_text_stops_at_once(box):                                  # F5
+    s = _stream(box.tmp, "weekly.jsonl", "API Error: 429 weekly limit reached")
+    box.go([{"stream": s}], ["limit-row", "green-row"])
+    assert box.rc == 3 and len(box.starts) == 1 and box.slept == []     # no wait, no resume
+    (lim,), (stop,) = box.kind("limit"), box.kind("stop")
+    assert (lim["limit_kind"], lim["action"]) == ("seven_day", "stop")
+    assert stop["reason"] == "usage-limit"
+
+
+def test_sigint_ends_the_night_after_the_child(box, monkeypatch):         # F4
+    real, sent = night.signals, []
+
+    def once(wt, pgid):
+        if not sent:
+            sent.append(pgid)
+            os.kill(os.getpid(), __import__("signal").SIGINT)
+        return real(wt, pgid)
+    monkeypatch.setattr(night, "signals", once)
+    box.go([{"stream": "green.jsonl", "commit": True, "sleep": 1}], ["green-row", "max-row"],
+           poll=0.2)
+    assert box.rc == 3 and len(box.starts) == 1
+    assert box.kind("row")[0]["state"] == "built" and box.kind("stop")[0]["reason"] == "signal"
+
+
+def test_a_dying_night_kills_its_child(box, monkeypatch):                 # F4
+    seen = []
+
+    def die(wt, pgid):
+        if seen:
+            raise RuntimeError("the loop broke")
+        seen.append(pgid)
+        return ("h", 0.0, ())
+    monkeypatch.setattr(night, "signals", die)
+    with pytest.raises(RuntimeError):
+        box.go([{"stream": "green.jsonl", "sleep": 60}], ["green-row"], poll=0.2)
+    d = night.newest_night(dict(os.environ))
+    stop = [json.loads(ln) for ln in (d / "ledger.jsonl").read_text().splitlines()][-1]
+    assert stop["kind"] == "stop" and stop["reason"] == "error" and "the loop broke" in stop["error"]
+    with pytest.raises(ProcessLookupError):
+        os.killpg(seen[0], 0)                            # the child's group is gone

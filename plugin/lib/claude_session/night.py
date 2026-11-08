@@ -424,26 +424,75 @@ def _parse(raw: bytes):
 def _text(result: dict) -> str:
     errs = result.get("errors")
     more = " ".join(str(e) for e in errs) if isinstance(errs, list) else ""
-    return f"{result.get('result') or ''} {more}".lower()
+    return f"{result.get('result') or ''}\n{more}".lower()
+
+
+API_STATUS = re.compile(r"(?m)^\s*api error: ([0-9]{3})(?:[^0-9]|$)")
+MODEL_WORDS = ("fable", "opus", "sonnet", "haiku")       # relay limit.go modelWords
+
+
+def _word(c: str) -> bool:
+    return c.isascii() and c.isalnum()
+
+
+def holds(text: str, needle: str) -> bool:
+    """The relay's `holds`: text holds needle as a whole word, neither end of a match
+    touching a letter or a digit (an underscore is a boundary)."""
+    i = text.find(needle)
+    while i >= 0:
+        j = i + len(needle)
+        if (i == 0 or not _word(text[i - 1]) or not _word(needle[0])) and \
+                (j == len(text) or not _word(text[j]) or not _word(needle[-1])):
+            return True
+        i = text.find(needle, i + 1)
+    return False
+
+
+def text_kind(text: str) -> str:
+    """The relay's `textKind` in the night's names: a window's text `session`, a weekly
+    one's `seven_day`, a model's `model_<word>`, else `unknown`."""
+    if holds(text, "session limit") or holds(text, "5-hour limit"):
+        return "session"
+    if holds(text, "weekly limit"):
+        return "seven_day"
+    for m in USAGE_WORDS.finditer(text):
+        if m.group(2) in MODEL_WORDS:
+            return f"model_{m.group(2)}"
+    return "unknown"
+
+
+def account(text: str) -> str | None:
+    """`limit`, `auth` or None for an is_error result's lowered text, as the relay's
+    `Account`: a line-start `api error: NNN` outranks any needle (401 auth, 429 a limit);
+    then the whole-word needles, usage first."""
+    for m in API_STATUS.finditer(text):
+        if m.group(1) == "429":
+            return "limit"
+        if m.group(1) == "401":
+            return "auth"
+    if any(holds(text, n) for n in USAGE_NEEDLES) or USAGE_WORDS.search(text):
+        return "limit"
+    if any(holds(text, n) for n in AUTH_NEEDLES):
+        return "auth"
+    return None
 
 
 def classify(obj: dict, part: Part) -> None:
     t = obj.get("type")
     if t == "rate_limit_event":
         info = obj.get("rate_limit_info") if isinstance(obj.get("rate_limit_info"), dict) else {}
-        st = info.get("status")
-        if isinstance(st, str) and not st.startswith("allowed") and part.limit is None:
+        st = info.get("status") if isinstance(info.get("status"), str) else obj.get("status")
+        if isinstance(st, str) and st and not st.startswith("allowed") and part.limit is None:
             part.limit = {"kind": str(info.get("rateLimitType") or "unknown"),
                           "resets_at": info.get("resetsAt"), "source": "event"}
     elif t == "result":
         part.result = obj
         if obj.get("is_error") is True and not str(obj.get("subtype") or "").startswith("error_max"):
             text = _text(obj)
-            if "api error: 429" in text or any(n in text for n in USAGE_NEEDLES) \
-                    or USAGE_WORDS.search(text):
-                if part.limit is None:
-                    part.limit = {"kind": "unknown", "resets_at": None, "source": "text"}
-            elif "api error: 401" in text or any(n in text for n in AUTH_NEEDLES):
+            said = account(text)
+            if said == "limit" and part.limit is None:
+                part.limit = {"kind": text_kind(text), "resets_at": None, "source": "text"}
+            elif said == "auth":
                 part.auth = True
 
 
@@ -501,6 +550,7 @@ class _Night:
     states: dict = field(default_factory=dict)
     cost: float = 0.0
     term: bool = False
+    proc: object = None
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -534,7 +584,7 @@ class _Night:
                     session_id=sid, argv=argv, admission=adm)
         env = child_env(self.fx.env, p["model"], turns, remotes(wt))
         part = Part()
-        proc = start(argv, wt, env, text, self.dir / f"{rid}.stderr", self.fx)
+        proc = self.proc = start(argv, wt, env, text, self.dir / f"{rid}.stderr", self.fx)
         reader = threading.Thread(target=read_stream, daemon=True,
                                   args=(proc.stdout, self.dir / f"{rid}.jsonl", part))
         reader.start()
@@ -543,6 +593,7 @@ class _Night:
         if reader.is_alive():           # a grandchild holds the pipe: the group goes
             gate._kill_group(proc.pid, self.fx)
             reader.join(5.0)
+        self.proc = None
         r = part.result or {}
         cost = r.get("total_cost_usd")
         self.cost += cost if type(cost) in (int, float) else 0
@@ -634,8 +685,9 @@ class _Night:
         if kind in ("five_hour", "session") and _num(reset):
             at = reset / 1000.0 if reset > 1e12 else float(reset)
             wait, wait_from = max(0.0, at - self.fx.now()) + 120.0, "reset"
-        elif kind == "unknown":
+        elif kind in ("unknown", "five_hour", "session"):    # no reset to wait for
             wait, wait_from = 1800.0, "fallback"
+            lim = {**lim, "source": "fallback"}
         else:
             self.limit(rid, lim, "row-limit")
             self.row(p, "limit", kind, wt=wt, sid=sid)
@@ -680,8 +732,9 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
 
     def on_term(_sig, _frame):
         N.term = True
-    old = signal.signal(signal.SIGTERM, on_term) \
-        if threading.current_thread() is threading.main_thread() else None
+    main = threading.current_thread() is threading.main_thread()
+    old = {sig: signal.signal(sig, on_term) for sig in (signal.SIGTERM, signal.SIGINT)} \
+        if main else {}
     stop = None
     try:
         for p in rows:
@@ -690,9 +743,18 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
             stop = N.do_row(p)
             if stop:
                 break
+    except BaseException as e:
+        # The night dies with a child running: its group goes, and the stop line says so.
+        if N.proc is not None and N.proc.poll() is None:
+            N.log(f"the night dies ({type(e).__name__}); the running child's group is killed")
+            gate._kill_group(N.proc.pid, fx)
+            N.proc.wait()
+        N.record("stop", reason="error", error=f"{type(e).__name__}: {e}"[:200], rows=N.states,
+                 cost=round(N.cost, 4))
+        raise
     finally:
-        if old is not None:
-            signal.signal(signal.SIGTERM, old)
+        for sig, h in old.items():
+            signal.signal(sig, h)
     stop = stop or ("signal" if N.term else "queue-spent")
     N.record("stop", reason=stop, rows=N.states, cost=round(N.cost, 4))
     fx.say(f"{nid}: stop {stop}; " + ", ".join(f"{k} {len(v)}" for k, v in N.states.items())
