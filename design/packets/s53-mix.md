@@ -25,6 +25,16 @@ A login's reading is one all-models figure: `[{"kind": "seven_day", "percentUsed
 7. **Tests.** (a) mix off: a golden band line and `band.json` unchanged. (b) two sessions, Fable and Opus spend 3:1, `P7` 40: points 30 and 10, `next` by `shares`. (c) Fable at 49 of 50 with `resets` 2: `reset` true and the line says `reset now`. (d) the reading falls 75 to 26 with `resetsAt` unchanged: one reset detected, `resets_left` 1, Fable's phase points restart, Opus's stay. (e) a week's reset (a new `resetsAt`) is not a Fable reset. (f) a helper's turns on Opus inside a Fable session count as Opus.
 8. Version `2.0.0-alpha.50`, one bump, last; the README count by hand and the sidecar re-hashed, as the repo does.
 
+**Fix round 1** (the coordinator, on the refuter's eight findings at 1a78efd):
+- F1. `record()` appends as main did; the mix after the append, guarded; an overflowing number is unreadable, and `rules.render` never raises.
+- F2. A login-week's resets, last readings and spend points survive rotation (`mix.json` beside band.json, 0600, capped), an input to the pure mix.
+- F3. A reset is one session's fall of 2 points or more, `resetsAt` the same; new only when its higher reading is newer than the last reset.
+- F4. A session's spend on a login counts from its last reading on any other login.
+- F5. The mix's settings come from the user layer at every record and band write.
+- F6. One seen set across a session's files; spend never falls.
+- F7. `reset` needs `fable` in `shares` and its points above 0. F8. An `until` at or before now is not drawn.
+- n15. The mod's `admissionLine` draws the same mix part (`plugin/hooks/session.ts` and its tests may be touched).
+
 ## 3. Interfaces
 
 `admission.mix` in settings; `mix` in a `band.json` entry; one ledger field or kind for spend. `band()`, `decide()` and `band_line()` keep their signatures. A pure function gives the mix from the scoped rows, `now` and settings, tested alone.
