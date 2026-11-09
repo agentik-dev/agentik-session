@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import admission, config, meter, rules
+from claude_session import admission, config, meter, resolver, rules
 
 UTC = timezone.utc
 A, B = "s53-sess-aaaa-0000-1111", "s53-sess-bbbb-0000-1111"
@@ -38,7 +38,41 @@ def reading(t, seven, sid=A, spend=None, week=WEEK, five=None):
 
 
 def settings(**mix):
-    return rules.admission({"admission": {"mix": mix}} if mix else {})
+    s = rules.admission({})
+    return {**s, "mix": rules.mix(mix)} if mix else s
+
+
+def user_mix(**mix):
+    """The user layer's `defaults.admission.mix` (F5): every record and band write reads it."""
+    p = resolver._user_file(os.environ)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["defaults:", "  admission:", "    mix:"]
+    for k, v in mix.items():
+        if isinstance(v, dict):
+            lines += [f"      {k}:"] + [f"        {f}: {x}" for f, x in v.items()]
+        else:
+            lines.append(f"      {k}: {v}")
+    p.write_text("\n".join(lines) + "\n")
+
+
+def rec(sid, pct, now):
+    admission.record(sid, json.dumps({"kind": "reading", "rateLimits": reading(now, pct)["rateLimits"]}),
+                     dict(os.environ), now)
+
+
+def ledger_lines():
+    d = admission.directory(os.environ)
+    return [json.loads(x) for p in sorted(d.glob("ledger*.jsonl")) for x in p.read_text().splitlines()]
+
+
+def band_file():
+    return json.loads((admission.directory(os.environ) / "band.json").read_text())
+
+
+def by_state(sid, by):
+    sdir = config.state_dir(os.environ) / "sessions" / sid
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "meter-state.json").write_text(json.dumps({"own": {"by": by}}))
 
 
 def at(h, m=0):
@@ -176,14 +210,111 @@ def test_s53_f_a_helper_s_opus_turns_count_as_opus(tmp_path):
     fable = (1000 * 8 + 100 * 40 + 1_000_000 * 10) / 1e6              # cache_write 1.25 x 8
     opus = (1000 * 5 + 100 * 25) / 1e6 + 5.0                           # the sidechain, the helper
     assert meter.spend(st, prices) == {"fable": round(fable, 6), "opus": round(opus, 6)}
-    sdir.joinpath("resolved.json").write_text(json.dumps(
-        {"session": {"admission": {"mix": {"shares": {"fable": 1, "opus": 1}}}}}))
-    admission.record(A, json.dumps({"kind": "reading", "rateLimits": reading(NOW, 40)["rateLimits"]}),
-                     dict(os.environ), NOW)
+    user_mix(shares={"fable": 1, "opus": 1})
+    rec(A, 40, NOW)
     d = admission.directory(os.environ)
-    line = json.loads((d / "ledger.jsonl").read_text().splitlines()[-1])
+    line = ledger_lines()[-1]
+    assert (line["kind"], line["account"]) == ("spend", "2026-11-16T23:00Z")
     assert line["spend"] == {"fable": round(fable, 6), "opus": round(opus, 6)}
     band = json.loads((d / "band.json").read_text())
     total = fable + opus
     assert band["mix"]["points"] == {"fable": round(40 * fable / total, 2),
                                      "opus": round(40 * opus / total, 2)}
+
+
+# ---- fix round 1 (F1 to F8) ----
+
+def test_s53_f1_a_huge_value_loses_no_line_and_renders_mix_off():
+    sdir = config.state_dir(os.environ) / "sessions" / A
+    sdir.mkdir(parents=True)
+    (sdir / "resolved.json").write_text(json.dumps({"session": {"admission": {"ceiling": 10**400}}}))
+    user_mix(shares={"fable": 10**400})
+    rec(A, 40, NOW)
+    assert [r["kind"] for r in ledger_lines()] == ["reading"]
+    assert rules.mix({"shares": {"fable": 10**400}}) is None
+    assert "spend mix" not in rules.render({"admission": {"mix": {"shares": {"fable": 10**400}}}})
+
+
+def test_s53_f2_the_week_survives_the_ledger_s_rotation():
+    user_mix(shares={"fable": 3, "opus": 1}, resets=2)
+    t = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+    by_state(A, {"fable": [0, 122500, 0, 0]})
+    by_state(B, {"opus": [0, 104000, 0, 0]})
+    rec(A, 75, t), rec(B, 75, t + timedelta(minutes=1)), rec(A, 26, t + timedelta(hours=1))
+    assert band_file()["mix"]["points"] == {"fable": 0.0, "opus": 26.0}
+    for h in (30, 60, 90):
+        by_state(A, {"fable": [0, 122500 + h * 100, 0, 0]})
+        rec(A, 26 + h // 30, t + timedelta(hours=h))
+        m = band_file()["mix"]
+        assert (m["phase"]["n"], m["resets_left"]) == (1, 1), h
+        assert 25 < m["points"]["opus"] <= 26, h                 # B's spend kept past rotation
+    assert not any(r["session"] == B for r in ledger_lines())   # B's lines are gone
+    p = admission.directory(os.environ) / "mix.json"
+    assert oct(p.stat().st_mode & 0o777) == "0o600"
+
+
+def test_s53_f3_a_reset_is_one_session_s_fall():
+    s = settings(shares={"fable": 3, "opus": 1}, resets=3)["mix"]
+    rows = [reading(at(8), 40, A, {"fable": 4.0}), reading(at(8, 1), 40, B, {"opus": 1.0})]
+    for i in range(3):                                           # B's cached, stale list
+        rows += [reading(at(9 + i), 43 + i, A, {"fable": 4.5 + i}), reading(at(9 + i, 1), 40, B)]
+    assert admission.mix(rows, NOW, s, tz=UTC)["phase"]["n"] == 0
+    rows = [reading(at(8), 75, A, {"fable": 4.9}), reading(at(8, 1), 75, B, {"opus": 2.6}),
+            reading(at(9), 26, A), reading(at(9, 30), 27, B)]    # both see the one reset
+    m = admission.mix(rows, NOW, s, tz=UTC)
+    assert (m["phase"]["n"], m["resets_left"]) == (1, 2)
+
+
+def test_s53_f4_spend_counts_from_the_last_reading_on_another_login():
+    def rd(t, pct, sid, week, spend):
+        return {**reading(t, pct, sid, spend, week=week)}
+    w2 = WEEK + timedelta(hours=10)
+    rows = [rd(NOW - timedelta(hours=5), 70, "sess-x", WEEK, {"fable": 10}),
+            rd(NOW - timedelta(hours=4), 70, "sess-y", WEEK, {"opus": 1}),
+            rd(NOW - timedelta(hours=3), 5, "sess-x", w2, {"fable": 10.5}),
+            rd(NOW - timedelta(hours=2), 5, "sess-z", w2, {"opus": 0.5})]
+    b = admission.bands(rows, NOW, settings(shares={"fable": 1, "opus": 1}), tz=UTC)
+    assert b["accounts"]["2026-11-17T09:00Z"]["mix"]["points"] == {"fable": 2.5, "opus": 2.5}
+
+
+def test_s53_f5_the_mix_comes_from_the_user_layer():
+    user_mix(shares={"fable": 3, "opus": 1})
+    sdir = config.state_dir(os.environ) / "sessions" / A
+    sdir.mkdir(parents=True)
+    (sdir / "resolved.json").write_text(json.dumps({"session": {"admission": {}}}))
+    by_state(A, {"fable": [0, 100000, 0, 0]})
+    by_state(B, {"opus": [0, 100000, 0, 0]})              # B has no resolved file
+    rec(A, 40, NOW), rec(B, 40, NOW + timedelta(minutes=1))
+    assert "mix" in band_file()
+    assert [r["session"] for r in ledger_lines() if r["kind"] == "spend"] == [A, B]
+
+
+def test_s53_f6_a_turn_counts_once_and_spend_never_falls(tmp_path):
+    p = tmp_path / f"{A}.jsonl"
+    p.write_text(_turn(1, "claude-fable-5-2") + "\n" + _turn(2, "claude-opus-5-5", side=True) + "\n")
+    (tmp_path / A / "subagents").mkdir(parents=True)
+    (tmp_path / A / "subagents" / "agent-h1.jsonl").write_text(_turn(2, "claude-opus-5-5", side=True) + "\n")
+    prices = settings(shares={"opus": 1})["mix"]["prices"]
+    st: dict = {}
+    meter.parse(p, st, session_id=A)
+    assert meter.spend(st, prices)["opus"] == round((1000 * 5 + 100 * 25) / 1e6, 6)
+    before = meter.spend(st, prices)["fable"]
+    p.write_text(_turn(7, "claude-fable-5-2") + "\n")                # rewritten, shorter
+    meter.parse(p, st, session_id=A)
+    assert meter.spend(st, prices)["fable"] >= before
+
+
+def test_s53_f7_reset_needs_fable_in_shares_and_above_zero():
+    rows = [reading(at(10), 60, A, {"opus": 1.0})]
+    m = admission.mix(rows, NOW, settings(shares={"fable": 1, "opus": 1}, fable_cap=0.5, resets=2)["mix"])
+    assert m["reset"] is False
+    rows = [reading(at(10), 60, A, {"fable": 4.9}), reading(at(10, 1), 60, B, {"opus": 1.1})]
+    assert admission.mix(rows, NOW, settings(shares={"opus": 1}, resets=2)["mix"])["reset"] is False
+
+
+def test_s53_f8_an_until_past_is_not_drawn():
+    rows = [reading(at(10), 60, A, {"fable": 1.0})]
+    m = admission.mix(rows, NOW, settings(shares={"fable": 1}, until="2026-11-12T11:00:00+00:00")["mix"])
+    assert m["until"] is None
+    m["until"] = "2026-11-12T11:00:00+00:00"
+    assert " by " not in " · ".join(admission._mix_part(m, NOW))
