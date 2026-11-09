@@ -94,6 +94,35 @@ def _median_low(xs: list) -> int:
 
 SYNTHETIC = "<synthetic>"      # the model Claude Code writes on a line no API call made
 
+# Spend by family (packet S53 ruling 2): each counted turn's tokens under its own
+# `message.model`'s family, in the state as [input, output, cache_write, cache_read]; a
+# helper's turns (its subagents file, or a sidechain line) are read with their own model.
+FAMILIES = ("opus", "sonnet", "haiku", "fable")
+SPEND = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+         "cache_read_input_tokens")
+PRICE = ("input", "output", "cache_write", "cache_read")
+
+
+def _family(model) -> str:
+    """admission.family's rule: the first family the id names, else `other`."""
+    low = model.lower() if isinstance(model, str) else ""
+    return next((f for f in FAMILIES if f in low), "other")
+
+
+def spend(state: dict, prices: dict) -> dict:
+    """{family: USD} over the session's own transcript and its helpers' files, by `prices`
+    ({family: {input, output, cache_write, cache_read}} per million tokens); a family with
+    no price (`other`) is left out, as is one with no spend."""
+    parts = [state.get("own") or {}] + list((state.get("builders") or {}).values())
+    out: dict = {}
+    for st in parts:
+        for fam, n in (st.get("by") or {}).items() if isinstance(st, dict) else ():
+            p = prices.get(fam)
+            if not isinstance(p, dict) or not isinstance(n, list) or len(n) != len(PRICE):
+                continue
+            out[fam] = out.get(fam, 0.0) + sum(x * p[k] for x, k in zip(n, PRICE)) / 1e6
+    return {f: round(v, 6) for f, v in sorted(out.items()) if v > 0}
+
 
 def _known(model, table) -> bool:
     """A model id the models table names a family for (with no table, any id but
@@ -145,6 +174,9 @@ def _scan(path: Path, st: dict, table=None) -> dict | None:
         ctx = n["input_tokens"] + n["cache_creation_input_tokens"] + n["cache_read_input_tokens"]
         side = bool(obj.get("isSidechain"))
         st["msgs"].append([ctx + n["output_tokens"], ctx, int(side)])
+        by = st.setdefault("by", {}).setdefault(_family(msg.get("model")), [0, 0, 0, 0])
+        for i, k in enumerate(SPEND):          # each turn under its own model (packet S53)
+            by[i] += n[k]
         if not side:
             m = msg.get("model")
             known = _known(m, table)
