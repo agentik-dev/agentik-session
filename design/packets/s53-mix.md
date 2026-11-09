@@ -31,7 +31,7 @@ A login's reading is one all-models figure: `[{"kind": "seven_day", "percentUsed
 
 ## 4. Findings that name this row
 
-None. First read `agentik decisions find admission` in this repo and agentik-research's `research/synthesis/tools-session.md`; an entry the rulings cross is the one open fork to name, not to decide.
+None. First read this repo's ledger entries on admission (the ledger tool's `find admission`) and agentik-research's `research/synthesis/tools-session.md`; an entry the rulings cross is the one open fork to name, not to decide.
 
 ## 5. Forbidden reads
 
