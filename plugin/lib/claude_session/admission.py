@@ -390,6 +390,21 @@ def session_spend(env, sid: str, prices: dict) -> dict:
     return sp
 
 
+def _record_spend(d: Path, env, sid: str, line: dict) -> None:
+    """After a reading's line, with the user layer's mix on, one `spend` line: the session's
+    cumulative spend by family and the reading's login (packet S53 F1, F4, F5). Guarded:
+    nothing here loses the reading's line or raises into the hook."""
+    try:
+        mx = _user_mix(env)
+        if mx and line["kind"] == "reading":
+            sp = session_spend(env, sid, mx["prices"])
+            if sp:
+                _append(d, [{"ts": line["ts"], "session": sid, "kind": "spend",
+                             "account": account(line.get("rateLimits")), "spend": sp}])
+    except Exception:  # noqa: BLE001 - the spend is advice; the reading stands
+        pass
+
+
 def record(sid, text: str, env, now: datetime | None = None) -> Path:
     """Check stdin's object, then rotate, append, (on `end`) sweep and rewrite band.json
     inside one lock."""
@@ -403,14 +418,11 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
         os.fchmod(fd, 0o600)
         _rotate(d, now)
         line = line_for(sid, obj, env, now)
-        settings = rules.admission(_session_config(env, sid))
-        if line["kind"] == "reading" and settings.get("mix"):
-            sp = session_spend(env, sid, settings["mix"]["prices"])
-            if sp:
-                line["spend"] = sp
         swept = _sweep(d, sid, now) if line["kind"] == "end" else []
         _append(d, [line, *swept])
-        _write_band(d, now, {**settings, "demand": _demand_once(env)})
+        _record_spend(d, env, sid, line)
+        _write_band(d, now, {**rules.admission(_session_config(env, sid)), "demand": _demand_once(env)},
+                    env)
     finally:
         os.close(fd)
     return d / LEDGER
@@ -1141,7 +1153,7 @@ def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
              "tool_use_id": req.get("tool_use_id")}
         _append(d, [{"ts": _ts(now), "session": sid, "kind": "verdict",
                      **{k: v[k] for k in VERDICT_KEYS}}])
-        _write_band(d, now, settings)
+        _write_band(d, now, settings, env)
     finally:
         os.close(fd)
     out = {k: v[k] for k in ("verdict", "mode", "text", "peak", "window", "resume_at")}
@@ -1198,28 +1210,32 @@ def _demand_once(env):
     return at
 
 
-# ---- The spend mix (packet S53 rulings 3 to 6): advice from one login's rows, pure ----
+# ---- The spend mix (packet S53 rulings 3 to 6, fix round 1): advice from one login's rows ----
 # A login's seven-day reading names no model, so each family's part of P7 is estimated from
-# the sessions' spend (USD by the mix's prices) that the reading lines carry. A Fable reset,
-# applied by the owner, gives back only Fable's usage: it shows as the week's reading falling
-# at least RESET_DROP points with its resetsAt unchanged, and starts a phase.
+# the sessions' spend (USD by the mix's prices): `spend` lines (or a reading's `spend`). A
+# Fable reset, applied by the owner, gives back only Fable's usage: one session's reading
+# falls at least RESET_DROP points with its resetsAt unchanged (F3), and a phase starts. The
+# ledger keeps about 58 h, so a login-week's resets, last readings and spend points are
+# carried in `mix.json` beside band.json (F2), an input to the pure `mix_state`.
 RESET_DROP = 2.0
 MAX_DROPS = 8                             # band.json's drops, newest kept
 MIX_ORDER = ("fable", "opus", "sonnet", "haiku")
+MIX_FILE = "mix.json"
+CARRY_SESSIONS, CARRY_DROPS = 64, 128
 
 
-def _spends(rows) -> dict:
-    """session -> [(ts, {family: USD})], oldest first, from the reading lines' `spend`."""
-    out: dict = {}
-    for r in rows:
-        sp, t, s = r.get("spend"), _when(r.get("ts")), _sid(r)
-        if r.get("kind") != "reading" or t is None or s is None or not isinstance(sp, dict):
-            continue
-        clean = {f: x for f in SPEND_KEYS if (x := _real(sp.get(f))) is not None and x >= 0}
-        out.setdefault(s, []).append((t, clean))
-    for xs in out.values():
-        xs.sort(key=lambda x: x[0])
-    return out
+def _spend_point(r):
+    """(ts, session, login key, {family: USD}) of a `spend` line (its `account`) or of a
+    reading carrying `spend` (its rateLimits' key); else None."""
+    kind = r.get("kind")
+    if kind not in ("spend", "reading"):
+        return None
+    key = _str(r.get("account")) if kind == "spend" else account(r.get("rateLimits"))
+    sp, t, s = r.get("spend"), _when(r.get("ts")), _sid(r)
+    if t is None or s is None or not isinstance(sp, dict):
+        return None
+    return t, s, key, {f: x for f in SPEND_KEYS
+                       if (x := _real(sp.get(f))) is not None and 0 <= x <= 1e9}
 
 
 def _spend_at(xs: list, t: datetime, strict: bool) -> dict:
@@ -1231,18 +1247,20 @@ def _spend_at(xs: list, t: datetime, strict: bool) -> dict:
     return best
 
 
-def _counted(by_s: dict, start: datetime, phase, upto=None) -> dict:
-    """{family: USD}: each session's spend since the week's `start`, Fable's since the
-    reading that opened the `phase` (None: the week's start), over the lines before `upto`."""
+def _counted(mine: dict, other: dict, start: datetime, phase, upto=None) -> dict:
+    """{family: USD}: each session's spend on this login since the week's `start`, Fable's
+    since the `phase`, net of its spend on any other login before (F4), over lines before
+    `upto`. Spend is cumulative, so each baseline is the largest of the three."""
     out: dict = {}
-    for xs in by_s.values():
+    for s, xs in mine.items():
         xs = [x for x in xs if upto is None or x[0] < upto]
         if not xs:
             continue
-        week = _spend_at(xs, start, True)
-        base = {"fable": _spend_at(xs, phase, False)} if phase is not None else {}
+        week, gone = _spend_at(xs, start, True), _spend_at(other.get(s, []), xs[-1][0], True)
+        ph = _spend_at(xs, phase, False) if phase is not None else {}
         for f, x in xs[-1][1].items():
-            out[f] = out.get(f, 0.0) + max(0.0, x - base.get(f, week).get(f, 0.0))
+            base = max(week.get(f, 0.0), gone.get(f, 0.0), ph.get(f, 0.0) if f == "fable" else 0.0)
+            out[f] = out.get(f, 0.0) + max(0.0, x - base)
     return out
 
 
@@ -1254,53 +1272,161 @@ def _points(counted: dict, P7):
     return {f: P7 * x / total for f, x in counted.items()}
 
 
-def mix(rows, now: datetime, m: dict, tz=None) -> dict:
-    """band.json's `mix` (packet S53) for one login's rows at `now` under `admission.mix`
-    `m` (rules.mix's): {points, budgets, shares, next, reset, resets_left, until, phase}.
-    Non-Fable families share 100 - fable_cap over the week by their shares; Fable has
-    fable_cap each phase. `next` is the open family (under its budget) with the lowest
-    points / share; `reset` is Fable within 1 point of its cap with resets left. Each
-    detected reset is on file in `phase.drops` beside the Fable points estimated before it."""
+def _carried(carry, week: datetime):
+    """(drops, last {sid: (t, pct)}, spend {sid: [(t, spend)]}) from a login-week's carry;
+    empty for another week or any shape it does not read."""
+    try:
+        if not isinstance(carry, dict) or not _same(_when(carry.get("week")), week):
+            raise ValueError
+        drops = [d for d in carry.get("drops") or [] if isinstance(d, dict)
+                 and _when(d.get("at")) is not None]
+        last = {s: (_when(v[0]), float(v[1])) for s, v in (carry.get("last") or {}).items()
+                if isinstance(v, list) and len(v) == 2 and _when(v[0]) and _real(v[1]) is not None}
+        spend = {s: [(_when(p[0]), {f: float(x) for f, x in p[1].items() if f in SPEND_KEYS
+                                    and _real(x) is not None and 0 <= x <= 1e9})
+                     for p in v if isinstance(p, list) and len(p) == 2 and _when(p[0])
+                     and isinstance(p[1], dict)]
+                 for s, v in (carry.get("spend") or {}).items() if isinstance(v, list)}
+        return drops, last, spend
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return [], {}, {}
+
+
+def _thin(xs: list, marks: list) -> list:
+    """A session's spend points kept across rotation: its newest, and its newest at or before
+    each mark (the week's start, each reset), all `_counted` reads."""
+    keep = {xs[-1][0]: xs[-1]}
+    for mk in marks:
+        before = [x for x in xs if x[0] <= mk]
+        if before:
+            keep[before[-1][0]] = before[-1]
+    return [[_ts(t), sp] for t, sp in sorted(keep.values(), key=lambda y: y[0])]
+
+
+def mix_state(rows, now: datetime, m: dict, tz=None, carry=None, key=None, every=None) -> tuple:
+    """(band.json's `mix`, the login-week's new carry) for one login's `rows` at `now` under
+    `admission.mix` `m` (rules.mix's). `every`: all the ledger's rows, for spend on other
+    logins (F4); `carry`: what `mix.json` kept for this login-week (F2). Pure."""
+    every = rows if every is None else every
+    key = key or _current(_keyed(rows)[1])
     seven = readings(rows, SEVEN)
     cur = [x for x in seven if x[3] > now]
     week = _newest(cur) if cur else None
     shares, cap = m["shares"], m["fable_cap"]
     rest = sum(v for f, v in shares.items() if f != "fable")
     budgets = {f: cap if f == "fable" else (100 - cap) * v / rest for f, v in shares.items()}
-    drops, phase, points = [], None, None
+    drops, phase, points, new = [], None, None, None
     if week is not None:
-        start, by_s, prev = week[3] - timedelta(days=7), _spends(rows), None
-        for x in (x for x in seven if _same(x[3], week[3]) and x[0] >= start):
-            if prev is not None and prev[2] - x[2] >= RESET_DROP:
-                est = _points(_counted(by_s, start, phase, upto=x[0]), prev[2])
-                drops.append({"at": _stamp(x[0], tz), "from": _round(prev[2], 2),
-                              "to": _round(x[2], 2),
-                              "fable_est": _round(est.get("fable", 0.0), 2) if est else None})
-                phase = x[0]
-            prev = x
-        points = _points(_counted(by_s, start, phase), week[2])
+        start = week[3] - timedelta(days=7)
+        drops, last, mine = _carried(carry, week[3])
+        other: dict = {}
+        for r in every:
+            p = _spend_point(r)
+            if p is not None:
+                t, s, k, sp = p
+                if key is None or k == key:
+                    if (t, sp) not in mine.setdefault(s, []):
+                        mine[s].append((t, sp))
+                elif k is not None:
+                    other.setdefault(s, []).append((t, sp))
+        for xs in list(mine.values()) + list(other.values()):
+            xs.sort(key=lambda x: x[0])
+        seq: dict = {}                    # F3: each session's own readings, in time order
+        for x in seven:
+            if _same(x[3], week[3]) and x[0] >= start and x[1] is not None:
+                seq.setdefault(x[1], []).append((x[0], x[2]))
+        for s, (t, pct) in last.items():
+            if t >= start and (s not in seq or t < seq[s][0][0]):
+                seq.setdefault(s, []).insert(0, (t, pct))
+        falls = sorted((b[0], a[0], a[1], b[1]) for xs in seq.values()
+                       for a, b in zip(xs, xs[1:]) if a[1] - b[1] >= RESET_DROP)
+        times = [_when(d["at"]) for d in drops]
+        phase = max(times) if times else None
+        for t, t0, hi, lo in falls:       # a newer higher reading than the last reset's: new
+            if phase is not None and t0 <= phase:
+                continue
+            est = _points(_counted(mine, other, start, phase, upto=t), hi)
+            drops.append({"at": _stamp(t, tz), "from": _round(hi, 2), "to": _round(lo, 2),
+                          "fable_est": _round(est.get("fable", 0.0), 2) if est else None})
+            phase = t
+        points = _points(_counted(mine, other, start, phase), week[2])
+        keep = sorted(mine, key=lambda s: mine[s][-1][0] if mine[s] else start)[-CARRY_SESSIONS:]
+        marks = [start] + [_when(d["at"]) for d in drops]
+        new = {"week": _ts(week[3]), "drops": drops[-CARRY_DROPS:],
+               "last": {s: [_ts(xs[-1][0]), xs[-1][1]] for s, xs in seq.items() if xs},
+               "spend": {s: _thin(mine[s], marks) for s in keep if mine[s]}}
+        if len(new["last"]) > CARRY_SESSIONS:
+            new["last"] = dict(sorted(new["last"].items(), key=lambda kv: kv[1][0])[-CARRY_SESSIONS:])
     left = max(0, m["resets"] - len(drops))
     nxt, reset = None, False
     if points is not None:
         opened = [f for f in shares if points.get(f, 0.0) < budgets[f]]
         nxt = min(opened, key=lambda f: (points.get(f, 0.0) / shares[f], MIX_ORDER.index(f)),
                   default=None)
-        reset = points.get("fable", 0.0) >= cap - 1 and left > 0
+        fp = points.get("fable", 0.0)
+        reset = "fable" in shares and 0 < fp and fp >= cap - 1 and left > 0      # F7
         points = {f: _round(points.get(f, 0.0), 2)
                   for f in MIX_ORDER if f in shares or f in points}
     until = _when(m.get("until"))
+    until = until if until is not None and until > now else None                 # F8
     since = phase or (week[3] - timedelta(days=7) if week is not None else None)
     return {"points": points, "budgets": {f: _round(v, 2) for f, v in budgets.items()},
             "shares": dict(shares), "next": nxt, "reset": reset, "resets_left": left,
             "until": _stamp(until, tz) if until is not None else None,
             "phase": {"n": len(drops), "since": _stamp(since, tz) if since else None,
-                      "drops": drops[-MAX_DROPS:]}}
+                      "drops": drops[-MAX_DROPS:]}}, new
 
 
-def _with_mix(entry: dict, rows, now: datetime, settings: dict, tz) -> dict:
-    """`entry` with `mix` when the settings carry one; else `entry` itself, unchanged."""
+def mix(rows, now: datetime, m: dict, tz=None, carry=None, key=None, every=None) -> dict:
+    """band.json's `mix` alone: `mix_state`'s first part."""
+    return mix_state(rows, now, m, tz, carry, key, every)[0]
+
+
+def _with_mix(entry: dict, rows, now: datetime, settings: dict, tz, key=None) -> dict:
+    """`entry` with `mix` when the settings carry one; else `entry` itself, unchanged. The
+    login-week's new carry goes into settings' `mix_out` when a writer passed one."""
     m = settings.get("mix")
-    return {**entry, "mix": mix(rows, now, m, tz)} if isinstance(m, dict) else entry
+    if not isinstance(m, dict):
+        return entry
+    key = key or _current(_keyed(rows)[1])
+    carry = settings.get("mix_carry")
+    mx, new = mix_state(rows, now, m, tz, carry.get(key) if isinstance(carry, dict) else None,
+                        key, settings.get("mix_rows"))
+    out = settings.get("mix_out")
+    if isinstance(out, dict) and key and new is not None:
+        out[key] = new
+    return {**entry, "mix": mx}
+
+
+def _user_mix(env):
+    """The user layer's `admission.mix` as it binds (F5); None when off; never raises."""
+    try:
+        return rules.mix(resolver.user_mix(env))
+    except Exception:  # noqa: BLE001 - the mix is advice
+        return None
+
+
+def _load_carry(d: Path) -> dict:
+    try:
+        p = d / MIX_FILE
+        if not stat.S_ISREG(os.lstat(p).st_mode) or os.lstat(p).st_size > BAND_MAX:
+            return {}
+        c = json.loads(p.read_text())
+    except (OSError, ValueError, RecursionError):
+        return {}
+    return c if isinstance(c, dict) else {}
+
+
+def _save_carry(d: Path, old: dict, out: dict, now: datetime) -> None:
+    """mix.json: each login-week's carry, the week not past, MAX_ACCOUNTS newest, atomic and
+    0600, at most BAND_MAX bytes (else not written)."""
+    c = {**old, **out}
+    keep = sorted((k for k, v in c.items() if isinstance(v, dict)
+                   and (w := _when(v.get("week"))) is not None and w > now),
+                  key=lambda k: c[k]["week"])[-MAX_ACCOUNTS:]
+    text = json.dumps({k: c[k] for k in keep}, allow_nan=False) + "\n"
+    if len(text) <= BAND_MAX:
+        store._write_private(d / MIX_FILE, text)
 
 
 def _band_none(rows, now: datetime, settings: dict, tz, out: dict) -> dict:
@@ -1335,11 +1461,11 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
     mode = mode or window(rows, key, now, settings)
     out = {"mode": settings["mode"], "at": _ts(now), "window": mode, "slot": slot(key)}
     if mode == NO_WINDOW:
-        return _with_mix(_band_none(rows, now, settings, tz, out), rows, now, settings, tz)
+        return _with_mix(_band_none(rows, now, settings, tz, out), rows, now, settings, tz, key)
     reads = readings(rows, FIVE)
     fresh = [x for x in reads if x[3] > now]
     if not fresh:                      # a new login's week before its first five-hour (S51)
-        return _with_mix(_band_none(rows, now, settings, tz, out), rows, now, settings, tz)
+        return _with_mix(_band_none(rows, now, settings, tz, out), rows, now, settings, tz, key)
     _, _, P, resets = _newest(fresh)
     seeds = settings["seeds"]
     seven = readings(rows, SEVEN)
@@ -1362,7 +1488,7 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
             "until": _local(until, tz).isoformat(timespec="seconds"), "bound": bound,
             "running": running, "room": _room(P + rise, each, T5, settings), "deferred": held,
             "P7": _round(_newest(seven)[2], 2) if seven else None, **out},
-                     rows, now, settings, tz)
+                     rows, now, settings, tz, key)
 
 
 def bands(rows, now: datetime, settings: dict, tz=None) -> dict:
@@ -1371,6 +1497,8 @@ def bands(rows, now: datetime, settings: dict, tz=None) -> dict:
     newest), or any `none` one (packet S42), also `accounts` {key: `band()`
     over its lines} for the MAX_ACCOUNTS newest and `sessions` {sid: key} for the
     MAX_SESSIONS newest of those, and the top level is the current login's entry."""
+    if isinstance(settings.get("mix"), dict) and "mix_rows" not in settings:
+        settings = {**settings, "mix_rows": rows}          # spend on every login (S53 F4)
     own, of = _keyed(rows)
     newest: dict = {}
     for r, k in zip(rows, own):        # every keyed reading's: a session that changed login
@@ -1402,13 +1530,21 @@ def session_band(b, sid):
     return a if isinstance(a, dict) else b
 
 
-def _write_band(d: Path, now: datetime, settings: dict) -> None:
+def _write_band(d: Path, now: datetime, settings: dict, env=None) -> None:
     """band.json from the whole ledger, inside the caller's lock; atomic and 0600 through
     the private writer. A failure leaves the last band and says so on one stderr line: it is
     display, never the record (fix round 1, F1)."""
     try:
         rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
+        mx = _user_mix(env) if env is not None else None       # F5: the user layer's, each write
+        if mx:
+            settings = {**settings, "mix": mx, "mix_carry": _load_carry(d), "mix_out": {}}
         store._write_private(d / BAND, json.dumps(bands(rows, now, settings), allow_nan=False) + "\n")
+        if mx:
+            try:
+                _save_carry(d, settings["mix_carry"], settings["mix_out"], now)
+            except Exception:  # noqa: BLE001 - the carry is advice
+                pass
     except Exception as e:  # noqa: BLE001 - the band never fails a record or a verdict
         why = " ".join(f"{type(e).__name__}: {e}".split())[:200]
         print(f"admission: band.json not written ({why}); the ledger line is kept", file=sys.stderr)
@@ -1512,7 +1648,7 @@ def band_status(b, now: datetime | None = None):
     return f"band: {to}" + (f"; next {', '.join(items)}" if items else "")
 
 
-def _mix_part(mx) -> list:
+def _mix_part(mx, now: datetime | None = None) -> list:
     """The mix's parts after the 7d part (packet S53 ruling 6): `mix fable 31/50`, a part a
     family of the shares, then `next opus` (or `reset now`), then `resets 2` with ` by Ddd
     HH:MM` when `until` is set; `mix no reading` with no points; [] with no mix (mix off)."""
@@ -1528,7 +1664,7 @@ def _mix_part(mx) -> list:
                else f"next {nxt if isinstance(nxt, str) and nxt in MIX_ORDER else 'none'}")
     left, u = _real(mx.get("resets_left")), _wall(mx.get("until"))
     tail = f"resets {_pct(left)}" if left is not None else ""
-    if u is not None:
+    if u is not None and (now is None or u[2] > now):
         tail = f"{tail} by {_weekday(mx['until'])} {u[0]}:{u[1]}".strip()
     out += [tail] if tail else []
     return ["mix " + out[0]] + out[1:]
@@ -1544,7 +1680,7 @@ def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
     p7, running = _real(b.get("P7")), _real(b.get("running"))
     if p7 is not None:
         parts.append(f"7d {_pct(p7)}%")
-    parts += _mix_part(b.get("mix"))
+    parts += _mix_part(b.get("mix"), now)
     for v in (b.get("until"), b.get("resetsAt")):
         w = _wall(v)
         if w is not None:
@@ -1595,7 +1731,7 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
         parts.append(f"{_pct(d)} deferred")
     if p7 is not None:
         parts.append(f"7d {_pct(p7)}%")
-    parts += _mix_part(b.get("mix"))
+    parts += _mix_part(b.get("mix"), now)
     return clip(" · ".join(parts + _line_end(b, now)), columns)
 
 
