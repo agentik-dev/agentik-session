@@ -315,6 +315,19 @@ def window_override(env) -> dict:
     return {k: ad[k] for k in ("window", "windows") if k in ad} if isinstance(ad, dict) else {}
 
 
+def user_mix(env):
+    """`mix` from the user layer's `defaults.admission`, read alone (packet S53 F5), as
+    `window_override` reads `window`: every record and band write reads the mix here, never
+    from the recording session's resolved file. None when unset or unreadable; never raises."""
+    try:
+        doc = _read(_user_file(env), [])
+    except (ResolveError, OSError, RecursionError):
+        return None
+    d = doc.get("defaults") if isinstance(doc, dict) else None
+    ad = d.get("admission") if isinstance(d, dict) else None
+    return ad.get("mix") if isinstance(ad, dict) else None
+
+
 def gate_config(env, log=None) -> dict:
     """The gate section's user layer (design/gate-r1.md ruling 4): the top-level `gate:`
     mapping of the user's profiles.yaml, read alone. A key unset, mistyped or unreadable
