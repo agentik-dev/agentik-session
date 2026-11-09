@@ -251,7 +251,7 @@ def render(session, life=None) -> str:
         ttl = ttl if ttl in LIFETIME else None
         lines.append(f"  {len(PACE) + 1}. " + LIFETIME[ttl].format(
             why=why, warm=WARM.get(ttl), warm1h=WARM["1h"], fallback=pa["fallback"]))
-        if "mix" in admission(session):
+        if _mix_on(session):
             lines.append(f"  {len(PACE) + 2}. " + MIX_ITEM)
     else:
         lines.append("pacing: off (session.pacing.enabled is false)")
@@ -455,7 +455,10 @@ def _window_override(ad: dict, notes: list | None) -> dict:
 
 def _real(v, key: str) -> bool:
     lo, hi, closed = ADMISSION_BOUNDS[key]
-    if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+    try:                                  # an int past a float's range is unreadable (S53 F1)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(float(v)):
+            return False
+    except OverflowError:
         return False
     return (v >= lo if closed else v > lo) and v <= hi and not (key == "margin" and v >= hi)
 
@@ -478,8 +481,7 @@ def admission(session, notes: list | None = None) -> dict:
         "a": sd["a"] if _real(sd.get("a"), "a") else seeds["a"],
         "b": {f: bd[f] if _real(bd.get(f), "b") else v for f, v in seeds["b"].items()},
         "life": sd["life"] if _real(sd.get("life"), "life") else seeds["life"]}
-    m = mix(ad.get("mix"))
-    return {**out, **_window_override(ad, notes), **({"mix": m} if m else {})}
+    return {**out, **_window_override(ad, notes)}
 
 
 # ---- session.admission.mix (packet S53 ruling 1): the week's spend shares, advice only ----
@@ -492,8 +494,12 @@ MIX_CAP, MIX_RESETS_MAX = 50, 99
 
 
 def _positive(v) -> bool:
-    return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            and 0 < v <= 1e6)
+    """A number in (0, 1e6]; one that overflows a float is not (S53 F1)."""
+    try:
+        return (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(float(v)) and 0 < v <= 1e6)
+    except OverflowError:
+        return False
 
 
 def _zoned(v):
@@ -505,6 +511,15 @@ def _zoned(v):
     except ValueError:
         return None
     return v if t.tzinfo is not None else None
+
+
+def _mix_on(session) -> bool:
+    """Whether `session.admission.mix` is on, for `render`; False on any malformed value."""
+    try:
+        ad = session.get("admission") if isinstance(session, dict) else None
+        return mix(ad.get("mix") if isinstance(ad, dict) else None) is not None
+    except Exception:  # noqa: BLE001 - render never raises on a malformed mix (S53 F1)
+        return False
 
 
 def mix(m) -> dict | None:
