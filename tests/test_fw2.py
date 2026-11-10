@@ -74,7 +74,7 @@ def test_fw2_wait_strict_keeps_waits_own_codes(state):
     assert gate.strict_code({"exit": 255}) == 255 and gate.strict_code({}) == 1
 
 
-def test_fw2_result_gains_head_and_key(w):
+def test_fw2_result_gains_head_and_key(w, tmp_path):
     assert gate.RESULT_KEYS[-2:] == ("head", "key") and len(gate.RESULT_KEYS) == 12
     seen = []
     w.plan = {"a": (3, 0), "b": OSError("no such command")}
@@ -86,9 +86,15 @@ def test_fw2_result_gains_head_and_key(w):
     assert (rb["exit"], rb["head"]) == (127, SHA)               # read before the spawn
     assert seen == [os.path.realpath(w.repo)] * 2
     assert gate.wait_line(ra).endswith(f"log {ra['log']}")      # the line's shape stands
+    lock = tmp_path / "tlc.lock"
+    lock.mkdir()
+    c = w.put("c", locks=[str(lock)], wall=30)
+    assert gate.serve(w.root, w.fx(head=lambda repo: SHA)) == 0
+    rc_ = w.result(c["id"])
+    assert (rc_["exit"], rc_["head"], rc_["key"]) == (126, None, c["key"])  # never started
 
 
-def test_fw2_head_is_null_when_unknown_and_never_raises(w, tmp_path):
+def test_fw2_head_is_null_when_unknown_and_never_raises(w, tmp_path, monkeypatch):
     def boom(repo):
         raise RuntimeError("git fell over")
     a = w.put("a")
@@ -102,9 +108,20 @@ def test_fw2_head_is_null_when_unknown_and_never_raises(w, tmp_path):
     want = subprocess.run(g + ["rev-parse", "HEAD"], check=True, env=env, capture_output=True,
                           text=True).stdout.strip()
     assert gate._head(str(w.repo)) == want and len(want) == 40
+    other = tmp_path / "other"                                  # the caller's GIT_* is dropped
+    g2 = ["git", "-C", str(other), "-c", "user.name=t", "-c", "user.email=t@" + "example.invalid"]
+    other.mkdir()
+    subprocess.run(g2 + ["init", "-q"], check=True, env=env)
+    subprocess.run(g2 + ["commit", "-q", "--allow-empty", "-m", "o"], check=True, env=env)
+    subprocess.run(g2 + ["commit", "-q", "--allow-empty", "-m", "p"], check=True, env=env)
+    theirs = subprocess.run(g2 + ["rev-parse", "HEAD"], check=True, env=env,
+                            capture_output=True, text=True).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    assert theirs != want and gate._head(str(w.repo)) == want
 
 
-def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w):
+def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w, tmp_path, monkeypatch):
     q = w.put("q")
     k = q["key"]
     for n, s in enumerate((120, 144), 1):
@@ -115,7 +132,7 @@ def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w):
         f"queued {q['id']} {q['repo']} position 1")
     for n, s in enumerate((150, 140, 160), 3):
         plant(w.root, n, seconds=float(s), key=k)
-    plant(w.root, 6, exit=1, seconds=5.0, key=k)                # a red is not counted
+    plant(w.root, 6, exit=1, seconds=1000.0, key=k)             # a red is not counted
     plant(w.root, 7, exit=0, seconds=9.0, key=k, cut="wall cut")
     plant(w.root, 8, seconds=900.0, key="another")              # nor another key's green
     plant(w.root, 9, seconds=1.0, key=None)                     # nor a result older than FW2
@@ -128,6 +145,12 @@ def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w):
     plant(w.root, 20, seconds=600.0, key=k)                     # a sixth: the oldest leaves
     assert gate.estimates(w.root) == {k: 150.0}
     assert gate.est_text(144.0) == "2.4" and gate.est_text(322.3) == "5.4"
+    scan = tmp_path / "scan"                                    # EST_SCAN: 201 greens of one
+    for n in range(1, 202):                                     # key, the oldest not read
+        plant(scan, n, seconds=float(n), key="s")
+    monkeypatch.setattr(gate, "EST_GREENS", 10 ** 6)
+    assert gate._greens(scan) == {"s": [float(n) for n in range(201, 1, -1)]}
+    assert gate.key_estimates(scan) == {"s": (101.5, 200)}
 
 
 def test_fw2_status_keeps_its_shape_and_the_cli_adds_est(w, state):
@@ -157,12 +180,15 @@ def test_fw2_run_says_est_on_stderr(state, tmp_path):
     assert rc == 0 and err == ""                                # no greens: nothing said
     assert out == (f"queued {gid} position 1 repo {os.path.realpath(tmp_path)} caller none; "
                    f"result {state / 'gate' / gid / 'result.json'}\n")
-    for n in range(1, 6):
-        plant(state, 100 + n, seconds=(120, 144, 150, 140, 160)[n - 1],
-              key=gate.repo_key(str(tmp_path)))
-    rc, out, err = run("gate", "run", str(tmp_path), "--", "true")
-    assert rc == 0 and out.count("\n") == 1 and out.startswith("queued ")
-    assert err == "est 2.4 min: the median of this repo's last 5 greens\n"
+    k, said = gate.repo_key(str(tmp_path)), []
+    for n, s in enumerate((60, 120, 600, 144, 150), 1):    # 3: median 2.0, mean 4.3;
+        plant(state, 100 + n, seconds=float(s), key=k)       # 5: median 2.4, mean 3.6
+        rc, out, err = run("gate", "run", str(tmp_path), "--", "true")
+        assert rc == 0 and out.count("\n") == 1 and out.startswith("queued ")
+        said.append(err)
+    assert said[:2] == ["", ""]                                 # two greens: nothing said
+    assert said[2] == "est 2.0 min: the median of this repo's last 3 greens\n"
+    assert said[4] == "est 2.4 min: the median of this repo's last 5 greens\n"
 
 
 def test_fw2_docs_say_strict_head_and_est():
