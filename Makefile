@@ -42,8 +42,8 @@ skill:  ## symlink the plugin's skill into ~/.claude/skills (without installing 
 	mkdir -p ~/.claude/skills && ln -sfn "$(PWD)/plugin/skills/session" ~/.claude/skills/agentik-session
 lint:  ## byte-compile everything
 	python3 -m compileall -q plugin/lib/claude_session
-check:  ## the gate, one per tree (.check.lock), walled at 840 s (inside the relay's 900), held off above load 4 x cores
-	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
+check:  ## the gate, one per tree (.check.lock), walled at 1800 s (the owner's ruling of 2026-11-10; a relay row's own wall must allow it), held off above load 4 x cores
+	scripts/bounded --lock .check.lock --wall 1800 --load 4 -- $(MAKE) check-unlocked
 tree-note:
 	@[ -z "$$(git status --porcelain)" ] || echo "check: note: the tree is dirty; this result is not a function of HEAD (R6 E1)"
 check-unlocked: tree-note test lint doclint hygiene plugin-version-check validate  ## the gate unbounded: test, lint, doclint, hygiene, plugin-version-check, validate, the mod's tests, README freshness
