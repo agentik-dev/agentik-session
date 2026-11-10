@@ -46,7 +46,7 @@ New: `charter.bare_target`, `ledger.lines`, `ledger.fold`, `admission.BAND_PASSE
 
 ## 4. Findings that name this row
 
-agentik-session keeps no `DECISIONS.md`: no own entry to carry. Bearing, none crossed: agentik-hq 6 (`plugin/lib` on Python 3.9, standard library alone); macbase 22 (which charter is live: unchanged). `design/research.md` §3: `--resume` keeps the session id. NICE: `admit`'s hold still grows with the ledger.
+agentik-session keeps no ledger of its own: no own entry to carry. Bearing, none crossed: agentik-hq 6 (`plugin/lib` on Python 3.9, standard library alone); the Mac's session-budget entry (which charter is live: unchanged). `design/research.md` §3: `--resume` keeps the session id. NICE: `admit`'s hold still grows with the ledger.
 
 ## 5. Forbidden reads
 
