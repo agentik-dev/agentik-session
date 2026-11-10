@@ -168,7 +168,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 - `make test`: the whole suite, with a fake `claude` on PATH and no quota spent.
 - Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
-- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), an 840 s wall, held off above load 4 x cores.
+- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), a 1800 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 
 ## Conventions shared with the sibling plugins
@@ -182,7 +182,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.60`, rendered `2026-11-10`, `2628` tests in the suite.
+Status: version `v2.0.0-alpha.63`, rendered `2026-11-10`, `2676` tests in the suite.
 
 ## Credit
 

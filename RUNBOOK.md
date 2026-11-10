@@ -445,8 +445,11 @@ that waits for a person, so `run` warns once and still runs. A list flag
 as `--flag=value`. A sitting restarts only when its charter's
 `## Next act` opens on `RESPAWN`, the main thread ran `agentik session
 checkpoint --respawn --charter <file>`, and the turn has ended and stood
-`settle` seconds with no helper call open. The launcher then ends the
-sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
+`settle` seconds with no helper call open. A helper call left open 20
+minutes with no helper activity since reads as stale (a rejected call
+never closes its file): the launcher goes on past it, says so in one line
+once the terminal is back, and names it in the restart line's
+`stale_calls`. The launcher then ends the sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
 the ledger and starts the next. A sitting that exits without a confirmed
 RESPAWN stops the chain, and a crash (a nonzero exit) is never restarted.
 Every stop but a hang-up prints a start line that runs as printed (after a
