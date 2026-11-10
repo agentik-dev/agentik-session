@@ -85,14 +85,19 @@ def test_u1_t4_a_later_helper_stamp_holds_for_the_bound():
     assert c._stale == [{"id": "toolu_01a", "age": 8400}]
 
 
-@pytest.mark.parametrize("ago, ready", [(7200, True), (30, False)])
-def test_u1_t5_an_unreadable_call_reads_its_mtime(ago, ready):
+@pytest.mark.parametrize("ago", [7200, 30])
+def test_u1_t5_a_torn_call_is_aged_from_first_sight_not_its_mtime(ago):
+    # fold F1 to F3: the mtime no longer counts; the launcher's first sight of the name does
     now = time.time()
     sdir = _folder(calls=[("toolu_01torn", b'{"at": 17')], helper=None,
                    marked=now - 200, acted=now - 190, ended=now - 180)
     p = sdir / hooks.CALLS / "toolu_01torn"
     os.utime(p, (now - ago, now - ago))
-    assert _chain()._ready(sdir, now) is ready
+    c = _chain()
+    assert c._ready(sdir, now, mono=50.0) is False
+    assert c._ready(sdir, now, mono=50.0 + 1199) is False
+    assert c._ready(sdir, now, mono=50.0 + 1200) is True
+    assert c._stale == [{"id": "toolu_01torn", "age": None}]
 
 
 def test_u1_t6_a_malformed_helper_stamp_still_holds():
@@ -249,3 +254,182 @@ def test_u1_t10_the_restart_line_gains_stale_calls_alone():
 def test_u1_t11_the_runbook_says_the_bound():
     text = " ".join((ROOT / "RUNBOOK.md").read_text().split())
     assert "open 20 minutes with no helper activity" in text and "`stale_calls`" in text
+
+
+# ---- the fold of round 1 (F1 to F5): no call-file shape holds past the bound or raises --
+# A call's age is `now - at` only for a finite `at` not after now (and not before 2001:
+# another unit, F4). Any other file in calls/ is aged from the launcher's first sight of
+# its name on a clock that does not go back, and goes stale once it has stood the bound
+# with no helper activity inside it.
+
+LATE = ENDED + 2 * 86400                                # two days after the turn ended
+
+
+def _shape(sdir, name, kind):
+    p = sdir / hooks.CALLS / name
+    bodies = {"nan": b'{"at": NaN}', "neg-inf": b'{"at": -Infinity}', "inf": b'{"at": Infinity}',
+              "big": b'{"at": 1e300}', "negative": b'{"at": -5}', "zero": b'{"at": 0}',
+              "x": b'{"at": "x"}', "bool": b'{"at": true}', "empty": b"", "not-json": b"garbage",
+              "array": b"[1, 2]", "deep": b"[" * 100000 + b"]" * 100000,
+              "future-1y": json.dumps({"at": LATE + 365 * 86400}).encode(),
+              "future-60s": json.dumps({"at": LATE + 60}).encode(),
+              "ms-epoch": json.dumps({"at": ENDED * 1000}).encode()}
+    if kind == "dangling-link":
+        p.symlink_to(sdir / "nowhere")
+    elif kind == "dir":
+        p.mkdir()
+    elif kind == "unreadable":
+        p.write_text(json.dumps({"at": ENDED - 3600}))
+        p.chmod(0)
+    else:
+        p.write_bytes(bodies[kind])
+    if not p.is_symlink():
+        os.utime(p, (ENDED - 3600, ENDED - 3600))       # an old mtime counts for nothing
+    return p
+
+
+SHAPES = ["nan", "neg-inf", "inf", "big", "negative", "zero", "x", "bool", "empty", "not-json",
+          "array", "deep", "future-1y", "future-60s", "ms-epoch", "dangling-link", "dir",
+          "unreadable"]
+
+
+@pytest.mark.parametrize("kind", SHAPES)
+def test_u1_t12_every_shape_is_aged_from_first_sight(kind):
+    sdir = _folder(helper=None)
+    p = _shape(sdir, "toolu_x", kind)
+    c = _chain()
+    try:
+        assert c._ready(sdir, LATE, mono=100.0) is False            # first sight: never raises
+        assert c._ready(sdir, LATE + 5000, mono=100.0 + 1199) is False
+        assert c._ready(sdir, LATE + 5000, mono=100.0 + 1200) is True
+        assert c._stale == [{"id": "toolu_x", "age": None}]
+    finally:
+        if kind == "unreadable":
+            p.chmod(0o600)
+
+
+def test_u1_t13_helper_activity_inside_the_bound_holds_a_first_sight_call():
+    sdir = _folder(calls=[("toolu_x", b'{"at": NaN}')], helper=LATE - 100)
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False
+    assert c._ready(sdir, LATE, mono=5000.0) is False                # a helper stamp 100 s ago
+    assert c._ready(sdir, LATE - 100 + 1199, mono=6000.0) is False
+    assert c._ready(sdir, LATE - 100 + 1200, mono=6001.0) is True
+
+
+def test_u1_t14_the_wall_clock_going_back_does_not_hold_a_first_sight_call():
+    sdir = _folder(calls=[("toolu_back", {"at": LATE + 86400 - 60})], helper=None)
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=10.0) is False
+    assert c._ready(sdir, LATE - 86400, mono=1210.0) is True         # the clock set back a day
+    assert c._stale == [{"id": "toolu_back", "age": None}]
+
+
+def test_u1_t15_a_finite_past_at_still_counts_beside_a_first_sight_call():
+    a = LATE - 1500
+    sdir = _folder(calls=[("toolu_01a", {"at": a}), ("toolu_02n", b'{"at": NaN}')], helper=None)
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False                   # the NaN one is new
+    assert c._ready(sdir, LATE + 1200, mono=1200.0) is True
+    assert c._stale == [{"id": "toolu_01a", "age": 2700}, {"id": "toolu_02n", "age": None}]
+
+
+def test_u1_t16_a_calls_folder_that_will_not_list_is_aged_from_first_sight():
+    sdir = _folder(helper=None)
+    (sdir / hooks.CALLS).rmdir()
+    (sdir / hooks.CALLS).write_text("not a folder")
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False
+    assert c._ready(sdir, LATE, mono=1200.0) is True
+    assert c._stale == [{"id": hooks.CALLS, "age": None}]
+
+
+def test_u1_t17_a_call_that_vanishes_between_list_and_read_holds_that_poll(monkeypatch):
+    # F5, mutant M4: the vanished name is seen first now, so this poll holds
+    sdir = _folder(helper=None)
+    real = Path.iterdir
+    ghost = [sdir / hooks.CALLS / "toolu_gone"]
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter(
+        list(real(self)) + (ghost if self.name == hooks.CALLS else [])))
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False
+    ghost.clear()
+    assert c._ready(sdir, LATE, mono=2.0) is True and c._stale == []
+
+
+def test_u1_t18_two_stale_calls_are_both_kept_in_name_order(monkeypatch):
+    # F5, mutants M5 and M9: the folder listed in reverse
+    sdir = _folder(calls=[("toolu_02b", {"at": OPENED + 1}), ("toolu_01a", {"at": OPENED})])
+    real = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter(
+        sorted(real(self), reverse=True) if self.name == hooks.CALLS else list(real(self))))
+    c = _chain()
+    assert c._ready(sdir, ENDED + 61, mono=0.0) is True
+    assert [s["id"] for s in c._stale] == ["toolu_01a", "toolu_02b"]
+
+
+def test_u1_t19_a_hold_at_the_last_check_names_no_stale_call(monkeypatch):
+    # F5, mutant M3: went_past is set only when the launcher goes on
+    c = _chain()
+    stale = [{"id": CALL, "age": 9000}]
+    monkeypatch.setattr(c, "_ready", lambda sdir, now: (setattr(c, "_stale", stale), True)[1])
+    monkeypatch.setattr(c, "_resolve", lambda: True)
+    held = iter([None, "not-main"])
+    monkeypatch.setattr(c, "_checks", lambda *a, **k: next(held))
+    assert c._step(Path("."), SID, 0, 1, {"c": 1}, None, None) == ("not-main", {"c": 1}, False)
+    assert c.went_past == []
+    held = iter([None, None])
+    assert c._step(Path("."), SID, 0, 1, {"c": 2}, None, None) == (None, {"c": 2}, True)
+    assert c.went_past == stale
+
+
+def _fx_mono(monkeypatch, plans):
+    """`_fx` with a monotonic clock that is the fake clock."""
+    fx = _fx(monkeypatch, plans)
+    fx.monotonic = lambda: fx.t
+    return fx
+
+
+def _write(name, body=None, link=False):
+    def act(fx, p):
+        d = resolver.session_dir(config.STATE_DIR, p.sid) / hooks.CALLS
+        d.mkdir(parents=True, exist_ok=True)
+        if link:
+            (d / name).symlink_to(d / "gone")
+        else:
+            (d / name).write_bytes(body if isinstance(body, bytes) else body(fx).encode())
+    return act
+
+
+@pytest.mark.parametrize("case, act", [
+    ("nan", _write("toolu_nan", b'{"at": NaN}')),
+    ("neg-inf", _write("toolu_ninf", b'{"at": -Infinity}')),
+    ("dangling-link", _write("toolu_link", link=True)),
+    ("clock-back-1d", _write("toolu_back", lambda fx: json.dumps({"at": fx.t + 86400 - 60})))])
+def test_u1_t20_the_launcher_goes_on_past_any_shape(case, act, monkeypatch, tmp_path):
+    # the refuter's p2 cases: the launcher neither raises nor holds past the bound
+    monkeypatch.chdir(tmp_path)
+    plans = [_close(tmp_path / "charter.md") + [(12, act), _end(80000)], [_end(1)]]
+    fx = _fx_mono(monkeypatch, plans)
+    assert _chain(fx).run() == 0
+    (t, sig), = fx.procs[0].signals
+    assert sig == TERM and 1212 <= t - fx.t0 <= 1218
+    cid = {"nan": "toolu_nan", "neg-inf": "toolu_ninf", "dangling-link": "toolu_link",
+           "clock-back-1d": "toolu_back"}[case]
+    assert [l for l in fx.said if "stale" in l] == [
+        f"c1: went on past a stale helper call: {cid} open ? min"]
+    rows = [json.loads(l) for l in ledger.path(config.STATE_DIR).read_text().splitlines()]
+    (r,) = [r for r in rows if r.get("kind") == "restart"]
+    assert r["stale_calls"] == [{"id": cid, "age": None}]
+
+
+def test_u1_t21_the_line_names_every_stale_call_in_name_order(monkeypatch, tmp_path):
+    # F5, mutants M5 and M9, as the launcher says them
+    real = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter(
+        sorted(real(self), reverse=True) if self.name == hooks.CALLS else list(real(self))))
+    fx, (r,) = _restart_of(_fx, monkeypatch, tmp_path,
+                           [(12, "pre_tool_use", "toolu_02b"), (13, "pre_tool_use", "toolu_01a")])
+    assert [s["id"] for s in r["stale_calls"]] == ["toolu_01a", "toolu_02b"]
+    assert [l for l in fx.said if "stale" in l] == [
+        "c1: went on past a stale helper call: toolu_01a open 20 min; toolu_02b open 20 min"]
