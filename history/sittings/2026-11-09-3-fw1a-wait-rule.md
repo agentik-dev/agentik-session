@@ -11,13 +11,13 @@
 ## Done-ness
 - [x] charter written at open: this file
 - [x] the packet committed with this charter
-- [ ] tests: T1 to T10 in `tests/test_fw1a.py`, red at c1b7359
-- [ ] the code: R1 to R4 and R11 (charter.py, cli.py), R5 to R7 (rules.py, profiles.yaml), R8's edits
-- [ ] the texts: R10
+- [x] tests: T1 to T10 in `tests/test_fw1a.py`, red at c1b7359, 24 failed, 3 passed (fb23010)
+- [x] the code: R1 to R4, R11 (fffc3da); R5 to R7 (be5b70a); R8's edits: test_charter 35, test_rules 11, test_hook_session_start 7
+- [x] the texts: R10, SKILL.md, RUNBOOK.md, README.md and its source (16,382 B)
 - [ ] the bump: R9, alpha.53; NICE rows
 - [ ] verify: the gate, once
 
 ## Handover
 
 ## Next act
-the tests of the acceptance table, each shown red
+the bump, alpha.53, and the records

@@ -110,7 +110,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 
 ## Priority and pacing
 
-- Two session keys, on in every shipped profile: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; from `WAITING <n>` at `waiting` the wake is the cache's idle limit, and no wait stops the loop).
+- Two session keys, on in every shipped profile: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; a wait says `WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>`, STALLED at `waiting`; fill off).
 - SessionStart's line carries them in one block of at most 320 bytes. `agentik session rules` prints both whole, as resolved.
 - Any layer overrides them, field by field; `set` does not. A level's text is quoted, since it holds ": ". No hook enforces either.
 
@@ -133,9 +133,9 @@ One file per sitting, `history/sittings/<date>-<n>.md` (the profile's `charter.d
 - `agentik session charter check <file>` exits 2 naming the failing part, 1 on the red.
 - `agentik session charter close --exit "<text>"` appends the exit line from the meter.
 - With `session.priority` on, `open` writes `- open by level: none yet` under Handover: open items by level, highest first.
-- `check` and `close` warn on a missing line or a `WAITING <n>: <what>; <how to tell>` misshapen or at `waiting`.
+- `check` and `close` warn on a missing line, or a `WAITING` misshapen or at `waiting`.
 
-Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## While waiting`, `- none` or ready/owed lines (WAITING beside any other line is red); `## Next act`.
+Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); `## Done-ness`; `## Handover`; `## While waiting`, `- none` or ready/owed lines (a wait beside an S1 to S3 or owed line is red); `## Next act`.
 
 ## Reading records
 

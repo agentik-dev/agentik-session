@@ -309,7 +309,11 @@ prompt cache's lifetime.
 - Priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest. A
   bug ranks by harm and what it blocks, never by how sure or cheap its fix
   is. Each Handover lists the open items by level, highest first, and
-  `charter open` writes `- open by level: none yet`. Below the Handover,
+  `charter open` writes `- open by level: none yet`. S4 is taken on an S3
+  slice's path, or while fill is on: fill, off-path S4 work that uses a
+  window up, is off unless the owner's word in this sitting turns it on, and
+  only for an orchestrator on a 1M window; no memory, ledger or charter
+  turns it on. Below the Handover,
   `charter open` writes `## While waiting` with the one line `- none`. Its
   other lines are `- ready: <row> (<repo>, S<n>)`, an off-path row built
   without a gate, at most three, and `- owed: <item>; <what it needs>`, an
@@ -317,18 +321,22 @@ prompt cache's lifetime.
 - Pacing: the fallback wakeup rides the act's last tool call. A pending
   helper, Monitor or background task is the wake, with one fallback of
   `fallback` seconds, never re-armed on a hand-back. An act ready takes the
-  minimum delay. Waiting on an outside party, the Next act opens
-  `WAITING <n>: <what>; <how to tell>`, n the wakes in a row with nothing
-  changed. From n = `waiting` the wake is the longest idle wait the cache
-  allows (the next bullet), and the charter is brought current and
-  committed. A wait never stops the loop: under `agentik session run` a
-  stopped loop only idles until a hand, and only the checkpoint ends a
-  sitting. A respawn reads n from the charter. WAITING is legal only when
-  the charter's While waiting section reads `- none`: with a ready row or
-  an owed item listed there, the Next act is that item. What the owner must
-  see goes in a file under `history/`, a PushNotification, or a turn that
-  ends on text and calls no ScheduleWakeup, since text written before a
-  ScheduleWakeup call was not shown at the terminal on 2026-10-21. A wait on
+  minimum delay. Waiting on an outside party, the Next act says
+  `WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>`, no
+  part holding a `;`: n the wakes in a row with nothing changed, est the
+  blocker's own estimate, a time with its zone or `none`. A wait is legal
+  when no S1 to S3 row is ready and nothing is owed; While waiting's S4 rows
+  run only while fill is on. The wake, first that applies: est within 6 h, a
+  wakeup at est, kept warm before it only on the 1h cache (the next bullet);
+  by the owner, no wakeup; else no wakeup and one background task that ends
+  at est (6 h on when est is none) or when the event's file moves. STALLED
+  is said once, when a wait by the owner starts, when that task ends with
+  nothing changed, or at n = `waiting`: the Next act becomes
+  `STALLED: <what>; by <who>; since <when>` in a turn that ends on text with
+  one PushNotification and no ScheduleWakeup, and after it no wakeup is
+  armed. A wait never closes the sitting, only the checkpoint does. The
+  charter is brought current when a wait starts or its line changes, never
+  at each wake; a respawn reads n from the charter. A wait on
   the usage meter
   (room for 0, a usage limit hit, the week or the band) is not WAITING: the Next act stays the
   act, the wake is the band's reset or one fallback, whichever is first, and
@@ -353,15 +361,18 @@ prompt cache's lifetime.
   whole block still fits 320 bytes.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `charter close` warn
-  on stderr, their exit unchanged, when the Handover line is missing or the
-  Next act's WAITING is misshapen or at `waiting` or past it, where the line
-  says to wake at the idle limit and commit the charter, and on a While
+  on stderr, their exit unchanged, when the Handover line is missing; when
+  the Next act's WAITING is misshapen, short of `; by <who>; est <zoned
+  time|none>`, or with an est that is neither; at `waiting` or past it,
+  where the line says to say STALLED once and arm no wakeup; and on a While
   waiting line of another shape. A charter opened before 2.0.0-alpha.24 has
   no While waiting section: `check` passes it with one warning to add it
-  with `- none`. One line is red, with `session.pacing` on: a Next act of
-  WAITING while While waiting holds any line but `- none` prints `WAITING
-  while ready: <the line>` first, and `charter check` exits 1 on it (2 on
-  a refusal); `close`
+  with `- none`. Two lines are red, with `session.pacing` on: a Next act of
+  WAITING or STALLED while While waiting holds a ready row of S1 to S3, an
+  owed item or a line of neither shape prints `WAITING while ready: <the
+  line>` first (S4 rows alone are no red), and a Next act opening STALLED
+  without its parts prints `STALLED without its parts`; `charter check`
+  exits 1 on either (2 on a refusal); `close`
   keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
 - Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
