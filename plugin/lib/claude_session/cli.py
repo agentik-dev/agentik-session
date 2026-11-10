@@ -1078,10 +1078,11 @@ def cmd_run(args) -> int:
 
 
 def cmd_gate(args) -> int:
-    """`agentik session gate run|wait|status` (design/gate-r1.md): the per-Mac gate queue.
+    """`agentik session gate run|wait|status|land` (design/gate-r1.md): the per-Mac gate queue.
     `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
     guide's rule: exit codes report the task, not the content), the job's code with
-    --strict (packet FW2), 1 past --timeout; `serve` is the runner, internal."""
+    --strict (packet FW2), 1 past --timeout; `land` exits the landing's code (packet FW4c);
+    `serve` is the runner, internal."""
     from pathlib import Path
     from . import gate
     env = os.environ
@@ -1091,6 +1092,8 @@ def cmd_gate(args) -> int:
         return gate.serve(root)
     if verb == "wait":
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
+    if verb == "land":
+        return _gate_land(root, args, env)
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
@@ -1143,6 +1146,60 @@ def cmd_unattended(args) -> int:
                          land=args.land)
     except unattended.UnattendedError as err:
         _die(f"unattended run: {err}", 2)
+
+
+def _gate_land(root, args, env) -> int:
+    """`gate land <repo> <branch> <sha> <merge-file>` (packet FW4c): one landing as one gate
+    job, the job `gate land --in-job` with the same four, absolute. Stdout is one line, the
+    land line, last; the queued line and wait's go to stderr; the exit is the job's
+    (`wait --strict`'s). A job's log with no land line of this repo reads `red gate`, never
+    ok. `--in-job` is that job: it runs the steps here, and only inside a gate job."""
+    from . import gate, land
+    mark = env.get(gate.JOB_MARK) or ""
+    if args.in_job:
+        if not mark:
+            _die("gate land --in-job runs only inside a gate job, which sets "
+                 f"{gate.JOB_MARK}; queue it: agentik session gate land <repo> <branch> <sha> "
+                 "<merge-file>", 2)
+        return land.main(list(args.args))
+    if mark:
+        _die(f"gate land: this is gate job {mark[:40]}; a landing queued here waits on its "
+             "own repo until the wall cuts it: run gate land --in-job", 2)
+    if len(args.args) != 4:
+        print("land-step: " + land.USAGE, file=sys.stderr)
+        print("land ?: red usage exit 2", flush=True)
+        return 2
+    repo = land.resolve_repo(args.args[0])
+    name = os.path.basename(repo)
+    if not os.path.isdir(repo):
+        print(f"land-step: no such directory: {repo}", file=sys.stderr)
+        print(f"land {name}: red repo exit 1", flush=True)
+        return 1
+    branch, sha, merge = args.args[1], args.args[2], os.path.abspath(args.args[3])
+    command = [*gate.self_argv(), "gate", "land", "--in-job", repo, branch, sha, merge]
+    try:
+        caller = gate.resolve_caller(args, env)
+        wall = args.wall if args.wall is not None else _gate_wall(env)
+        e = gate.enqueue(root, repo, command, dict(env), [], wall, f"land {branch}", caller,
+                         time.time())
+    except gate.GateError as err:
+        _die(f"gate land: {err}", 2)
+    gate.spawn_serve(root)
+    print(f"queued {e['id']} position {gate.position(root, e['id'])} repo {e['repo']} "
+          f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
+          file=sys.stderr, flush=True)
+    rc, result = gate.wait(root, e["id"])
+    if rc != 0 or result is None:
+        _die(f"gate land: {e['id']} has no result under {gate.gate_dir(root)}", 1)
+    print(gate.wait_line(result), file=sys.stderr, flush=True)
+    code = gate.strict_code(result)
+    line = gate.last_line(result.get("log"), e["id"]) or ""
+    ok = line.startswith(f"land {name}: ok ") and code == 0
+    if not ok and not line.startswith(f"land {name}: red "):
+        code = code or 1
+        line = f"land {name}: red gate exit {code}"
+    print(line, flush=True)
+    return code
 
 
 def _gate_wall(env) -> int:
@@ -1363,7 +1420,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gt = sub.add_parser("gate", help="the gate queue: one running per repo under a load "
                                       "ceiling, its result to the caller")
-    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status")
+    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status|land")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")
     gr.add_argument("--session", metavar="SID",
@@ -1384,6 +1441,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="exit the job's code (0 to 255, else 1), not 0; wait's own 2 (no such "
                          "id) and 1 (the timeout) print nothing on stdout, so a line there "
                          "marks the code as the job's")
+    gl = gsub.add_parser("land", help="land a branch as one gate job: check, hygiene, merge "
+                                       "--no-ff on main, remove the worktree, delete the branch")
+    gl.add_argument("args", nargs="*", metavar="repo branch sha merge-file",
+                    help="the repo (a bare name is under ~/code), the branch, its head's sha, "
+                         "the merge message's file")
+    gl.add_argument("--session", metavar="SID",
+                    help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
+    gl.add_argument("--wall", type=_positive_int, metavar="SECONDS",
+                    help="cut the landing after SECONDS (default: gate.wall, 5400)")
+    gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn

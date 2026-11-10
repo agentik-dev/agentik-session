@@ -62,6 +62,7 @@ EST_GREENS = 5              # the greens of one key it keeps
 EST_LEAST = 3               # under this many, a key has no estimate
 _HEAD = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DOT_GIT_MOST = 4096         # a `.git` file or a `commondir` is one short line
+JOB_MARK = "CLAUDE_SESSION_GATE_JOB"    # each job's env names its own id (packet FW4c, R2)
 
 
 class GateError(Exception):
@@ -483,6 +484,16 @@ def _over(cfg: dict, fx, count: int, last, now: float):
     return ("settle", left) if left > 0 else None
 
 
+def self_argv() -> list[str]:
+    """This interpreter (never PATH), `-I` and the launcher beside this package, its bytecode
+    under the launcher's prefix (design/04 §3): the head of every argv that runs this code."""
+    runner = Path(__file__).resolve().parent.parent / "agentik-session"
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
+    # The launcher's expression, never sys.pycache_prefix: Apple's 3.9 sets its own by default.
+    prefix = os.path.join(cache, "agentik", "pycache")
+    return [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner)]
+
+
 def spawn_serve(root, popen=None) -> bool:
     """Start `serve` detached when the queue is not empty: this interpreter (never PATH),
     a new session, close_fds, stdio to gate/runner.log, `-I` and the runner beside this package
@@ -493,12 +504,7 @@ def spawn_serve(root, popen=None) -> bool:
     popen = popen or subprocess.Popen
     g = gate_dir(root)
     _mkdir(g)
-    runner = Path(__file__).resolve().parent.parent / "agentik-session"
-    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
-    # The launcher's expression, never sys.pycache_prefix: Apple's 3.9 sets its own by default.
-    prefix = os.path.join(cache, "agentik", "pycache")
-    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner),
-            "gate", "serve", "--root", str(root)]
+    argv = [*self_argv(), "gate", "serve", "--root", str(root)]
     with open(g / "runner.log", "ab") as log:
         popen(argv, cwd=str(g), env={**os.environ, **install.parent_record()}, stdin=subprocess.DEVNULL, stdout=log,
               stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
@@ -677,7 +683,7 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
         log.flush()
         try:
-            p = fx.popen(e["command"], cwd=e["repo"], env=e.get("env") or {},
+            p = fx.popen(e["command"], cwd=e["repo"], env={**(e.get("env") or {}), JOB_MARK: gid},
                          stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True, close_fds=True)
         except (OSError, ValueError, subprocess.SubprocessError) as err:
@@ -835,6 +841,21 @@ def serve(root, fx: Fx | None = None) -> int:
 def wait_line(result: dict) -> str:
     return (f"gate {result.get('id')} {result.get('repo')}: exit {result.get('exit')} in "
             f"{_minutes(result.get('seconds'))} min; log {result.get('log')}")
+
+
+def last_line(path, gid: str) -> str | None:
+    """A job log's last non-empty line that is not the gate's own (`gate <gid>: ...`, which
+    `_start`, `_close` and `_finish` write), read from its last 64 KiB; None when there is
+    none or the log is unreadable (packet FW4c, R3)."""
+    skip = f"gate {gid}: "
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, os.path.getsize(path) - 65536))
+            lines = [ln.strip() for ln in fh.read().decode(errors="replace").splitlines()]
+    except (OSError, ValueError, TypeError):
+        return None
+    lines = [ln for ln in lines if ln and not ln.startswith(skip)]
+    return lines[-1] if lines else None
 
 
 def strict_code(result) -> int:

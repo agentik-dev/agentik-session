@@ -110,7 +110,7 @@ def test_fw4c_t3_the_wall_reads_red_cut_124(repo, served):
     sha = repo.branch("slow", {"SLOW": ("slow\n", 0o644)})
     before = repo.main()
     rc, out, _ = run("gate", "land", str(repo.path), "slow", sha, str(repo.message),
-                     "--wall", "2")
+                     "--wall", "6")
     assert (rc, out) == (124, "land scratch: red cut exit 124\n")
     assert repo.main() == before
 
