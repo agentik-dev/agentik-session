@@ -17,7 +17,8 @@
 - [x] verify: gate 20261110-004433-825 exit 0 in 8 min (2595 passed, floor 2571 + 3 skipped, validate passed, readme fresh)
 - fold of refuter round 1 (hq's REFUTE-2026-11-10-r1-r1, its dispositions): F1, F2 (ruled), F3, F6, F9; NICE F4, F5, F7, F8
 - [x] fold tests: 33 cases appended to `tests/test_r1.py`, none edited; red at ba48d6d: `10 failed, 29 passed` under 3.12.7 and 3.9.6 (F1 x4, F6, F2 x4, F3); the F9 cases pass there and are red only under their mutation
-- [ ] fold code, NICE rows, alpha.60, gate
+- [x] fold code: `39 passed` under 3.12.7 and 3.9.6; 19 mutations each red alone (M1 M3 M4 M5 M7 M10 M11 M13 M16 M17 M18 M19 M21 M22 M23, and F1 F2 F3 F6 undone)
+- [ ] NICE rows, alpha.60, gate
 
 ## Handover
 - open by level: none yet

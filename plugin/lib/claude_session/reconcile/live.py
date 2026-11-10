@@ -3,7 +3,8 @@ newest charters keep one goal) and `live.since_landing` (charters opened since t
 newest landing).
 
 A charter is `history/sittings/<date>-<n>[-<row>].md`; they are ordered by `(date, n)`, so
-`-10` comes after `-9`, never by name."""
+`-10` comes after `-9`, never by name. The printed command is the definition: the goal row is
+read in bytes as its `grep -a -m1`, `sed` and `uniq -c` read it, under `LC_ALL=C`."""
 
 from __future__ import annotations
 
@@ -16,42 +17,53 @@ from . import finding, sh
 
 NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)(-[A-Za-z0-9._-]+)?\.md$")
 NAME_ERE = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+(-[A-Za-z0-9._-]+)?[.]md$"
-GOAL_LINE = re.compile(r"^\| *goal *\|")
+GOAL_LINE = re.compile(rb"^\| *goal *\|")
+SPACE = re.compile(rb"[ \t\n\v\f\r]+")       # [[:space:]] in the C locale
 NEWEST = 20
 
 
 def charters(hq) -> list:
-    """The hq's charter paths, oldest first by (date, n, name); OSError when the folder is
-    unreadable."""
+    """The hq's charter paths, oldest first by (date, n, name) as `ls | grep | sort` lists
+    them (a folder of that name included: its `grep` reads nothing); OSError when the folder
+    is unreadable."""
     d = os.path.join(str(hq), charter.DEFAULT_DIR)
     found = []
     for name in os.listdir(d):
         m = NAME.match(name)
-        if m and os.path.isfile(os.path.join(d, name)):
+        if m:
             found.append(((m.group(1), int(m.group(2)), name), os.path.join(d, name)))
     return [p for _, p in sorted(found)]
 
 
 def goal_row(path):
-    """The first goal row's cell, read by `charter._table` as the command's `grep -m1` reads
-    it; None when the charter has none."""
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if GOAL_LINE.match(line):
-                return charter._table([line.rstrip("\n")]).get("goal")
+    """The bytes after the first goal row's goal cell, as `grep -a -m1` finds the row; None
+    when the charter has none or cannot be read (`grep` skips that file)."""
+    try:
+        with open(path, "rb") as fh:
+            for line in fh:
+                m = GOAL_LINE.match(line)
+                if m:
+                    return line.rstrip(b"\n")[m.end():]
+    except OSError:
+        return None
     return None
 
 
-def normal(goal: str) -> str:
-    """The goal cut at its first comma, digits dropped, blanks folded."""
-    return " ".join(re.sub(r"[0-9]", "", goal.split(",", 1)[0]).split())
+def normal(goal) -> bytes:
+    """The command's `sed`: cut at the first pipe or comma (a missing closing pipe reads as
+    one), digits dropped, blanks (CR and tab among them) folded, one blank trimmed each end."""
+    if isinstance(goal, str):
+        goal = goal.encode("utf-8", "surrogateescape")
+    g = SPACE.sub(b" ", re.sub(rb"[0-9]", b"", re.split(rb"[|,]", goal, 1)[0]))
+    g = g[1:] if g.startswith(b" ") else g                     # s/^ //
+    return g[:-1] if g.endswith(b" ") else g                   # s/ $//
 
 
 def goal_unchanged(ctx) -> dict:
     hq = str(ctx["roots"]["hq"])
-    cmd = ("cd %s && ls | grep -E '^%s' | sort -t- -k1,3 -k4,4n | tail -%d"
-           " | xargs grep -h -m1 '^| *goal *|' | sed -E 's/^[|] *goal *[|] *//; s/ *[|] *$//;"
-           " s/,.*//; s/[0-9]//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'"
+    cmd = ("export LC_ALL=C; cd %s && ls | grep -E '^%s' | sort -t- -k1,3 -k4,4n | tail -%d"
+           " | xargs grep -a -h -m1 '^| *goal *|' | sed -E 's/^[|] *goal *[|]//; s/[|,].*//;"
+           " s/[0-9]//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'"
            " | sort | uniq -c | sort -rn | head -1"
            % (sh(os.path.join(hq, charter.DEFAULT_DIR)), NAME_ERE, NEWEST))
     try:
