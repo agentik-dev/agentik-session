@@ -14,10 +14,15 @@
 - [x] tests: T1 to T10 in `tests/test_fw1a.py`, red at c1b7359, 24 failed, 3 passed (fb23010)
 - [x] the code: R1 to R4, R11 (fffc3da); R5 to R7 (be5b70a); R8's edits: test_charter 35, test_rules 11, test_hook_session_start 7
 - [x] the texts: R10, SKILL.md, RUNBOOK.md, README.md and its source (16,382 B)
-- [ ] the bump: R9, alpha.53; NICE rows
+- [x] the bump: R9, alpha.53, status line 2549 (collected), rendered.sha256 re-hashed (`shasum -c` OK); NICE n27 to n35
 - [ ] verify: the gate, once
 
 ## Handover
+- Choice (consumer: the refuter): the meter check reads <what> to its first `;`; WAITING_LINE's `\S` let it take FULL's <how to tell> (test_charter's how-to-tell case).
+- Choice (consumer: the refuter): R11, an absolute record outside `dir` refuses at any count; a relative, torn or gone-file record reads as none; one charter of the suffix keeps S54's rule whole.
+- Choice (consumer: the refuter): R11's refusals name today's charters of the suffix, or the record and all of today's charters; both end `name the file: charter close <file>`.
+- Choice (consumer: the refuter): R8's test_charter count is 35: S52's continue test closed two `-hq` bare, which R11 refuses; it now closes by name. test_rules' near-bound label grew so it still crosses with the 1h tail.
+- Choice (consumer: the refuter): README.md and its source edited by hand, as S54, the source 16,382 B; T3's fixture names "another repo" for the public scan.
 
 ## Next act
-the bump, alpha.53, and the records
+the gate, once, on a clean tree
