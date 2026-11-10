@@ -1123,16 +1123,25 @@ def cmd_gate(args) -> int:
 def cmd_reconcile(args) -> int:
     """`agentik session reconcile [--json] [--force]` (packet R2): R1's detectors over the
     tree the cwd's `session.reconcile` names, when `every` hours have passed since the last
-    record. 0 clean or not due, 1 a finding flagged, 2 the config or an unwritable record."""
+    record. 0 clean or not due, 1 a finding flagged and nothing else, 2 the config, an
+    unwritable record or any other error, one line and never a traceback (R2's review fold,
+    F4)."""
     from .reconcile import runner
+
+    def warn(line):
+        print(line, file=sys.stderr)
     try:
-        code, lines, doc = runner.run(os.getcwd(), dict(os.environ), time.time(), args.force)
+        code, lines, doc = runner.run(os.getcwd(), dict(os.environ), time.time(), args.force,
+                                      warn=warn)
     except runner.ConfigError as e:
         for line in str(e).splitlines():
             print(f"error: agentik-session reconcile: {line}", file=sys.stderr)
         return 2
     except OSError as e:
         _die(f"agentik-session reconcile: the record was not written ({e})", 2)
+    except Exception as e:                       # noqa: BLE001  (exit 1 is flagged alone)
+        why = " ".join(str(e).split()) or "no message"
+        _die(f"agentik-session reconcile: {type(e).__name__}: {why}", 2)
     if args.json:
         print(json.dumps(doc, indent=2))
     else:

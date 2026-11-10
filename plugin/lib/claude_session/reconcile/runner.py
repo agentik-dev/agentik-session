@@ -22,6 +22,7 @@ READ_KEYS = ("every", "floor", "turns", "context")
 READ_DEFAULTS = {"every": 168, "floor": 168, "turns": 40, "context": 120000}
 DEFAULTS = {"window": 14, "every": 24, "record": "history/reconcile"}
 EVERY_FLOOR = 24          # hours: the detectors run at most daily (design/08, fold E4)
+EVERY_CEILING = 8760      # hours: and at least yearly (R2's review fold, F4)
 READ_FLOOR = 168          # hours: R3's reading pass at most weekly
 RECORD_CAP = 4096         # bytes: a record past it is written and its summary says so
 _PATH = "session.reconcile"
@@ -54,18 +55,43 @@ def raw(cwd, env):
 
 
 def wanted(cwd, env) -> bool:
-    """True when the repo sets the key and its layers resolve: the launcher's pass runs."""
+    """True when the repo sets the key and its layers resolve: the launcher's pass runs.
+    `reconcile: false` is off, as an absent key is (R2's review fold, F9)."""
     try:
-        return raw(cwd, env) is not None
+        v = raw(cwd, env)
+        return v is not None and v is not False
     except Exception:                    # noqa: BLE001  (the launcher's guard never raises)
         return False
 
 
 def _inside(base: Path, rel) -> bool:
+    """`rel` is relative and its real path (links resolved, the part that exists) lies inside
+    the repo's real path and outside its `.git` (R2's review fold, F2 and F10)."""
     if not isinstance(rel, str) or not rel.strip() or os.path.isabs(rel):
         return False
     norm = os.path.normpath(rel)
-    return norm != "." and norm != ".." and not norm.startswith(".." + os.sep)
+    if norm in (".", "..") or norm.startswith(".." + os.sep):
+        return False
+    root = os.path.realpath(str(base))
+    real = os.path.realpath(os.path.join(root, norm))
+    if real == root or os.path.commonpath([root, real]) != root:
+        return False
+    return os.path.relpath(real, root).split(os.sep)[0].lower() != ".git"
+
+
+def _unwritable(folder: Path, path: Path) -> str | None:
+    """Why the record cannot be written at `path` in `folder`, or None; read, never written,
+    so a refusal comes before the detectors and before any write (R2's review fold, F5)."""
+    if os.path.isdir(str(path)):
+        return f"{path} is a folder"
+    near = Path(folder)
+    while not os.path.lexists(str(near)) and near != near.parent:
+        near = near.parent
+    if not near.is_dir():
+        return f"{near} is not a folder"
+    if not os.access(str(near), os.W_OK | os.X_OK):
+        return f"{near} cannot be written"
+    return None
 
 
 def check(cwd, env, value=None) -> dict:
@@ -74,7 +100,7 @@ def check(cwd, env, value=None) -> dict:
     from . import THRESHOLDS
     cwd = Path(cwd)
     cfg = raw(cwd, env) if value is None else value
-    if cfg is None:
+    if cfg is None or cfg is False:
         raise ConfigError(f"{_PATH} is not set (in .claude/agentik/config.yaml or a layer "
                           "over it)")
     if not isinstance(cfg, dict):
@@ -109,9 +135,9 @@ def check(cwd, env, value=None) -> dict:
     every = out["every"]
     if not _int(every):
         bad.append(f"{_PATH}.every must be a whole number of hours")
-    elif every < EVERY_FLOOR:
-        bad.append(f"{_PATH}.every is {every} hours; its floor is {EVERY_FLOOR} "
-                   "(detectors at most daily)")
+    elif not EVERY_FLOOR <= every <= EVERY_CEILING:
+        bad.append(f"{_PATH}.every is {every} hours; its floor is {EVERY_FLOOR} and its "
+                   f"ceiling {EVERY_CEILING} (detectors at most daily, at least yearly)")
     det = out.get("detectors")
     if det is not None:
         if not isinstance(det, list) or not all(isinstance(d, str) for d in det):
@@ -159,21 +185,36 @@ def check(cwd, env, value=None) -> dict:
     return out
 
 
-def last_run(folder) -> tuple:
-    """(epoch seconds, path) of the newest `YYYY-MM-DD.md` by name and its `run:` line;
-    (None, path or None) when there is none or its line does not parse."""
-    try:
-        days = sorted(p for p in os.listdir(str(folder)) if _DAY.match(p))
-    except OSError:
-        return None, None
-    if not days:
-        return None, None
-    path = Path(folder) / days[-1]
+def _stamp(path: Path):
+    """A record's `run:` stamp in epoch seconds; None when it has no line that reads as a
+    date (R2's review fold, F4)."""
     try:
         m = _RUN.search(path.read_text(encoding="utf-8", errors="replace"))
-        return (datetime.fromisoformat(m.group(1)).timestamp() if m else None), path
-    except (OSError, ValueError):
-        return None, path
+        return datetime.fromisoformat(m.group(1)).timestamp() if m else None
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def last_run(folder, now: float) -> tuple:
+    """(epoch seconds or None, path or None, the records ahead): the last run is the newest
+    `YYYY-MM-DD.md` by name that is not ahead of `now` (named for a date after now's, or
+    stamped after now), with its stamp; None when its stamp does not read, so the run is
+    due. A record ahead is left out of the cadence and returned to be named (R2's review
+    fold, F3): a forced run is the last run from then on."""
+    try:
+        days = sorted((p for p in os.listdir(str(folder)) if _DAY.match(p)), reverse=True)
+    except OSError:
+        return None, None, []
+    today = datetime.fromtimestamp(now).strftime("%Y-%m-%d") + ".md"
+    ahead = []
+    for name in days:
+        path = Path(folder) / name
+        stamp = _stamp(path)
+        if name > today or (stamp is not None and stamp > now):
+            ahead.append(path)
+            continue
+        return stamp, path, ahead
+    return None, None, ahead
 
 
 def _iso(t: float, spec: str) -> str:
@@ -206,18 +247,26 @@ def record_text(findings, cfg, now: float) -> str:
     return head + rows
 
 
-def run(cwd, env, now: float, force: bool = False) -> tuple:
-    """(exit, stdout lines, the --json document). Raises ConfigError for the key and
-    OSError when the record cannot be written."""
+def run(cwd, env, now: float, force: bool = False, warn=None) -> tuple:
+    """(exit, stdout lines, the --json document). Raises ConfigError for the key or a record
+    folder that cannot be written, and OSError when the write fails. `warn` takes the one
+    line that names the records ahead of now."""
     cwd = Path(cwd)
     cfg = check(cwd, env)
     folder = cwd / cfg["record"]
-    last, _ = last_run(folder)
+    last, _, ahead = last_run(folder, now)
+    if ahead and warn is not None:
+        warn(f"reconcile: left out of the cadence, stamped after now: "
+             f"{', '.join(str(p) for p in ahead)}")
     due_at = None if last is None else last + cfg["every"] * 3600
     if not force and due_at is not None and now < due_at:
         nxt = _iso(due_at, "minutes")
         return 0, [f"not due until {nxt}"], {"due": False, "last": _iso(last, "seconds"),
                                               "next": nxt}
+    path = folder / (datetime.fromtimestamp(now).strftime("%Y-%m-%d") + ".md")
+    why = _unwritable(folder, path)
+    if why is not None:
+        raise ConfigError(f"{_PATH}.record {cfg['record']} cannot hold a record: {why}")
     from .. import reconcile as lib      # read at call time: R1's contract alone
     home = env.get("HOME") or os.path.expanduser("~")
     roots = {"hq": str(cwd), "repos": str(cwd.parent),
@@ -226,7 +275,6 @@ def run(cwd, env, now: float, force: bool = False) -> tuple:
                           thresholds=cfg.get("thresholds"), detectors=cfg.get("detectors"))
     text = record_text(findings, cfg, now)
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / (datetime.fromtimestamp(now).strftime("%Y-%m-%d") + ".md")
     tmp = folder / f".{path.name}.{os.getpid()}.tmp"
     try:
         tmp.write_text(text, encoding="utf-8")
