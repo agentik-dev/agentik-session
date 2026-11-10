@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] charter written at open: this file
 - [x] the packet committed with this charter
-- [ ] tests: T1 to T8 in `tests/test_fw2.py`, red at 942cace
+- [x] tests: T1 to T8 in `tests/test_fw2.py`, red at 942cace: `8 failed in 0.35s`
 - [ ] the code: R1 to R5
 - [ ] the texts: R6
 - [ ] the bump: R7, alpha.55; NICE row
@@ -19,10 +19,10 @@
 
 ## Handover
 - open by level: none yet
-- decide, owner: the coordinator: R6 asks `cmd_gate`'s docstring to cite the house configuration repo by name, which the public scan's private group refuses; the docstring names the agentik guide's rule "exit codes report the task, not the content" instead, and the packet's copy names the ledger without the repo's name.
+- decide, owner: the coordinator: R6 asks `cmd_gate`'s docstring to cite the house configuration repo by name, which the public scan's private group refuses; the docstring names the agentik guide's rule "exit codes report the task, not the content" instead, and the packet's copy names the ledger without the repo's name. T8 asserts that rule's words in the docstring and no bare `(entry 25)`, and adds `plugin/commands/gate.md`'s three words; the prototype's git email is split for the scan's email group.
 
 ## While waiting
 - none
 
 ## Next act
-the tests: add `tests/test_fw2.py` and record its red at 942cace
+the code: R1 to R5 in gate.py and cli.py
