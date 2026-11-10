@@ -234,6 +234,9 @@ RUNS = ['{n} charter open "g"', "{n} charter close --exit done",
         "cd /r && {n} charter --dir d open g", "{n} charter close h.md; ls"]
 
 
+VERB_FIRST = "a helper's one charter call is `agentik-session charter check <file>`, the verb first"
+
+
 def _bash(cmd, helper=True):
     p = {"session_id": A, "tool_name": "Bash", "tool_use_id": "toolu_n33",
          "tool_input": {"command": cmd}, "hook_event_name": "PreToolUse"}
@@ -253,17 +256,17 @@ def test_n33_t12_helper_open_and_close_denied(repo, name):
         out = hooks.pre_tool_use(_bash(run_.format(n=name)))
         assert _denied(out), run_.format(n=name)
         why = out["hookSpecificOutput"]["permissionDecisionReason"]
-        assert "by hand" in why and "charter check <file>" in why and "script file" in why
+        assert "by hand" in why and "script file" in why and VERB_FIRST in why
     assert not (_sdir(A) / hooks.CALLS / "toolu_n33").exists()
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_n33_t13_main_thread_and_other_verbs_pass(repo, name):
     """T13, R6: the same commands from the main thread pass; a helper's `charter check`, a
-    status and a non-Bash tool pass."""
+    status and a non-Bash tool pass (the fold: `charter --help`, a flag first, is T17's deny)."""
     for run_ in RUNS:
         assert not _denied(hooks.pre_tool_use(_bash(run_.format(n=name), helper=False)))
-    for cmd in (f"{name} charter check h.md", f"{name} status", f"{name} charter --help"):
+    for cmd in (f"{name} charter check h.md", f"{name} status", f"{name} -x charter check h.md"):
         assert not _denied(hooks.pre_tool_use(_bash(cmd))), cmd
     p = {**_bash(f"{name} charter open g"), "tool_name": "Read"}
     assert not _denied(hooks.pre_tool_use(p))
@@ -288,3 +291,116 @@ def test_n33_t15_hook_entry_denies(repo):
                        input=json.dumps(_bash('agentik-session charter open "g"', helper=False)),
                        capture_output=True, text=True, timeout=60, env=dict(os.environ))
     assert r.returncode == 0 and "deny" not in r.stdout, r.stdout
+
+
+# The review fold (round 1, F1 to F3, F7): the rule reads no flags. A launcher name, then the word
+# `charter` on the same logical line, is denied to a helper unless the word right after it is a
+# verb that only reads; quotes and backslash-newlines are dropped before the match.
+EVASIONS = (
+    # p3 and p11: a flag value with a command substitution, a continuation before `charter`
+    'agentik-session charter --dir "$(pwd)/history/sittings" close --exit "helper done"',
+    "agentik-session charter --dir $(git rev-parse --show-toplevel)/history/sittings close",
+    'agentik-session \\\n  charter close --exit "helper done"',
+    'agentik-session charter --dir "$(pwd)/history/sittings" open "helper goal"',
+    # p1's spellings (F3): quoted names and verbs, continuations, substitutions
+    '"agentik-session" charter open g', "agentik-session charter \"open\" g",
+    "'agentik-session' 'charter' 'close'", 'agentik-session charter --dir "a b" open g',
+    "agentik-session charter \\\n open g", "agentik \\\n session charter open g",
+    "$(which agentik-session) charter open g", '"$(command -v agentik-session)" charter open g',
+    "T=agentik-session; $T charter open g", "agentik-session charter o''pen g",
+    'agentik-session charter "cl"ose', "agentik-session charter o\\pen g",
+)
+
+
+@pytest.mark.parametrize("cmd", EVASIONS)
+def test_n33_t16_the_refuters_spellings_denied(repo, cmd):
+    """T16: each spelling the round found past the hook is denied to a helper, the reason
+    naming the one charter call; the main thread's same command passes."""
+    out = hooks.pre_tool_use(_bash(cmd))
+    assert _denied(out), cmd
+    assert VERB_FIRST in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert not _denied(hooks.pre_tool_use(_bash(cmd, helper=False))), cmd
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_n33_t17_a_flag_before_the_verb_is_denied(repo, name):
+    """T17: `charter <any flag> ...` is denied to a helper, `check` included (the deny names
+    the verb-first call); a flag between the launcher and `charter` changes nothing."""
+    for cmd in (f"{name} charter --dir d check f", f"{name} charter --help", f"{name} charter -h",
+                f"{name} charter", f"{name} charter; ls", f"{name} charter --exit=x close",
+                f"{name} --v charter open g", f"{name} -x charter close"):
+        out = hooks.pre_tool_use(_bash(cmd))
+        assert _denied(out), cmd
+        assert VERB_FIRST in out["hookSpecificOutput"]["permissionDecisionReason"], cmd
+    for cmd in (f"{name} charter check open.md", f"{name} charter check a.md b.md",
+                f"{name} -x charter check f"):
+        assert not _denied(hooks.pre_tool_use(_bash(cmd))), cmd
+
+
+def test_n33_t18_the_rules_edges(repo):
+    """T18, F7's mutants: the launcher's guards (a longer name is not the launcher), the read
+    verb's guard (`check.md` is not `check`), the same logical line, every `charter` after
+    the launcher read."""
+    passes = ("myagentik-session charter open g", "xclaude-session charter close",
+              "claude-sessions charter open g", "agentik-session-old charter open g",
+              'agentik-session status\ngrep -n "charter open" SKILL.md',
+              "agentik-session charter check a.md\necho charter open")
+    for cmd in passes:
+        assert not _denied(hooks.pre_tool_use(_bash(cmd))), cmd
+    denied = ("agentik-session charter check.md", "agentik-session charter checkout x",
+              "agentik-session charter check-x f", "agentik-session charter openers",
+              "agentik-session charter close.md",
+              "agentik-session charter check a.md && agentik-session charter close",
+              "agentik-session charter check a.md; charter open g",
+              "agentik-session charter\ncheck f")
+    for cmd in denied:
+        assert _denied(hooks.pre_tool_use(_bash(cmd))), cmd
+
+
+def test_n33_t19_a_quoted_exit_mark_mid_line_still_holds(repo):
+    """T19, F7 M7: a line that quotes `- exit taken:` mid-line does not close the charter, so a
+    second open still refuses."""
+    a = _open("A goal")
+    a.write_text(a.read_text() + "- the mark is `- exit taken: x`, written by close\n")
+    rc, out, err = run("charter", "open", "helper goal")
+    assert rc == 2 and str(a) in err, (rc, out, err)
+
+
+def test_n33_t20_a_flagged_helper_open_neither_refuses_nor_records(repo, monkeypatch):
+    """T20, F7 M10: under CLAUDE_SESSION_HELPER=1 an open writes no record, so it takes none
+    and does not refuse: a new file, the record unchanged."""
+    a = _open("A goal")
+    monkeypatch.setenv("CLAUDE_SESSION_HELPER", "1")
+    b = _open("helper goal")
+    assert b != a and _rec(A) == {"path": str(a)}
+
+
+_TIMED = r"""
+import json, sys, time
+from claude_session import hooks
+p = json.loads(sys.stdin.read())
+t = time.monotonic(); out = hooks.pre_tool_use(p)
+h = (out or {}).get("hookSpecificOutput") or {}
+print(json.dumps([h.get("permissionDecision") == "deny", time.monotonic() - t]))
+"""
+SCALE = (  # p4's chains (95 KB, 950 KB), p5's (a real open after a chain; an rg-style heredoc)
+    ("agentik-session -x agentik-session -x " * 2500, False),
+    ("agentik-session -x agentik-session -x " * 25000, False),
+    ("agentik-session -x " * 2000 + "; agentik-session charter open g", True),
+    ("cat <<'X'\n" + "rg -e claude-session -e claude-session -e " * 2000 + "\nX", False),
+    ("agentik-session -x " * 50000 + "; agentik-session charter open g", True),
+    ("agentik-session charter check a " * 30000, False),
+    ("agentik-session charter" + " " * 500000 + "open", True),
+    ("agentik" + " " * 500000 + "x charter open", False),
+)
+
+
+@pytest.mark.parametrize("cmd,deny", SCALE, ids=[f"s{i}" for i in range(len(SCALE))])
+def test_n33_t21_the_rule_is_linear(repo, cmd, deny):
+    """T21, F2: the rule takes well under the hook's 5 s on each payload up to 950 KB (a
+    generous 2 s bound on the call alone), with the right decision."""
+    r = subprocess.run([sys.executable, "-c", _TIMED], input=json.dumps(_bash(cmd)),
+                       capture_output=True, text=True, timeout=20, env=dict(os.environ))
+    assert r.returncode == 0, r.stderr
+    hit, took = json.loads(r.stdout)
+    assert hit is deny and took < 2.0, (hit, took)
