@@ -56,6 +56,9 @@ _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overl
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
 _EVERY = re.compile(r"\bevery\s+(\d+)\s*([smhd])[a-z]*\s*$", re.I)   # `/loop <p> every 2h`
 _MINUTES = {"s": 1 / 60, "m": 1, "h": 60, "d": 1440}
+# Packet R2: the reconciler's pass at a respawn close is cut at this many seconds, the
+# launcher's own `kill_grace`, so a successor never waits on it longer.
+RECONCILE_WAIT = 30
 _COMPACT = re.compile(r"(?:^|\s)/compact(?:\s|$)")     # the command, never a path's part
 
 
@@ -209,6 +212,15 @@ def prompt_gap(args) -> str | None:
     return gap
 
 
+def reconcile_argv() -> list:
+    """The close's pass (packet R2): this interpreter and this tree's launcher, as
+    `gate.spawn_serve` runs its runner, then the verb with no `--force`."""
+    runner = Path(__file__).resolve().parent.parent / "agentik-session"
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
+    prefix = os.path.join(cache, "agentik", "pycache")
+    return [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner), "reconcile"]
+
+
 def home(state, name: str) -> Path | None:
     """The chain `name`'s home, `<state>/respawn/<name>/` (its lock, STOP, held.json and,
     since S39, state.md with state.json); None for a name that is not a chain's."""
@@ -306,6 +318,20 @@ class Effects:
 
     def append(self, state: Path, entry: dict) -> Path:
         return ledger.append_chain(state, entry)
+
+    def reconcile(self, cwd, timeout: float) -> tuple:
+        """(the pass's exit, its last line): stdin /dev/null, output captured, cut at
+        `timeout`; the exit is None when the pass was cut or did not start."""
+        try:
+            r = subprocess.run(reconcile_argv(), cwd=str(cwd), stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None, f"cut after {timeout:g} s"
+        except OSError as e:
+            return None, f"did not start ({e})"
+        lines = [l for l in (r.stdout or "").splitlines() if l.strip()] or \
+                [l for l in (r.stderr or "").splitlines() if l.strip()]
+        return r.returncode, " ".join(lines[-1].split())[:300] if lines else ""
 
     def restarts(self, state: Path, chain: str, now: float) -> int:
         return ledger.restarts_in(state, chain, now)
@@ -448,10 +474,26 @@ class Chain:
                         self.fx.say(f"{self.name}: the successor runs on --model {carried}, "
                                     "the model the sitting ended on; the start line says "
                                     f"--model {start_model}")
+                    self._reconcile()             # R2: after the restart line, before the successor
                     prev, sid, args = sid, nxt, succ
                     continue
             self._stop(sid, reason, code, seconds)
             return code
+
+    def _reconcile(self) -> None:
+        """Packet R2, the close: the reconciler's pass when the repo sets `session.reconcile`
+        (the verb's `every` decides whether it runs the detectors). One line said, cut at
+        RECONCILE_WAIT; nothing here stops or holds the successor past that bound."""
+        try:
+            from .reconcile import runner
+            cwd = Path.cwd()
+            if not runner.wanted(cwd, getattr(self, "env", None) or {}):
+                return
+            rc, line = self.fx.reconcile(cwd, RECONCILE_WAIT)
+        except Exception as e:                   # noqa: BLE001  (a pass never stops a chain)
+            rc, line = None, f"did not run ({e})"
+        what = "reconcile" if rc is None else f"reconcile exit {rc}"
+        self.fx.say(f"{self.name}: {what}: {line}" if line else f"{self.name}: {what}")
 
     def _carry(self, sid: str) -> tuple[list, str | None, str | None]:
         """`carry` for the ending sitting, always against the start line (S34 ruling 3):
