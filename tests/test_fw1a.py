@@ -106,7 +106,14 @@ def test_fw1a_due_rows_are_red(tmp_path, monkeypatch, rows, first):
     ("WAITING 2: x; y; by owner; est tomorrow", "est tomorrow is neither a zoned time"),
     ("WAITING 2: x; y; by owner; est 2026-11-09T18:30", "is neither a zoned time"),
     ("WAITING: x", "'WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>'"),
-], ids=["full-none", "full-zoned", "old", "no-est", "est-word", "est-no-zone", "misshapen"])
+    # R2: no part of FULL holds a `;`.
+    ("WAITING 1: a; b; c; by owner; est none", "names no '; by <who>; est <zoned time|none>'"),
+    ("WAITING 1: a; b; by ;; est none", "names no '; by <who>; est <zoned time|none>'"),
+    ("WAITING 1: x; y; by owner; est 5pm; est none",
+     "names no '; by <who>; est <zoned time|none>'"),
+    ("WAITING 1: ;; ;; by ;; est none", "names no '; by <who>; est <zoned time|none>'"),
+], ids=["full-none", "full-zoned", "old", "no-est", "est-word", "est-no-zone", "misshapen",
+        "five-parts", "who-semicolon", "two-ests", "all-semicolons"])
 def test_fw1a_line_by_and_est(line, want):
     got = warns(line)
     assert got == [] if want is None else (len(got) == 1 and want in got[0]), got

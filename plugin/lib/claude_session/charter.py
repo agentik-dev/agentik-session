@@ -43,9 +43,10 @@ RESPAWN = re.compile(r"^RESPAWN(?=[:.\s]|$)")
 WAITING = re.compile(r"^WAITING(?=[:.\s]|$)")
 WAITING_LINE = re.compile(r"^WAITING ([1-9][0-9]*): ([^;]*\S[^;]*); (.*\S.*)$")
 # Packet FW1a: the line's full shape, with who must act and the blocker's estimate; and the
-# line a wait becomes once the owner has been told.
-WAITING_FULL = re.compile(r"^WAITING [1-9][0-9]*: [^;]*\S[^;]*; [^;]*\S[^;]*; "
-                          r"by [^;]*\S[^;]*; est (\S+)$")
+# line a wait becomes once the owner has been told. _PART is one part holding no `;` and
+# something past blanks: `\S` would take a `;`, and `[^;]*[^;\s][^;]*` backtracks for seconds.
+_PART = r"\s*[^;\s][^;]*"
+WAITING_FULL = re.compile(rf"^WAITING [1-9][0-9]*: {_PART}; {_PART}; by {_PART}; est (\S+)$")
 STALLED = re.compile(r"^STALLED(?=[:.\s]|$)")
 STALLED_LINE = re.compile(r"^STALLED: [^;]*\S[^;]*; by [^;]*\S[^;]*; since \S.*$")
 SHAPE = "WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>"
