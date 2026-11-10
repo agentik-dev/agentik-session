@@ -2,30 +2,28 @@
 
 | item | value |
 |---|---|
-| goal | build packet wfg: `workflowguard.py`, the PreToolUse rule for `SPAWNING_TOOLS` (R1 to R8), R6's `model.json` with PostModelSwitch registered, R9's docs |
+| goal | build packet wfg (R1 to R9), then fold REFUTE wfg r1's seven dispositions |
 | budget | builder: 200k window, 180k context, about 90 tool calls (packet: 60 calls, 120k); doclint's five rows |
 | pin | bfc66ae (alpha.63) on `wfg-workflow-guard` in `.claude/worktrees/wfg-workflow-guard` |
 | window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [x] the packet as `design/packets/wfg-workflow-guard.md`, sections renamed for doclint only, no ruling word changed (d9cdad3)
-- [x] tests first (15722dd): at bfc66ae `63 failed, 1 passed` under 3.12.7 and 3.9.6
-- [x] the guard (ae3fa92): the prototype read and applied; PostModelSwitch registered last; test_doctor (3 tests) and test_precompact (2) amended; RUNBOOK step 2 and the guard's bullet. test_wfg `64 passed`; with hooks, doctor, precompact, readme `279 passed` (both pythons)
-- [x] cost, 100,259 B script: `measure` 9.2 ms (3.12), 9.0 ms (3.9); the hook process +18.1 ms, +19.3 ms over a Bash call of the same size (load 13 to 20)
-- [x] SKILL, NICE n58 to n60 (844e068, a3d7a30); alpha.64, status line 2741 (30a83b7)
-- [x] lint (compileall, both pythons) 0; doclint 0; recordlint 0; hygiene tree 0 hits; range `commits: 7 scanned, 0 with a hit outside the allowlist`
-- [ ] the gate: not run here. `make check` took past 540 s on main (u1: 3.12 alone 704 s), and the builder's rule leaves a verify line past 540 s to the gate after the builder
+- [x] packet (d9cdad3); tests (15722dd, red `63 failed, 1 passed`); guard (ae3fa92); SKILL, NICE (844e068, a3d7a30); alpha.64 (30a83b7)
+- [x] gate 20261110-075649-887 on b29d2ea (the coordinator's): `3 failed, 2738 passed` (T11 under load, test_mod's CLASSIC, test_s49's MAIN_FLOW)
+- [x] fold tests (c4b25bd): T12 to T18 and the probes as fixtures, T11 on process_time; at b29d2ea `42 failed, 70 passed` (3.12.7, T11 among them), `41 failed, 71 passed` (3.9.6)
+- [x] fold (7008592): the backstop, plain options, default params, thunks, numeric index, the budget, R6's exception, script with scriptPath; `doctor.HOOK_EVENTS` gains PostModelSwitch. test_wfg `112 passed`; with hooks, doctor, precompact, mod, s49 `524 passed` (both pythons)
+- [x] SKILL, NICE n59 closed, n61 (c778be8); alpha.65 as the check asked, status line 2789 (5c8e9d6)
+- [x] cost: worst case (64 sites, 250 KB) 0.5 s to 0.04 s CPU (the identifier index); 100 KB `measure` 15.5 ms / 15.9 ms, hook +8.7 / +14.3 ms (load 44 to 65); the refuter's c1, c3, c4 denied at the budget in 1.1 to 1.4 s
+- [x] whole tests/, one process each: 3.12.7 `2789 passed` (452 s); 3.9.6 `12 failed, 2774 passed, 3 skipped`, the 12 all test_bounded.py, which `test-floor` ignores (bounded is a 3.11 dev tool)
 
 ## Handover
-- Rulings (the coordinator): Q1 the ceiling 8; Q2 Fable in a workflow only under a Fable session, labelled design or refutation, two at most; Q3 and Q4 not in this packet; deny, never rewrite input; R6 as written
-- Choice: PostModelSwitch sits last in hooks.json, so the tests pin `[*doctor.HOOK_EVENTS, "PostModelSwitch"]`
-- Choice: `scripts/bare-proof` and test_bare_machine untouched (86 passed with the event registered); n60
-- decide, owner: the coordinator: `doctor.HOOK_EVENTS` lacks PostModelSwitch; `doctor.py` is outside may-touch (n59); consumer: the doctor's `plugin` line
-- decide, owner: the coordinator: the pin asked for n33 on main; it is not (bfc66ae), so the rule sits first in `pre_tool_use`, and n33's landing meets it there; consumer: whichever lands second
-- A single unreproduced red under load (1 failed of 279, both pythons at once, load 18 to 23); five reruns green
-- decide, owner: the coordinator: the gate's verdict on this head, by one `gate run` from the coordinator's side
-- exit: checkpoint; all items built and committed, targeted tests green on both pythons, the gate left to the coordinator; nothing pushed
+- Choice: `with` is denied as `with (`, not as a word, which every prompt holds
+- Choice: the budget reads CPU (1 s) and wall (3 s), so T11 and a loaded Mac agree
+- Choice: the shim is right (PostModelSwitch drops its exit as Stop does); test_s49's MAIN_FLOW and test_mod's CLASSIC follow it
+- Choice: T3's `log('no agent at all')` reworded: the ruling denies the word in a string
+- decide, owner: the coordinator: n33 not on main; the rule sits first in `pre_tool_use`; consumer: whichever lands second
+- exit: checkpoint; fold built and committed; the gate left to the coordinator; nothing pushed
 
 ## Next act
 the coordinator's gate on the head, then its read
