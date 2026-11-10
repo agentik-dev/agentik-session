@@ -272,7 +272,7 @@ def _shape(sdir, name, kind):
               "x": b'{"at": "x"}', "bool": b'{"at": true}', "empty": b"", "not-json": b"garbage",
               "array": b"[1, 2]", "deep": b"[" * 100000 + b"]" * 100000,
               "future-1y": json.dumps({"at": LATE + 365 * 86400}).encode(),
-              "future-60s": json.dumps({"at": LATE + 60}).encode(),
+              "future-60s": json.dumps({"at": LATE + 5000 + 60}).encode(),   # at each read
               "ms-epoch": json.dumps({"at": ENDED * 1000}).encode()}
     if kind == "dangling-link":
         p.symlink_to(sdir / "nowhere")
@@ -383,6 +383,21 @@ def test_u1_t19_a_hold_at_the_last_check_names_no_stale_call(monkeypatch):
     assert c.went_past == stale
 
 
+def test_u1_t22_first_sight_still_counts_once_a_future_at_has_passed():
+    sdir = _folder(calls=[("toolu_soon", {"at": LATE + 600})], helper=None)
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False
+    assert c._ready(sdir, LATE + 1199, mono=1199.0) is False
+    assert c._ready(sdir, LATE + 1200, mono=1200.0) is True          # `at` says 600 s
+    assert c._stale == [{"id": "toolu_soon", "age": None}]
+    old = _folder(sid="fd362ce3-0000-444c-8e6f-8ad87b5eb363", helper=None,
+                  calls=[("toolu_late", b"{")])                       # torn, then whole
+    assert c._ready(old, LATE, mono=0.0) is False
+    (old / hooks.CALLS / "toolu_late").write_text(json.dumps({"at": LATE - 3000}))
+    assert c._ready(old, LATE + 1, mono=1.0) is True                  # the older `at` counts
+    assert c._stale == [{"id": "toolu_late", "age": 3001}]
+
+
 def _fx_mono(monkeypatch, plans):
     """`_fx` with a monotonic clock that is the fake clock."""
     fx = _fx(monkeypatch, plans)
@@ -413,7 +428,8 @@ def test_u1_t20_the_launcher_goes_on_past_any_shape(case, act, monkeypatch, tmp_
     fx = _fx_mono(monkeypatch, plans)
     assert _chain(fx).run() == 0
     (t, sig), = fx.procs[0].signals
-    assert sig == TERM and 1212 <= t - fx.t0 <= 1218
+    # first sight at the first poll that lists calls/: the turn's end (14) + settle (60)
+    assert sig == TERM and 1272 <= t - fx.t0 <= 1278
     cid = {"nan": "toolu_nan", "neg-inf": "toolu_ninf", "dangling-link": "toolu_link",
            "clock-back-1d": "toolu_back"}[case]
     assert [l for l in fx.said if "stale" in l] == [
