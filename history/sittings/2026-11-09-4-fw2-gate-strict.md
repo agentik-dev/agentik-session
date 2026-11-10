@@ -14,7 +14,7 @@
 - [x] tests: T1 to T8 in `tests/test_fw2.py`, red at 942cace: `8 failed in 0.35s`
 - [x] the code: R1 to R5 in gate.py and cli.py; T1 to T7 green, the six neighbouring suites 340 passed
 - [x] the texts: R6, SKILL.md, RUNBOOK.md, README.md and its source (16,381 B, under the 16,384 ceiling), gate.md, gate-r1's change log; T8 green
-- [ ] the bump: R7, alpha.55; NICE row
+- [x] the bump: R7, alpha.55, status line 2561 (collected), rendered.sha256 re-hashed (`shasum -c` OK); NICE n36
 - [ ] verify: the gate once
 
 ## Handover
@@ -27,4 +27,4 @@
 - none
 
 ## Next act
-the bump: R7, alpha.55, the status line, the sidecar; the NICE row
+verify: the gate once, make check in this worktree
