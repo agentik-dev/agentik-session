@@ -352,18 +352,113 @@ def test_t11_a_100_kb_script_costs_under_50_ms():
     payload = {"tool_name": "Workflow", "session_id": SID, "tool_input": {"script": src}}
     times = []
     for _ in range(9):
-        t0 = time.perf_counter()
+        t0 = time.process_time()
         assert hooks._spawn_rule(payload, {}) is None
-        times.append(time.perf_counter() - t0)
+        times.append(time.process_time() - t0)
     assert statistics.median(times) < 0.050, times
     g = guard()                                  # the worst case stays far inside the 5 s timeout
     calls = "\n".join(f"await parallel(A{i}.map(a => () => agent(`${{a}} " + "x" * 3500
                       + f"`, {OPUS})))" for i in range(g.MAX_SITES))
     wide = META + "\n".join(f"const A{i} = ['a', 'b']" for i in range(g.MAX_SITES)) + "\n" + calls
     assert 200_000 < len(wide) < g.MAX_SCRIPT
-    t0 = time.perf_counter()
+    t0 = time.process_time()
     total, why = g.measure(wide)
     assert total == 2 * g.MAX_SITES and "ceiling is 8" in why[0]
-    assert time.perf_counter() - t0 < 0.5
+    assert time.process_time() - t0 < 0.5
     many = META + "\n".join(f"await agent('x', {OPUS})" for _ in range(g.MAX_SITES + 1))
     assert g.measure(many) == (0, ["the script holds 65 agent( calls and the guard reads 64"])
+
+
+# --- T12 to T18: the refuter's round 1 (REFUTE wfg r1), each probe a deny ---------------
+# The probes' real counts, from a node harness that runs each script with stub agents:
+# b1 12, b1b 10, b2 20, b12 20, b3 1 (Fable), b7 1 (Fable), b4 12, b5 12, b6 12, b10 20, b11 6.
+
+@pytest.mark.parametrize("name, word", [
+    ("b1_unicode", "escape"),                 # F1: `\u0061gent(` hid every call
+    ("b1b_eval", "escape"),                   # F1: `\u0065val(`
+    ("b2_regexdiv", "?.("),                   # F2: a division read as a regex
+    ("b12_regex_after_paren", "?.("),         # F2: a regex read as a division
+    ("b3_dupkey", "plain `key: value`"),      # F3: a quoted second model key
+    ("b7_getter", "plain `key: value`"),      # F3: a getter named model
+    ("b4_flatmap", "the direct argument"),    # F4: thunks through .flatMap
+    ("b5_push", "is not a fixed list"),       # F5: L['push'](...)
+    ("b6_nullish", "is not a fixed list"),    # F5: L[11] ??= ...
+    ("b10_defparam", "default"),              # F6: agent( in a default parameter
+    ("b11_defparam_fable", "default"),        # F6, under a Fable parent
+])
+@pytest.mark.parametrize("parent_family", ["opus", "fable"])
+def test_t12_each_refuter_probe_is_denied(name, word, parent_family):
+    total, why = guard().measure((FIX / (name + ".js")).read_text(), parent_family)
+    assert why and any(word in w for w in why), (total, why)
+
+
+@pytest.mark.parametrize("name", ["b1_unicode", "b2_regexdiv", "b3_dupkey", "b4_flatmap",
+                                  "b10_defparam"])
+def test_t12_the_probes_are_denied_through_the_hook(name):
+    parent("claude-opus-5-5", "claude-opus-5-5")
+    assert "Workflow denied before launch" in reason(wf((FIX / (name + ".js")).read_text()))
+
+
+@pytest.mark.parametrize("name, total", [("ok_six", 6), ("ok_legal", 7),
+                                         ("pass_six_opus", 6)])
+def test_t13_the_plain_legal_scripts_stay_allowed(name, total):
+    src = (FIX / (name + ".js")).read_text()
+    assert guard().measure(src, "opus") == (total, [])
+    parent("claude-opus-5-5", "claude-opus-5-5")
+    assert wf(src) == {}
+
+
+@pytest.mark.parametrize("body, word", [
+    ("await \\x61gent('p', " + OPUS + ")", "escape"),
+    ("await parallel([1].map(i => () => agent('p', " + OPUS + ")))\nconst f = Function", "`Function`"),
+    ("await agent('p', " + OPUS + ")\nconst g = globalThis", "`globalThis`"),
+    ("await agent('p', " + OPUS + ")\nconst c = [].constructor", "`constructor`"),
+    ("await agent('p', " + OPUS + ")\nReflect.apply(agent, null, [])", "`Reflect`"),
+    ("await agent('p', " + OPUS + ")\nwith (o) { x() }", "`with`"),
+    ("await agent('p', " + OPUS + ")\nawait import('x')", "`import(`"),
+    ("await agent('p', " + OPUS + ")\nconst s = 'an agent here'", "more times"),
+    ("await agent('p', " + OPUS + ")\nawait this.agent('p', " + OPUS + ")", "more times"),
+])
+def test_t14_the_raw_backstop_counts_too_much_never_too_little(body, word):
+    total, why = guard().measure(META + body, "opus")
+    assert why and any(word in w for w in why), (total, why)
+
+
+@pytest.mark.parametrize("opts", [
+    "{ label: 'a', model: 'opus', model: 'opus' }",
+    "{ label: 'a', ['model']: 'fable', model: 'opus' }",
+    "{ label: 'a', \"model\": 'opus' }",
+    "{ label: 'a', model }",
+    "{ label: 'a', model() { return 'opus' } }",
+    "{ label: 'a', set model(v) {}, model: 'opus' }",
+])
+def test_t15_one_literal_model_key_in_plain_options(opts):
+    total, why = guard().measure(META + "await agent('p', " + opts + ")", "opus")
+    assert why, (total, why)
+
+
+def test_t16_the_guard_bounds_its_own_work(monkeypatch):
+    src = (FIX / "pass_six_opus.js").read_text()
+    monkeypatch.setattr(guard(), "BUDGET", 0.0)
+    total, why = guard().measure(src, "opus")
+    assert why and "budget" in why[0], why
+    parent("claude-opus-5-5", "claude-opus-5-5")
+    assert "budget" in reason(wf(src))
+
+
+def test_t17_an_exception_in_the_agent_rule_denies(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("probe")
+    monkeypatch.setattr(hooks, "_session_family", boom)
+    assert "fails closed" in reason(spawn("fable"))
+    assert "fails closed" in reason(spawn("claude-fable-5-2"))
+    monkeypatch.setattr(guard(), "family", boom)
+    assert "fails closed" in reason(spawn("opus"))
+
+
+def test_t18_script_and_script_path_together_are_denied(tmp_path):
+    f = tmp_path / "nine.js"
+    f.write_text((FIX / "b9_nine.js").read_text())
+    parent("claude-opus-5-5", "claude-opus-5-5")
+    assert "both" in reason(wf("return 1", scriptPath=str(f)))
+    assert "both" in reason(wf((FIX / "ok_six.js").read_text(), scriptPath=str(f)))
