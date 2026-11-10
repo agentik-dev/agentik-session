@@ -20,7 +20,7 @@
 - [x] review round 1, AA1: STALLED_LINE's parts the same, T4's two cases red at 076137a; the status line 2553
 - [x] gate 20261109-202820-777 exit 2: 2553 passed, floor 2529 + 3 skipped; red only on plugin-version-check (charter.py past alpha.53)
 - [x] the bump: alpha.54, the status line, rendered.sha256 re-hashed
-- [ ] the gate a second time (a red stops), then the exit line
+- [x] gate 20261109-203848-778 exit 0 in 9 min (2553 passed, floor 2529 + 3 skipped, readme fresh)
 
 ## Handover
 - Choice (consumer: the refuter): the meter check reads <what> to its first `;`; WAITING_LINE's `\S` let it take FULL's <how to tell> (test_charter's how-to-tell case).
@@ -31,6 +31,6 @@
 - Choice (consumer: the coordinator): alpha.54, not R9's alpha.53; the review's fix touched charter.py after the bump, and plugin-version-check wants a new version.
 
 ## Next act
-the gate a second time, on a clean tree
+none: the branch waits on its second review round and landing
 
-exit: FW1a done at gate 20261109-195158-775 exit 0; R1 to R11, alpha.53 and NICE n27 to n35 committed; nothing pushed
+exit: FW1a review round 1 folded (BA1, AA1) at gate 20261109-203848-778 exit 0; alpha.54; nothing pushed
