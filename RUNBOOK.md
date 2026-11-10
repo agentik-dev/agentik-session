@@ -31,14 +31,14 @@ resolves to deny, even though Claude Code still reports success. Read section
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
-   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
+   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
+   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch`, `PostModelSwitch` and `PreCompact` (keeping
    PreCompact's stdout, its block), so no turn end, no helper's loop and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
@@ -333,6 +333,16 @@ Postures, least to most restrictive, all confirmed by test:
   `permissionDecision: "ask"`. The reason names the zone.
 - `deny`: returns `"deny"` only in the reserve zone; in wind-down it still
   just asks.
+
+Whatever the posture, the spawn rule (packet wfg) denies before launch: a
+`Workflow` script it cannot bound to 8 agents, each with a literal `model`,
+and any Fable spawn (`Agent`, `Task`, or a script's agent) unless
+`model.json` (SessionStart, then each `PostModelSwitch`) and the meter both
+read Fable; the denial names the lines and the rewrite (the skill lists them).
+
+- With the plugin off or its hook timed out nothing denies: a timed-out hook
+  does not block the call, and the tool's own caps alone hold, 16 agents at
+  once and 1000 a run.
 
 A checkpoint is a commit or a durable record: run one and the session is
 handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
