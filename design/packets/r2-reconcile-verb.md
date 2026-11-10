@@ -50,7 +50,7 @@ New: `SESSION_KEYS`' `reconcile`; `reconcile/runner.py` (`KEYS`, `READ_KEYS`, `R
 
 ## 4. Findings that name this row
 
-No session ledger. Bearing, uncrossed: hq 6; the machine ledger's entry 20; §4 Never (R5). **Ruled by the orchestrator, 2026-11-09 23:05: flagged exits 1**, the guide's "a check said no", as `charter check` gives its red; 3 stays "not installed". Wherever this packet, `test_r2.py` (`:154`, now `rc == 1`) or the prototype says 3 for flagged, read 1; design/08 §4 is amended to match. The fork as the cutter met it: exit 3 for "flagged" conflicts with GUIDE §10 (`GUIDE.md:84`, quoted in §1): 3 is "not installed", and a flagged finding is content, or at most "a check said no", which is 1, as `charter check` gives its red. The packet keeps the design's; the owner picks 3 or 1, and R3's skill branches on it. NICE to file, S4: a record past 4,096 B is written and said, not cut.
+No session ledger. Bearing, uncrossed: hq 6; the machine ledger's entry 20; §4 Never (R5). **Ruled by the orchestrator, 2026-11-09 23:05: flagged exits 1**, the guide's "a check said no", as `charter check` gives its red; 3 stays "not installed". Wherever this packet, `test_r2.py` (`:154`, now `rc == 1`) or the prototype says 3 for flagged, read 1; design/08 §4 is amended to match. The cutter's fork before the ruling is in the coordinating repo's original. NICE to file, S4: a record past 4,096 B is written and said, not cut.
 
 ## 5. Forbidden reads
 
