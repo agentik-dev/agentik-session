@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] charter written at open: this file
 - [x] the packet committed with this charter (two sibling names and one ledger file name reworded for the scan, no ruling word moved)
-- [ ] tests: T1 to T6 in `tests/test_r1.py`, red at 2eaa069 under 3.12 and 3.9.6
+- [x] tests: T1 to T6 in `tests/test_r1.py`, red at 2eaa069: `6 failed` under 3.12.7 and under 3.9.6
 - [ ] the library: R1 to R8, T1 to T6 green under both pythons, neighbours green
 - [ ] the texts and the bump: R9, alpha.59 (the packet's alpha.57 moved by two folds), status line, sidecar; NICE (S4: `rules.mix` has no 1h write price)
 - [ ] verify: the gate once, `make check`
@@ -25,4 +25,4 @@
 - none
 
 ## Next act
-tests: copy the probes' `test_r1.py`, run red under both pythons
+the library: R1 to R8 in `claude_session/reconcile/`
