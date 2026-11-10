@@ -15,6 +15,9 @@
 - [x] the library: R1 to R8 in `claude_session/reconcile/`; T1 to T6 `6 passed` under 3.12.7 and 3.9.6; seven neighbouring suites 338 passed (floor 336 + 2 skipped), the proof deselected
 - [x] the texts and the bump: R9, alpha.59 (the packet's alpha.57 moved by two folds), status line 2595 (collected), sidecar re-hashed (`shasum -c` OK), source 16,381 B; NICE n41 (no 1h write price), n42 (the reader holds the window in memory)
 - [x] verify: gate 20261110-004433-825 exit 0 in 8 min (2595 passed, floor 2571 + 3 skipped, validate passed, readme fresh)
+- fold of refuter round 1 (hq's REFUTE-2026-11-10-r1-r1, its dispositions): F1, F2 (ruled), F3, F6, F9; NICE F4, F5, F7, F8
+- [x] fold tests: 33 cases appended to `tests/test_r1.py`, none edited; red at ba48d6d: `10 failed, 29 passed` under 3.12.7 and 3.9.6 (F1 x4, F6, F2 x4, F3); the F9 cases pass there and are red only under their mutation
+- [ ] fold code, NICE rows, alpha.60, gate
 
 ## Handover
 - open by level: none yet

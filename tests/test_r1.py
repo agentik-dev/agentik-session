@@ -253,3 +253,242 @@ def test_r1_the_package_imports_no_model_client():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                        env={**os.environ, "PYTHONPATH": str(ROOT / "plugin" / "lib")})
     assert (r.returncode, r.stdout.strip()) == (0, "[]"), r.stderr
+
+
+# ---- the refuter's round 1, folded (F1, F2, F3, F6, F9) ------------------------------------
+
+def _sh(cmd, **env):
+    out = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True, text=True, timeout=60,
+                         env={**os.environ, **env})
+    return out.returncode, out.stdout, out.stderr
+
+
+def _goal_finding(tmp_path, texts, **kw):
+    tree, roots = world(tmp_path)
+    d = roots["hq"] / "history" / "sittings"
+    d.mkdir(parents=True)
+    for name, raw in texts:
+        (d / (name + ".md")).write_bytes(raw)
+    return one(_rc().detect(tree, 14, NOW, roots, detectors=["live.goal_unchanged"], **kw),
+               "live.goal_unchanged")
+
+
+def _command_count(f, **env):
+    rc, out, err = _sh(f["evidence"]["command"], **env)
+    assert rc == 0, err
+    return int(out.split()[0]) if out.split() else 0
+
+
+ROW = b"# S\n\n| item | value |\n|---|---|\n%s\n| budget | b |\n"
+SHAPES = {   # F1: each shape of a goal row reads as the command's grep -m1, sed and uniq -c read it
+    "no_closing_pipe": lambda n: ROW % b"| goal | the loop",
+    "bare_goal_cell": lambda n: ROW % b"| goal |",
+    "crlf_and_lf": lambda n: (ROW % b"| goal | the loop |").replace(
+        b"\n", b"\r\n" if n % 2 else b"\n"),
+    "trailing_blanks": lambda n: ROW % (b"| goal | the loop  \t|" + (b" \t" if n % 2 else b"")),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+def test_r1_fold_goal_row_reads_as_its_command(tmp_path, shape):
+    f = _goal_finding(tmp_path, [("2026-11-01-%d" % n, SHAPES[shape](n)) for n in range(1, 13)])
+    assert (f["value"], f["flagged"]) == (12, True)
+    assert _command_count(f) == f["value"]
+
+
+def test_r1_fold_goal_command_sorts_in_the_c_locale(tmp_path):
+    # F6: two charters of one (date, n) whose suffixes differ in case, at the 20 boundary
+    row = lambda g: ROW % (b"| goal | " + g + b" |")
+    texts = [("2026-11-01-1-B", row(b"A")), ("2026-11-01-1-a", row(b"Z"))]
+    texts += [("2026-11-01-%d" % n, row(b"A")) for n in range(2, 21)]
+    f = _goal_finding(tmp_path, texts)
+    assert f["value"] == 19
+    assert _command_count(f, LANG="en_US.UTF-8") == 19
+    assert "LC_ALL=C" in f["evidence"]["command"]
+
+
+@pytest.mark.parametrize("same,flagged", [(10, True), (9, False)])
+def test_r1_fold_goal_threshold_is_reached_at_equal(tmp_path, same, flagged):
+    # F9 M1: `flagged` is value >= threshold
+    texts = [("2026-11-01-%d" % n, ROW % (b"| goal | the loop |" if n <= same else
+                                          b"| goal | other " + b"x" * n + b" |"))
+             for n in range(1, 21)]
+    f = _goal_finding(tmp_path, texts)
+    assert (f["value"], f["threshold"], f["flagged"]) == (same, 10, flagged)
+    assert _command_count(f) == same
+
+
+def _since(f):
+    rc, out, err = _sh(f["evidence"]["command"])
+    assert rc == 0, err
+    return int(out.split()[-1])
+
+
+def test_r1_fold_since_landing_takes_the_newest_goal_landing(tmp_path):
+    # F9 M10: `side` lands after `tool`; the newest of the two is the line
+    tree, roots = landing_world(tmp_path)
+    f = one(_rc().detect(tree, 14, NOW, roots, goal=["tool", "side"],
+                         detectors=["live.since_landing"]), "live.since_landing")
+    assert f["evidence"]["numbers"]["landing_at"] == int(NOW) - DAY
+    assert (f["value"], _since(f)) == (0, 0)
+
+
+def test_r1_fold_since_landing_counts_added_charters_only(tmp_path):
+    # F9 M13: a charter opened before the landing and edited after it is not opened since
+    tree, roots = landing_world(tmp_path)
+    p = roots["hq"] / "history" / "sittings" / "2026-11-04-1-hq.md"
+    p.write_text(p.read_text() + "edit\n")
+    git(roots["hq"], "add", str(p.relative_to(roots["hq"])))
+    git(roots["hq"], "commit", "-q", "-m", "edit", at=int(NOW) - 2 * DAY)
+    f = one(_rc().detect(tree, 14, NOW, roots, goal=["tool"], detectors=["live.since_landing"]),
+            "live.since_landing")
+    assert (f["value"], _since(f)) == (2, 2)
+
+
+def test_r1_fold_since_landing_without_a_landing_reads_the_window(tmp_path):
+    # F9 M21: no goal repo has landed: since is the window's start, never now
+    tree, roots = landing_world(tmp_path)
+    f = one(_rc().detect(tree, 14, NOW, roots, goal=["nothere"],
+                         detectors=["live.since_landing"]), "live.since_landing")
+    assert f["evidence"]["numbers"]["landing_at"] is None
+    assert (f["value"], _since(f)) == (3, 3)
+
+
+def test_r1_fold_default_goal_drops_the_hq_a_given_goal_keeps_it(tmp_path):
+    # F9 M3 and M5 (choice 1): the default goal is the tree without the hq; a given one is as given
+    tree, roots = world(tmp_path)
+    tree = {"repos": [{"name": "tool"}, {"name": "hq"}]}
+    T0 = int(NOW) - 5 * DAY
+    for r, merge_at in ((roots["repos"] / "tool", T0 + DAY), (roots["hq"], T0 + 3 * DAY)):
+        r.mkdir(exist_ok=True)
+        git(r, "init", "-q", "-b", "main")
+        (r / "a").write_text("a")
+        git(r, "add", "a")
+        git(r, "commit", "-q", "-m", "a", at=T0)
+        if r.name == "hq":
+            p = charter(r, "2026-11-06-1-hq", "g a")
+            git(r, "add", str(p.relative_to(r)))
+            git(r, "commit", "-q", "-m", "open", at=T0 + 2 * DAY)
+        git(r, "checkout", "-q", "-b", "row")
+        (r / "b").write_text("b")
+        git(r, "add", "b")
+        git(r, "commit", "-q", "-m", "b", at=merge_at - 60)
+        git(r, "checkout", "-q", "main")
+        git(r, "merge", "-q", "--no-ff", "-m", "land row", "row", at=merge_at)
+    p = charter(roots["hq"], "2026-11-07-1-hq", "g b")
+    git(roots["hq"], "add", str(p.relative_to(roots["hq"])))
+    git(roots["hq"], "commit", "-q", "-m", "open", at=T0 + 3 * DAY + 3600)
+    f = one(_rc().detect(tree, 14, NOW, roots, detectors=["live.since_landing"]),
+            "live.since_landing")
+    assert (f["evidence"]["numbers"]["landing_at"], f["value"], _since(f)) == (T0 + DAY, 2, 2)
+    g = one(_rc().detect(tree, 14, NOW, roots, goal=["tool", "hq"],
+                         detectors=["live.since_landing"]), "live.since_landing")
+    assert (g["evidence"]["numbers"]["landing_at"], g["value"], _since(g)) == (T0 + 3 * DAY, 1, 1)
+
+
+def test_r1_fold_a_raising_detector_is_a_false_finding(tmp_path):
+    # F9 M16 (choice 5): the guard turns a raising detector into value None, command `false`
+    tree, roots = goal_world(tmp_path)
+
+    def boom(cwd, *args):
+        raise RuntimeError("git exploded")
+    found = _rc().detect(tree, 14, NOW, roots, goal=["tool"], readers=_rc().Readers(git=boom),
+                         detectors=["live.since_landing", "live.goal_unchanged"])
+    f, g = one(found, "live.since_landing"), one(found, "live.goal_unchanged")
+    assert (f["value"], f["flagged"], f["evidence"]["command"]) == (None, False, "false")
+    assert "exploded" not in json.dumps(found) and g["value"] == 14
+
+
+def test_r1_fold_an_unknown_detector_is_a_value_error(tmp_path):
+    # F9 M23 (choice 5)
+    tree, roots = world(tmp_path)
+    with pytest.raises(ValueError):
+        _rc().detect(tree, 14, NOW, roots, detectors=["live.nope"])
+
+
+def _idle_finding(tmp_path, rows, raw=()):
+    tree, roots = world(tmp_path)
+    d = roots["projects"] / slug(roots["hq"])
+    d.mkdir(parents=True)
+    p = d / "s1.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows) + "".join(raw))
+    os.utime(p, (NOW - 60, NOW - 60))
+    f = one(_rc().detect(tree, 14, NOW, roots, detectors=["eff.idle"]), "eff.idle")
+    rc, out, err = _sh(f["evidence"]["command"])
+    assert rc == 0, err
+    words = out.split()
+    printed = dict(zip(words[::2], words[1::2]))
+    assert printed["share"] == str(f["value"]), (printed, f)
+    return f, printed
+
+
+def _two_ticks(command=None, tool=None, at=None):
+    """An active tick (a Write outside the charters) and a `/loop` tick whose one call runs
+    `command` in Bash, or `tool`."""
+    ts = lambda s: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW - 3600 + s))
+    block = tool if tool is not None else _tool("Bash", command=command)
+    return [_user("build", ts(0)),
+            _call("w1", ts(1), _u(1, 0, 0, 0), _tool("Write", file_path="/r/x.py")),
+            _user("/loop check", ts(10) if at is None else at),
+            _call("b1", ts(11), _u(2, 0, 0, 0), block)]
+
+
+HEREDOC = ("git add history/sittings/2026-11-10-1.md && git commit -m \"$(cat <<'EOF'\n"
+           "checkpoint: the \"charter\" current; make it so\nEOF\n)\"")
+CHARTER_ONLY = [   # F2, ruled: a tick whose only writes are charters is idle
+    "git add history/sittings/2026-11-10-1.md && git commit -m 'checkpoint: make it current'",
+    HEREDOC,
+    "cd /r/hq && git -C /r/hq add /r/hq/history/sittings/2026-11-10-1.md && git commit -q -m x",
+    "git status --short && git commit -m x -- history/sittings/2026-11-10-1.md",
+]
+MOVES = [
+    "git add history/sittings/2026-11-10-1.md HANDOFF.md && git commit -m x",
+    "git add history/sittings/2026-11-10-1.md && git commit -m x && git push",
+    "git add history/sittings/2026-11-10-1.md; git merge row",
+    "git add history/sittings/2026-11-10-1.md && make check",
+    "git commit -am 'checkpoint'",
+    "git commit -m 'history/sittings/2026-11-10-1.md'",
+    "git add -A && git commit -m x",
+    "git add history/sittings/../../x.py && git commit -m x",
+    "git add history/sittings/2026-11-10-1.md > /tmp/x && git commit -m x",
+    "git add 'history/sittings/2026-11-10-1.md && git commit -m x",
+]
+
+
+@pytest.mark.parametrize("command", CHARTER_ONLY)
+def test_r1_fold_a_charter_commit_is_idle(tmp_path, command):
+    f, printed = _idle_finding(tmp_path, _two_ticks(command))
+    n = f["evidence"]["numbers"]
+    assert (n["ticks"], n["idle"], n["idle_loop"]) == (2, 1, 1)
+    assert f["value"] == 66.7 and f["flagged"]          # 2 of 3 weighted, to one decimal
+
+
+@pytest.mark.parametrize("command", MOVES)
+def test_r1_fold_a_commit_beyond_the_charters_moves(tmp_path, command):
+    f, _ = _idle_finding(tmp_path, _two_ticks(command))
+    assert (f["evidence"]["numbers"]["idle"], f["value"]) == (0, 0.0)
+
+
+@pytest.mark.parametrize("tool", [_tool("Task", prompt="p"), _tool("SendMessage", to="x"),
+                                  _tool("Write", file_path="/r/oldhistory/sittings/a.md"),
+                                  _tool("Edit", file_path="/r/history/sittings-old/a.md")])
+def test_r1_fold_a_helper_a_message_or_a_near_charter_write_moves(tmp_path, tool):
+    # F9 M4 (choice 3): a charter is a path holding `/history/sittings/`, never a substring
+    f, _ = _idle_finding(tmp_path, _two_ticks(tool=tool))
+    assert (f["evidence"]["numbers"]["idle"], f["value"]) == (0, 0.0)
+
+
+def test_r1_fold_a_tick_at_the_window_start_counts(tmp_path):
+    # F9 the `>=` edge (M7): a prompt at exactly now - window opens a tick
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(NOW - 14 * DAY)))
+    f, _ = _idle_finding(tmp_path, _two_ticks("git status", at=at))
+    assert (f["evidence"]["numbers"]["ticks"], f["value"]) == (2, 66.7)
+
+
+def test_r1_fold_an_unreadable_line_is_skipped_and_counted(tmp_path):
+    # F3: a non-finite number and deep nesting each cost one line, never the detector
+    raw = ['{"type":"assistant","requestId":"r9","message":{"id":"m9","usage":'
+           '{"output_tokens":Infinity}}}\n', "[" * 100000 + "]" * 100000 + "\n", "{not json\n"]
+    f, printed = _idle_finding(tmp_path, _two_ticks("git status"), raw)
+    assert (f["value"], f["evidence"]["command"] != "false") == (66.7, True)
+    assert f["evidence"]["numbers"]["unread"] == 3 and printed["unread"] == "3"
