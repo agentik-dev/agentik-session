@@ -13,7 +13,7 @@
 - [x] the packet committed with this charter (two sibling names and one ledger file name reworded for the scan, no ruling word moved)
 - [x] tests: T1 to T6 in `tests/test_r1.py`, red at 2eaa069: `6 failed` under 3.12.7 and under 3.9.6
 - [x] the library: R1 to R8 in `claude_session/reconcile/`; T1 to T6 `6 passed` under 3.12.7 and 3.9.6; seven neighbouring suites 338 passed (floor 336 + 2 skipped), the proof deselected
-- [ ] the texts and the bump: R9, alpha.59 (the packet's alpha.57 moved by two folds), status line, sidecar; NICE (S4: `rules.mix` has no 1h write price)
+- [x] the texts and the bump: R9, alpha.59 (the packet's alpha.57 moved by two folds), status line 2595 (collected), sidecar re-hashed (`shasum -c` OK), source 16,381 B; NICE n41 (no 1h write price), n42 (the reader holds the window in memory)
 - [ ] verify: the gate once, `make check`
 
 ## Handover
@@ -25,4 +25,4 @@
 - none
 
 ## Next act
-the texts and the bump: R9, NICE
+verify: the gate once
