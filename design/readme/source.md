@@ -62,7 +62,7 @@ CLI verbs (`agentik session --help`):
 | `reconcile` | `agentik session reconcile` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task`, and denies `Workflow`), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
 ## Profiles
 
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.67`, rendered `2026-11-10`, `2922` tests in the suite.
+Status: version `v2.0.0-alpha.68`, rendered `2026-11-10`, `2836` tests in the suite.
 
 ## Credit
 
