@@ -120,6 +120,38 @@ not retry it or work around it.** The remainder is reserved so that you can
 finish cleanly: stop starting new work, commit what is in flight, and write the
 handoff.
 
+**The spawn rule** (packet wfg) holds whatever the posture, a helper's call too,
+and denies before launch with one line, `Workflow denied before launch: lines
+N: <reason>: <rewrite>`. Apply the rewrite and call again; never route around it.
+- Every `agent(` names its model in its own options literal:
+  `agent(prompt, { label: '...', model: 'opus' })`. No spread, name or helper's
+  result; an unnamed agent would run on the session's model.
+- A script starts 8 agents at most. A call counts once at the top level or in an
+  `if` (both arms of a ternary), or in a callback given directly to `parallel(`,
+  `pipeline(`, `.map(`, `.flatMap(` or `.then(`; a `.map(`, `.flatMap(` or
+  `pipeline(` multiplies by its list, which must be an inline array, a top-level
+  `const` array never changed, or `<list>.slice(0, N)`.
+- Denied, with the rewrite: a call in a loop (unroll it, or map a literal list);
+  in a named function or another call's callback (write it inline, or give the
+  callback directly to `parallel(`); thunks kept in a name (build them inside the
+  `parallel(`); a list known at run time (`.slice(0, N)`); `workflow(`, `eval(`,
+  `Function(`, `import(`, `require(`, `globalThis` (inline the child's calls); the
+  text `agent(` in a string or comment (reword it); a script the guard cannot read
+  (simplify the quoting); no `script` and no readable `scriptPath` file, or both
+  (pass one); a default parameter that calls `agent(` (write the call inline).
+- The text is read raw too, escapes decoded, strings and comments included: an
+  escape in the code, `eval`, `Function`, `globalThis`, `constructor`, `Reflect`,
+  `import(`, `?.(` or `with (`, or the word `agent` more often than the code calls
+  it, is denied (reword the prompt). Options are plain `key: value` pairs with one
+  literal `model`. A list read only by a numeric index (`L[0]`). The read stops at
+  1 s of CPU and denies.
+- Fable: an `Agent` or `Task` with a Fable `model`, or a script's Fable agent,
+  starts only under a Fable session, as both `model.json` (SessionStart, then each
+  `/model` switch) and the meter read it; else name `model: 'opus'`. In a script,
+  a Fable agent needs a label that starts with `design` or `refut`, two at most.
+  "Not known" (no record yet, or a switch one record has not seen) clears after
+  one tool call.
+
 ## The charter
 
 The charter is the sitting's live head: one file per sitting under the
@@ -130,6 +162,7 @@ open one before the first act.
 ```bash
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
 agentik-session charter open --continue "<goal>"  # adopts today's newest of the suffix under 3,584 B, else as open
+agentik-session charter open --replace "<goal>"   # takes this sitting's record off a charter still open here; never in a helper
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest, or two of its suffix stand with no record
 ```

@@ -52,6 +52,13 @@ _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowe
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 20, "floor": 600, "settle": 60}
 HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
+# u1 R1: a helper call open this long, and no helper stamp as recent, is stale: a rejected
+# call fires no Post, so its file would hold the launcher forever. Bash's ceiling is 600 s.
+STALE_CALL = 1200
+# The fold of u1's round 1: a call's `at` is its opening only when it is a finite time not
+# after now and not before this floor (2001-09-09): one before it is in another unit, or no
+# stamp of the hooks', which write time.time(). Any other call file is aged from first sight.
+AT_FLOOR = 1e9
 _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overlay is read
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
 _EVERY = re.compile(r"\bevery\s+(\d+)\s*([smhd])[a-z]*\s*$", re.I)   # `/loop <p> every 2h`
@@ -272,6 +279,13 @@ def _num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _opened(at, now: float) -> bool:
+    """u1's fold: a call file's `at` is when it opened only as a finite time from
+    AT_FLOOR to now; NaN, an infinity, a future stamp or another unit is not. Compared,
+    never subtracted: a JSON integer too large for a float compares exactly."""
+    return _num(at) and AT_FLOOR <= at <= now
+
+
 def _status(rc: int) -> int:
     """A child's status as a shell reports it: a signal N is 128+N (ruling 8)."""
     return 128 - rc if rc < 0 else rc
@@ -283,6 +297,10 @@ class Effects:
 
     def now(self) -> float:
         return time.time()
+
+    def monotonic(self) -> float:
+        """A clock that does not go back: a call file's first sight (u1's fold)."""
+        return time.monotonic()
 
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
@@ -371,11 +389,15 @@ class Chain:
     again before each restart; `poll`, `grace` and `kill_grace` are seconds."""
 
     def __init__(self, name, args, state, effects, guards, *, poll=2, grace=10,
-                 kill_grace=30, argv=None, warnings=()):
+                 kill_grace=30, argv=None, warnings=(), stale_call=STALE_CALL):
         self.name, self.args, self.state, self.fx = name, list(args), Path(state), effects
         self.warnings = list(warnings)  # said once, after the lock and the guards hold
         self._guards = guards
         self.poll, self.grace, self.kill_grace = poll, grace, kill_grace
+        self.stale_call = stale_call    # u1 R1: seconds before an open helper call is stale
+        self._stale: list[dict] = []    # the stale calls the last ready read went past
+        self._first: dict[str, float] = {}  # a call file's first sight, on fx.monotonic()
+        self.went_past: list[dict] = []     # and those of the child the launcher ended
         self.argv = list(argv) if argv else ["agentik", "session", "run", "--chain", name,
                                              "--", *self.args]
         self.home = self.state / "respawn" / name
@@ -474,6 +496,10 @@ class Chain:
             rc, ended_by, held = self._watch(proc, sid, start)
             cut = len(self.got)                  # the signals taken while the child ran
             self.fx.tty_restore(attrs)                     # §3.7: before anything prints
+            if self.went_past:                   # u1 R1's word, before the grace line
+                self.fx.say(f"{self.name}: went on past a stale helper call: " + "; ".join(
+                    f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
+                    for s in self.went_past))
             seconds = round(self.fx.now() - start)
             reason, code, marker, count = self._decide(sid, start, rc, ended_by, held)
             if reason is None:
@@ -488,7 +514,8 @@ class Chain:
                          "charter_sha256": marker.get("charter_sha256"),
                          "sitting_seconds": seconds, "ended_by": ended_by or "exit",
                          "restarts_24h": count + 1, "cap": self.g["cap"],
-                         "model": carried, "start_model": start_model}      # S34 ruling 4
+                         "model": carried, "start_model": start_model,      # S34 ruling 4
+                         "stale_calls": list(self.went_past) or None}       # u1 R1
                 try:
                     self.fx.append(self.state, entry)       # §3.5: before the successor
                 except (OSError, ledger.LedgerError) as e:
@@ -550,6 +577,8 @@ class Chain:
         sdir = resolver.session_dir(self.state, sid)
         held = ended_by = term_at = seen = None
         forwarded = False
+        self.went_past = []                  # u1 R1: the stale calls this child's end passed
+        self._first = {}                     # and the first sights of its odd call files
         self._said = ""                      # a file a past watch left goes at the first say
         try:
             while True:
@@ -598,6 +627,8 @@ class Chain:
         if not self._resolve():                  # §4: a config edit counts before the signal
             return "config", seen, False
         held = self._checks(sdir, sid, start, now)           # N4: again, right before
+        if held is None:
+            self.went_past = list(self._stale)       # u1 R1: said once the terminal is back
         return held, seen, held is None
 
     def _resolve(self) -> bool:
@@ -637,9 +668,14 @@ class Chain:
             return
         self._said = reason
 
-    def _ready(self, sdir: Path, now: float) -> bool:
+    def _ready(self, sdir: Path, now: float, mono: float | None = None) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,
-        the end has stood `settle`, the helpers are quiet `settle` and none has a call open."""
+        the end has stood `settle`, the helpers are quiet `settle` and none has a call open,
+        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since. A True
+        keeps the stale calls in `_stale`, `[{"id", "age"}]`, the age in whole seconds.
+        A call whose `at` is no time (`_opened`) is aged from the launcher's first sight of
+        its name on `mono`, `fx.monotonic()` by default, and its age is None (u1's fold)."""
+        mono = self.fx.monotonic() if mono is None else mono
         settle = self.g["settle"]
         marker, te = _json(sdir / hooks.MARKER) or {}, _json(sdir / hooks.TURN_ENDED) or {}
         written, ended = marker.get("written"), te.get("at")
@@ -651,14 +687,39 @@ class Chain:
         # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
         # close between the two reads leaves a fresh stamp, never a gap.
         try:
-            if any(not p.name.startswith(".") for p in (sdir / hooks.CALLS).iterdir()):
-                return False
+            paths = sorted(p for p in (sdir / hooks.CALLS).iterdir() if not p.name.startswith("."))
         except FileNotFoundError:
-            pass
+            paths = []
         except OSError:
-            return False
+            paths = [sdir / hooks.CALLS]     # calls/ will not list: aged from first sight
+        calls = []                           # (id, age in seconds, from `at` or not)
+        for p in paths:
+            try:
+                at = (_json(p) or {}).get("at")
+            except Exception:                # one file's error holds a poll at most (fold)
+                at = None
+            seen = self._first.get(str(p))
+            if _opened(at, now) and (seen is None or now - at >= mono - seen):
+                calls.append((p.name, now - at, True))
+            else:                            # the older of `at` and first sight counts
+                seen = self._first.setdefault(str(p), mono)
+                calls.append((p.name, mono - seen, False))
         helper = _json(sdir / hooks.HELPER_ACTIVITY)
-        return helper is None or (_num(helper.get("at")) and now - helper["at"] >= settle)
+        if helper is not None and not _num(helper.get("at")):
+            return False                     # a malformed stamp holds
+        # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
+        # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
+        h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+        recent = h is not None and h > now - self.stale_call
+        stale = []
+        for cid, age, timed in calls:
+            if recent or age < self.stale_call:
+                return False
+            stale.append({"id": cid, "age": int(age) if timed else None})
+        if h is not None and h > now - settle:
+            return False
+        self._stale = stale
+        return True
 
     # ---- the checks (§3.4, §3.5) --------------------------------------------------------
 

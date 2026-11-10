@@ -30,10 +30,51 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import (budget, charter, gate, harness, install, ledger, meter, policystore, resolver, rules,
-               sessionconfig, store)
+               sessionconfig, store, workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
+
+# Packet n33 R6, as the review folded it (fail-closed, linear): the rule reads no flags. In a
+# helper's command, a launcher name (a path to bin/agentik-session and `-m claude_session` too)
+# followed on the same logical line by the word `charter` is denied unless the word right after
+# that `charter` is a verb that only reads; every `charter` after the launcher is read. Quotes
+# and backslash-newlines are dropped first (a lone backslash too: it quotes the next byte), so
+# a quoted or continued spelling reads as the plain one. Each regex has one repetition at most
+# and none nests, so the pass is linear in the command's length. A quoted mention that names
+# the launcher is denied too, and the helper rewords it.
+CHARTER_READS = ("check",)          # `charter`'s verbs that write nothing: never open, never close
+_LAUNCHER = re.compile(r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])")
+_CHARTER_WORD = re.compile(r"(?<![\w-])charter(?![\w.-])")
+_CHARTER_READ = re.compile(r"[ \t]+(?:" + "|".join(CHARTER_READS) + r")(?![\w.-])")
+
+
+class _HelperCharter:
+    """The rule, with a compiled pattern's `search`: the first `charter` it denies (a match in
+    the plain text), else None."""
+
+    @staticmethod
+    def plain(cmd: str) -> str:
+        return cmd.replace("\\\n", "").replace("'", "").replace('"', "").replace("\\", "")
+
+    def search(self, cmd: str):
+        for line in self.plain(cmd).split("\n"):
+            launcher = _LAUNCHER.search(line)
+            if launcher is None:
+                continue
+            for word in _CHARTER_WORD.finditer(line, launcher.end()):
+                if _CHARTER_READ.match(line, word.end()) is None:
+                    return word
+        return None
+
+
+HELPER_CHARTER = _HelperCharter()
+HELPER_CHARTER_DENY = (
+    "agentik-session: a helper's charter open or close would take or write its sitting's "
+    "record (a helper's Bash carries its parent's session id). Write your charter by hand "
+    "(a helper's one charter call is `agentik-session charter check <file>`, the verb first), "
+    "and put a probe's own call to charter open or close in a script file run under a scratch "
+    "state home.")
 
 _TOKEN = re.compile(r"[^A-Za-z0-9_.:-]")
 _WSRC = re.compile(r"[^A-Za-z0-9_.:\[\]-]")       # a window's source keeps `[1m]`
@@ -178,13 +219,132 @@ def _close_call(payload: dict, env) -> None:
         pass
 
 
+def _helper_charter(payload: dict) -> bool:
+    """Packet n33 R6: a helper's (agent_id) Bash whose command names this tool's `charter`
+    with any word but a read-only verb right after it (HELPER_CHARTER)."""
+    if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
+        return False
+    cmd = (payload.get("tool_input") or {}).get("command")
+    return isinstance(cmd, str) and HELPER_CHARTER.search(cmd) is not None
+
+
+MODEL_REC = "model.json"    # the session's model: SessionStart's, then each PostModelSwitch's
+MODEL_UNKNOWN = ("the session's model is not known (no record yet, or a switch its records "
+                 "have not both seen: retry after one tool call)")
+
+
+def _model_stamp(payload: dict, env, model, source: str) -> None:
+    if isinstance(model, str) and model.strip() and not payload.get("agent_id"):
+        _stamp(payload, env, MODEL_REC, {"model": model.strip()[:128], "from": source,
+                                         "at": time.time()})
+
+
+def post_model_switch(payload: dict, env=None) -> dict:
+    """Packet wfg R6: the switch's `to_model` is the session's model from here on."""
+    _model_stamp(payload, os.environ if env is None else env, payload.get("to_model"), "switch")
+    return {}
+
+
+def _session_family(payload: dict, env) -> str | None:
+    """The session's model family as its records give it: `model.json` and the meter's last
+    main-thread line. None for a helper's payload, with no record, or when the two disagree
+    (a switch one of them has not seen yet): the caller fails closed on None."""
+    if payload.get("agent_id"):
+        return None
+    sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+    if sdir is None:
+        return None
+    seen = set()
+    for name in (MODEL_REC, "meter.json"):
+        m = _load_json(sdir / name).get("model")
+        if isinstance(m, str) and m:
+            seen.add(workflowguard.family(m) or "other")
+    return seen.pop() if len(seen) == 1 else None
+
+
+def _script_of(ti: dict):
+    """The Workflow call's script: `script` inline, else the file `scriptPath` names (a
+    resume passes it); None when neither gives readable text of a size the guard takes."""
+    if isinstance(ti.get("script"), str):
+        return ti["script"]
+    path = ti.get("scriptPath")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        p = Path(path)
+        st = p.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size > workflowguard.MAX_SCRIPT:
+            return None
+        return p.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return None
+
+
+def _spawn_rule(payload: dict, env) -> str | None:
+    """Packet wfg: the one line that denies this spawn, else None. A Fable helper starts only
+    under a Fable session (R5); a Workflow script passes `workflowguard.check` (R1 to R4).
+    Whatever fails inside the Workflow rule denies: it fails closed."""
+    tool = payload.get("tool_name")
+    ti = payload.get("tool_input")
+    ti = ti if isinstance(ti, dict) else {}
+    if tool in ("Agent", "Task"):
+        if workflowguard.family(ti.get("model")) != "fable":
+            return None
+        parent = _session_family(payload, env)
+        if parent == "fable":
+            return None
+        return ("agentik-session: a Fable helper starts only under a Fable session: "
+                + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
+                + ". Name model: 'opus'.")
+    if tool != "Workflow":
+        return None
+    try:
+        if "script" in ti and "scriptPath" in ti:
+            return ("agentik-session: Workflow denied before launch: the call names both "
+                    "`script` and `scriptPath`, and the guard cannot know which runs. Pass one.")
+        script = _script_of(ti)
+        if script is None:
+            return ("agentik-session: Workflow denied before launch: the call names no script "
+                    "the guard can read. Pass `script` inline, or `scriptPath` of a file under "
+                    f"{workflowguard.MAX_SCRIPT // 1024} KB; a saved workflow's name is not read.")
+        reasons = workflowguard.check(script, _session_family(payload, env))
+        return workflowguard.deny_line(reasons) if reasons else None
+    except Exception as e:                              # noqa: BLE001
+        return ("agentik-session: Workflow denied before launch: the guard failed "
+                f"({type(e).__name__}) and fails closed. Simplify the script, and report this line.")
+
+
+def _deny(reason: str, note: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason},
+            "systemMessage": note}
+
+
 def pre_tool_use(payload: dict, env=None) -> dict:
     """The spawn gate (§2.2): under `ask` or `deny`, a spawn in the late zones
     asks, and under `deny` one in the reserve is refused. A subagent's call: {}.
     Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only."""
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
-    _open_call(payload, os.environ if env is None else env)
+    if _helper_charter(payload):     # n33 R6: whatever the posture, and no call opened
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": HELPER_CHARTER_DENY,
+            },
+            "systemMessage": "agentik-session: denied a helper's charter open or close.",
+        }
     tool = payload.get("tool_name") or ""
+    if tool in SPAWNING_TOOLS:       # wfg: whatever the posture, a helper's too, no call opened
+        try:
+            line = _spawn_rule(payload, os.environ if env is None else env)
+        except Exception as e:                          # noqa: BLE001  (wfg r1: R6 too)
+            line = (f"agentik-session: {_token(tool)} denied before launch: the guard failed "
+                    f"({type(e).__name__}) and fails closed. Retry once; if it repeats, "
+                    "report this line.")
+        if line:
+            return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+    _open_call(payload, os.environ if env is None else env)
     if tool not in SPAWNING_TOOLS or payload.get("agent_id"):
         return {}
     cfg, zone = state(payload.get("session_id"), env)
@@ -425,6 +585,7 @@ def session_start(payload: dict, env=None) -> dict:
     `claude -p` line: it never reads the variable.
     """
     env = os.environ if env is None else env
+    _model_stamp(payload, env, payload.get("model"), "start")
     try:
         sid = payload.get("session_id")
         cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR") or os.getcwd()
@@ -782,6 +943,7 @@ HANDLERS = {
     "post-tool-use-failure": post_tool_use_failure,
     "post-tool-batch": post_tool_batch,
     "pre-compact": pre_compact,
+    "post-model-switch": post_model_switch,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -789,9 +951,10 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "SessionStart": session_start, "SessionEnd": session_end, "Stop": stop,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
-                 "PreCompact": pre_compact})
+                 "PreCompact": pre_compact, "PostModelSwitch": post_model_switch})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
-SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure"})   # StopFailure: fire-and-forget
+SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
+                    "post-model-switch", "PostModelSwitch"})   # StopFailure: fire-and-forget
 # A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.
