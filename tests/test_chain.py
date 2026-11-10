@@ -399,8 +399,8 @@ def test_s20a_waits_for_the_turn(case, fake, monkeypatch):
         earliest = 260
     elif case == "helper-open-call":
         seq += [(12, hook("PreToolUse", tool_use_id="toolu_01", **helper)),
-                (3000, hook("PostToolUse", tool_use_id="toolu_01", **helper))]
-        earliest = 3060
+                (1100, hook("PostToolUse", tool_use_id="toolu_01", **helper))]
+        earliest = 1160                     # u1 R4: closed under STALE_CALL, so it holds
     else:
         ticks = list(range(15, 3001, 30))
         seq += [(t, hook("PreToolUse", **helper)) for t in ticks]
@@ -1029,7 +1029,7 @@ def test_s22_live_call_still_holds_ready(fake):
     hooks.pre_tool_use({**a2, "tool_name": "Bash", "tool_use_id": "toolu_02gate"})
     _batch(a1, "toolu_01blocked")
     now = _ended_turn(sdir)
-    c = _chain(ch.Effects(), dict(G))
+    c = _chain(ch.Effects(), dict(G), stale_call=2 * 86400)   # u1 R4: a day later, still live
     assert [p.name for p in (sdir / hooks.CALLS).iterdir()] == ["toolu_02gate"]
     assert c._ready(sdir, now) is False
     hooks.post_tool_use({**a2, "tool_name": "Bash", "tool_use_id": "toolu_02gate"})
