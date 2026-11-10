@@ -17,7 +17,7 @@
 - [x] the bump: R9, alpha.53, status line 2549 (collected), rendered.sha256 re-hashed (`shasum -c` OK); NICE n27 to n35
 - [x] verify: gate 20261109-195158-775 exit 0 in 9 min (2549 passed in 295 s, floor 2525 + 3 skipped in 219 s, mod 196, readme fresh)
 - [x] review round 1, BA1: FULL's parts hold no `;` (`_PART`), T3's four cases red at 05388e4
-- [ ] review round 1, AA1: STALLED_LINE's parts the same, T4's two cases
+- [x] review round 1, AA1: STALLED_LINE's parts the same, T4's two cases red at 076137a; the status line 2553
 - [ ] the gate once more, then the exit line
 
 ## Handover
@@ -28,6 +28,6 @@
 - Choice (consumer: the refuter): README.md and its source edited by hand, as S54, the source 16,382 B; T3's fixture names "another repo" for the public scan.
 
 ## Next act
-AA1: STALLED_LINE's parts
+the gate once, on a clean tree
 
 exit: FW1a done at gate 20261109-195158-775 exit 0; R1 to R11, alpha.53 and NICE n27 to n35 committed; nothing pushed

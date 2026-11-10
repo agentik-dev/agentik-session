@@ -48,7 +48,7 @@ WAITING_LINE = re.compile(r"^WAITING ([1-9][0-9]*): ([^;]*\S[^;]*); (.*\S.*)$")
 _PART = r"\s*[^;\s][^;]*"
 WAITING_FULL = re.compile(rf"^WAITING [1-9][0-9]*: {_PART}; {_PART}; by {_PART}; est (\S+)$")
 STALLED = re.compile(r"^STALLED(?=[:.\s]|$)")
-STALLED_LINE = re.compile(r"^STALLED: [^;]*\S[^;]*; by [^;]*\S[^;]*; since \S.*$")
+STALLED_LINE = re.compile(rf"^STALLED: {_PART}; by {_PART}; since \S.*$")
 SHAPE = "WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>"
 STALLED_SHAPE = "STALLED: <what>; by <who>; since <when>"
 NEXT_ACT = "## Next act"

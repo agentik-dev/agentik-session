@@ -128,7 +128,8 @@ def test_fw1a_stalled(tmp_path, monkeypatch):
     assert warns(ok) == [] and warns(ok, S4_ROW) == []
     assert warns(ok, S2_ROW) == [TAKE.format(S2_ROW)]
     for bad in ("STALLED:", "STALLED: the walk", "STALLED: the walk; by owner",
-                "STALLED: the walk; since 10:00"):
+                "STALLED: the walk; since 10:00", "STALLED: ;; by ;; since x",
+                "STALLED: a; b; by owner; since x"):
         assert warns(bad) == ["STALLED without its parts: the Next act is not "
                               "'STALLED: <what>; by <who>; since <when>'"], bad
     assert warns("STALLED:", session={**SECTION, "pacing": {"enabled": False}}) == []
