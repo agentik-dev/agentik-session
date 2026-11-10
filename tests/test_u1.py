@@ -420,7 +420,8 @@ def _write(name, body=None, link=False):
     ("nan", _write("toolu_nan", b'{"at": NaN}')),
     ("neg-inf", _write("toolu_ninf", b'{"at": -Infinity}')),
     ("dangling-link", _write("toolu_link", link=True)),
-    ("clock-back-1d", _write("toolu_back", lambda fx: json.dumps({"at": fx.t + 86400 - 60})))])
+    ("clock-back-1d", _write("toolu_back", lambda fx: json.dumps({"at": fx.t + 86400 - 60}))),
+    ("huge", _write("toolu_huge", b'{"at": 1' + b"0" * 400 + b"}"))])
 def test_u1_t20_the_launcher_goes_on_past_any_shape(case, act, monkeypatch, tmp_path):
     # the refuter's p2 cases: the launcher neither raises nor holds past the bound
     monkeypatch.chdir(tmp_path)
@@ -431,7 +432,7 @@ def test_u1_t20_the_launcher_goes_on_past_any_shape(case, act, monkeypatch, tmp_
     # first sight at the first poll that lists calls/: the turn's end (14) + settle (60)
     assert sig == TERM and 1272 <= t - fx.t0 <= 1278
     cid = {"nan": "toolu_nan", "neg-inf": "toolu_ninf", "dangling-link": "toolu_link",
-           "clock-back-1d": "toolu_back"}[case]
+           "clock-back-1d": "toolu_back", "huge": "toolu_huge"}[case]
     assert [l for l in fx.said if "stale" in l] == [
         f"c1: went on past a stale helper call: {cid} open ? min"]
     rows = [json.loads(l) for l in ledger.path(config.STATE_DIR).read_text().splitlines()]
@@ -449,3 +450,23 @@ def test_u1_t21_the_line_names_every_stale_call_in_name_order(monkeypatch, tmp_p
     assert [s["id"] for s in r["stale_calls"]] == ["toolu_01a", "toolu_02b"]
     assert [l for l in fx.said if "stale" in l] == [
         "c1: went on past a stale helper call: toolu_01a open 20 min; toolu_02b open 20 min"]
+
+
+# ---- the coordinator's read of e0a26a1: a 400-digit integer overflows a float ---------
+
+@pytest.mark.parametrize("at", [10 ** 400, -10 ** 400], ids=["plus", "minus"])
+def test_u1_t23_an_integer_too_large_for_a_float_is_aged_from_first_sight(at):
+    sdir = _folder(calls=[("toolu_big", {"at": at})], helper=None)
+    c = _chain()
+    assert c._ready(sdir, LATE, mono=0.0) is False
+    assert c._ready(sdir, LATE, mono=1199.0) is False
+    assert c._ready(sdir, LATE, mono=1200.0) is True
+    assert c._stale == [{"id": "toolu_big", "age": None}]
+
+
+@pytest.mark.parametrize("h", [10 ** 400, -10 ** 400], ids=["plus", "minus"])
+def test_u1_t24_a_helper_stamp_too_large_for_a_float_does_not_count(h):
+    sdir = _folder(calls=[(CALL, {"at": OPENED})], helper=h)
+    c = _chain()
+    assert c._ready(sdir, ENDED + 61, mono=0.0) is True
+    assert c._stale == [{"id": CALL, "age": int(ENDED + 61 - OPENED)}]
