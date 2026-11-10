@@ -106,7 +106,7 @@ for (const mode of ['ok', 'reject', 'timeout', 'refused'] as const) {
     expect(seen[0]).toEqual(SPAWN)
     expect(r.model).toBe('claude-opus-5-5')
     expect(r.deny).toBeUndefined()
-    expect(calls.length).toBe(1)
+    expect(calls.length).toBe(mode === 'refused' ? 2 : 1)       // packet S54 R9: exit 3 runs once more
     expect(calls[0].stdin).toEqual({ kind: 'spawn', subagentType: 'general-purpose', model: 'opus',
       parentModel: 'claude-opus-5-5', background: false, fork: false, description: 'read the packet',
       tool_use_id: 'toolu_01', agentId: 'a1', context: { tokens: 1000, window: 200000, percent: 1 },
@@ -115,6 +115,67 @@ for (const mode of ['ok', 'reject', 'timeout', 'refused'] as const) {
     noContent(calls)
   })
 }
+
+// Packet S54 T8 (R9): exit 3 is the ledger lock's refusal, nothing written, so the record runs
+// once more at 3 s; another exit, a rejection or a timeout may have written, so never again.
+// One debug line, the last attempt's. The process answers from a script, one entry a call.
+test('a record refused with exit 3 runs once more; no other failure does', async (t: any, on: any) => {
+  const calls: Call[] = []
+  const logs: string[] = []
+  let script: Array<number | 'reject' | 'timeout'> = []
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 1000, window: 200000, percent: 1 }, rateLimits: LIMITS } }))
+  on('ui.log', ($: any, e: any) => { logs.push(String(e.text ?? '')); return { value: undefined } })
+  on('clock.sleep', () => new Promise(() => {}))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('session.measure', ($: any, e: any) => ({ changed: e.changed }))
+  on('process.run', ($: any, e: any) => {
+    if (e.argv?.[1] !== 'admission') return { value: { exitCode: 1, stdout: '', stderr: '',
+      isStdoutTruncated: false, isStderrTruncated: false } }
+    const init = e.init ?? e
+    calls.push({ argv: e.argv, stdin: JSON.parse(String(init.stdin ?? 'null')), timeoutMs: init.timeoutMs, raw: e })
+    const next = script.shift() ?? 0
+    if (next === 'reject') throw new Error('ENOENT: agentik-session not found')
+    if (next === 'timeout') {
+      return new Promise((_, reject) => setTimeout(() => reject(new Error('timed out after 5000 ms')), 30))
+    }
+    return { value: { exitCode: next, stdout: '', stderr: `stderr of exit ${next}`,
+      isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  // An exit's line is pinned whole, so the last attempt's is the one logged; a rejection's or a
+  // timeout's text is the engine's (a hook that throws reads as the call's failure), so only
+  // the line's head and its count are pinned there.
+  const FAILED = 'admission: record reading: '
+  const cases: Array<[Array<number | 'reject' | 'timeout'>, number, string | null]> = [
+    [[0], 1, null],
+    [[3, 0], 2, null],
+    [[3, 3], 2, 'admission: record reading: exit 3: stderr of exit 3'],
+    [[3, 1], 2, 'admission: record reading: exit 1: stderr of exit 1'],
+    [[3, 'reject'], 2, FAILED],
+    [[1], 1, 'admission: record reading: exit 1: stderr of exit 1'],
+    [[2], 1, 'admission: record reading: exit 2: stderr of exit 2'],
+    [['reject'], 1, FAILED],
+    [['timeout'], 1, FAILED],
+  ]
+  for (const [given, n, line] of cases) {
+    calls.length = 0
+    logs.length = 0
+    script = [...given]
+    await t.session.measure({ context: { window: 200000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    expect(calls.length).toBe(n)
+    expect(calls.map(c => c.timeoutMs)).toEqual(n === 2 ? [5000, 3000] : [5000])
+    for (const c of calls) {
+      expect(c.argv).toEqual(ARGV)
+      expect(c.stdin).toEqual({ kind: 'reading', rateLimits: LIMITS })
+    }
+    const got = logs.filter(l => l.startsWith('admission: record'))
+    if (line === null) expect(got).toEqual([])
+    else if (line === FAILED) {
+      expect(got.length).toBe(1)
+      expect(got[0].startsWith(FAILED) && !got[0].includes('exit ')).toBe(true)
+    } else expect(got).toEqual([line])
+  }
+})
 
 // Fix round 1, F1: a spawn refused beneath started nothing, so nothing is recorded.
 test('a spawn refused beneath records nothing, and the refusal passes up', async (t: any, on: any) => {
