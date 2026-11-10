@@ -84,6 +84,11 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "waiting on the usage meter (room for 0, or a usage limit hit) is not WAITING: the "
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
         "first, and it never counts toward n")
+# Packet S53 ruling 6: with session.admission.mix on, one more pacing item; advice only.
+MIX_ITEM = ("the spend mix (session.admission.mix): a helper takes the family the band "
+            "line's `next` names unless its task needs the other; design, refutation and "
+            "judgment are Fable's, bounded builds, records and reads are Opus's; `reset now` "
+            "is the owner's Fable reset in Settings; advice only, nothing is held")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "
          "none; no hook enforces them")
 
@@ -246,6 +251,8 @@ def render(session, life=None) -> str:
         ttl = ttl if ttl in LIFETIME else None
         lines.append(f"  {len(PACE) + 1}. " + LIFETIME[ttl].format(
             why=why, warm=WARM.get(ttl), warm1h=WARM["1h"], fallback=pa["fallback"]))
+        if _mix_on(session):
+            lines.append(f"  {len(PACE) + 2}. " + MIX_ITEM)
     else:
         lines.append("pacing: off (session.pacing.enabled is false)")
     lines.append(BOUND)
@@ -448,7 +455,10 @@ def _window_override(ad: dict, notes: list | None) -> dict:
 
 def _real(v, key: str) -> bool:
     lo, hi, closed = ADMISSION_BOUNDS[key]
-    if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
+    try:                                  # an int past a float's range is unreadable (S53 F1)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(float(v)):
+            return False
+    except OverflowError:
         return False
     return (v >= lo if closed else v > lo) and v <= hi and not (key == "margin" and v >= hi)
 
@@ -472,3 +482,67 @@ def admission(session, notes: list | None = None) -> dict:
         "b": {f: bd[f] if _real(bd.get(f), "b") else v for f, v in seeds["b"].items()},
         "life": sd["life"] if _real(sd.get("life"), "life") else seeds["life"]}
     return {**out, **_window_override(ad, notes)}
+
+
+# ---- session.admission.mix (packet S53 ruling 1): the week's spend shares, advice only ----
+# Off unless `shares` names at least one family with a positive number. Prices are USD per
+# million tokens; cache_write and cache_read default to 1.25 and 0.1 times the input price.
+MIX_FAMILIES = ("fable", "opus", "sonnet", "haiku")
+MIX_PRICES = {"fable": (8.0, 40.0), "opus": (5.0, 25.0), "sonnet": (3.0, 15.0),
+              "haiku": (1.0, 5.0)}
+MIX_CAP, MIX_RESETS_MAX = 50, 99
+
+
+def _positive(v) -> bool:
+    """A number in (0, 1e6]; one that overflows a float is not (S53 F1)."""
+    try:
+        return (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(float(v)) and 0 < v <= 1e6)
+    except OverflowError:
+        return False
+
+
+def _zoned(v):
+    """An ISO time with its zone, as given; else None."""
+    if not isinstance(v, str) or len(v) > 64:
+        return None
+    try:
+        t = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return v if t.tzinfo is not None else None
+
+
+def _mix_on(session) -> bool:
+    """Whether `session.admission.mix` is on, for `render`; False on any malformed value."""
+    try:
+        ad = session.get("admission") if isinstance(session, dict) else None
+        return mix(ad.get("mix") if isinstance(ad, dict) else None) is not None
+    except Exception:  # noqa: BLE001 - render never raises on a malformed mix (S53 F1)
+        return False
+
+
+def mix(m) -> dict | None:
+    """`admission.mix` as it binds: None (off) without a readable `shares`; else shares, the
+    Fable cap (points of the week, (0, 100]), the resets in hand, `until` and the prices,
+    each field its default when absent or unreadable."""
+    if not isinstance(m, dict) or not isinstance(m.get("shares"), dict):
+        return None
+    shares = {f: m["shares"][f] for f in MIX_FAMILIES if _positive(m["shares"].get(f))}
+    if not shares:
+        return None
+    cap = m.get("fable_cap")
+    cap = cap if _positive(cap) and cap <= 100 else MIX_CAP
+    n = m.get("resets")
+    n = n if isinstance(n, int) and not isinstance(n, bool) and 0 <= n <= MIX_RESETS_MAX else 0
+    given = m.get("prices") if isinstance(m.get("prices"), dict) else {}
+    prices = {}
+    for f, (i, o) in MIX_PRICES.items():
+        g = given.get(f) if isinstance(given.get(f), dict) else {}
+        i = g["input"] if _positive(g.get("input")) else i
+        p = {"input": i, "output": g["output"] if _positive(g.get("output")) else o}
+        for k, x in (("cache_write", 1.25), ("cache_read", 0.1)):
+            p[k] = g[k] if _positive(g.get(k)) else round(x * i, 6)
+        prices[f] = p
+    return {"shares": shares, "fable_cap": cap, "resets": n, "until": _zoned(m.get("until")),
+            "prices": prices}

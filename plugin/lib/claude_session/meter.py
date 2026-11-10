@@ -94,6 +94,50 @@ def _median_low(xs: list) -> int:
 
 SYNTHETIC = "<synthetic>"      # the model Claude Code writes on a line no API call made
 
+# Spend by family (packet S53 ruling 2): each counted turn's tokens under its own
+# `message.model`'s family, in the state as [input, output, cache_write, cache_read]; a
+# helper's turns (its subagents file, or a sidechain line) are read with their own model.
+FAMILIES = ("opus", "sonnet", "haiku", "fable")
+SPEND = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+         "cache_read_input_tokens")
+PRICE = ("input", "output", "cache_write", "cache_read")
+
+
+def _family(model) -> str:
+    """admission.family's rule: the first family the id names, else `other`."""
+    low = model.lower() if isinstance(model, str) else ""
+    return next((f for f in FAMILIES if f in low), "other")
+
+
+def _tokens(n) -> bool:
+    return (isinstance(n, list) and len(n) == len(PRICE) and all(
+        isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x < 1e15 for x in n))
+
+
+def _by_sum(*bys) -> dict:
+    out: dict = {}
+    for by in bys:
+        for f, n in (by.items() if isinstance(by, dict) else ()):
+            if _tokens(n):
+                out[f] = [a + b for a, b in zip(out.get(f, [0, 0, 0, 0]), n)]
+    return out
+
+
+def spend(state: dict, prices: dict) -> dict:
+    """{family: USD} over the session's own transcript and its helpers' files, by `prices`
+    ({family: {input, output, cache_write, cache_read}} per million tokens); a family with
+    no price (`other`) is left out, as is one with no spend."""
+    parts = [state.get("own") or {}] + list((state.get("builders") or {}).values())
+    out: dict = {}
+    for st in parts:
+        by = _by_sum(st.get("by_base"), st.get("by")) if isinstance(st, dict) else {}
+        for fam, n in by.items():
+            p = prices.get(fam)
+            if not isinstance(p, dict):
+                continue
+            out[fam] = out.get(fam, 0.0) + sum(x * p[k] for x, k in zip(n, PRICE)) / 1e6
+    return {f: round(v, 6) for f, v in sorted(out.items()) if v > 0}
+
 
 def _known(model, table) -> bool:
     """A model id the models table names a family for (with no table, any id but
@@ -103,7 +147,7 @@ def _known(model, table) -> bool:
     return models.family(model, table) is not None if isinstance(table, dict) else True
 
 
-def _scan(path: Path, st: dict, table=None) -> dict | None:
+def _scan(path: Path, st: dict, table=None, shared=None) -> dict | None:
     """Fold the bytes appended since `st` into it. None when unreadable. A line by a
     model `table` does not know (a `<synthetic>` one among them, round 1 F2) never
     replaces the last known model, and at zero occupancy never the last context."""
@@ -111,7 +155,10 @@ def _scan(path: Path, st: dict, table=None) -> dict | None:
         info = os.stat(path)
         if st.get("inode") != info.st_ino or info.st_size < st.get("size", 0) \
                 or st.get("offset", 0) > info.st_size:
+            base = _by_sum(st.get("by_base"), st.get("by"))   # spend never falls (S53 F6)
             st = _fresh()
+            if base:
+                st["by_base"] = base
         with open(path, "rb") as f:
             f.seek(st["offset"])
             data = f.read()
@@ -145,6 +192,13 @@ def _scan(path: Path, st: dict, table=None) -> dict | None:
         ctx = n["input_tokens"] + n["cache_creation_input_tokens"] + n["cache_read_input_tokens"]
         side = bool(obj.get("isSidechain"))
         st["msgs"].append([ctx + n["output_tokens"], ctx, int(side)])
+        sk = f"{obj.get('requestId')}\t{mid}" if mid else None
+        if shared is None or sk is None or sk not in shared:   # once a session (S53 F6)
+            if shared is not None and sk is not None:
+                shared.add(sk)
+            by = st.setdefault("by", {}).setdefault(_family(msg.get("model")), [0, 0, 0, 0])
+            for i, k in enumerate(SPEND):      # each turn under its own model (packet S53)
+                by[i] += n[k]
         if not side:
             m = msg.get("model")
             known = _known(m, table)
@@ -177,7 +231,8 @@ def parse(path, state=None, limits=None, policy=None, session_id=None) -> Meter 
     path = Path(path)
     state = {} if state is None else state
     lim = {**DEFAULT_LIMITS, **(limits or {})}
-    own = _scan(path, state.get("own") or _fresh(), lim.get("models"))
+    shared = set(state.get("spend_seen") or [])
+    own = _scan(path, state.get("own") or _fresh(), lim.get("models"), shared)
     if own is None:
         return None
     state["own"] = own
@@ -188,7 +243,7 @@ def parse(path, state=None, limits=None, policy=None, session_id=None) -> Meter 
     sub = path.parent / path.stem / "subagents"
     files = sorted(sub.glob("agent-*.jsonl")) if sub.is_dir() else []
     for f in files:
-        b = _scan(f, bstate.get(f.name) or _fresh(), lim.get("models"))
+        b = _scan(f, bstate.get(f.name) or _fresh(), lim.get("models"), shared)
         if b is None:
             continue
         bstate[f.name] = b
@@ -196,6 +251,7 @@ def parse(path, state=None, limits=None, policy=None, session_id=None) -> Meter 
         builders.append({"agent": f.stem[len("agent-"):], "turns": s["turns"],
                          "tokens": s["tokens"], "max_context": s["max_context"]})
     state["builders"] = {k: v for k, v in bstate.items() if k in {f.name for f in files}}
+    state["spend_seen"] = sorted(shared)
 
     s = _sums(own)
     allctx = s["contexts"] + [c for b in state["builders"].values() for c in _sums(b)["contexts"]]

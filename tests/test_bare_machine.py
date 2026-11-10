@@ -525,6 +525,9 @@ READERS = {
     ("admission", "read_band"): (
         "state/agentik-session/admission/band.json", {"line": "x"},
         lambda m, d: m["admission"].read_band(_state_env(d))),
+    ("admission", "_load_carry"): (                      # packet S53 F2: the mix's carry
+        "state/agentik-session/admission/mix.json", {"k": {}},
+        lambda m, d: m["admission"]._load_carry(d / "state/agentik-session/admission")),
     ("chain", "_json"): ("c.json", {"a": 1}, lambda m, d: m["chain"]._json(d / "c.json")),
     ("cli", "_session_section"): (
         "state/agentik-session/sessions/%s/resolved.json" % S, RESOLVED, None),

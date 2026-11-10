@@ -176,6 +176,41 @@ const bandTo = (b: any, nowMs: number): string | null => {
   return `${d.band} to ${u[2] - (a ? a[2] : nowMs) <= 86400000 ? '' : `${day} `}${u[0]}:${u[1]}`
 }
 
+// The mix's parts after the 7d part (packet S53 ruling 6, NICE n15), the twin of Python's
+// _mix_part: `mix fable 31/50`, a part a family with a budget, then `next opus` (or `reset
+// now`), then `resets 2` with ` by Ddd HH:MM` while `until` is ahead; `mix no reading` with
+// no points or budgets; nothing with no mix. Rounded as _pct is, floor(x + 0.5), all digits
+// past 1e21; it never throws, so a malformed mix leaves the line as it was.
+const MIX_ORDER = ['fable', 'opus', 'sonnet', 'haiku']
+const isMap = (v: unknown): boolean => !!v && typeof v === 'object' && !Array.isArray(v)
+const pctOf = (n: number): string => {
+  const r = Math.floor(n + 0.5)
+  return Math.abs(r) < 1e21 ? String(r) : BigInt(r).toString()
+}
+export const mixPart = (mx: any, nowMs: number): string[] => {
+  try {
+    if (!isMap(mx)) return []
+    const pts = own(mx, 'points'), bud = own(mx, 'budgets')
+    if (!isMap(pts) || !isMap(bud)) return ['mix no reading']
+    const out: string[] = []
+    for (const f of MIX_ORDER) {
+      const b = fig(own(bud, f))
+      if (b !== null) out.push(`${f} ${pctOf(fig(own(pts, f)) ?? 0)}/${pctOf(b)}`)
+    }
+    const nxt = own(mx, 'next')
+    out.push(own(mx, 'reset') === true ? 'reset now'
+      : `next ${typeof nxt === 'string' && MIX_ORDER.includes(nxt) ? nxt : 'none'}`)
+    const left = fig(own(mx, 'resets_left')), until = own(mx, 'until')
+    const u = wall(until), day = u ? weekday(String(until)) : null
+    let tail = left !== null ? `resets ${pctOf(left)}` : ''
+    if (u && day && u[2] > nowMs) tail = `${tail} by ${day} ${u[0]}:${u[1]}`.trim()
+    if (tail) out.push(tail)
+    return [`mix ${out[0]}`, ...out.slice(1)]
+  } catch {
+    return []
+  }
+}
+
 // A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
 // `resetsAt`, both the week's, then the band's. No countdown, ceiling, room or deferred.
 // `head` is `5h no reading` on a five-hour login's week (packet S51).
@@ -183,6 +218,7 @@ const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
   const parts = [head]
   const p7 = fig(b.P7), running = fig(b.running)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
+  parts.push(...mixPart(b.mix, nowMs))
   for (const v of [b.until, b.resetsAt]) {
     const w = wall(v), day = w ? weekday(String(v)) : null
     if (w && day) {
@@ -221,6 +257,7 @@ export const admissionLine = (band: string | null, nowMs: number, id = ''): stri
   const d = fig(b.deferred), p7 = fig(b.P7)
   if (d !== null) parts.push(`${whole(d)} deferred`)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
+  parts.push(...mixPart(b.mix, nowMs))
   return [...parts, ...lineEnd(b, nowMs)].join(' · ')
 }
 
