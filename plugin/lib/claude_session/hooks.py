@@ -262,62 +262,38 @@ def _session_family(payload: dict, env) -> str | None:
     return seen.pop() if len(seen) == 1 else None
 
 
-def _script_of(ti: dict):
-    """The Workflow call's script: `script` inline, else the file `scriptPath` names (a
-    resume passes it); None when neither gives readable text of a size the guard takes."""
-    if isinstance(ti.get("script"), str):
-        return ti["script"]
-    path = ti.get("scriptPath")
-    if not isinstance(path, str) or not path:
-        return None
-    try:
-        p = Path(path)
-        st = p.lstat()
-        if not stat.S_ISREG(st.st_mode) or st.st_size > workflowguard.MAX_SCRIPT:
-            return None
-        return p.read_text(encoding="utf-8")
-    except (OSError, ValueError):
-        return None
+WORKFLOW_DENY = ("agentik-session: Workflow denied: this suite runs no workflows. Spawn helpers "
+                 "with the Agent tool, each naming its model; do not call Workflow again.")
 
 
 def _spawn_rule(payload: dict, env) -> str | None:
-    """Packet wfg: the one line that denies this spawn, else None. A Fable helper starts only
-    under a Fable session (R5); a Workflow script passes `workflowguard.check` (R1 to R4).
-    Whatever fails inside the Workflow rule denies: it fails closed."""
+    """The one line that denies this spawn, else None. Packet wfd: every Workflow call is
+    denied, first and unconditionally, its call unread (no script, no path, no name), so the
+    rule cannot raise and cannot fail open. Packet wfg R5: a Fable helper on Agent or Task
+    starts only under a Fable session, and an unknown session model denies it."""
     tool = payload.get("tool_name")
+    if tool == "Workflow":
+        return WORKFLOW_DENY
+    if tool not in ("Agent", "Task"):
+        return None
     ti = payload.get("tool_input")
     ti = ti if isinstance(ti, dict) else {}
-    if tool in ("Agent", "Task"):
-        if workflowguard.family(ti.get("model")) != "fable":
-            return None
-        parent = _session_family(payload, env)
-        if parent == "fable":
-            return None
-        return ("agentik-session: a Fable helper starts only under a Fable session: "
-                + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
-                + ". Name model: 'opus'.")
-    if tool != "Workflow":
+    if workflowguard.family(ti.get("model")) != "fable":
         return None
-    try:
-        if "script" in ti and "scriptPath" in ti:
-            return ("agentik-session: Workflow denied before launch: the call names both "
-                    "`script` and `scriptPath`, and the guard cannot know which runs. Pass one.")
-        script = _script_of(ti)
-        if script is None:
-            return ("agentik-session: Workflow denied before launch: the call names no script "
-                    "the guard can read. Pass `script` inline, or `scriptPath` of a file under "
-                    f"{workflowguard.MAX_SCRIPT // 1024} KB; a saved workflow's name is not read.")
-        reasons = workflowguard.check(script, _session_family(payload, env))
-        return workflowguard.deny_line(reasons) if reasons else None
-    except Exception as e:                              # noqa: BLE001
-        return ("agentik-session: Workflow denied before launch: the guard failed "
-                f"({type(e).__name__}) and fails closed. Simplify the script, and report this line.")
+    parent = _session_family(payload, env)
+    if parent == "fable":
+        return None
+    return ("agentik-session: a Fable helper starts only under a Fable session: "
+            + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
+            + ". Name model: 'opus'.")
 
 
-def _deny(reason: str, note: str) -> dict:
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                   "permissionDecisionReason": reason},
-            "systemMessage": note}
+def _deny(reason: str, note: str | None) -> dict:
+    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                  "permissionDecisionReason": reason}}
+    if note:
+        out["systemMessage"] = note
+    return out
 
 
 def pre_tool_use(payload: dict, env=None) -> dict:
@@ -335,13 +311,15 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             "systemMessage": "agentik-session: denied a helper's charter open or close.",
         }
     tool = payload.get("tool_name") or ""
-    if tool in SPAWNING_TOOLS:       # wfg: whatever the posture, a helper's too, no call opened
+    if tool in SPAWNING_TOOLS:       # wfd, wfg: any posture, a helper's too, no call opened
         try:
             line = _spawn_rule(payload, os.environ if env is None else env)
         except Exception as e:                          # noqa: BLE001  (wfg r1: R6 too)
             line = (f"agentik-session: {_token(tool)} denied before launch: the guard failed "
                     f"({type(e).__name__}) and fails closed. Retry once; if it repeats, "
                     "report this line.")
+        if line == WORKFLOW_DENY:    # wfd: the one line and nothing else
+            return _deny(line, None)
         if line:
             return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
     _open_call(payload, os.environ if env is None else env)

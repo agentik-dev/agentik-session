@@ -76,7 +76,7 @@ class Trap(dict):
 
 # --- T1: a script the pin allowed -------------------------------------------------------
 
-def test_t1_a_script_of_two_opus_agents_is_denied():
+def test_t1_two_opus_agents_in_one_script_are_denied():
     parent("claude-opus-5-5")
     assert call({"script": TWO_OPUS}) == DENY
     parent("claude-fable-5-2")
@@ -144,7 +144,7 @@ def test_t4_a_helpers_call_is_denied_and_opens_no_call():
 def test_t5_the_line_is_one_short_line_naming_the_agent_tool():
     assert "\n" not in LINE and len(LINE.encode()) < 200
     assert "Agent tool" in LINE
-    assert "Fix the script" not in LINE and "before launch" not in LINE
+    assert "fix the script" not in LINE.lower() and "before launch" not in LINE
     assert hooks._spawn_rule({"tool_name": "Workflow"}, {}) == LINE
 
 
