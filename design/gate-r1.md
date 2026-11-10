@@ -36,3 +36,4 @@
 - The running entry's start, in `status` and in the 125 result, is its directory's mtime, since `runner.json` is now rewritten at every start and finish; a directory not there yet reads that file.
 - `status` also says `waits on running <n> of <m>` and `waits on settle <s> s`, the two bars ruling 4 gave no words, so an entry never waits unexplained; one entry shows one wait, a lock before a key before the ceiling.
 - A command that cannot start (127) counts as no start: it adds no load, so it sets no settle.
+- Packet FW2 (alpha.55): `gate wait <id> --strict` exits the job's code, its default exit still 0 by the agentik guide's rule; result.json adds `head` and `key`, and `status` and `run` say `est <m> min`, the median of a key's last five greens.

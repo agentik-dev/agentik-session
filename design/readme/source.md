@@ -58,7 +58,7 @@ CLI verbs (`agentik session --help`):
 | `budget` | `agentik session budget` |
 | `rules` | `agentik session rules` |
 | `run` | `agentik session run --chain loop -- --model 'opus[1m]' "/loop 30m check in"` |
-| `gate` | `agentik session gate run . -- make check`; `agentik session gate wait <id>` |
+| `gate` | `agentik session gate run . -- make check` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
@@ -144,16 +144,15 @@ Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); 
 
 ## The gate queue
 
-A gate can run an hour, so gates queue: one running per repo, under a load ceiling (RUNBOOK §5), each cut at `gate.wall`.
+Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`.
 
-- `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`; a lock path that exists or a running gate names holds it.
-- Wake on `gate wait <id>` in a background Bash (a timeout past the gate) or on the hook's line; after a respawn the successor re-arms the ids in its state file's `## Gates`.
-- `wait` exits 0 whatever the code, 2 for an unknown id, 1 on timeout; 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall.
+- `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`, then `est <m> min` on stderr (five greens' median); a lock path that exists or a running gate names holds it.
+- Wake on `gate wait <id>` in a background Bash, or the hook's line; a successor re-arms the state file's `## Gates`.
+- `wait` exits 0, 2 for no such id, 1 on timeout; `gate wait <id> --strict` exits the job's code; its stdout line says so. 124 is the wall's cut, 125 a dead runner, 126 a lock held past the wall. Results keep `head`, `key`.
 
 ## The unattended loop
 
 `agentik session unattended run <repo> [--rows a,b] [--until HH:MM] [--max-rows N] [--land PATH]` runs `relay/queue.yaml`'s rows in order, a `claude -p` builder each in its worktree, never beside a relay run.
-
 
 - A `merge-on-green` row lands as one gate job through `--land` or `<repo>/scripts/land`; a verdict other than the log's `ok` or `red <step>` reads red `gate-unrun`.
 - Exit 0 at the queue's end, `--until` or `--max-rows`; 3 on a limit, an auth error or the run's `stop` file; `status` and `report` read its ledger.

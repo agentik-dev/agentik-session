@@ -207,9 +207,10 @@ agentik-session doctor          # the setup, the plugin, its dependencies; exit 
 agentik-session budget          # the zone and checkpoint cadence
 agentik-session checkpoint      # mark a handoff-ready point (`-m`, `--commit` stages tracked files only)
 agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, through Bash
-agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>
+agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>, est on stderr
 agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
-agentik-session gate status     # what runs, what waits, the last five done
+agentik-session gate wait <id> --strict        # the same, exiting the job's code
+agentik-session gate status     # what runs, what waits (each with its est), the last five done
 ```
 
 The gate queue runs one gate per repo (a repo and its worktrees are one) under a load
@@ -219,7 +220,13 @@ Its result reaches the caller two ways:
 UserPromptSubmit and PostToolUse hooks' line at the next prompt or tool call. A respawn
 kills background tasks: list each open gate id in the state file's `## Gates`, and the
 successor re-arms `gate wait <id>`. `wait` exits 0 whatever the gate's code; 124 is the
-wall's cut, 125 a runner that died, 126 a lock held past the wall.
+wall's cut, 125 a runner that died, 126 a lock held past the wall. `gate wait <id> --strict`
+exits the job's code (0 to 255, else 1); `wait`'s own 2 (no such id) and 1 (the timeout)
+print nothing on stdout, so a line there marks the code as the job's. A result keeps the
+repo's `head` (its commit before the start, or null) and `key` (a repo and its worktrees
+are one). `run` says `est <m> min` on stderr, and `status` ends a line `; est <m> min`:
+the median of the key's last five greens, none under three. A WAITING line's `est` on a
+gate is worked from it: the gate's start, or now while it queues, plus `est <m> min`.
 
 The band: the plugin's hooks module draws `session: <model> · <window> · ctx <c>% · turns <t>% · <zone>` above the prompt (e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`: the window the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading, and its next tool closes it; `status` prints the same as `model: …`, with the id and the window's source) and, at session start, runs `agentik-session mod start --session <id>` (it writes `mod.json`; `status` and `doctor` then print `mod: seen`, else `mod: not seen`).
 
