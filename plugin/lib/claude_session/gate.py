@@ -876,10 +876,17 @@ def _greens(root) -> dict:
     return out
 
 
+def key_estimates(root) -> dict:
+    """{key: (seconds, greens)} (packet FW2, R4): the median of a key's last `EST_LEAST` to
+    `EST_GREENS` greens and how many it used; a key with fewer than `EST_LEAST` has none.
+    The one source of an estimate: `estimates`, `entry_estimates` and `run`'s line read it."""
+    return {k: (statistics.median(v), len(v)) for k, v in _greens(root).items()
+            if len(v) >= EST_LEAST}
+
+
 def estimates(root) -> dict:
-    """{key: seconds} (packet FW2, R4): the median of a key's last `EST_GREENS` greens; a key
-    with fewer than `EST_LEAST` has none."""
-    return {k: statistics.median(v) for k, v in _greens(root).items() if len(v) >= EST_LEAST}
+    """{key: seconds}: `key_estimates` without the count."""
+    return {k: s for k, (s, _) in key_estimates(root).items()}
 
 
 def entry_estimates(root) -> dict:

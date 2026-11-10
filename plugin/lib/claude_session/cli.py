@@ -975,7 +975,6 @@ def cmd_gate(args) -> int:
     `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
     guide's rule: exit codes report the task, not the content), the job's code with
     --strict (packet FW2), 1 past --timeout; `serve` is the runner, internal."""
-    import statistics
     from pathlib import Path
     from . import gate
     env = os.environ
@@ -1007,10 +1006,10 @@ def cmd_gate(args) -> int:
           f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
           flush=True)
     # Packet FW2 R5: the estimate on stderr, so run's stdout stays the queued line alone.
-    greens = gate._greens(root).get(e["key"]) or []
-    if len(greens) >= gate.EST_LEAST:
-        print(f"est {gate.est_text(statistics.median(greens))} min: the median of this repo's "
-              f"last {len(greens)} greens", file=sys.stderr, flush=True)
+    got = gate.key_estimates(root).get(e["key"])
+    if got is not None:
+        print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
+              file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
