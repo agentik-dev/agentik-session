@@ -99,3 +99,5 @@ tests/test_hooks.py: renamed
 # tests name the relay's legacy packet stems.
 scripts/doclint: renamed
 tests/test_doclint.py: renamed
+# n33's tests name the old launcher (claude-session) among the five names the hook denies.
+tests/test_n33.py: renamed
