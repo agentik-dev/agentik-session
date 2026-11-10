@@ -623,3 +623,28 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 | `gate/runner.log` | the runner's stdout and stderr |
 | `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days; it keeps `head` (the repo's commit, read before the spawn; null when unknown or never started) and `key` |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |
+
+## 6. Commit by path
+
+`agentik session commit <paths...> --check <cmd> --message-file <f>` (packet
+FW4d) adds each named path, runs the check in the repo's top and commits on
+green with `git commit --only`, so a path someone else staged stays staged and
+out of the commit. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
+glob), as git takes them from the cwd. Stdout is one line, last:
+`commit <repo>: ok <sha>` (exit 0), or `red check exit <code>` (the check's
+code: 127 not found, 126 not runnable, 128+n a signal), `red moved exit 1` (a
+named path changed during the check), `red add` or `red commit` with git's
+code. On every red the named paths' index entries are put back as they were
+read; no other entry is touched.
+- Refused, exit 2, the index as found: no path; `-A`, `-u`; the whole tree
+  (`.` at the top, `..` below it, its absolute path); a path outside the repo;
+  an untracked nested repo, or a directory holding one, which git would add as
+  a gitlink (each named, the first twenty; an ignored one is never added); a
+  path git would not add; a missing or blank message file; an empty check; a
+  merge, cherry-pick, revert or rebase under way; a detached HEAD; nothing to
+  commit in the named paths.
+- The check is one string, split as a shell would but run with no shell. When
+  its first word is `make` or `gmake` it is one gate job in the repo, labelled
+  `commit check` (its code `gate wait --strict`'s, its wait line on stderr),
+  since the gate holds every `make` on the machine; any other check, a
+  `sh -c '...'` wrapper too, runs directly, its output on stderr.
