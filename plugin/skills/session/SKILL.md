@@ -162,6 +162,7 @@ open one before the first act.
 ```bash
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
 agentik-session charter open --continue "<goal>"  # adopts today's newest of the suffix under 3,584 B, else as open
+agentik-session charter open --replace "<goal>"   # takes this sitting's record off a charter still open here; never in a helper
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest, or two of its suffix stand with no record
 ```
