@@ -5,7 +5,7 @@
 | from | the owner's ask of 2026-11-09 (hq sitting 2026-11-09-1): set usage ratios by model family and have the meter steer to them, Fable resets counted; configurable. S3, the owner's word |
 | pin | agentik-session main 344818a, alpha.49; worktree `.claude/worktrees/s53-mix`, branch `s53-mix`, `.venv` and `.venv-floor` linked from the main checkout |
 | wall | this repo; no push, `--amend`, rebase, merge, real `make install` or `install-cli`; `claude` only as `claude plugin validate` and `claude plugin test plugin`; a test never writes under the live `~/.local`, `~/.claude`, `~/.config/agentik`; never touch `~/.config/agentik/hooks-follow-launcher`; no relay verb; no `kill`, `pkill` or signal from a script; never a gate verb under a temp HOME |
-| may touch | `plugin/lib/claude_session/admission.py`, `meter.py`, `measure.py`, `hooks.py`, `rules.py`, `resolver.py`, `cli.py`, `tests/`, `README.md`/`design/readme/*` for the settings and the count, `NICE_TO_HAVE.md`, `plugin/.claude-plugin/plugin.json`, this packet as `design/packets/s53-mix.md`, a charter |
+| may touch | `plugin/lib/claude_session/admission.py`, `meter.py`, `measure.py`, `hooks.py`, `rules.py`, `resolver.py`, `cli.py`, `tests/`, `plugin/hooks/session.ts` and `session.test.ts` (n15, fix round 1), `README.md`/`design/readme/*` for the settings and the count, `NICE_TO_HAVE.md`, `plugin/.claude-plugin/plugin.json`, this packet as `design/packets/s53-mix.md`, a charter |
 | verify | `agentik session gate run <absolute worktree path> -- /bin/sh -c "make check > <scratch log>"`, then `agentik session gate wait <id>` in one background Bash, last; it exits 0 whatever the code: read the code from its line |
 | acceptance | rulings 1 to 8 met; tests 7(a) to 7(f) green by name; `scripts/doclint` exits 0 |
 | budget | 90 tool calls, 140k context; `claude-opus-5-5` |
@@ -33,7 +33,7 @@ A login's reading is one all-models figure: `[{"kind": "seven_day", "percentUsed
 - F5. The mix's settings come from the user layer at every record and band write.
 - F6. One seen set across a session's files; spend never falls.
 - F7. `reset` needs `fable` in `shares` and its points above 0. F8. An `until` at or before now is not drawn.
-- n15. The mod's `admissionLine` draws the same mix part (`plugin/hooks/session.ts` and its tests may be touched).
+- n15, done. The mod's `admissionLine` draws the same mix part (`plugin/hooks/session.ts` and its tests may be touched): `mixPart`, the cases `MIX_CASES` both twins read.
 
 ## 3. Interfaces
 

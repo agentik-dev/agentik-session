@@ -8,7 +8,6 @@ Findings that block nothing, one row each, in agentik-hq design/05 §2's table: 
 |---|---|---|---|---|---|
 | n1 | S4 | `design/readme/source.md` | The README's source sits 2 B under its 16,384 B ceiling, so no new README line fits (s52's `--continue` line did not) until the source is trimmed or the ceiling moves | 16,382 B at 823003e; `tests/test_readme.py:25` | 2026-11-01, s52's builder |
 | n2 | S3 | `DECISIONS.md` | agentik-session has no ledger on main (no `DECISIONS.md`, no `CLAUDE.md` block), against the Mac's ledger, entry 21 (a decision lives in the root `DECISIONS.md` of the repo holding its implementation) | `git ls-tree -r main --name-only \| grep -ci decision` gives 0; `history/NICE-2026-11-01.md` holds "this repo has no ledger" | 2026-11-01, h1's refuter F1 |
-| n15 | S3 | `plugin/hooks/session.ts` | The mod's `admissionLine`, the band line's twin above the prompt, does not draw S53's `mix` part; only the Python `band_line` (the prompt hook's line) does, and the S53 packet's `may touch` leaves the module out | `plugin/hooks/session.ts:199`; `admission.py` `_mix_part` | 2026-11-09, S53's builder |
 | n17 | S4 | `design/readme/source.md` | `session.admission.mix` (shares, fable_cap, resets, until, prices) has no README line; the source has no room (n1) | packet S53 ruling 1 | 2026-11-09, S53's builder |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
