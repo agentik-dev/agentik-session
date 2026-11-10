@@ -291,7 +291,12 @@ def test_s52_a2_continue_never_adopts_behind_another_chain(tmp_path, monkeypatch
     before = first.read_bytes(), land.read_bytes()
     third = tmp_path / f"{t}-3-hq.md"
     opened = third.read_bytes()
-    assert run("charter", "close", "--dir", str(tmp_path), "--exit", "goal met")[0] == 0
+    # Packet FW1a R11: two -hq charters today and no record, so the bare close refuses and
+    # writes nothing; the named close writes the third.
+    rc, out, err = run("charter", "close", "--dir", str(tmp_path), "--exit", "goal met")
+    assert (rc, out) == (2, "") and first.name in err and third.name in err
+    assert third.read_bytes() == opened
+    assert run("charter", "close", "--exit", "goal met", str(third))[0] == 0
     assert third.read_bytes() != opened and b"goal met" in third.read_bytes()
     assert (first.read_bytes(), land.read_bytes()) == before
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
@@ -442,13 +447,13 @@ def test_s21_open_seeds_nothing_with_priority_off(tmp_path):
 @pytest.mark.parametrize("handover,next_act,config,want", [
     ("## Handover\n- h\n\n", "the next act", None, "open by level"),
     (S21_LISTED, "WAITING: the owner", None, "WAITING <n>: <what>; <how to tell>"),
-    (S21_LISTED, "WAITING 3: the owner's word; a reply in OPEN-QUESTIONS.md", None,
+    (S21_LISTED, "WAITING 3: the owner's word; a reply in OPEN-QUESTIONS.md; by owner; est none", None,
      "session.pacing.waiting"),
     ("## Handover\n- h\n\n", "WAITING", S21_OFF, None),
 ], ids=["no-line", "misshapen", "at-the-stop", "off"])
 def test_s21_check_warns(tmp_path, monkeypatch, handover, next_act, config, want):
     _s21_repo(tmp_path, monkeypatch)
-    ok = _s21_charter(tmp_path, next_act="WAITING 2: the owner's word; a reply lands")
+    ok = _s21_charter(tmp_path, next_act="WAITING 2: the owner's word; a reply lands; by owner; est none")
     assert run("charter", "check", str(ok)) == (0, "", "")             # the control
     p = _s21_charter(tmp_path, handover, next_act)
     assert "warning" in run("charter", "check", str(p))[2]             # on by default
@@ -463,7 +468,7 @@ def test_s21_check_warns(tmp_path, monkeypatch, handover, next_act, config, want
 
 def test_s21_close_warns(tmp_path, monkeypatch):
     _s21_repo(tmp_path, monkeypatch)
-    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 4: x; y")
+    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 4: x; y; by owner; est none")
     rc, out, err = run("charter", "close", "--exit", "goal met", str(p))
     assert rc == 0 and out.strip() == str(p) and "- exit taken: goal met" in p.read_text()
     assert err.count("warning") == 2 and "open by level" in err and "WAITING 4" in err
@@ -471,7 +476,7 @@ def test_s21_close_warns(tmp_path, monkeypatch):
 
 def test_s21_bad_resolve_warns_nothing(tmp_path, monkeypatch):
     _s21_repo(tmp_path, monkeypatch, "session:\n  pacing: {waiting: 2}\n")
-    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 2: x; y")
+    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 2: x; y; by owner; est none")
     rc, _, err = run("charter", "check", str(p))
     assert rc == 0 and err.count("warning") == 2                        # the control
     _s21_repo(tmp_path, monkeypatch, "session: {posture: loud}\n")
@@ -491,7 +496,7 @@ def test_s21_malformed_layer_warns_nothing(tmp_path, monkeypatch, user, repo, ve
 
     from claude_session import resolver
     _s21_repo(tmp_path, monkeypatch)
-    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 2: x; y")
+    p = _s21_charter(tmp_path, "## Handover\n- h\n\n", "WAITING 2: x; y; by owner; est none")
     assert run("charter", "check", str(p))[2].count("warning") == 1     # the control
     if user is not None:
         u = resolver._user_file(os.environ)
@@ -508,7 +513,7 @@ def test_s21_malformed_layer_warns_nothing(tmp_path, monkeypatch, user, repo, ve
 
 @pytest.mark.parametrize("line,want", [
     ("WAITING 1: the owner's answer; a line in OPEN-QUESTIONS.md", 1),
-    ("WAITING 12: CI; the run's status", 12),
+    ("WAITING 12: CI; the run's status; by CI; est none", 12),
     ("WAITING 3: no how-to-tell", 0),
 ], ids=["one", "twelve", "misshapen"])
 def test_s21_waiting(line, want):
@@ -524,7 +529,7 @@ def test_s21_waiting(line, want):
 
 S29_METER = ("a wait on the usage meter is not WAITING (session.pacing): keep the act as the "
              "Next act and wake at the band's reset")
-S29_STOP = "never stops the loop"
+S29_STOP = "say STALLED once"
 
 
 def _s29_warns(next_act, session=SECTION, waiting=S40_NONE):
@@ -543,11 +548,11 @@ def test_s29_meter_wait_warns_at_any_n(what, n):
 
 
 @pytest.mark.parametrize("next_act,want", [
-    ("WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md", []),
-    ("WAITING 3: CI; the run's status", [S29_STOP]),
-    ("WAITING 2: the parameter sweep; its log", []),         # a word that only holds "meter"
+    ("WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md; by owner; est none", []),
+    ("WAITING 3: CI; the run's status; by CI; est none", [S29_STOP]),
+    ("WAITING 2: the parameter sweep; its log; by CI; est none", []),         # a word that only holds "meter"
     ("WAITING: room for 0", ["WAITING <n>: <what>; <how to tell>"]),    # misshapen, not named
-    ("WAITING 2: CI; the meter shows room", []),             # the meter in <how to tell> only
+    ("WAITING 2: CI; the meter shows room; by CI; est none", []),             # the meter in <how to tell> only
     ("the next act names the meter", []),
 ], ids=["owner", "ci-at-the-stop", "parameter", "misshapen", "how-to-tell", "no-waiting"])
 def test_s29_other_waiting_gets_no_meter_line(next_act, want):
@@ -719,15 +724,15 @@ def test_s22_docs_say_the_order():
 
 # ---- S36: a wait never stops the loop ---------------------------------------
 
-S36_LINE = ("WAITING {n} is at session.pacing.waiting ({w}) or past it: wake at the cache's "
-            "idle limit, bring the charter current and commit it; a wait never stops the loop "
-            "or closes the sitting, only the checkpoint does")
+S36_LINE = ("WAITING {n} is at session.pacing.waiting ({w}) or past it: say STALLED once, "
+            "make the Next act 'STALLED: <what>; by <who>; since <when>' and arm no wakeup; "
+            "the sitting stays open")
 
 
 @pytest.mark.parametrize("n,w,warned", [(3, 3, True), (9, 3, True), (1, 1, True),
                                         (2, 3, False)], ids=["at", "past", "at-one", "under"])
 def test_s36_waiting_at_n_never_stops_the_loop(n, w, warned):
-    got = _s29_warns(f"WAITING {n}: CI; the run's status", {**SECTION, "pacing": {"waiting": w}})
+    got = _s29_warns(f"WAITING {n}: CI; the run's status; by CI; est none", {**SECTION, "pacing": {"waiting": w}})
     assert got == ([S36_LINE.format(n=n, w=w)] if warned else [])
     assert not any("the loop stops" in g or "close the sitting" in g for g in got)
 
@@ -799,8 +804,8 @@ def test_s40_shapes_without_waiting_warn_nothing(lines):
 
 
 @pytest.mark.parametrize("next_act", [
-    "WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md",
-    "WAITING 3: CI; the run's status",
+    "WAITING 1: the owner's word; a reply in OPEN-QUESTIONS.md; by owner; est none",
+    "WAITING 3: CI; the run's status; by CI; est none",
     "WAITING: the owner",
 ], ids=["one", "at-the-stop", "misshapen"])
 @pytest.mark.parametrize("lines,first", [
@@ -811,20 +816,20 @@ def test_s40_waiting_while_ready_is_red_first(next_act, lines, first):
     body = "## While waiting\n" + "".join(l + "\n" for l in lines) + "\n"
     assert not any(charter.RED in g for g in _s29_warns(next_act))   # the control: - none
     got = _s29_warns(next_act, waiting=body)
-    assert got[0] == (f"WAITING while ready: {first}; take it, since WAITING is legal only "
-                      "when While waiting reads - none")
+    assert got[0] == (f"WAITING while ready: {first}; take it, since a wait is legal only "
+                      "when no S1 to S3 row is ready and nothing is owed")
     assert sum(charter.RED in g for g in got) == 1
 
 
 def test_s40_the_meter_wait_stays_exempt():
     body = "## While waiting\n%s\n\n" % S40_READY
     assert _s29_warns("WAITING 2: room for 0; band.json's resetsAt", waiting=body) == [S29_METER]
-    assert _s29_warns("WAITING 2: CI; the run's status",
+    assert _s29_warns("WAITING 2: CI; the run's status; by CI; est none",
                       {**SECTION, "pacing": {"enabled": False}}, waiting=body) == []
 
 
 @pytest.mark.parametrize("next_act,want", [
-    ("WAITING 1: CI; the run's status", 1), ("the next act", 0),
+    ("WAITING 1: CI; the run's status; by CI; est none", 1), ("the next act", 0),
     ("WAITING 1: room for 0; band.json's resetsAt", 0),
 ], ids=["red", "no-waiting", "meter"])
 def test_s40_check_exits_1_on_the_red(tmp_path, monkeypatch, next_act, want):
@@ -844,7 +849,7 @@ def test_s40_check_exits_1_on_the_red(tmp_path, monkeypatch, next_act, want):
 
 def test_s40_close_keeps_its_exit_on_the_red(tmp_path, monkeypatch):
     _s21_repo(tmp_path, monkeypatch)
-    p = _s21_charter(tmp_path, next_act="WAITING 1: CI; the run's status",
+    p = _s21_charter(tmp_path, next_act="WAITING 1: CI; the run's status; by CI; est none",
                      waiting="## While waiting\n%s\n\n" % S40_READY)
     rc, out, err = run("charter", "close", "--exit", "goal met", str(p))
     assert rc == 0 and out.splitlines()[0] == str(p) and charter.RED in err
@@ -864,10 +869,10 @@ def test_s40_docs_say_the_section():
 def test_s40_shape_warnings_whatever_pacing_says():
     body = "## While waiting\n- none\n- prose\n\n"
     off = {**SECTION, "pacing": {"enabled": False}}
-    got = _s29_warns("WAITING 1: CI; the run's status", off, waiting=body)
+    got = _s29_warns("WAITING 1: CI; the run's status; by CI; est none", off, waiting=body)
     assert len(got) == 2 and "'- none' beside other lines" in got[0] and got[1].endswith(": - prose")
     assert not any(charter.RED in g for g in got)
-    assert charter.RED in _s29_warns("WAITING 1: CI; the run's status", waiting=body)[0]
+    assert charter.RED in _s29_warns("WAITING 1: CI; the run's status; by CI; est none", waiting=body)[0]
 
 
 @pytest.mark.parametrize("head", ["## While Waiting", "## While waiting (S40)", "## while waiting"])
@@ -877,11 +882,11 @@ def test_s40_a_near_miss_heading_is_named(head):
 
 
 def test_s40_a_misshapen_line_reds_and_says_so():
-    got = _s29_warns("WAITING 1: CI; the run's status", waiting="## While waiting\na line\n\n")
+    got = _s29_warns("WAITING 1: CI; the run's status; by CI; est none", waiting="## While waiting\na line\n\n")
     assert got[0] == ("WAITING while ready: a line (not a ready or owed shape: fix the line or "
                       "take it)")
     assert len(got) == 2 and got[1].endswith(": a line")
 
 
 def test_s40_no_section_under_waiting_is_no_red():
-    assert _s29_warns("WAITING 1: CI; the run's status", waiting="") == [S40_OLD]
+    assert _s29_warns("WAITING 1: CI; the run's status; by CI; est none", waiting="") == [S40_OLD]

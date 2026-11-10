@@ -13,8 +13,10 @@ other than While waiting; a table missing one of its five rows. An empty Done-ne
 is not refused here: `open` seeds the Handover's open-by-level line (none with priority off)
 and While waiting's `- none`; `close` fills the Handover. While waiting's lines are
 `- ready: <row> (<repo>, S<n>)` (at most three), `- owed: <item>; <what it needs>`, or
-`- none` alone; a Next act of WAITING beside any other line is the red (`RED`), which
-`charter check` exits 1 on.
+`- none` alone. A Next act of WAITING or STALLED beside a ready row of S1 to S3, an owed
+item or a line of neither shape is the red (`RED`; S4 rows alone are none, packet FW1a R1); a
+Next act opening STALLED misshapen is the second (`STALLED_RED`, R3); `charter check` exits 1
+on either (`REDS`).
 """
 
 from __future__ import annotations
@@ -40,6 +42,14 @@ RESPAWN = re.compile(r"^RESPAWN(?=[:.\s]|$)")
 # Waiting on an outside party (S21): `WAITING <n>: <what>; <how to tell>`, n from 1.
 WAITING = re.compile(r"^WAITING(?=[:.\s]|$)")
 WAITING_LINE = re.compile(r"^WAITING ([1-9][0-9]*): ([^;]*\S[^;]*); (.*\S.*)$")
+# Packet FW1a: the line's full shape, with who must act and the blocker's estimate; and the
+# line a wait becomes once the owner has been told.
+WAITING_FULL = re.compile(r"^WAITING [1-9][0-9]*: [^;]*\S[^;]*; [^;]*\S[^;]*; "
+                          r"by [^;]*\S[^;]*; est (\S+)$")
+STALLED = re.compile(r"^STALLED(?=[:.\s]|$)")
+STALLED_LINE = re.compile(r"^STALLED: [^;]*\S[^;]*; by [^;]*\S[^;]*; since \S.*$")
+SHAPE = "WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>"
+STALLED_SHAPE = "STALLED: <what>; by <who>; since <when>"
 NEXT_ACT = "## Next act"
 # The While waiting section (S40): its three line shapes, and the red of a WAITING beside it.
 NONE = "- none"
@@ -47,6 +57,8 @@ READY_LINE = re.compile(r"^- ready: (\S+) \(([^,()]*\S[^,()]*), S([1-9][0-9]*)\)
 OWED_LINE = re.compile(r"^- owed: ([^;]*\S[^;]*); (.*\S.*)$")
 MAX_READY = 3
 RED = "WAITING while ready"
+STALLED_RED = "STALLED without its parts"
+REDS = (RED, STALLED_RED)
 
 
 class CharterError(ValueError):
@@ -136,16 +148,30 @@ def _while_waiting_shape(lines: list[str] | None, text: str = "") -> list[str]:
 
 
 def _red(lines: list[str] | None) -> str | None:
-    """The red of a WAITING Next act beside a While waiting line other than `- none`."""
+    """The red of a waiting Next act beside a While waiting line that must be taken first: a
+    ready row of S1 to S3, an owed item, or a line of neither shape. S4 rows alone are a
+    list (FW1a): they run only while fill is on."""
     others = [line for line in lines or () if line != NONE]
-    if not others:
+
+    def due(line):
+        m = READY_LINE.match(line)
+        return bool(OWED_LINE.match(line)) or (m is not None and int(m.group(3)) <= 3)
+    first = next((line for line in others if due(line)), None)
+    if first is not None:
+        return (f"{RED}: {first}; take it, since a wait is legal only when no S1 to S3 row "
+                "is ready and nothing is owed")
+    odd = next((line for line in others if not READY_LINE.match(line)), None)
+    if odd is not None:
+        return f"{RED}: {odd} (not a ready or owed shape: fix the line or take it)"
+    return None
+
+
+def stalled(line: str | None) -> bool | None:
+    """True for a Next act `STALLED: <what>; by <who>; since <when>`, False when it opens
+    STALLED misshapen, None when it does not open STALLED."""
+    if not line or not STALLED.match(line):
         return None
-    first = next((line for line in others if READY_LINE.match(line) or OWED_LINE.match(line)),
-                 None)
-    if first is None:
-        return f"{RED}: {others[0]} (not a ready or owed shape: fix the line or take it)"
-    return (f"{RED}: {first}; take it, since WAITING is legal only when While waiting "
-            f"reads {NONE}")
+    return bool(STALLED_LINE.match(line.rstrip()))
 
 
 def next_act_line(text: str) -> str | None:
@@ -174,14 +200,14 @@ def waiting(line: str | None) -> int | None:
 
 def warnings(raw: bytes, session: dict) -> list[str]:
     """What `check` and `close` print on stderr (S21): no `- open by level:` line under
-    Handover (priority on); a Next act opening WAITING misshapen, or at n of
-    `pacing.waiting` or more (pacing on), whose line says to wake at the cache's idle
-    limit and commit the charter: a wait never stops the loop (S36). A well-formed
-    WAITING whose <what> names the usage meter (S29) gets its own line at any n, never
-    the idle limit's: a meter wait is not WAITING. Whatever pacing says (S40): the
-    While waiting section's shape. With pacing on, the red, first in the list: a Next
-    act of WAITING (n of 1 or more, or misshapen) beside a line other than `- none`.
-    `check` exits 1 on the red; every other line, and `close`, leave the exit alone."""
+    Handover (priority on). With pacing on (packet FW1a R2, R4): a Next act opening WAITING
+    misshapen, or short of FULL (`SHAPE`), or with an est token that is neither `none` nor a
+    zoned time, each once; at n of `pacing.waiting` or more, the line that says STALLED once
+    and arms no wakeup. A well-formed WAITING whose <what> names the usage meter (S29) gets
+    its own line at any n: a meter wait is not WAITING. Whatever pacing says (S40): the
+    While waiting section's shape. With pacing on, the reds, first in the list: a Next act
+    of WAITING or STALLED beside a line `_red` names (R1), then a misshapen STALLED (R3).
+    `check` exits 1 on a red; every other line, and `close`, leave the exit alone."""
     text = raw.decode("utf-8", "replace")
     priority, pacing = rules.parts(session)
     out = []
@@ -193,22 +219,37 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     lines = while_waiting(raw)
     out.extend(_while_waiting_shape(lines, text))
     if n:
-        what = WAITING_LINE.match(line.rstrip()).group(2)
+        # FW1a: <what> up to its first `;`, since WAITING_LINE's `\S` lets it take one, and
+        # in FULL that would read <how to tell> as the wait's subject.
+        what = WAITING_LINE.match(line.rstrip()).group(2).split(";")[0]
         if re.search(r"\b(room for|meter|usage limit|five-hour|5h)"
                      r"|\b(week|weekly|7d|seven-day|band)\b", what, re.I):
             out.append("a wait on the usage meter is not WAITING (session.pacing): keep the "
                        "act as the Next act and wake at the band's reset")
             return out
+    st = stalled(line) if pacing["enabled"] else None
     if n == 0:
-        out.append("the Next act opens WAITING but is not "
-                   "'WAITING <n>: <what>; <how to tell>' (session.pacing is on)")
-    elif n is not None and n >= pacing["waiting"]:
-        out.append(f"WAITING {n} is at session.pacing.waiting ({pacing['waiting']}) or past "
-                   "it: wake at the cache's idle limit, bring the charter current and commit "
-                   "it; a wait never stops the loop or closes the sitting, only the checkpoint "
-                   "does")
-    red = _red(lines) if n is not None else None
-    return [red] + out if red else out
+        out.append(f"the Next act opens WAITING but is not '{SHAPE}' (session.pacing is on)")
+    elif n is not None:
+        full = WAITING_FULL.match(line.rstrip())
+        if full is None:
+            out.append("the Next act's WAITING names no '; by <who>; est <zoned time|none>' "
+                       "(session.pacing): say who must act and the blocker's estimate")
+        elif full.group(1) != "none" and rules._zoned(full.group(1)) is None:
+            out.append(f"est {full.group(1)} is neither a zoned time "
+                       "(2026-11-09T18:30-08:00) nor none")
+        if n >= pacing["waiting"]:
+            out.append(f"WAITING {n} is at session.pacing.waiting ({pacing['waiting']}) or "
+                       f"past it: say STALLED once, make the Next act '{STALLED_SHAPE}' and "
+                       "arm no wakeup; the sitting stays open")
+    reds = []
+    if n is not None or st is not None:
+        red = _red(lines)
+        if red:
+            reds.append(red)
+    if st is False:
+        reds.append(f"{STALLED_RED}: the Next act is not '{STALLED_SHAPE}'")
+    return reds + out
 
 
 def check(path) -> list[str]:
@@ -262,27 +303,41 @@ def bare_target(dir, row: str | None, recorded: str | None) -> Path:
     """Packet S54 R1: the file a bare `close` writes. `recorded` (this sitting's
     `sessions/<sid>/charter.json` path) wins when it is absolute, a file, and its directory
     resolves to `dir`'s; the target is then `Path(dir) / <its name>`, so the caller prints
-    `dir`'s spelling. Else today's newest, when its name carries `open`'s suffix for `row`.
-    Raises CharterError, nothing written, when there is none today or when today's newest is
-    another suffix's (another sitting's file: the refusal names both and asks for the file)."""
-    if isinstance(recorded, str) and os.path.isabs(recorded):
-        try:
-            if (os.path.isfile(recorded) and os.path.realpath(os.path.dirname(recorded))
-                    == os.path.realpath(dir)):
-                return Path(dir) / os.path.basename(recorded)
-        except (OSError, ValueError):
-            pass
+    `dir`'s spelling. Packet FW1a R11: an absolute record naming a file outside `dir` (a Bash
+    in another repo) refuses, and so does no usable record when today holds two or more
+    charters of `open`'s suffix for `row` (another sitting may own the newest); each refusal
+    names today's charters and `close <file>`. Else today's newest, when its name carries the
+    suffix. Raises CharterError, nothing written, on a refusal, when there is none today, or
+    when today's newest is another suffix's (another sitting's file)."""
     date, suffix = today(), _suffix(row)
     found = _numbered(Path(dir), date)
+    own = [p for k, p in found if p.name == f"{date}-{k}{suffix}.md"]
+    ask = "name the file: charter close <file>"
+    if isinstance(recorded, str) and os.path.isabs(recorded):
+        try:
+            inside = (os.path.realpath(os.path.dirname(recorded))
+                      == os.path.realpath(dir))
+            if inside and os.path.isfile(recorded):
+                return Path(dir) / os.path.basename(recorded)
+        except (OSError, ValueError):
+            inside = True
+        if not inside:
+            listed = ", ".join(str(p) for _, p in found) or "none"
+            raise CharterError(
+                f"this session's record names {recorded}, outside {dir}; today's charters "
+                f"under {dir}: {listed}; {ask}")
+    if len(own) >= 2:
+        raise CharterError(
+            f"no record of this session names its charter, and today holds {len(own)} "
+            f"charters of its suffix under {dir}: {', '.join(str(p) for p in own)}; {ask}")
     if not found:
         raise CharterError(f"no charter for today under {dir}")
     n, newest = found[-1]
     if newest.name == f"{date}-{n}{suffix}.md":
         return newest
-    own = [p for k, p in found if p.name == f"{date}-{k}{suffix}.md"]
     raise CharterError(
         f"today's newest charter, {newest}, is another sitting's; this sitting's newest "
-        f"today: {own[-1] if own else 'none today'}; name the file: charter close <file>")
+        f"today: {own[-1] if own else 'none today'}; {ask}")
 
 
 def adoptable(dir, row: str | None = None) -> Path | None:
@@ -341,7 +396,8 @@ def open(dir, goal: str, section: dict, head: str | None,
         NONE,
         "",
         "## Next act",
-        "The first act toward the goal; bring this charter current at every commit.",
+        "The first act toward the goal; bring this charter current at a CHECKPOINT line, when a "
+        "wait starts or its line changes, and at close.",
         "",
     ])
     path = dir / f"{date}-{n}{suffix}.md"
