@@ -421,9 +421,10 @@ prompt cache's lifetime.
   keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
 - A helper's Bash carries its sitting's session id, so the PreToolUse hook denies a helper's
-  Bash that runs `agentik-session charter open` or `close` (any launcher name), whatever the
-  posture: write the charter by hand, check it with `charter check <file>`, and put a
-  probe's own call in a script file. With hooks off, `charter open` refuses, exit 2 and
+  Bash that names `agentik-session charter` (any launcher name, quotes and continuations
+  read through) with any word but `check` right after `charter`, flags included, whatever
+  the posture: write the charter by hand (a helper's one charter call is
+  `charter check <file>`, the verb first), and put a probe's own call in a script file. With hooks off, `charter open` refuses, exit 2 and
   nothing written, to move the record off a charter still open in the same directory: close
   it, open in a worktree, or take it on purpose with `charter open --replace`; a bare close
   then refuses while the replaced file stays open.
