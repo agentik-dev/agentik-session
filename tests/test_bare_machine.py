@@ -507,11 +507,21 @@ SETTINGS = {"model": "opus", "env": {"ANTHROPIC_MODEL": "m"}}
 def _modules():
     return {n: importlib.import_module("claude_session." + n) for n in (
         "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "ledger", "measure",
-        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state")}
+        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state",
+        "fill")}
 
 
 def _state_env(d):
     return {"HOME": str(d / "home"), "XDG_STATE_HOME": str(d / "state")}
+
+
+FILL_V = {"word": "opus", "until": "2026-10-30T18:00:00+00:00",
+          "week": "2026-11-01T18:00:00+00:00", "set": NOW_TS}
+
+
+def _fill_now():
+    from datetime import datetime
+    return datetime.fromisoformat(NOW_TS)
 
 
 READERS = {
@@ -534,6 +544,10 @@ READERS = {
     ("doctor", "_check_resolved"): (
         "state/agentik-session/sessions/%s/resolved.json" % S, RESOLVED,
         lambda m, d: m["doctor"]._check_resolved(_state_env(d)).ok),
+    ("fill", "overlay"): ("overlays/%s.json" % S, {"fill": FILL_V, "_prompts": 3},   # FW1b R9
+                          lambda m, d: m["fill"].overlay(d, S)),
+    ("fill", "hand"): ("fill.json", {"session": "p", "fill": FILL_V},        # packet FW1b R9
+                       lambda m, d: m["fill"].hand(d, d, "p", S, _fill_now())),
     ("gate", "_load"): ("g.json", {"id": "1", "repo": "/r"}, lambda m, d: m["gate"]._load(d / "g.json")),
     ("harness", "read_hooks"): ("hooks.jsonl", {"event": "Stop", "ms": 1, "exit": 0},
                                 lambda m, d: m["harness"].read_hooks(d)),

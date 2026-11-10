@@ -229,6 +229,21 @@ def _admission_line(sid=None) -> str | None:
         return None
 
 
+def _fill_part(sid, session, env):
+    """`fill <word> to <Ddd HH:MM>` while this session's fill word is in force (packet
+    FW1b R6), else None; never raises."""
+    try:
+        from datetime import datetime, timezone
+        from . import fill
+        state = resolver.state_dir(env)
+        if session is None:                     # the verb's, `rules`' and the mark's seat (F4)
+            from . import admission
+            session = admission._session_config(env, sid)
+        return fill.part(fill.overlay(state, sid), session, env, datetime.now(timezone.utc))
+    except Exception:  # noqa: BLE001 - the part never breaks a hook
+        return None
+
+
 def _lifetime(cwd, env, sid=None) -> tuple:
     """`rules.lifetime` from env, the settings under cwd and band.json (packet S30), this
     session's account's (packet S35); display only, as the band line: on any failure,
@@ -319,6 +334,10 @@ def user_prompt_submit(payload: dict) -> dict:
     band = _admission_line(sid)
     if band:
         bits.append(band)
+    word = (_fill_part(sid, None, os.environ)                    # FW1b R6: only while on
+            if isinstance(sid, str) and _SID.match(sid) else None)
+    if word:
+        bits.append(word.replace("fill ", "fill: ", 1))
     cache = _cache_line(payload)            # the prompt cache's lifetime (S30)
     if cache:
         bits.append(cache)
@@ -435,7 +454,8 @@ def session_start(payload: dict, env=None) -> dict:
             f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
             f"window ({whence}), checkpoint at "
             f"{s['checkpoint_at']:.0%}; resolved config at {path}")
-    line += rules.clause(s, _lifetime(cwd, env, sid)[0])     # at most 320 bytes (S21, S30)
+    line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
+                         fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",

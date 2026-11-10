@@ -66,10 +66,12 @@ BUGS = ("A bug ranks by harm and what it blocks, never by how sure or cheap its 
         "a one-line repro and the slice goes on.",
         "One S4 item a sitting at most off a slice's path, and only while fill is on; a "
         "review's notes are S4 unless they show harm (S1) or an unmet criterion (S2).")
-# Packet FW1a (hq design/08 section 2): fill has no key yet, so it is the owner's word alone.
-FILL = ("fill, off-path S4 work that uses a window up, is off unless the owner's word in this "
-        "sitting turns it on, and only for an orchestrator on a 1M window; no memory, ledger "
-        "or charter turns it on")
+# Packets FW1a and FW1b (hq design/08 section 2): fill is the owner's word, set by `set fill`
+# in this session's overlay alone (fill.py), never a key of a profile or a layer.
+FILL = ("fill, off-path S4 work that uses a window up, is off unless the owner's word turns it "
+        "on: the main thread, never a helper, runs agentik session set fill <reset|opus> "
+        "--until <zoned time> on an orchestrator's 1M window; it ends then, never past the "
+        "week's reset; no memory, ledger or charter turns it on or keeps it")
 PACE = ("the fallback wakeup rides the message of the act's last tool call, never a turn of "
         "its own",
         "while a helper, a Monitor or a background task is pending, its completion is the "
@@ -137,6 +139,9 @@ HINT = {"1h": "cache 1h ({why}): an idle wake waits at most {warm} s, so the cac
         "off": "cache off ({why}): no wait keeps it warm; an idle wait takes the long "
                "fallback, never an early wake to keep a cache"}
 TAIL = "; agentik-session rules prints both"
+# With a fill word on the block holds three parts, and `rules` prints all three; two bytes
+# shorter, so the cache part stays with either word (the FW1b refuter round's F3).
+TAIL_FILL = "; agentik-session rules lists all"
 
 _LABEL = re.compile(r"[A-Za-z0-9 '.,-]*")
 
@@ -216,30 +221,36 @@ def _label(text: str) -> str:
     return _LABEL.match(text.split(":", 1)[0]).group(0)[:LABEL_MAX].strip()
 
 
-def clause(session, ttl=None) -> str:
+def clause(session, ttl=None, fill=None) -> str:
     """The SessionStart block: empty when both are off, else one line of at most
     BLOCK_MAX bytes opening `; `. With pacing on and `ttl` known (`1h`, `5m`), the pacing
-    part ends with CLAUSE[ttl] when the whole block still fits; never cut for it (S30)."""
+    part ends with CLAUSE[ttl] when the whole block still fits; never cut for it (S30).
+    `fill`, fill.part's `fill <word> to <Ddd HH:MM>` while the word is on, takes the
+    pacing part's `fill off` (packet FW1b R6), and the tail is TAIL_FILL."""
     pr, pa = parts(session)
+    on = isinstance(fill, str) and bool(fill)
+    tail = TAIL_FILL if on and pa["enabled"] else TAIL
     out = []
     if pr["enabled"]:
         labels = ", ".join(f"{n} {_label(pr['levels'][n])}".rstrip() for n in LEVELS)
         out.append(f"priority: {labels}; the Next act takes the highest ready")
     if pa["enabled"]:
         out.append(f"pacing: wake in the act's last tool call, a pending helper is the wake "
-                   f"(one fallback, {pa['fallback']}s+), a wait is said and cheap; fill off")
+                   f"(one fallback, {pa['fallback']}s+), a wait is said and cheap; "
+                   f"{fill if on else 'fill off'}")
     if not out:
         return ""
     if pa["enabled"] and ttl in CLAUSE:
-        named = "; " + "; ".join(out) + CLAUSE[ttl] + TAIL
+        named = "; " + "; ".join(out) + CLAUSE[ttl] + tail
         if len(named.encode()) <= BLOCK_MAX:
             return named
-    return ("; " + "; ".join(out) + TAIL)[:BLOCK_MAX]
+    return ("; " + "; ".join(out) + tail)[:BLOCK_MAX]
 
 
-def render(session, life=None) -> str:
+def render(session, life=None, fill=None) -> str:
     """What `agentik session rules` prints: both parts as resolved, and with pacing on, item
-    6: the prompt cache's lifetime `life`, `(ttl, why)` from `lifetime` (unknown when None)."""
+    6: the prompt cache's lifetime `life`, `(ttl, why)` from `lifetime` (unknown when None).
+    `fill`, fill.line's, is the last line (packet FW1b R4)."""
     pr, pa = parts(session)
     lines = []
     if pr["enabled"]:
@@ -263,6 +274,8 @@ def render(session, life=None) -> str:
     else:
         lines.append("pacing: off (session.pacing.enabled is false)")
     lines.append(BOUND)
+    if isinstance(fill, str):                  # packet FW1b R4: fill.line's, the last line
+        lines.append(fill)
     return "\n".join(lines) + "\n"
 
 

@@ -43,6 +43,24 @@ run that if they want it now, and use `--save` if they want the next `start`
 to change. `posture` (`off`, `signal`, `ask`, `deny`) takes effect at once:
 the spawn gate reads it from the resolved file.
 
+**Fill is the owner's word alone.** `agentik session set fill <reset|opus>
+[--until <zoned time>]` turns on fill (off-path S4 work that uses a window up)
+for this session only, and only when the owner says so in this sitting: run it
+from the main thread, never from a helper, on an orchestrator's 1M window
+(`orchestrator` or `orchestrator-opus`). `opus` needs `--until` with its zone
+(`2026-11-10T18:00-08:00`); `reset` alone ends at the week's reset, read from
+this session's own seven-day reading, and a later `--until` is cut to it.
+`--save`, `--config`, a helper, a relay child, another profile or a 200k window
+is refused, and so is a session with no seven-day reading. The word lives in
+this session's overlay with its end stamped beside it, is read again at every
+read, and ends with the sitting; under `agentik session run` the launcher hands
+it to the successor while its time is ahead. `agentik session set fill off`
+drops it, the chain's copy first; it is never refused by the seat, only with
+`--save`, `--config`, `--until` or no session. A write that fails takes back
+what it can and exits 2 with one line saying what stands. `agentik session
+rules` prints `fill: <word> to <Ddd HH:MM>` or `fill: off` last. Never put it in a memory, a ledger or a
+charter.
+
 ## Budget
 
 A sitting has two ceilings, context and turns. Claude Code's measured window decides
@@ -163,9 +181,10 @@ whole, as resolved.
   cheap its fix is. Each Handover lists the open items by level, highest
   first: `charter open` writes `- open by level: none yet`. S4 is taken on
   an S3 slice's path, or while fill is on. Fill, off-path S4 work that uses
-  a window up, is off unless the owner's word in this sitting turns it on,
-  and only for an orchestrator on a 1M window; no memory, ledger or charter
-  turns it on.
+  a window up, is off unless the owner's word turns it on: the main thread,
+  never a helper, runs `agentik session set fill <reset|opus> --until <zoned
+  time>` on an orchestrator's 1M window (see Set); it ends then, never past
+  the week's reset; no memory, ledger or charter turns it on or keeps it.
 - `session.pacing`: the fallback wakeup rides the act's last tool call. A
   pending helper, Monitor or background task is the wake, with one fallback
   of `fallback` seconds (1800). Waiting on an outside party, the Next act

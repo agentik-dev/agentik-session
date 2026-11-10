@@ -17,7 +17,7 @@ claude plugin install session@agentik
 
 - The plugin carries the code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`, 3.9 or newer, with no clone, venv or launcher. Hooks never use PATH, so a session keeps its version until it respawns.
 - `/session:install-cli` gives the terminal a CLI, which a fresh Mac's relay band needs: it freezes the plugin's `lib/` under `~/.local/share/agentik-session/<hash>/` and writes `~/.local/bin/agentik-session`, run with `-I` under `/usr/bin/python3`. From a clone, `make install`; a dirty tree exits 2.
-- Then run `agentik session doctor` (or `/session:doctor` inside Claude Code). It checks the tool, the plugin and its hooks, one line per check, and notes each optional sibling that is absent; exit 2 names the failing check and its remedy.
+- Then run `agentik session doctor` (or `/session:doctor` inside Claude Code). It checks the tool, the plugin and its hooks, one line per check, and notes each absent optional sibling; exit 2 names the failing check and its remedy.
 - To upgrade: `claude plugin update session@agentik`; new sessions pick it up, live ones at their respawn; a new session moves a launcher forward.
 - At run time, the tool uses only the Python standard library.
 
@@ -61,7 +61,7 @@ CLI verbs (`agentik session --help`):
 | `gate` | `agentik session gate run . -- make check` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead) and lets a `/compact` you type run.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
 ## Profiles
 
@@ -80,10 +80,10 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 | `orchestrator` | large, complex work: Fable 5.1 on its 1M window |
 | `orchestrator-opus` | small and medium orchestrated projects: Opus 5.5 on its 1M window (`opus[1m]`) |
 
-- `agentik session start <profile>` launches Claude Code with that profile, using flags only. Nothing is written to `settings.json`. `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling. Claude Code's own `--max-turns` flag applies in print mode only. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one. A nested `start` exits 2 without `--nested`.
-- `agentik session set <knob> <value>` changes this session only. Launch-time knobs (model, effort, tools) print the in-session equivalent (`/model`, `/effort`). `posture` applies at once.
-- A session's profile is its role. The SessionStart hook takes the profile name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets). Failing that, it reads `session.profile` in `config.local.yaml`, then in `config.yaml`, then falls back to `frontier`. A helper a session spawns (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`. A helper of an orchestrator therefore keeps 180000 context tokens.
-- Claude Code's measured window (`context.window`) decides: a model change moves window, ceilings and ctx % at its next measure. Before the first, `profiles.yaml`'s `models:` table does: fable and mythos 1M; opus 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, the settings'.
+- `agentik session start <profile>` launches Claude Code with that profile, using flags only, never `settings.json`. `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling. Claude Code's own `--max-turns` flag applies in print mode only. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one. A nested `start` exits 2 without `--nested`.
+- `agentik session set <knob> <value>` changes this session only. Launch-time knobs (model, effort, tools) print the in-session equivalent (`/model`, `/effort`). `posture` applies at once. `set fill <reset|opus> [--until <zoned time>]` is the owner's word alone: an orchestrator's main thread on 1M, this session only. It ends at its time or the week's reset, and never takes `--save`. `run` hands it on. `set fill off` ends it from any seat.
+- A session's profile is its role. The SessionStart hook takes the profile name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets). Failing that, it reads `session.profile` in `config.local.yaml`, then in `config.yaml`, then falls back to `frontier`. A helper (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`, so an orchestrator's helper keeps 180000 context tokens.
+- Claude Code's measured window (`context.window`) decides: a model change moves window, ceilings and ctx % at its next measure. Before the first, `profiles.yaml`'s `models:` table does: fable and mythos 1M; a bare `opus` 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, the settings'.
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
 
@@ -94,15 +94,15 @@ CLAUDE_SESSION_PROFILE=orchestrator claude --model fable               # Fable 5
 CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'     # Opus 5.5, 1M
 ```
 
-For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window. A bare `opus` reads the table's 200k only until the first measure. `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
+For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`. The SessionStart line names the profile, the ceilings and the window. `agentik session status` ends with the source, e.g. `role:orchestrator-opus window:1000000`.
 
 ## Budget
 
-- The meter: after every tool, the PostToolUse hook reads the transcript's new lines and writes `meter.json`, which holds the used share of each of two ceilings, context and turns (`frontier`: 180000 context tokens, 400 turns, on either window). It re-picks the window, engine's first, and records `window_source` and `limits_source`.
+- The meter: after every tool, the PostToolUse hook reads the transcript's new lines and writes `meter.json`, which holds the used share of two ceilings, context and turns (`frontier`: 180000 tokens, 400 turns, either window). It re-picks the window, engine's first, and records `window_source` and `limits_source`.
 - Zones, by the larger share: clear from 0%, notice from 80%, wind-down from 90%, reserve from 92%, exhausted at 100%.
 - `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80%), then every tenth tool: bring the charter current, commit, run `agentik session checkpoint`.
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
-- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`. Its first line must open on `RESPAWN`, or the verb exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
+- A RESPAWN close is the sitting's last act, run through Bash: `agentik-session checkpoint --respawn --charter <file>`. `--charter` is required. The verb reads only the charter's `## Next act`. Its first line opens on `RESPAWN`, or the verb exits 2 and writes nothing. It then checkpoints and writes `sessions/<session_id>/respawn.json`, and the sitting ends its turn. `--state <s>` hands the successor a checked state file its SessionStart line names. The PostToolUse hook confirms the mark only for the main thread's own Bash call.
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
 - `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
@@ -120,9 +120,9 @@ The configuration is layered, lowest first: the shipped profiles; `~/.claude/<pl
 
 At SessionStart the plugin writes the result to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/sessions/<session_id>/resolved.json`, shaped `{"provider": {plugin, version, profile, resolved_at, inputs: [{path, sha256}]}, "<plugin>": {...}}`.
 
-A dependent plugin takes `session_id` from hook stdin or `$CLAUDE_CODE_SESSION_ID`. It accepts the file only when `provider.version` is in its range, reads its own section, and never writes the file. When the file is absent, the dependent runs alone. `agentik session config show --resolved` prints this session's file.
+A dependent plugin takes `session_id` from hook stdin or `$CLAUDE_CODE_SESSION_ID`. It accepts the file only when `provider.version` is in its range, reads its own section, and never writes it. With no file, it runs alone. `agentik session config show --resolved` prints this session's file.
 
-The sibling plugins, `decisions`, `respeak` and `relay`, are optional: this plugin works with none installed and accepts any version of each, and `agentik session doctor` notes an absent one with what it adds. Nothing else outside the repo.
+The sibling plugins, `decisions`, `respeak` and `relay`, are optional: this plugin works with none and accepts any version of each, and `agentik session doctor` notes an absent one with what it adds. Nothing else outside the repo.
 
 ## The charter
 
@@ -182,7 +182,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.56`, rendered `2026-10-14`, `2561` tests in the suite.
+Status: version `v2.0.0-alpha.58`, rendered `2026-11-10`, `2589` tests in the suite.
 
 ## Credit
 

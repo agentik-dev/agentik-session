@@ -215,13 +215,57 @@ these hooks. `env` refuses `PATH`, `PYTHONPATH`, `DYLD_*`, `ANTHROPIC_*` and
 the credential variables outright. `name` and `description` are not settable.
 
 Commands: `agentik session set <key> <value> [--save] [--config NAME]`,
-`agentik session config list`, `agentik session config show [name] [--stored]`,
+`agentik session set fill <reset|opus> [--until <zoned time>]`,
+`agentik session set fill off`, `agentik session config list`, `agentik session config show [name] [--stored]`,
 `agentik session config new <name> --from <base> --description "..."`,
 `agentik session config delete <name>`.
 
 An overlay set with `set` is confirmed gone once the `SessionEnd` hook
 fires: this is covered by test, not just by design. It depends on the plugin's
 hooks firing, per section 1.
+
+**Fill: `agentik session set fill <reset|opus> [--until <zoned time>]`, and `set fill off`.**
+Fill (section 4, Priority and pacing) is the owner's word, never a key: it
+joins no configuration and no profile, and `--save` or `--config` is refused.
+`set fill` writes `fill` into this session's overlay as the word and three
+zoned times, `{"word", "until", "week", "set"}`, and prints `fill: <word> to <Ddd
+HH:MM>`, local, as the band line writes the week's reset.
+
+- The end. `--until` takes an ISO time with its zone. `opus` needs it; `reset`
+  alone ends at the week's reset, this session's own newest seven-day
+  reading's `resetsAt` on the admission ledger (another session's may be
+  another login's). A later `--until` is cut to the week's reset and the line
+  says ` (the week's reset; --until named <given>)`. Exit 2: `opus` with no
+  `--until`, a time with no zone, an unknown word, `--until` beside `off` or
+  another key. Exit 1: a passed time, no seven-day reading of this session's.
+- The seat. Refused, exit 1, nothing written: `--save` or `--config`, no
+  session id, a helper or a relay child (`CLAUDE_SESSION_HELPER`, `RELAY_ROW`,
+  a depth of 1 or more), a resolved profile other than `orchestrator` and
+  `orchestrator-opus`, or a window in force under 1M.
+- The read. The word binds only while its record is whole, now is before its
+  end, its end is not past its week, and the seat still holds, at every read:
+  a `/model` switch to a 200k window turns it off and back. Only this session's
+  overlay is read. `agentik session rules` prints `fill: <word> to <Ddd
+  HH:MM>`, `fill: off`, or `fill: off (<why>)` last; the SessionStart line's
+  `fill off` becomes `fill <word> to <Ddd HH:MM>` and each prompt says `fill:
+  <word> to <Ddd HH:MM>` while it is on; a spawn line on the admission ledger
+  carries `fill: <word>` only then.
+- One terminal. With no launcher the word ends with the sitting, since
+  `SessionEnd` deletes the overlay. Under `agentik session run`, `set` also
+  writes `<chain home>/fill.json` (`{"session", "fill"}`; `off` removes it),
+  and before each start the launcher hands a copy the session that just ended
+  held, its time ahead, to the successor's overlay and says `<chain>: fill
+  <word> to <Ddd HH:MM> goes to the successor`; any other copy is removed.
+- `agentik session set fill off` removes the chain's copy first, then drops
+  the key, so a kill between the two leaves the successor nothing to take. It
+  is never refused by the seat: a helper, a relay child or another profile may
+  run it. It is refused with `--save` or `--config` (exit 1), with no session
+  id (exit 1) and with `--until` (exit 2).
+- A failed write. `set fill <reset|opus>` writes the overlay first and the
+  chain's copy second; when either cannot be written (an OSError), the verb
+  takes back what it can, the copy first and the overlay's word second, and
+  exits 2 with one line on stderr that says what still stands, never a
+  traceback: a failure leaves the successor less fill, never more.
 
 **The priority and pacing keys.** `session.priority` and `session.pacing` sit
 in the shipped `defaults`, both on in every shipped profile. Any layer
@@ -311,9 +355,10 @@ prompt cache's lifetime.
   is. Each Handover lists the open items by level, highest first, and
   `charter open` writes `- open by level: none yet`. S4 is taken on an S3
   slice's path, or while fill is on: fill, off-path S4 work that uses a
-  window up, is off unless the owner's word in this sitting turns it on, and
-  only for an orchestrator on a 1M window; no memory, ledger or charter
-  turns it on. Below the Handover,
+  window up, is off unless the owner's word turns it on: the main thread,
+  never a helper, runs `agentik session set fill <reset|opus> --until <zoned
+  time>` on an orchestrator's 1M window (section 3); it ends then, never past
+  the week's reset; no memory, ledger or charter turns it on or keeps it. Below the Handover,
   `charter open` writes `## While waiting` with the one line `- none`. Its
   other lines are `- ready: <row> (<repo>, S<n>)`, an off-path row built
   without a gate, at most three, and `- owed: <item>; <what it needs>`, an

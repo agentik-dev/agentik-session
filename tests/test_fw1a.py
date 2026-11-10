@@ -41,9 +41,11 @@ S4 = ("the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md
       "level, taken on an S3 slice's path, or while fill is on; never ahead of S3")
 BUG_3 = ("One S4 item a sitting at most off a slice's path, and only while fill is on; a "
          "review's notes are S4 unless they show harm (S1) or an unmet criterion (S2).")
-FILL = ("fill, off-path S4 work that uses a window up, is off unless the owner's word in this "
-        "sitting turns it on, and only for an orchestrator on a 1M window; no memory, ledger "
-        "or charter turns it on")
+# Packet FW1b R8 rewords FILL: the verb, who runs it, and its end.
+FILL = ("fill, off-path S4 work that uses a window up, is off unless the owner's word turns it "
+        "on: the main thread, never a helper, runs agentik session set fill <reset|opus> "
+        "--until <zoned time> on an orchestrator's 1M window; it ends then, never past the "
+        "week's reset; no memory, ledger or charter turns it on or keeps it")
 BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the Next "
          "act takes the highest ready; pacing: wake in the act's last tool call, a pending "
          "helper is the wake (one fallback, 1800s+), a wait is said and cheap; fill off; "

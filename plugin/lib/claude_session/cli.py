@@ -359,7 +359,14 @@ def cmd_rules(args) -> int:
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID")               # its account's band (S35)
     life = rules.lifetime(os.environ, cwd,
                           admission.session_band(admission.read_band(os.environ), sid))
-    sys.stdout.write(rules.render(_session_section(cwd), life))
+    from datetime import datetime, timezone
+    from . import fill
+    section = _session_section(cwd)
+    fsid = sessionconfig.session_id()
+    seat = admission._session_config(os.environ, fsid) if fsid else {}   # F4: one seat
+    word = fill.line(sessionconfig.load_overlay(), seat, os.environ,
+                     datetime.now(timezone.utc))                 # packet FW1b R4
+    sys.stdout.write(rules.render(section, life, fill=word))
     return 0
 
 
@@ -611,8 +618,108 @@ def _coerce(key: str, raw: str):
     return raw
 
 
+def _set_fill(args) -> int:
+    """`set fill <reset|opus|off> [--until <zoned time>]` (packet FW1b R1 to R5): this
+    session's overlay alone, its end stamped at `set`; under a launcher the chain home keeps
+    a copy for the hand. Refused with --save or --config, with no session, in a helper or a
+    relay child, and off an orchestrator's 1M window; `off` is never refused by the seat.
+    A failure, or a kill between the two writes, leaves the successor less fill, never more
+    (the refuter round's F1, F2): `off` removes the copy first, a word is written to the
+    overlay first, and a write that fails takes back what it can and says what stands."""
+    from datetime import datetime, timezone
+    from . import chain, fill
+    word = args.value
+    if args.save or args.config:
+        _die("fill is this session's alone: --save and --config are refused, and no "
+             "configuration, profile or config layer keeps a fill word")
+    if word not in fill.WORDS + ("off",):
+        _die("fill takes reset, opus or off", 2)
+    if word == "off" and args.until is not None:
+        _die("--until goes with fill reset or fill opus", 2)
+    until = None
+    if args.until is not None:
+        until = fill.when(args.until)
+        if until is None:
+            _die("--until takes an ISO time with its zone, as 2026-11-10T18:00-08:00", 2)
+    elif word == "opus":
+        _die(f"fill {word} needs its end: --until <zoned time>", 2)
+    sid = sessionconfig.session_id()
+    if not sid:
+        _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is unset), so "
+             "there is no session to scope a fill word to")
+    name = _chain_name()
+    home = chain.home(resolver.state_dir(os.environ), name) if name else None
+    if word == "off":
+        try:
+            _fill_off(sid, home)
+        except OSError as e:
+            _fill_failed(word, e, sid, home)
+        print(fill.OFF)
+        return 0
+    now = datetime.now(timezone.utc)
+    section = admission._session_config(os.environ, sid)     # the hook's and the mark's seat
+    try:
+        why = fill.seat(section, os.environ)
+        if why:
+            raise fill.Refused(why)
+        d = admission.directory(os.environ)
+        rows = [r for f in (admission.ROTATED, admission.LEDGER) for r in admission._rows(d / f)]
+        v, cut = fill.stamp(word, until, admission.week_reset(rows, sid, now), now)
+    except fill.Refused as e:
+        _die(str(e), e.code)
+    try:
+        sessionconfig.save_overlay({fill.KEY: v}, sid)
+        if home is not None:
+            home.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fill.keep(home, sid, v)
+    except OSError as e:
+        _fill_failed(word, e, sid, home)
+    line = fill.line({fill.KEY: v}, section, os.environ, now)
+    print(line + (f" (the week's reset; --until named {args.until})" if cut else ""))
+    return 0
+
+
+def _fill_off(sid, home) -> None:
+    """The chain home's copy first, then this session's word: a kill between the two leaves
+    the successor nothing to take (the refuter round's F1). Raises OSError."""
+    from . import fill
+    if home is not None:
+        fill.keep(home, sid, None)
+    cur = sessionconfig.load_overlay(sid)
+    if cur.pop(fill.KEY, None) is not None:
+        store._write_private(sessionconfig.overlay_path(sid), json.dumps(cur, indent=2))
+
+
+def _fill_failed(word, e, sid, home):
+    """A fill write failed: take back what can be, as `off` does, each step on its own, and
+    say in one line what still stands; exit 2, a failed precondition (F1, F2)."""
+    from . import fill
+    if home is not None:
+        try:
+            fill.keep(home, sid, None)
+        except OSError:
+            pass
+    try:
+        _fill_off(sid, None)
+    except OSError:
+        pass
+    stands = []
+    if fill.KEY in sessionconfig.load_overlay(sid):
+        stands.append("this session's word stands")
+    copy = home / fill.RECORD if home is not None else None
+    if copy is not None and copy.exists():
+        stands.append(f"the chain's copy stands and its successor takes it: remove {copy}")
+    where = f" ({e.filename})" if e.filename else ""
+    _die(f"fill {word}: {e.strerror or e}{where}; "
+         + ("; ".join(stands) if stands else "nothing stands, fill: off"), 2)
+
+
 def cmd_set(args) -> int:
     key = args.key.replace("-", "_")
+    if key == "fill":                       # packet FW1b R1: ahead of the field check
+        return _set_fill(args)
+    if args.until is not None:
+        _die("--until goes with fill", 2)
     # `set checkpoint 8` is the common case: one number for every zone.
     if key == "checkpoint" and args.value.isdigit():
         n = int(args.value)
@@ -1157,6 +1264,9 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--save", action="store_true",
                     help="persist it to the configuration instead")
     se.add_argument("--config", metavar="NAME")
+    se.add_argument("--until", metavar="TIME",
+                    help="with fill reset or fill opus, never with fill off: the zoned "
+                         "ISO time the word ends at, as 2026-11-10T18:00-08:00")
     se.set_defaults(func=cmd_set)
 
     cp = sub.add_parser("checkpoint", help="mark a handoff-ready point")

@@ -344,6 +344,22 @@ class Chain:
         except OSError as e:
             self.fx.say(f"{self.name}: the successor's state was not handed on ({e})")
 
+    def _hand_fill(self, prev, sid) -> None:
+        """Packet FW1b R5, before each start: the fill word the session that just ended
+        held, its time still ahead, goes into `sid`'s overlay and is said; any other copy
+        in the chain home (an earlier chain's, a passed one) is removed."""
+        from datetime import datetime, timezone
+        from . import fill
+        try:
+            now = datetime.fromtimestamp(self.fx.now(), timezone.utc)
+            v = fill.hand(self.home, self.state, prev, sid, now)
+        except OSError as e:
+            self.fx.say(f"{self.name}: the fill word was not handed on ({e})")
+            return
+        if v:
+            self.fx.say(f"{self.name}: fill {v['word']} to {fill.wall(fill.when(v['until']))} "
+                        "goes to the successor")
+
     def run(self) -> int:
         try:
             self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -393,6 +409,7 @@ class Chain:
             n += 1
             start = self.fx.now()
             self._hand_state(prev, sid)
+            self._hand_fill(prev, sid)
             try:
                 proc = self.fx.spawn([program, "--session-id", sid, *args], child_env)
             except OSError as e:                 # A-F6: a stop line, never a traceback
