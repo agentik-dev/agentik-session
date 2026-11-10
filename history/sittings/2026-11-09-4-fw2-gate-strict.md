@@ -15,16 +15,17 @@
 - [x] the code: R1 to R5 in gate.py and cli.py; T1 to T7 green, the six neighbouring suites 340 passed
 - [x] the texts: R6, SKILL.md, RUNBOOK.md, README.md and its source (16,381 B, under the 16,384 ceiling), gate.md, gate-r1's change log; T8 green
 - [x] the bump: R7, alpha.55, status line 2561 (collected), rendered.sha256 re-hashed (`shasum -c` OK); NICE n36
-- [ ] verify: the gate once
+- [x] verify: gate 20261109-213959-787 exit 0 in 11 min (2561 passed, floor 2537 + 3 skipped, validate passed, readme fresh)
 
 ## Handover
 - open by level: none yet
 - decide, owner: the coordinator: R6 asks `cmd_gate`'s docstring to cite the house configuration repo by name, which the public scan's private group refuses; the docstring names the agentik guide's rule "exit codes report the task, not the content" instead, and the packet's copy names the ledger without the repo's name. T8 asserts that rule's words in the docstring and no bare `(entry 25)`, and adds `plugin/commands/gate.md`'s three words; the prototype's git email is split for the scan's email group.
 - Choice (consumer: the refuter): the README source sat 2 B under its 16,384 ceiling; its gate section and the commands table's gate row were tightened to fit R6's words (the table keeps `gate run` alone; `wait` is in the section).
 - Choice (consumer: the refuter): `run`'s stderr line names the greens it took, `last <n> greens`, 3 to 5, not a fixed 5.
+- exit taken: FW2 built, R1 to R7, T1 to T8 green; gate 20261109-213959-787 exit 0 (2561 passed); alpha.55; nothing pushed; about 144k context, 35 turns
 
 ## While waiting
 - none
 
 ## Next act
-verify: the gate once, make check in this worktree
+none: the branch waits on its review and landing
