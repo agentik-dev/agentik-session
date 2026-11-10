@@ -20,14 +20,15 @@
 - [x] fold code: `39 passed` under 3.12.7 and 3.9.6; 19 mutations each red alone (M1 M3 M4 M5 M7 M10 M11 M13 M16 M17 M18 M19 M21 M22 M23, and F1 F2 F3 F6 undone)
 - [x] NICE n43 (F4), n44 (F5), n45 (F7), n46 (F8), each row under 400 characters
 - [x] bump: alpha.60 (plugin-version-check asked; later packets read up by one), status line 2628 (collected) by hand, sidecar re-hashed (`shasum -c` OK), source 16,381 B
-- [ ] verify: one gate
+- [x] verify: gate 20261110-011702-827 exit 0 in 10 min (2628 passed, floor 2604 + 3 skipped, validate passed, readme fresh)
 
 ## Handover
 - open by level: none yet
-- the packet's versions read on 2eaa069: alpha.58 held, this bump alpha.59 (the coordinator's change)
-- Choice (consumer: the refuter): an explicit `goal` is taken as given (the default alone drops the hq); the goal row is the first `| goal |` line read through `charter._table`, as the command's `grep -m1`; an empty goal counts, as `uniq -c` counts it
-- Choice (consumer: the refuter): a charter write is a path holding `/history/sittings/`, never a substring; a tick with no call is no tick; `landing_at` is None with no landing; the outer guard's finding carries the command `false`
-- exit taken: R1 to R9 built; gate 20261110-004433-825 exit 0; alpha.59; NICE n41, n42; nothing pushed
+- Choice (consumer: the refuter): an explicit `goal` is taken as given (the default alone drops the hq); an empty goal counts, as `uniq -c` counts it; a charter write is a path holding `/history/sittings/`, no `..`; the guard's finding carries the command `false`
+- Fold choice (consumer: the reviewer): F1 drops `charter._table` (R5) for the command's bytes rule: cut at the first `|` or `,`, `grep -a`; an unreadable charter is skipped, as `grep` skips it
+- Fold choice: F2 `idle.charter_only` reads the line's words (heredoc bodies dropped): each `git add`/`commit` names charter paths alone, none `-a`, no redirect, one path at least; a comment or open quote reads active. Not run on the real hq (a forbidden read): its 5.1 is unconfirmed
+- Fold choice: F3 adds `unread` as the numbers' last key; a string token count, once 0, is unread. M12 (isMeta) stays uncaught
+- exit taken: fold done, commits 2f96c15 53f4a25 da0a2d6 6a23bf5; gate 20261110-011702-827 exit 0; alpha.60; NICE n43 to n46; nothing pushed
 
 ## While waiting
 - none
