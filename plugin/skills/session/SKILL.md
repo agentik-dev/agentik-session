@@ -113,7 +113,7 @@ open one before the first act.
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
 agentik-session charter open --continue "<goal>"  # adopts today's newest of the suffix under 3,584 B, else as open
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
-agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest
+agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest, or two of its suffix stand with no record
 ```
 
 The shape, and nothing else:
@@ -129,15 +129,18 @@ The shape, and nothing else:
    (a runsheet, a refuter round, a draft);
 6. `## Next act`, one line.
 
-WAITING is legal only when While waiting reads `- none`: with a ready row or
-an owed item there, the Next act is that item, and, with `session.pacing` on,
-`check` exits 1 on a Next act of WAITING beside any line but `- none`
-(`WAITING while ready: <the line>`). A charter
-opened before 2.0.0-alpha.24 has no While waiting section; `check` passes it
+A wait is legal when no S1 to S3 row is ready and nothing is owed: with a
+ready row of S1 to S3 or an owed item there, the Next act is that item, and,
+with `session.pacing` on, `check` exits 1 on a Next act of WAITING or STALLED
+beside one, or beside a line of neither shape (`WAITING while ready: <the
+line>`). S4 rows alone are no red: they run only while fill is on. A Next act
+opening STALLED without its parts is the other red (`STALLED without its
+parts`). A charter opened before 2.0.0-alpha.24 has no While waiting section; `check` passes it
 and warns: add it with `- none`.
 
 The file stays under 4,096 bytes: move text out, never widen the ceiling.
-Bring it current at every commit and at every CHECKPOINT line. `close` appends
+Bring it current at a CHECKPOINT line, when a wait starts or its line
+changes, and at close. `close` appends
 exactly one line under Handover, `- exit taken: <text>; about <context>
 context, <turns> turns` from the meter, and refuses a charter that fails
 `check` or would pass the ceiling.
@@ -158,20 +161,27 @@ whole, as resolved.
   rest. An item gets its level when filed, and the Next act is the highest
   level ready. A bug ranks by harm and what it blocks, never by how sure or
   cheap its fix is. Each Handover lists the open items by level, highest
-  first: `charter open` writes `- open by level: none yet`.
+  first: `charter open` writes `- open by level: none yet`. S4 is taken on
+  an S3 slice's path, or while fill is on. Fill, off-path S4 work that uses
+  a window up, is off unless the owner's word in this sitting turns it on,
+  and only for an orchestrator on a 1M window; no memory, ledger or charter
+  turns it on.
 - `session.pacing`: the fallback wakeup rides the act's last tool call. A
   pending helper, Monitor or background task is the wake, with one fallback
   of `fallback` seconds (1800). Waiting on an outside party, the Next act
-  opens `WAITING <n>: <what>; <how to tell>`, n the wakes in a row with
-  nothing changed. From n = `waiting` (3) the wake is the longest idle wait
-  the cache allows, and the charter is brought current and committed. A wait
-  never stops the loop: under `agentik session run` a stopped loop only
-  idles until a hand, and only the checkpoint ends a sitting. WAITING is
-  legal only when the charter's While waiting section reads `- none`; with
-  a ready row or an owed item there, the Next act is that item. What the
-  owner must see goes in a file under `history/`, a PushNotification, or a
-  turn that ends on text and calls no ScheduleWakeup: text written before a
-  ScheduleWakeup call was not shown at the terminal on 2026-10-21. A wait on the
+  says `WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>`,
+  n the wakes in a row with nothing changed, est the blocker's own estimate
+  (a time with its zone, or `none`). The wake, first that applies: est
+  within 6 h, a wakeup at est, kept warm before it only on the 1h cache; by
+  the owner, no wakeup; else no wakeup and one background task that ends at
+  est (6 h on when est is none) or when the event's file moves. STALLED is
+  said once, when a wait by the owner starts, when that task ends with
+  nothing changed, or at n = `waiting` (3): the Next act becomes
+  `STALLED: <what>; by <who>; since <when>` in a turn that ends on text with
+  one PushNotification and no ScheduleWakeup, and after it no wakeup is
+  armed. A wait never closes the sitting, only the checkpoint does. The
+  charter is brought current when a wait starts or its line changes, never
+  at each wake; a respawn reads n from the charter. A wait on the
   usage meter (room for 0, a usage limit hit, the week or the band) is not WAITING: the Next
   act stays the act, the wake is the band's reset or one fallback, whichever
   is first, and it never counts toward n.
@@ -183,9 +193,10 @@ whole, as resolved.
   `agentik-session rules` and the prompt line name the lifetime in force.
 - A packet or brief bounds both: a builder files what lies outside it and
   takes none. No hook enforces them. `charter check` and `close` warn when
-  the Handover line is missing or a WAITING is misshapen or at `waiting` or
-  past it, and their exit is unchanged except the red of a WAITING Next act
-  beside a While waiting line, which exits 1.
+  the Handover line is missing, or a WAITING is misshapen, short of its
+  `by` and `est`, or at `waiting` or past it, and their exit is unchanged
+  except `check`'s on the two reds, a wait beside a due While waiting line
+  and a STALLED without its parts, which exit 1.
 - Any layer overrides them, never `set`: `priority: {enabled: false}`, one
   level's quoted text under `priority.levels`, `pacing: {fallback: 2400}`.
 

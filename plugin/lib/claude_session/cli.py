@@ -349,7 +349,7 @@ def _warn(path, section: dict | None) -> bool:
     found = charter.warnings(raw, section)
     for w in found:
         print(f"{path}: warning: {w}", file=sys.stderr)
-    return bool(found) and found[0].startswith(charter.RED)
+    return bool(found) and found[0].startswith(charter.REDS)
 
 
 def cmd_rules(args) -> int:
@@ -407,7 +407,8 @@ def cmd_charter(args) -> int:
     if args.args:
         path = args.args[0]
     else:
-        # Packet S54 R2: this sitting's recorded charter, else today's newest of its suffix.
+        # Packet S54 R2, FW1a R11: this sitting's recorded charter, else today's newest of its
+        # suffix; an outside record, or two of the suffix with no record, refuses.
         d = args.dir or _charter_dir(_session_section(cwd))
         try:
             path = charter.bare_target(d, os.environ.get("RELAY_ROW"), _recorded_charter())

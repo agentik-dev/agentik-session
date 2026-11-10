@@ -45,8 +45,8 @@ PRIORITY = {"enabled": True, "levels": {
           "a new user's first run, or a dependency that holds the goal",
     "S3": "the build order: the goal's next slice, then the repo's pending list",
     "S4": "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with "
-          "its level, taken only when S1 to S3 have nothing ready or on an S3 slice's path; "
-          "never ahead of S3"}}
+          "its level, taken on an S3 slice's path, or while fill is on; never ahead of "
+          "S3"}}
 PACING = {"enabled": True, "fallback": 1800, "waiting": 3}
 FIELDS = {"priority": ("enabled", "levels"), "pacing": ("enabled", "fallback", "waiting")}
 BOUNDS = {"fallback": (60, 3600), "waiting": (1, 9)}
@@ -64,23 +64,30 @@ BUGS = ("A bug ranks by harm and what it blocks, never by how sure or cheap its 
         "with neither it is S4, below S3, however easy.",
         "Met in an S3 slice, it is fixed there only on the slice's path, else filed S4 with "
         "a one-line repro and the slice goes on.",
-        "One S4 item a sitting at most, only when S1 to S3 have none ready; a review's notes "
-        "are S4 unless they show harm (S1) or an unmet criterion (S2).")
+        "One S4 item a sitting at most off a slice's path, and only while fill is on; a "
+        "review's notes are S4 unless they show harm (S1) or an unmet criterion (S2).")
+# Packet FW1a (hq design/08 section 2): fill has no key yet, so it is the owner's word alone.
+FILL = ("fill, off-path S4 work that uses a window up, is off unless the owner's word in this "
+        "sitting turns it on, and only for an orchestrator on a 1M window; no memory, ledger "
+        "or charter turns it on")
 PACE = ("the fallback wakeup rides the message of the act's last tool call, never a turn of "
         "its own",
         "while a helper, a Monitor or a background task is pending, its completion is the "
         "wake: one fallback of {fallback} s or more, never re-armed on a hand-back",
         "an act ready: the minimum delay",
         "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to "
-        "tell>`, n the wakes in a row with nothing changed; from n = {waiting} the wake is "
-        "the longest idle wait the cache allows (item 6) and the charter is brought current "
-        "and committed; a wait never stops the loop, since under `agentik session run` a "
-        "stopped loop only idles until a hand, and only the checkpoint ends a sitting; "
-        "WAITING is legal only when the charter's While waiting section reads `- none`, and "
-        "with a ready row or an owed item the Next act is that item (a respawn reads n from "
-        "the charter); what the owner must see goes in a file under `history/`, a "
-        "PushNotification, or a turn that ends on text and calls no ScheduleWakeup (text "
-        "before a ScheduleWakeup call was not shown on 2026-10-21)",
+        "tell>; by <who>; est <zoned time|none>`, n the wakes in a row with nothing changed, "
+        "est the blocker's own estimate; a wait is legal when no S1 to S3 row is ready and "
+        "nothing is owed, and While waiting's S4 rows run only while fill is on; the wake, "
+        "first that applies: est within 6 h, a wakeup at est, kept warm before it only on the "
+        "1h cache (item 6); by the owner, no wakeup; else no wakeup and one background task "
+        "that ends at est (6 h on when est is none) or when the event's file moves; STALLED is "
+        "said once, when a wait by the owner starts, when that task ends with nothing changed, "
+        "or at n = {waiting}: the Next act becomes `STALLED: <what>; by <who>; since <when>` in "
+        "a turn that ends on text with one PushNotification and no ScheduleWakeup, and after "
+        "it no wakeup is armed; a wait never closes the sitting, only the checkpoint does; the "
+        "charter is brought current when a wait starts or its line changes, never at each wake "
+        "(a respawn reads n from the charter)",
         "waiting on the usage meter (room for 0, or a usage limit hit) is not WAITING: the "
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
         "first, and it never counts toward n")
@@ -220,8 +227,7 @@ def clause(session, ttl=None) -> str:
         out.append(f"priority: {labels}; the Next act takes the highest ready")
     if pa["enabled"]:
         out.append(f"pacing: wake in the act's last tool call, a pending helper is the wake "
-                   f"(one fallback, {pa['fallback']}s+), no wait stops the loop; WAITING "
-                   f"{pa['waiting']}+: idle limit")
+                   f"(one fallback, {pa['fallback']}s+), a wait is said and cheap; fill off")
     if not out:
         return ""
     if pa["enabled"] and ttl in CLAUSE:
@@ -241,6 +247,7 @@ def render(session, life=None) -> str:
         lines += [f"  {n} {pr['levels'][n]}" for n in LEVELS]
         lines += [f"  - {r}" for r in RULES]
         lines += [f"  - {b}" for b in BUGS]
+        lines.append(f"  - {FILL}")
     else:
         lines.append("priority: off (session.priority.enabled is false)")
     if pa["enabled"]:

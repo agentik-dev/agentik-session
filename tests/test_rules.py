@@ -18,18 +18,17 @@ S2 = ("blocks the goal: an unmet acceptance criterion of the current goal, a def
       "user's first run, or a dependency that holds the goal")
 S3 = "the build order: the goal's next slice, then the repo's pending list"
 S4 = ("the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its "
-      "level, taken only when S1 to S3 have nothing ready or on an S3 slice's path; never "
-      "ahead of S3")
+      "level, taken on an S3 slice's path, or while fill is on; never ahead of S3")
 BLOCK = ("; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the rest; the Next "
          "act takes the highest ready; pacing: wake in the act's last tool call, a pending "
-         "helper is the wake (one fallback, 1800s+), no wait stops the loop; WAITING 3+: "
-         "idle limit; agentik-session rules prints both")
+         "helper is the wake (one fallback, 1800s+), a wait is said and cheap; fill off; "
+         "agentik-session rules prints both")
 BUGS = ("A bug ranks by harm and what it blocks, never by how sure or cheap its fix is; with "
         "neither it is S4, below S3, however easy.",
         "Met in an S3 slice, it is fixed there only on the slice's path, else filed S4 with a "
         "one-line repro and the slice goes on.",
-        "One S4 item a sitting at most, only when S1 to S3 have none ready; a review's notes "
-        "are S4 unless they show harm (S1) or an unmet criterion (S2).")
+        "One S4 item a sitting at most off a slice's path, and only while fill is on; a "
+        "review's notes are S4 unless they show harm (S1) or an unmet criterion (S2).")
 
 
 def rules():
@@ -69,8 +68,8 @@ def test_s21_default_every_shipped_profile_keeps_both_on(tmp_path):
     ("on", BLOCK),
     ("absent", BLOCK),                                   # N6: a missing key is on
     ("priority-off", "; pacing: wake in the act's last tool call, a pending helper is the "
-                     "wake (one fallback, 1800s+), no wait stops the loop; WAITING 3+: idle "
-                     "limit; agentik-session rules prints both"),
+                     "wake (one fallback, 1800s+), a wait is said and cheap; fill off; "
+                     "agentik-session rules prints both"),
     ("pacing-off", "; priority: S1 harm, S2 blocks the goal, S3 the build order, S4 the "
                    "rest; the Next act takes the highest ready; agentik-session rules prints both"),
     ("both-off", ""),
@@ -85,12 +84,12 @@ def test_s21_clause(sess, want):
 
 def test_s21_clause_bound_at_320_bytes():
     r = rules()
-    assert len(BLOCK.encode()) == 288          # S36: "no wait stops the loop; WAITING 3+: idle limit", 2 more
+    assert len(BLOCK.encode()) == 276          # FW1a R7: "a wait is said and cheap; fill off"
     levels = {n: "x" * 30 + ": t" for n in r.LEVELS}          # labels cut to 24
     big = session({"levels": levels}, {"fallback": 3600, "waiting": 9})
     line = r.clause(big)
     assert "S1 " + "x" * 24 + ", S2" in line and "x" * 25 not in line
-    assert "3600s+" in line and "no wait stops the loop; WAITING 9+: idle limit" in line
+    assert "3600s+" in line and "a wait is said and cheap; fill off" in line
     assert len(line.encode()) == 320 <= 320      # S29: cut at the bound, the tail's name lost
     odd = session({"levels": {**levels, "S1": "a;bé: t", "S2": ": no label"}})
     line = r.clause(odd)
@@ -108,7 +107,8 @@ def test_s21_render_lists_levels_rules_and_pacing():
         assert rule in out
     assert "never a turn of its own" in out and "one fallback of 1800 s or more" in out
     assert "an act ready: the minimum delay" in out
-    assert "WAITING <n>: <what>; <how to tell>" in out and "n = 3" in out
+    assert "WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>" in out
+    assert "n = 3" in out
     assert "a packet or brief bounds them" in out and "no hook enforces them" in out
 
 
@@ -229,14 +229,14 @@ def test_s30_clause_names_the_lifetime_when_it_fits():
     head = BLOCK[:-len(S30_TAIL)]
     assert r.clause(session(), "1h") == head + S30_1H + S30_TAIL
     assert r.clause(session(), "5m") == head + S30_5M + S30_TAIL
-    assert len((head + S30_1H + S30_TAIL).encode()) == 318 <= r.BLOCK_MAX
+    assert len((head + S30_1H + S30_TAIL).encode()) == 306 <= r.BLOCK_MAX
     assert r.clause(session(), None) == r.clause(session()) == BLOCK      # unknown: as before
     off = r.clause(session(pacing={"enabled": False}), "1h")
     assert off == r.clause(session(pacing={"enabled": False})) and "cache" not in off
     levels = {n: "x" * 30 + ": t" for n in r.LEVELS}
     big = session({"levels": levels}, {"fallback": 3600, "waiting": 9})
     assert r.clause(big, "1h") == r.clause(big) and len(r.clause(big).encode()) == 320
-    near = session({"levels": {**r.PRIORITY["levels"], "S1": "harmful harm: t"}})
+    near = session({"levels": {**r.PRIORITY["levels"], "S1": "harmful harm harms harm: t"}})
     assert len(r.clause(near).encode()) + len(S30_1H) > r.BLOCK_MAX >= len(r.clause(near).encode())
     assert r.clause(near, "1h") == r.clause(near)                  # never cut for the lifetime
 
@@ -385,17 +385,20 @@ def test_s30_a_key_or_a_gateway_reads_unknown(tmp_path, env, settings, want):
 
 # ---- S36: a wait never stops the loop ---------------------------------------
 
-S36_WAITING = ("waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to "
-               "tell>`, n the wakes in a row with nothing changed; from n = {waiting} the wake "
-               "is the longest idle wait the cache allows (item 6) and the charter is brought "
-               "current and committed; a wait never stops the loop, since under `agentik "
-               "session run` a stopped loop only idles until a hand, and only the checkpoint "
-               "ends a sitting; WAITING is legal only when the charter's While waiting "
-               "section reads `- none`, and with a ready row or an owed item the Next act is "
-               "that item (a respawn reads n from the charter); what the owner must see goes "
-               "in a file under `history/`, a PushNotification, or a turn that ends on text "
-               "and calls no ScheduleWakeup (text before a ScheduleWakeup call was not shown "
-               "on 2026-10-21)")
+S36_WAITING = (                    # FW1a R5: item 4 as the packet gives it, to the byte
+    "waiting on an outside party: the Next act says `WAITING <n>: <what>; <how to tell>; by "
+    "<who>; est <zoned time|none>`, n the wakes in a row with nothing changed, est the "
+    "blocker's own estimate; a wait is legal when no S1 to S3 row is ready and nothing is "
+    "owed, and While waiting's S4 rows run only while fill is on; the wake, first that "
+    "applies: est within 6 h, a wakeup at est, kept warm before it only on the 1h cache "
+    "(item 6); by the owner, no wakeup; else no wakeup and one background task that ends at "
+    "est (6 h on when est is none) or when the event's file moves; STALLED is said once, "
+    "when a wait by the owner starts, when that task ends with nothing changed, or at n = "
+    "{waiting}: the Next act becomes `STALLED: <what>; by <who>; since <when>` in a turn that "
+    "ends on text with one PushNotification and no ScheduleWakeup, and after it no wakeup is "
+    "armed; a wait never closes the sitting, only the checkpoint does; the charter is brought "
+    "current when a wait starts or its line changes, never at each wake (a respawn reads n "
+    "from the charter)")
 
 
 def test_s36_pace_says_a_wait_never_stops_the_loop():
@@ -403,10 +406,10 @@ def test_s36_pace_says_a_wait_never_stops_the_loop():
     assert r.PACE[3] == S36_WAITING and r.PACE[4] == METER
     assert f"  4. {S36_WAITING.format(waiting=3)}\n" in r.render(session())
     assert not any("the loop stopping" in p or "toward the stop" in p for p in r.PACE)
-    assert r.clause(session()) == BLOCK and len(BLOCK.encode()) == 288
+    assert r.clause(session()) == BLOCK and len(BLOCK.encode()) == 276
     line = r.clause(session(), "1h")
-    assert line.endswith("no wait stops the loop; WAITING 3+: idle limit" + S30_1H + S30_TAIL)
-    assert len(line.encode()) == 318 <= r.BLOCK_MAX                # the 1h tail still fits
+    assert line.endswith("a wait is said and cheap; fill off" + S30_1H + S30_TAIL)
+    assert len(line.encode()) == 306 <= r.BLOCK_MAX                # the 1h tail still fits
 
 
 # ---- S40: item 4 names the While waiting section and what the owner sees -----
@@ -414,11 +417,10 @@ def test_s36_pace_says_a_wait_never_stops_the_loop():
 def test_s40_pace_item_4_says_while_waiting_and_what_the_owner_sees():
     r = rules()
     item = r.PACE[3]
-    legal = item.index("WAITING is legal only when the charter's While waiting section reads "
-                       "`- none`")
-    assert legal < item.index("(a respawn reads n from the charter)") < item.index(
-        "PushNotification")
-    assert item.endswith("calls no ScheduleWakeup (text before a ScheduleWakeup call was not "
-                         "shown on 2026-10-21)")
-    assert "While waiting" not in r.clause(session()) and len(BLOCK.encode()) == 288
-    assert "WAITING is legal only when" in r.render(session())
+    legal = item.index("a wait is legal when no S1 to S3 row is ready and nothing is owed")
+    assert legal < item.index("PushNotification") < item.index(
+        "(a respawn reads n from the charter)")
+    assert item.endswith("never at each wake (a respawn reads n from the charter)")
+    assert "While waiting's S4 rows run only while fill is on" in item
+    assert "While waiting" not in r.clause(session()) and len(BLOCK.encode()) == 276
+    assert "a wait is legal when" in r.render(session())

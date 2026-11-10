@@ -58,7 +58,7 @@ defaults:
       S1: "harm: a reproduced bug that can do harm (a wrong write, data loss, a leaked secret, a safety path) or the repo's own gate red on main; it goes first, ahead of the current goal"
       S2: "blocks the goal: an unmet acceptance criterion of the current goal, a defect in a new user's first run, or a dependency that holds the goal"
       S3: "the build order: the goal's next slice, then the repo's pending list"
-      S4: "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its level, taken only when S1 to S3 have nothing ready or on an S3 slice's path; never ahead of S3"
+      S4: "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its level, taken on an S3 slice's path, or while fill is on; never ahead of S3"
   pacing: {enabled: true, fallback: 1800, waiting: 3}
   respeak: {narrative: tech}
   decisions: {dir: decisions}
