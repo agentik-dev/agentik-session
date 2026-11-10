@@ -77,7 +77,7 @@ def _rows(box, app=config.APP):
 # ---- the shim: main's flow and one variable (Amendment 1)
 
 MAIN_FLOW = '''case "$1" in
-  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  Stop|StopFailure|PostToolUseFailure|PostToolBatch|PostModelSwitch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
   PreCompact) "$tool" hook "$1"; exit 0 ;;
 esac
 exec "$tool" hook "$1"

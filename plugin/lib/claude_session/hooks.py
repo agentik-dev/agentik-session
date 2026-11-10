@@ -249,6 +249,9 @@ def _spawn_rule(payload: dict, env) -> str | None:
     if tool != "Workflow":
         return None
     try:
+        if "script" in ti and "scriptPath" in ti:
+            return ("agentik-session: Workflow denied before launch: the call names both "
+                    "`script` and `scriptPath`, and the guard cannot know which runs. Pass one.")
         script = _script_of(ti)
         if script is None:
             return ("agentik-session: Workflow denied before launch: the call names no script "
@@ -274,7 +277,12 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
     tool = payload.get("tool_name") or ""
     if tool in SPAWNING_TOOLS:       # wfg: whatever the posture, a helper's too, no call opened
-        line = _spawn_rule(payload, os.environ if env is None else env)
+        try:
+            line = _spawn_rule(payload, os.environ if env is None else env)
+        except Exception as e:                          # noqa: BLE001  (wfg r1: R6 too)
+            line = (f"agentik-session: {_token(tool)} denied before launch: the guard failed "
+                    f"({type(e).__name__}) and fails closed. Retry once; if it repeats, "
+                    "report this line.")
         if line:
             return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
     _open_call(payload, os.environ if env is None else env)

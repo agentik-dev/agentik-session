@@ -104,8 +104,8 @@ def test_c1_other_events_still_print_their_json(capsys, monkeypatch):
 
 def test_c1_hooks_json_keeps_the_classic_eight_and_adds_precompact():
     registered = json.loads((PLUGIN / "hooks/hooks.json").read_text())["hooks"]
-    assert list(registered) == [*CLASSIC, "PreCompact", "PostModelSwitch"]     # wfg R7
-    assert [*CLASSIC, "PreCompact"] == list(doctor.HOOK_EVENTS)
+    assert list(registered) == [*CLASSIC, "PreCompact", "PostModelSwitch"] == list(
+        doctor.HOOK_EVENTS)                                              # wfg R7
     for event, timeout in [*CLASSIC.items(), ("PreCompact", 5)]:
         assert [(h["type"], h["command"], h["timeout"]) for g in registered[event]
                 for h in g["hooks"]] == [
@@ -160,7 +160,8 @@ def test_c1_doctor_names_a_plugin_without_precompact(tmp_path):
     plugins = {doctor.PLUGIN_ID: {"version": "2.0.0-alpha.6", "enabled": True,
                                   "installPath": str(install.parent)}}
     c = doctor._check_plugin(plugins, None)
-    assert not c.ok and c.detail.startswith("hooks not registered: PreCompact;")
+    assert not c.ok and c.detail.startswith(
+        "hooks not registered: PreCompact, PostModelSwitch;")              # wfg R7
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
 
 

@@ -52,7 +52,7 @@ def machine(tmp_path, monkeypatch):
     (install / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
         "SessionStart": [], "PreToolUse": [], "PostToolUse": [], "PostToolUseFailure": [],
         "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "StopFailure": [], "SessionEnd": [],
-        "PreCompact": []}}))
+        "PreCompact": [], "PostModelSwitch": []}}))                   # wfg R7
     plugins = [
         {"id": "session@agentik", "version": "2.0.0", "enabled": True,
          "installPath": str(install)},
@@ -317,8 +317,7 @@ def test_c1_the_version_moves_with_the_plugin():
 
 def test_hooks_json_is_the_shim_on_session_start_only():
     hooks_json = json.loads((PLUGIN / "hooks/hooks.json").read_text())
-    # wfg R7 registers PostModelSwitch; doctor.HOOK_EVENTS does not name it yet
-    assert list(hooks_json["hooks"]) == [*doctor.HOOK_EVENTS, "PostModelSwitch"] == [
+    assert list(hooks_json["hooks"]) == list(doctor.HOOK_EVENTS) == [
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
         "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact",
         "PostModelSwitch"]
@@ -389,22 +388,21 @@ def test_every_hook_command_has_its_events_timeout():
                 assert h.get("type") == "command"
                 assert h.get("timeout") == HOOK_TIMEOUTS[event], (event, h)
                 seen += 1
-    assert seen == len(doctor.HOOK_EVENTS) + 1          # wfg R7: PostModelSwitch
+    assert seen == len(doctor.HOOK_EVENTS)
 
 
 # ---- S19: Stop and PreToolUse on every tool (respawn-r1 §3.3, criterion 18) ----
 
 S19_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
               "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
-              "PreCompact"]
-# S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
+              "PreCompact", "PostModelSwitch"]
+# wfg adds PostModelSwitch (R7); S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
 # PreCompact (mod-r1 §6); S34 adds StopFailure (ruling 5)
 
 
 def test_s19_hooks_register_stop_and_every_tool():
     registered = json.loads((PLUGIN / "hooks/hooks.json").read_text())["hooks"]
-    assert list(registered) == [*doctor.HOOK_EVENTS, "PostModelSwitch"] == [
-        *S19_EVENTS, "PostModelSwitch"]                      # wfg R7
+    assert list(registered) == list(doctor.HOOK_EVENTS) == S19_EVENTS
     stop = [h for g in registered["Stop"] for h in g["hooks"]]
     assert [(h["command"], h["timeout"]) for h in stop] == [
         ("\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" Stop", 5)]

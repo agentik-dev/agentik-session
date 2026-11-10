@@ -123,7 +123,7 @@ def test_t3_the_ceiling_is_eight():
      "await parallel(A.map(a => () => parallel(B.map(b => () => agent(a + b, %s)))))", 4),
     ("const x = cond ? await agent('a', %s) : await agent('b', %s)\n"
      "if (x) { await agent(`c ${await agent('d', %s)}`, %s) }", 4),
-    ("log('no agent at all')", 0),
+    ("log('no helper at all')", 0),
 ])
 def test_t3_what_the_static_read_counts(body, total):
     assert guard().measure(META + body.replace("%s", OPUS)) == (total, [])

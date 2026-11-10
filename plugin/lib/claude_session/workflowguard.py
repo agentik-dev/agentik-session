@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import bisect
 import re
+import time
 
 MAX_AGENTS = 8            # eight helpers a sitting; the packet's fork Q1
 FABLE_MAX = 2
@@ -46,6 +47,17 @@ _RX_WORDS = ("return", "typeof", "await", "case", "void", "in", "of", "yield")
 _WORD_END = re.compile(r"[\w$]+\Z")
 _AGENT = re.compile(r"(?<![\w$.])agent(?![\w$])")
 _RAW_AGENT = re.compile(r"(?<![\w$.])agent\s*\(")
+# The raw-text backstop (REFUTE wfg r1, disposition 2): run on the text with its escapes
+# decoded, strings and comments included, so it counts too much and never too little.
+_ESC = re.compile(r"\\(?:u\{([0-9A-Fa-f]{1,8})\}|u([0-9A-Fa-f]{4})|x([0-9A-Fa-f]{2}))")
+_RAW_NAME = re.compile(r"(?<![\w$])agent(?![\w$])")
+_RAW_BANNED = re.compile(r"(?<![\w$])(eval|Function|globalThis|constructor|Reflect)(?![\w$])"
+                         r"|(?<![\w$])(import)\s*\(|(\?\.)\s*\(|(?<![\w$])(with)\s*\(")
+_ASSIGN = re.compile(r"\s*(?:\+\+|--|(?:\*\*|<<|>>>|>>|&&|\|\||\?\?|[-+*/%&|^])?=(?!=))")
+_NAME = re.compile(r"(?<![\w$])[A-Za-z_$][\w$]*")
+_PLAIN_KEY = re.compile(r"([A-Za-z_$][\w$]*)\s*:")
+BUDGET = 1.0              # the guard's own CPU seconds; past it the script is denied
+WALL = 3.0                # and its wall seconds, well inside the hook's 5 s timeout
 _SLICE = re.compile(r"\.slice\(\s*0\s*,\s*(\d{1,4})\s*\)\s*\Z")
 _IDENT = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*\Z")
 _MODEL = re.compile(r"model\s*:\s*(['\"])([A-Za-z0-9_.\[\]-]{1,64})\1\s*[,}]")
@@ -69,6 +81,18 @@ def _prev(sk: str, pos: int) -> int:
 
 class Unbounded(Exception):
     """A shape the guard cannot bound; its text is the reason."""
+
+
+class OverBudget(Exception):
+    """The guard's read passed BUDGET or WALL: the whole script is denied."""
+
+
+def _decode(src: str) -> str:
+    """The text with each `\\u`, `\\u{}` and `\\x` escape read as its character."""
+    def one(m):
+        n = int(m.group(1) or m.group(2) or m.group(3), 16)
+        return chr(n) if n <= 0x10FFFF else " "
+    return _ESC.sub(one, src)
 
 
 def family(model) -> str | None:
@@ -293,7 +317,13 @@ class _Script:
         self.src = src
         self.sk = skeleton(src)
         self.t = _Tree(self.sk)
-        self._len = {}
+        self._len, self._names = {}, None
+        self.cpu0, self.wall0 = time.process_time(), time.monotonic()
+
+    def tick(self) -> None:
+        if (time.process_time() - self.cpu0 > BUDGET
+                or time.monotonic() - self.wall0 > WALL):
+            raise OverBudget()
 
     def line(self, pos: int) -> int:
         return self.src.count("\n", 0, pos) + 1
@@ -307,6 +337,14 @@ class _Script:
             raise Unbounded("an array with a spread or a hole has no fixed length")
         return len(parts)
 
+    def names(self) -> dict:
+        """Each identifier of the skeleton's code and where it starts, read once."""
+        if self._names is None:
+            self._names = {}
+            for m in _NAME.finditer(self.sk):
+                self._names.setdefault(m.group(), []).append(m.start())
+        return self._names
+
     def const_len(self, name: str) -> int:
         """The length of `const NAME = [ ... ]`, declared once at the top level and only
         ever read; anything else is Unbounded."""
@@ -314,17 +352,19 @@ class _Script:
             return self._len[name]
         sk, esc = self.sk, re.escape(name)
         fix = f"`{name}` is not a fixed list: declare it once as a top-level `const {name} = [...]` literal and only read it, or cut it with `.slice(0, N)`"
-        decl = list(re.finditer(r"(?<![\w$.])const\s+" + esc + r"\s*=\s*\[", sk))
+        head = re.compile(r"(?<![\w$.])const\s+" + esc + r"\s*=\s*\[")
+        decl = [d for d in (head.match(sk, at) for at in self.names().get("const", ())) if d]
         if len(decl) != 1 or self.t.parent[decl[0].end() - 1] != -1:
             raise Unbounded(fix)
         o = decl[0].end() - 1
         if not re.match(r"[ \t]*(?:;|\n\s*[\w$]|\s*\Z)", sk[self.t.close[o] + 1:]):
             raise Unbounded(fix)
-        for m in re.finditer(r"(?<![\w$])" + esc + r"(?![\w$])", sk):
-            if decl[0].start() <= m.start() < decl[0].end():
+        for start in self.names().get(name, ()):
+            end = start + len(name)
+            if decl[0].start() <= start < decl[0].end():
                 continue
-            e = _prev(sk, m.start())
-            before, after = sk[max(0, e - 3):e + 1], sk[m.end():m.end() + 24].lstrip()
+            e = _prev(sk, start)
+            before, after = sk[max(0, e - 3):e + 1], sk[end:end + 24].lstrip()
             if before.endswith(".") and not before.endswith("..."):
                 continue                                  # another object's property
             if after.startswith(":") and before[-1:] in "{,":
@@ -335,13 +375,14 @@ class _Script:
                 ok = bool(w) and w.group(1) in _READS and not re.match(
                     r"\.\s*length\s*=(?!=)", after)
             elif after.startswith("["):
-                c = self.t.close[m.end() + sk[m.end():].index("[")]
-                ok = not re.match(r"\s*(?:=(?!=)|\+=|\+\+|--)", sk[c + 1:c + 6])
+                ob = end + sk[end:].index("[")
+                c = self.t.close[ob]
+                ok = sk[ob + 1:c].strip().isdigit() and not _ASSIGN.match(sk, c + 1)
             elif after.startswith(","):
-                h = self.t.holder(m.start())
+                h = self.t.holder(start)
                 ok = (h != -1 and self.t.callee(h) == "pipeline"
-                      and not sk[h + 1:m.start()].strip())
-            h = self.t.holder(m.start())
+                      and not sk[h + 1:start].strip())
+            h = self.t.holder(start)
             if not ok or before.endswith("...") or (h != -1 and self.t.kind(h) == "params"):
                 raise Unbounded(fix)
         self._len[name] = self.elements(o)
@@ -380,8 +421,12 @@ class _Script:
         t, mult, pos, pending = self.t, 1, site, False
         level = t.holder(site)
         while True:
+            self.tick()
             lo = level + 1 if level != -1 else 0
             k = t.kind(level) if level != -1 else "top"
+            if k == "params":
+                raise Unbounded("an agent( in a parameter's default runs at each call: "
+                                "write the call inline where it runs")
             if k in ("block", "arrowbody", "funcbody", "loopbody", "top"):
                 local = _statement(t.flat(level, lo, pos) + "X")[:-1]
             else:
@@ -397,6 +442,9 @@ class _Script:
                                 "unroll it, or map a literal list")
             c = t.callee(level) if k == "comb" else ""
             if pending and c == "parallel":
+                if self.sk[t.close[pos] + 1:t.close[level]].strip():
+                    raise Unbounded("agent thunks must be the direct argument of parallel(: "
+                                    "nothing after the list's `]` or the `.map(...)`")
                 pending = False                 # the thunks' one consumer runs each once
             elif pending and not (k == "array" or c in (".map", ".flatMap")):
                 raise Unbounded("agent thunks (`() => agent(`) must be built inside the "
@@ -446,6 +494,14 @@ class _Script:
         if fam is None:
             raise Unbounded("every agent( names its model in its own options: "
                             "add model: 'opus' (an unnamed agent runs on the session's model)")
+        parts = [p.strip() for p in inner.split(",")]
+        if parts and not parts[-1]:
+            parts.pop()
+        keys = [_PLAIN_KEY.match(p) for p in parts]
+        if not all(keys) or [k.group(1) for k in keys].count("model") > 1:
+            raise Unbounded("an agent's options are plain `key: value` pairs with one literal "
+                            "model: no quoted or computed key, getter, method, shorthand or "
+                            "second model")
         return fam, label
 
 
@@ -467,12 +523,34 @@ def measure(script, parent: str | None = None) -> tuple[int, list[str]]:
     except Unbounded as e:
         return 0, [f"the guard cannot read the script ({e}): simplify the quoting"]
     found, total, fables = {}, 0, 0      # a reason's text: the lines it holds on
+    try:
+        total, fables = _read(s, script, parent, found)
+    except OverBudget:
+        return total, [f"the guard's read passed its budget ({BUDGET:g} s of CPU, {WALL:g} s "
+                       "in all): shorten the script, or split the work across turns"]
+    reasons = [(f"line{'s' if len(ls) > 1 else ''} {', '.join(map(str, ls[:6]))}: " if ls else "")
+               + text for text, ls in found.items()]
+    return total, reasons[:MAX_REASONS]
+
+
+def _read(s, script, parent, found):
+    total = fables = 0
 
     def add(text, pos=None):
         lines = found.setdefault(text, [])
         if pos is not None and s.line(pos) not in lines:
             lines.append(s.line(pos))
 
+    s.tick()
+    if "\\" in s.sk:
+        add("an escape (`\\u`, `\\x`) in the code can hide a name from the count: write the "
+            "name plainly", s.sk.index("\\"))
+    raw = _decode(script)
+    for b in _RAW_BANNED.finditer(raw):
+        word = b.group(1) or (b.group(2) and "import(") or (b.group(3) and "?.(") or b.group(4)
+        add(f"`{word}` can hide agents from the count: call each agent( by name, plainly; "
+            "reword that text if it is in a string or comment", b.start())
+        break
     w = _BANNED.search(s.sk)
     if w:
         add(f"`{w.group(1) or w.group(2)}` hides agents from the count: inline the child's "
@@ -490,10 +568,16 @@ def measure(script, parent: str | None = None) -> tuple[int, list[str]]:
     if len(_RAW_AGENT.findall(script)) != len(sites):
         add("the text `agent(` appears inside a string, template or comment, so the count "
             "is not sure: reword that text")
+    else:
+        n_raw, n_read = len(_RAW_NAME.findall(raw)), len(_AGENT.findall(s.sk))
+        if n_raw > n_read:
+            add(f"the name `agent` appears more times in the text ({n_raw}) than the guard "
+                f"reads in the code ({n_read}): reword the string or comment that holds it")
     if len(sites) > MAX_SITES:
         add(f"the script holds {len(sites)} agent( calls and the guard reads {MAX_SITES}")
         sites = []
     for site in sites:
+        s.tick()
         fam = label = None
         n = 0
         try:
@@ -519,9 +603,7 @@ def measure(script, parent: str | None = None) -> tuple[int, list[str]]:
     if total > MAX_AGENTS:
         add(f"the script can start {total} agents and the ceiling is {MAX_AGENTS}: "
             "cut the lists, or split the work across turns")
-    reasons = [(f"line{'s' if len(ls) > 1 else ''} {', '.join(map(str, ls[:6]))}: " if ls else "")
-               + text for text, ls in found.items()]
-    return total, reasons[:MAX_REASONS]
+    return total, fables
 
 
 def deny_line(reasons: list[str]) -> str:
