@@ -540,6 +540,8 @@ READERS = {
     ("hooks", "_load_json"): ("h.json", {"at": 1.0}, lambda m, d: m["hooks"]._load_json(d / "h.json")),
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
+    ("ledger", "lines"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},   # packet S54 R4
+                          lambda m, d: m["ledger"].lines(d)),
     ("measure", "load"): ("measure.json", {"context": {"window": 200000}, "at": 1.0},
                           lambda m, d: m["measure"].load(d)),
     ("meter", "_load"): ("meter.json", {"turns": 3, "context": 9}, lambda m, d: m["meter"]._load(d / "meter.json")),

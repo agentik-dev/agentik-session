@@ -105,12 +105,12 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
 }
 
 // ---- Admission's line (design/admission-r1.md §3.5, packet S27b): it shows. ----
-// `agentik-session admission` rewrites <state>/admission/band.json inside the ledger's lock at
-// every record and admit; the band draws it under the session's line. This is the twin of
-// Python's band_line (one fixture in session.test.ts pins both): a part with no figure is
-// left out, `observe` is last while the mode is, and the age past 120 s follows it; the
-// reset reads `week resets HH:MM (h:mm), 5h HH:MM` when band.json's bound is the seven-day
-// one: `until` the weekly reset, resetsAt the five-hour one.
+// `agentik-session admission` rewrites <state>/admission/band.json after the ledger's lock,
+// under band.lock, at every record and admit; the band draws it under the session's line.
+// This is the twin of Python's band_line (one fixture in session.test.ts pins both): a part
+// with no figure is left out, `observe` is last while the mode is, and the age past 120 s
+// follows it; the reset reads `week resets HH:MM (h:mm), 5h HH:MM` when band.json's bound is
+// the seven-day one: `until` the weekly reset, resetsAt the five-hour one.
 const ISO = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/
 const fig = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null
 const whole = (n: number): string => String(Math.round(n))
@@ -301,12 +301,18 @@ async function within<T>($: EngineInterface, call: () => Promise<T>,
 
 // One record call, under `id` or the session's own id; it never throws: a non-zero exit, a
 // rejection or a timeout is one debug line, and the id read and the log are each bounded.
+// Packet S54 R9: exit 3 is the ledger lock's refusal, nothing written, so the call runs once
+// more at RETRY_MS; never on another exit, a rejection or a timeout, since a cut call may have
+// written. The debug line is the last attempt's.
+const RETRY_MS = 3000
 async function record($: EngineInterface, fields: Record<string, unknown>, id: string | null = null,
   timeoutMs = LIMIT_MS): Promise<void> {
   try {
     const who = id ?? await within($, () => $.session.id())
     if (who === LATE) throw new Error(`no session id in ${BOUND_MS} ms`)
-    const r = await runTool($, admissionArgv(who), { stdin: JSON.stringify(fields), timeoutMs })
+    const stdin = JSON.stringify(fields)
+    let r = await runTool($, admissionArgv(who), { stdin, timeoutMs })
+    if (Number(r?.exitCode) === 3) r = await runTool($, admissionArgv(who), { stdin, timeoutMs: RETRY_MS })
     const line = exited(fields, r)
     if (line) await within($, () => $.ui.log(line, DEBUG))
   } catch (err) { try { await within($, () => $.ui.log(failed(fields, err), DEBUG)) } catch { /* nothing */ } }

@@ -142,7 +142,7 @@ def test_record_rewrites_band_json_atomically_and_0600():
     p = adir() / "band.json"
     assert stat.S_IMODE(p.stat().st_mode) == 0o600
     assert p.stat().st_ino != ino                    # replaced by a rename, never rewritten in place
-    assert sorted(x.name for x in adir().iterdir()) == ["band.json", "ledger.jsonl", "ledger.lock"]
+    assert sorted(x.name for x in adir().iterdir()) == ["band.json", "band.lock", "ledger.jsonl", "ledger.lock"]
 
 
 def test_admit_rewrites_band_json_with_its_verdict():

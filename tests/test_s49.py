@@ -798,7 +798,8 @@ def test_s49_read_with_no_file_is_empty(tmp_path):
 
 
 def test_s49_report_hooks_prints_the_table_and_the_bytes(capsys):
-    state = _plant({**OLD_ROW, "ended": "2026-10-02T00:00:00+00:00", "claude_md_bytes": 100},
+    state = _plant({**OLD_ROW, "ended": "2026-10-02T00:00:00+00:00", "claude_md_bytes": 100,
+                    "session": "old-sess-0"},                    # packet S54 R10: distinct ids
                    OLD_ROW,
                    {**OLD_ROW, "ended": "2026-10-03T00:00:00+00:00", "session": "new-sess-2",
                     "claude_md_bytes": 300})
