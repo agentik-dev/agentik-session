@@ -137,8 +137,14 @@ N: <reason>: <rewrite>`. Apply the rewrite and call again; never route around it
   `parallel(`); a list known at run time (`.slice(0, N)`); `workflow(`, `eval(`,
   `Function(`, `import(`, `require(`, `globalThis` (inline the child's calls); the
   text `agent(` in a string or comment (reword it); a script the guard cannot read
-  (simplify the quoting); no `script` and no readable `scriptPath` file (pass the
-  script inline).
+  (simplify the quoting); no `script` and no readable `scriptPath` file, or both
+  (pass one); a default parameter that calls `agent(` (write the call inline).
+- The text is read raw too, escapes decoded, strings and comments included: an
+  escape in the code, `eval`, `Function`, `globalThis`, `constructor`, `Reflect`,
+  `import(`, `?.(` or `with (`, or the word `agent` more often than the code calls
+  it, is denied (reword the prompt). Options are plain `key: value` pairs with one
+  literal `model`. A list read only by a numeric index (`L[0]`). The read stops at
+  1 s of CPU and denies.
 - Fable: an `Agent` or `Task` with a Fable `model`, or a script's Fable agent,
   starts only under a Fable session, as both `model.json` (SessionStart, then each
   `/model` switch) and the meter read it; else name `model: 'opus'`. In a script,
