@@ -14,7 +14,6 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
-import math
 import os
 import re
 import shlex
@@ -260,8 +259,9 @@ def _num(v) -> bool:
 
 def _opened(at, now: float) -> bool:
     """u1's fold: a call file's `at` is when it opened only as a finite time from
-    AT_FLOOR to now; NaN, an infinity, a future stamp or another unit is not."""
-    return _num(at) and math.isfinite(at) and AT_FLOOR <= at <= now
+    AT_FLOOR to now; NaN, an infinity, a future stamp or another unit is not. Compared,
+    never subtracted: a JSON integer too large for a float compares exactly."""
+    return _num(at) and AT_FLOOR <= at <= now
 
 
 def _status(rc: int) -> int:
@@ -632,13 +632,15 @@ class Chain:
         if helper is not None and not _num(helper.get("at")):
             return False                     # a malformed stamp holds
         # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
-        recent = helper is not None and now - helper["at"] < self.stale_call
+        # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
+        h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+        recent = h is not None and h > now - self.stale_call
         stale = []
         for cid, age, timed in calls:
             if recent or age < self.stale_call:
                 return False
             stale.append({"id": cid, "age": int(age) if timed else None})
-        if helper is not None and now - helper["at"] < settle:
+        if h is not None and h > now - settle:
             return False
         self._stale = stale
         return True
