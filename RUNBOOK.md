@@ -482,7 +482,9 @@ repo does not wait behind a long gate of another.
 ```bash
 agentik session gate run . --lock <tlc-lock-dir> --label "land s38" -- make check
 # queued <id> position 1 repo <realpath> caller <sid-short>; result <state>/gate/<id>/result.json
+# est 5.4 min: the median of this repo's last 5 greens        (on stderr, when it has 3)
 agentik session gate wait <id> --timeout 6000     # in a background Bash
+agentik session gate wait <id> --strict           # the same line, exiting the job's code
 agentik session gate status                       # running, queued, the last five done, the runner
 ```
 
@@ -525,8 +527,20 @@ agentik session gate status                       # running, queued, the last fi
   `waits on settle <s> s`. In `--json`, `running` is a list of `{id, repo, label,
   since, seconds}`, empty with nothing running, and each queued entry adds `key`
   and `wait`.
+- The estimate. A running or queued line ends `; est <m> min` when its key has
+  one: the median of the key's last five greens (`exit` 0, no cut, a `key`),
+  read from at most 200 results newest first, none under three greens; a
+  result older than alpha.55 has no key and is not counted. `status --json`
+  adds `est`, `{id: seconds}`; `run` says `est <m> min: the median of this
+  repo's last <n> greens` on stderr after its queued line, whose stdout stays
+  that one line. A WAITING line's `est` on a gate is worked from it: the gate's
+  start, or now while it queues, plus `est <m> min`. A key's greens mix its
+  commands, a land and a check alike.
 - Exit codes. `wait` exits 0 whatever the gate's code, 2 for an unknown id, 1
-  past `--timeout`. A result holds the command's own code, or 124 (the wall cut
+  past `--timeout`. `gate wait <id> --strict` exits the job's code instead (the
+  result's `exit` when an int from 0 to 255, else 1); `wait`'s own 2 and 1
+  print nothing on stdout, so a line there marks the code as the job's. `run
+  --wait` takes no `--strict`, since the unattended loop reads its code. A result holds the command's own code, or 124 (the wall cut
   its process group, SIGTERM then SIGKILL), 125 (its runner died; the next
   runner killed each running group it names, and with a `pgid` of null kills
   nothing), 126 (a lock held past the wall; never run:
@@ -562,5 +576,5 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 | `gate/queue.lock`, `gate/counter` | the id's counter, taken under flock |
 | `gate/runner.lock`, `gate/runner.json` | the one runner's flock; its pid, since, running (a list of `{id, pgid}`, `pgid` null before the spawn) |
 | `gate/runner.log` | the runner's stdout and stderr |
-| `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days |
+| `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days; it keeps `head` (the repo's commit, read before the spawn; null when unknown or never started) and `key` |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |

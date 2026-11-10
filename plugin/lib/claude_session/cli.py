@@ -972,8 +972,9 @@ def cmd_run(args) -> int:
 
 def cmd_gate(args) -> int:
     """`agentik session gate run|wait|status` (design/gate-r1.md): the per-Mac gate queue.
-    `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (entry 25),
-    1 past --timeout; `serve` is the runner, internal."""
+    `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
+    guide's rule: exit codes report the task, not the content), the job's code with
+    --strict (packet FW2), 1 past --timeout; `serve` is the runner, internal."""
     from pathlib import Path
     from . import gate
     env = os.environ
@@ -982,11 +983,13 @@ def cmd_gate(args) -> int:
     if verb == "serve":
         return gate.serve(root)
     if verb == "wait":
-        return _gate_wait(root, args.id, args.timeout, args.json)
+        return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
-        print(json.dumps(st, indent=2) if args.json else "\n".join(gate.status_lines(st)))
+        est = gate.entry_estimates(root)
+        print(json.dumps({**st, "est": est}, indent=2) if args.json
+              else "\n".join(gate.status_lines(st, est)))
         return 0
     command = list(args.command)
     if command[:1] == ["--"]:
@@ -1002,6 +1005,11 @@ def cmd_gate(args) -> int:
     print(f"queued {e['id']} position {gate.position(root, e['id'])} repo {e['repo']} "
           f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
           flush=True)
+    # Packet FW2 R5: the estimate on stderr, so run's stdout stays the queued line alone.
+    got = gate.key_estimates(root).get(e["key"])
+    if got is not None:
+        print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
+              file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
@@ -1036,7 +1044,7 @@ def _gate_wall(env) -> int:
     return gate._config(env)["wall"]
 
 
-def _gate_wait(root, gid: str, timeout, as_json: bool) -> int:
+def _gate_wait(root, gid: str, timeout, as_json: bool, strict: bool = False) -> int:
     from . import gate
     rc, result = gate.wait(root, gid, timeout=timeout)
     if rc == 2:
@@ -1046,7 +1054,9 @@ def _gate_wait(root, gid: str, timeout, as_json: bool) -> int:
         _die(f"gate wait: {gid} is still queued or running after {timeout:g} s; "
              "agentik session gate status shows it", 1)
     print(json.dumps(result, indent=2) if as_json else gate.wait_line(result))
-    return 0
+    # Packet FW2 R1: wait's own 2 and 1 print nothing on stdout, so a line there marks the
+    # code as the job's.
+    return gate.strict_code(result) if strict else 0
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1260,6 +1270,10 @@ def build_parser() -> argparse.ArgumentParser:
     gw.add_argument("--timeout", type=float, metavar="SECONDS",
                     help="give up after SECONDS (exit 1)")
     gw.add_argument("--json", action="store_true", help="print result.json")
+    gw.add_argument("--strict", action="store_true",
+                    help="exit the job's code (0 to 255, else 1), not 0; wait's own 2 (no such "
+                         "id) and 1 (the timeout) print nothing on stdout, so a line there "
+                         "marks the code as the job's")
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn

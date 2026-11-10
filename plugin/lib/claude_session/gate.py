@@ -23,6 +23,7 @@ import re
 import shlex
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import time
@@ -48,7 +49,7 @@ MORE = "{n} more: agentik session gate status"
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
-               "caller", "cut")
+               "caller", "cut", "head", "key")
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
 RUNNER_KEYS = ("pid", "since", "running")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": WALL}
@@ -56,6 +57,10 @@ MAX_RUNNING = 3             # gate.max_running's default (packet S47, ruling 4)
 LOAD_SHARE = 0.75           # gate.load_ceiling's default, as a share of the cores
 START_SETTLE = 60.0         # the seconds between two starts, since a load average lags
 GIT_WAIT = 10.0
+EST_SCAN = 200              # the results an estimate reads, newest first (packet FW2, R4)
+EST_GREENS = 5              # the greens of one key it keeps
+EST_LEAST = 3               # under this many, a key has no estimate
+_HEAD = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DOT_GIT_MOST = 4096         # a `.git` file or a `commondir` is one short line
 
 
@@ -219,6 +224,20 @@ def repo_key(repo: str) -> str:
     except (OSError, ValueError, subprocess.SubprocessError):
         out = ""
     return _stat_key(os.path.join(repo, out)) if out else _fallback_key(repo)
+
+
+def _head(repo: str) -> str | None:
+    """`git -C <repo> rev-parse HEAD`, with no `GIT_*` from the caller, under `GIT_WAIT`:
+    40 or 64 hex digits, else None (packet FW2, R2). Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    out = p.stdout.strip() if p.returncode == 0 else ""
+    return out if _HEAD.match(out) else None
 
 
 def entry_key(e: dict) -> str:
@@ -520,6 +539,7 @@ class Fx:
     poll: float = POLL
     grace: float = GRACE
     pid: int = field(default_factory=os.getpid)
+    head: Callable[[str], str | None] = _head
 
 
 def _take(fh, fx: Fx) -> bool:
@@ -598,6 +618,14 @@ def _open_log(path: Path):
     return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "ab")
 
 
+def _clean_head(h) -> str | None:
+    return h if isinstance(h, str) and _HEAD.match(h) else None
+
+
+def _str_or_none(x) -> str | None:
+    return x if isinstance(x, str) and x else None
+
+
 def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
             note: str | None = None) -> dict:
     """Write result.json last, atomically; drop the entry; tell the inbox and ntfy."""
@@ -610,7 +638,8 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     seconds = round(ended - started, 1) if isinstance(started, (int, float)) else None
     result = {"id": gid, "repo": e.get("repo"), "command": e.get("command"), "exit": rc,
               "started": started, "ended": ended, "seconds": seconds,
-              "log": str(d / "log"), "caller": e.get("caller"), "cut": cut}
+              "log": str(d / "log"), "caller": e.get("caller"), "cut": cut,
+              "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key"))}
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
     _unlink(_queue(root) / f"{gid}.json")
     caller = e.get("caller")
@@ -637,6 +666,12 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     _mkdir(d)
     s.starting = gid
     _runner_write(root, fx, s)
+    # Packet FW2 R2: the head before the spawn, since a queued entry's repo may move while it
+    # waits; kept on the entry in memory for `_finish`. A head that raises reads None.
+    try:
+        e["head"] = _clean_head(fx.head(e["repo"]))
+    except Exception:
+        e["head"] = None
     started = fx.now()
     with _open_log(d / "log") as log:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
@@ -802,6 +837,70 @@ def wait_line(result: dict) -> str:
             f"{_minutes(result.get('seconds'))} min; log {result.get('log')}")
 
 
+def strict_code(result) -> int:
+    """`wait --strict`'s exit (packet FW2, R1): the result's `exit` when it is an int from 0
+    to 255 and no bool, else 1."""
+    x = result.get("exit") if isinstance(result, dict) else None
+    return x if isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 255 else 1
+
+
+def _result_names(root) -> list[str]:
+    """The entry dirs under the gate, newest first by counter."""
+    try:
+        return sorted((n for n in os.listdir(gate_dir(root)) if ID.match(n)),
+                      key=_counter, reverse=True)
+    except OSError:
+        return []
+
+
+def _greens(root) -> dict:
+    """{key: [seconds]}: each key's newest greens, at most `EST_GREENS`, from at most
+    `EST_SCAN` results newest first. A green has `exit` 0, a null `cut`, a number of
+    `seconds` and a string `key`; a result older than FW2 has no key and is not counted."""
+    out: dict = {}
+    read = 0
+    for n in _result_names(root):
+        if read >= EST_SCAN:
+            break
+        r = _load(result_path(root, n))
+        if r is None:
+            continue
+        read += 1
+        x, sec, k = r.get("exit"), r.get("seconds"), r.get("key")
+        if (x == 0 and not isinstance(x, bool) and r.get("cut") is None
+                and isinstance(sec, (int, float)) and not isinstance(sec, bool)
+                and isinstance(k, str) and k):
+            got = out.setdefault(k, [])
+            if len(got) < EST_GREENS:
+                got.append(float(sec))
+    return out
+
+
+def key_estimates(root) -> dict:
+    """{key: (seconds, greens)} (packet FW2, R4): the median of a key's last `EST_LEAST` to
+    `EST_GREENS` greens and how many it used; a key with fewer than `EST_LEAST` has none.
+    The one source of an estimate: `estimates`, `entry_estimates` and `run`'s line read it."""
+    return {k: (statistics.median(v), len(v)) for k, v in _greens(root).items()
+            if len(v) >= EST_LEAST}
+
+
+def estimates(root) -> dict:
+    """{key: seconds}: `key_estimates` without the count."""
+    return {k: s for k, (s, _) in key_estimates(root).items()}
+
+
+def entry_estimates(root) -> dict:
+    """{entry id: seconds}: the queued and running entries whose key has an estimate."""
+    est = estimates(root)
+    if not est:
+        return {}
+    return {e["id"]: est[entry_key(e)] for e in entries(root) if entry_key(e) in est}
+
+
+def est_text(s) -> str:
+    return f"{s / 60:.1f}"
+
+
 def wait(root, gid: str, poll=WAIT_POLL, timeout=None, sleep=None, clock=None, spawn=None,
          alive=_alive) -> tuple[int, dict | None]:
     """(0, result) once result.json is there; (2, None) for an id neither queued nor
@@ -870,12 +969,7 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
                        "label": e.get("label") or "", "key": entry_key(e),
                        "wait": _wait_text(why)})
     done = []
-    try:
-        names = sorted((n for n in os.listdir(gate_dir(root)) if ID.match(n)),
-                       key=_counter, reverse=True)
-    except OSError:
-        names = []
-    for n in names:
+    for n in _result_names(root):
         res = _load(result_path(root, n))
         if res is not None:
             done.append({k: res.get(k) for k in ("id", "repo", "exit", "seconds", "cut")})
@@ -885,13 +979,20 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
     return {"running": running, "queued": queued, "done": done, "runner": runner}
 
 
-def status_lines(st: dict) -> list[str]:
+def status_lines(st: dict, est: dict | None = None) -> list[str]:
+    """The status as lines; a running or queued entry whose id is in `est` ends
+    `; est <m.m> min` (packet FW2, R5), else today's bytes."""
+    est = est or {}
+
+    def tail(gid):
+        return f"; est {est_text(est[gid])} min" if gid in est else ""
     out = []
     for x in st.get("running") or []:
-        out.append(f"running {x['id']} {x['repo']} since {_hm(x['since'])} {x['label']}".rstrip())
+        out.append(f"running {x['id']} {x['repo']} since {_hm(x['since'])} {x['label']}".rstrip()
+                   + tail(x["id"]))
     for x in st.get("queued") or []:
         wait = f" waits on {x['wait']}" if x.get("wait") else ""
-        out.append(f"queued {x['id']} {x['repo']} position {x['position']}{wait}")
+        out.append(f"queued {x['id']} {x['repo']} position {x['position']}{wait}" + tail(x["id"]))
     for x in st.get("done") or []:
         out.append(f"done {x['id']} {x['repo']} exit {x['exit']} {_minutes(x['seconds'])} min")
     rn = st.get("runner")
