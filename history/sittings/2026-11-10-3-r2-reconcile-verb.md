@@ -15,16 +15,16 @@
 - [x] the texts: RUNBOOK §3 (`false` off, the folder's real path, the ceiling, records ahead, exit 2) and §4 (a stop in the pass); NICE n48 (F6, `tree`); status line 2701 by hand, sidecar re-hashed (`shasum -c` OK); no version bump (alpha.61 stands); readme, doclint, hygiene, r2 215 passed under each python
 - [x] F8's pins: 35 mutants of the fold in a scratch copy, 32 killed by the first 49 cases; the 3 survivors (a record named ahead, `false` at the verb, the launcher's own stdin) pinned by 3 more cases, all 35 killed; status line 2704, sidecar re-hashed; `76 passed` under each python
 - [x] the bump: gate 20261110-024707-836 exit 2 in 9 min (2704 passed, floor 2680 + 3 skipped, hygiene 0) on plugin-version-check alone; plugin 2.0.0-alpha.62, status line and sidecar
-- [ ] verify: the gate once more, `make check`
+- [x] verify: gate 20261110-025715-838 exit 2 (`make` 124): the wall of 840 s cut the floor run at 18% after the main suite's `2704 passed` in 583 s (244 s in the first run), a second repo's gate job running beside it; not run a third time, the landing's check is the next
 
 ## Handover
-- open by level: none yet
+- open by level: none
 - Choice (consumer: the coordinator): a stop seen during or right after the pass comes after the restart line, so the ledger holds that restart line and then the stop line with the grace's reason, as a spawn that fails after it does
 - Choice (consumer: the coordinator): a record is ahead of now when its name's date is after now's or its stamp is after now; the newest by name not ahead is the last run (an unreadable stamp there makes the run due); the ahead line goes to stderr, so `--json` stays JSON
-- exit taken: none yet
+- exit taken: done, commits d0b33cc 3fca7be ed417bb ec1224b 1eb271c and this one over d12ccc5; alpha.62; NICE n48; the last gate cut by its wall under load, every case green in both gate runs that reached it; nothing pushed, main not merged
 
 ## While waiting
 - none
 
 ## Next act
-verify: the gate once more, `make check`
+none: the branch waits on the coordinator's read and its landing (the landing's `make check` is the verify)
