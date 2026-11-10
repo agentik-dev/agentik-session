@@ -13,6 +13,7 @@
 - [x] tests first: 49 cases added to `tests/test_r2.py` (no existing case edited), red at d12ccc5's code: `30 failed, 43 passed` under 3.12.7 and 3.9.6; the 19 green at d12ccc5 pin surviving mutants (F8)
 - [x] the code: `chain.py` (F1, F7), `reconcile/runner.py` (F2, F3, F4, F5, F9, F10), `cli.py` (F4); `73 passed` under 3.12.7 and 3.9.6; test_chain, test_cli, test_launch, test_launch_model, test_r1, test_resolver 343 passed under each
 - [x] the texts: RUNBOOK §3 (`false` off, the folder's real path, the ceiling, records ahead, exit 2) and §4 (a stop in the pass); NICE n48 (F6, `tree`); status line 2701 by hand, sidecar re-hashed (`shasum -c` OK); no version bump (alpha.61 stands); readme, doclint, hygiene, r2 215 passed under each python
+- [x] F8's pins: 35 mutants of the fold in a scratch copy, 32 killed by the first 49 cases; the 3 survivors (a record named ahead, `false` at the verb, the launcher's own stdin) pinned by 3 more cases, all 35 killed; status line 2704, sidecar re-hashed; `76 passed` under each python
 - [ ] verify: one gate job, `make check`
 
 ## Handover

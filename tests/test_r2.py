@@ -588,3 +588,35 @@ def test_r2_fold_the_pass_line(code, want, tmp_path, monkeypatch):
     rc, line = chain.Effects().reconcile(tmp_path, 10)
     assert (rc, line) == want
     assert not [c for c in line if ord(c) < 32 or 127 <= ord(c) < 160], repr(line)
+
+
+def test_r2_fold_a_record_named_ahead_holds_nothing_off(tmp_path, monkeypatch):
+    hq = hq_world(tmp_path)
+    _record(hq, NOW + 30 * DAY, "not-a-date")
+    calls = fake_detect(monkeypatch)
+    assert cli(hq, monkeypatch)[0] == 0 and len(calls) == 1
+    rc, so, _ = cli(hq, monkeypatch, now=NOW + 60)
+    assert rc == 0 and so.startswith("not due until") and len(calls) == 1, so
+
+
+def test_r2_fold_reconcile_false_at_the_verb_is_not_set(tmp_path, monkeypatch):
+    hq = hq_world(tmp_path, None)
+    (hq / ".claude" / "agentik" / "config.yaml").write_text("session:\n  reconcile: false\n")
+    calls = fake_detect(monkeypatch)
+    rc, so, err = cli(hq, monkeypatch)
+    assert (rc, so, calls) == (2, "", []) and "session.reconcile is not set" in err, err
+
+
+def test_r2_fold_the_pass_never_reads_the_launchers_stdin(tmp_path, monkeypatch):
+    from claude_session import chain
+    monkeypatch.setattr(chain, "reconcile_argv", lambda: [
+        sys.executable, "-c",
+        "import os; print(os.path.samestat(os.fstat(0), os.stat(os.devnull)))"])
+    saved, (r, w) = os.dup(0), os.pipe()
+    os.dup2(r, 0)
+    try:
+        assert chain.Effects().reconcile(tmp_path, 10) == (0, "True")
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, r, w):
+            os.close(fd)
