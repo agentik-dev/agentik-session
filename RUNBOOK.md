@@ -539,6 +539,15 @@ agentik session gate status                       # running, queued, the last fi
   <code> in <m> min; log <path>`, and the UserPromptSubmit and PostToolUse
   hooks print the same line at the next prompt or tool call (main thread only,
   at most three, then `<n> more: agentik session gate status`).
+- `agentik session gate land <repo> <branch> <sha> <merge-file>` queues one
+  landing as one gate job (packet FW4c): `make check` in the branch's worktree,
+  `scripts/hygiene` when present, the merge `--no-ff` on main, the worktree's
+  removal, the branch's deletion. Stdout is the land line alone (`land <repo>:
+  ok <sha>, main readied`, or `red <step> exit <code>`), the queued and wait
+  lines go to stderr, and the exit is the job's; a log with no land line reads
+  `red gate`. Inside a gate job the queue form refuses, since it would wait on
+  its own repo until the wall: the job itself is `gate land --in-job`, which
+  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.

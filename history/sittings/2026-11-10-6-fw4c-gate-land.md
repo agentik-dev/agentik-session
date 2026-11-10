@@ -26,4 +26,4 @@
 - none
 
 ## Next act
-the texts and the bump, then the gate's one run
+the gate's one run of make check, then the range scan
