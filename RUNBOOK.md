@@ -215,8 +215,8 @@ these hooks. `env` refuses `PATH`, `PYTHONPATH`, `DYLD_*`, `ANTHROPIC_*` and
 the credential variables outright. `name` and `description` are not settable.
 
 Commands: `agentik session set <key> <value> [--save] [--config NAME]`,
-`agentik session set fill <reset|opus|off> [--until <zoned time>]`,
-`agentik session config list`, `agentik session config show [name] [--stored]`,
+`agentik session set fill <reset|opus> [--until <zoned time>]`,
+`agentik session set fill off`, `agentik session config list`, `agentik session config show [name] [--stored]`,
 `agentik session config new <name> --from <base> --description "..."`,
 `agentik session config delete <name>`.
 
@@ -224,7 +224,7 @@ An overlay set with `set` is confirmed gone once the `SessionEnd` hook
 fires: this is covered by test, not just by design. It depends on the plugin's
 hooks firing, per section 1.
 
-**Fill: `agentik session set fill <reset|opus|off> [--until <zoned time>]`.**
+**Fill: `agentik session set fill <reset|opus> [--until <zoned time>]`, and `set fill off`.**
 Fill (section 4, Priority and pacing) is the owner's word, never a key: it
 joins no configuration and no profile, and `--save` or `--config` is refused.
 `set fill` writes `fill` into this session's overlay as the word and three
@@ -256,7 +256,16 @@ HH:MM>`, local, as the band line writes the week's reset.
   and before each start the launcher hands a copy the session that just ended
   held, its time ahead, to the successor's overlay and says `<chain>: fill
   <word> to <Ddd HH:MM> goes to the successor`; any other copy is removed.
-- `agentik session set fill off` drops the key and is never refused.
+- `agentik session set fill off` removes the chain's copy first, then drops
+  the key, so a kill between the two leaves the successor nothing to take. It
+  is never refused by the seat: a helper, a relay child or another profile may
+  run it. It is refused with `--save` or `--config` (exit 1), with no session
+  id (exit 1) and with `--until` (exit 2).
+- A failed write. `set fill <reset|opus>` writes the overlay first and the
+  chain's copy second; when either cannot be written (an OSError), the verb
+  takes back what it can, the copy first and the overlay's word second, and
+  exits 2 with one line on stderr that says what still stands, never a
+  traceback: a failure leaves the successor less fill, never more.
 
 **The priority and pacing keys.** `session.priority` and `session.pacing` sit
 in the shipped `defaults`, both on in every shipped profile. Any layer

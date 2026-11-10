@@ -55,8 +55,10 @@ is refused, and so is a session with no seven-day reading. The word lives in
 this session's overlay with its end stamped beside it, is read again at every
 read, and ends with the sitting; under `agentik session run` the launcher hands
 it to the successor while its time is ahead. `agentik session set fill off`
-drops it and is never refused. `agentik session rules` prints `fill: <word> to
-<Ddd HH:MM>` or `fill: off` last. Never put it in a memory, a ledger or a
+drops it, the chain's copy first; it is never refused by the seat, only with
+`--save`, `--config`, `--until` or no session. A write that fails takes back
+what it can and exits 2 with one line saying what stands. `agentik session
+rules` prints `fill: <word> to <Ddd HH:MM>` or `fill: off` last. Never put it in a memory, a ledger or a
 charter.
 
 ## Budget
