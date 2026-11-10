@@ -21,6 +21,9 @@ stderr. Stdout is one line, last:
   commit <repo>: red moved exit 1               a named path changed during the check
   commit <repo>: red <add|commit> exit <code>   git's own red
   commit <repo>: red lock exit 124              another call held the lock past the wall
+  commit <repo>: red <step> exit <code>, the commit stands: <sha>
+                                                a red or a signal once HEAD moved to this
+                                                call's commit: nothing is restored
 
 One call at a time per work tree: a lock in its git dir is held from before the add until the
 line is printed, so the `ok` sha is the commit this call made; a second call waits up to the
@@ -36,6 +39,7 @@ import fcntl
 import io
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -117,6 +121,27 @@ def _lock(path: str, wall) -> int | None:
     os.ftruncate(fd, 0)
     os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
     return fd
+
+
+def _head(top: str) -> str:
+    """HEAD's sha, or "" on an unborn branch."""
+    return _git(top, "rev-parse", "-q", "--verify", "HEAD")[1]
+
+
+def _code(rc: int) -> int:
+    """A child's code as a shell reads it: 128+n for a signal."""
+    return rc if rc >= 0 else 128 - rc
+
+
+def _verdict(exc: BaseException) -> tuple:
+    """The step and code a failure's line names."""
+    if isinstance(exc, Red):
+        return exc.step, exc.code
+    if isinstance(exc, KeyboardInterrupt):
+        return "signal", 128 + signal.SIGINT
+    if isinstance(exc, SystemExit) and isinstance(exc.code, int):
+        return "exit", exc.code
+    return "error", 1
 
 
 def _require_state(top: str) -> None:
@@ -263,11 +288,12 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
     _require_state(top)
     _require_paths(top, cwd, paths)
     before = _entries(cwd, paths)
+    old = None                          # HEAD before this call's `git commit`, once it runs
     try:
         code, _, err = _git(cwd, "add", "--", *paths)
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
-            raise Red("add", code)
+            raise Red("add", _code(code))
         if _git(cwd, "diff", "--cached", "--quiet", "HEAD", "--", *paths)[0] == 0:
             _restore(top, cwd, paths, before)
             raise Refused("nothing to commit in the named paths")
@@ -278,17 +304,28 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
             print("commit-step: a named path changed during the check; nothing committed",
                   file=sys.stderr)
             raise Red("moved", 1)
+        old = _head(top)
         code, _, err = _git(cwd, "commit", "-q", "--only", "-F", msg, "--", *paths)
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
-            raise Red("commit", code)
-        sha = _git(top, "rev-parse", "HEAD")[1]     # this call's commit: no other call holds
-    except Red as red:                              # the lock between the commit and here
-        _restore(top, cwd, paths, before)
-        print(f"commit {name}: red {red.step} exit {red.code}", flush=True)
-        return red.code
-    except (KeyboardInterrupt, SystemExit):
-        _restore(top, cwd, paths, before)
+            raise Red("commit", _code(code))
+        sha = _head(top)                # this call's commit: no other call holds the lock
+    except Refused:
+        raise
+    except BaseException as exc:
+        now = _head(top) if old is not None else None
+        if now and now != old:          # HEAD moved to this call's commit: it stands
+            step, code = _verdict(exc)
+            print(f"commit {name}: red {step} exit {code}, the commit stands: {now}", flush=True)
+            if isinstance(exc, Red):
+                return exc.code
+            raise
+        if isinstance(exc, Red):
+            _restore(top, cwd, paths, before)
+            print(f"commit {name}: red {exc.step} exit {exc.code}", flush=True)
+            return exc.code
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            _restore(top, cwd, paths, before)
         raise
     print(f"commit {name}: ok {sha}", flush=True)
     return 0

@@ -637,7 +637,10 @@ named path changed during the check), `red add` or `red commit` with git's
 code. One call at a time per work tree: a lock in its git dir
 (`agentik-commit.lock`) is held from before the add until the line, so the
 `ok` sha is the commit this call made; a second call waits up to the gate's
-wall, then `red lock exit 124`. On every red the named paths' index entries are put back as they were
+wall, then `red lock exit 124`. Once HEAD has moved to this call's commit,
+nothing is restored: a red or a signal after it reads `red <step> exit
+<code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). On
+every other red the named paths' index entries are put back as they were
 read; no other entry is touched.
 - Refused, exit 2, the index as found: no path; `-A`, `-u`; the whole tree
   (`.` at the top, `..` below it, its absolute path); a path outside the repo;

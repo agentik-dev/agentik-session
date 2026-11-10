@@ -290,9 +290,14 @@ GITDIR = ".git"
 def spawn(repo, *argv, check="true"):
     """The verb in its own process, as a harness runs it (for the races and the signals)."""
     env = dict(os.environ, PYTHONPATH=str(LIB), PYTHONDONTWRITEBYTECODE="1")
-    return subprocess.Popen([sys.executable, "-m", "claude_session", "commit", *argv, "--check",
-                             check, "--message-file", str(repo.msg)], cwd=repo.path, env=env,
+    return subprocess.Popen([sys.executable, "-c", MAIN, "commit", *argv, "--check", check,
+                             "--message-file", str(repo.msg)], cwd=repo.path, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+# SIGINT at Python's own handler even when the runner started with it ignored (a background job)
+MAIN = ("import runpy, signal; signal.signal(signal.SIGINT, signal.default_int_handler); "
+        "runpy.run_module('claude_session', run_name='__main__', alter_sys=True)")
 
 
 def until(cond, secs=30):
@@ -346,3 +351,46 @@ def test_fw4d_r1_f1_a_held_lock_waits_to_the_wall_then_reds(repo, monkeypatch):
         os.close(fd)
     rc, out, _ = repo.commit("a.txt")
     assert rc == 0 and out == f"commit scratch: ok {repo.head()}\n"
+
+
+def test_fw4d_r1_f2_git_killed_after_the_branch_moved_the_commit_stands(repo):
+    """F2 (p10): git dies by SIGTERM in its post-commit hook, after the branch moved: nothing is
+    restored, the line says the commit stands with its sha, the code is 128+15."""
+    hook = repo.path / GITDIR / "hooks" / "post-commit"
+    hook.write_text("#!/bin/sh\nkill -TERM $PPID\nsleep 1\n")
+    hook.chmod(0o755)
+    repo.write("a.txt", "mine\n")
+    head = repo.head()
+    rc, out, err = repo.commit("a.txt")
+    now = repo.head()
+    assert now != head and took(repo, now) == "a.txt"
+    assert (rc, out) == (143, f"commit scratch: red commit exit 143, the commit stands: {now}\n"), err
+    assert git(repo.path, "status", "--porcelain") == ""
+
+
+def test_fw4d_r1_f2_sigint_in_the_post_commit_hook_the_commit_stands(repo):
+    """F2 (p02, the post-commit window): SIGINT to the verb while its commit's post-commit hook
+    runs: the commit stands, named on the line; the index is the commit's, not the pre-add."""
+    pidf = repo.path / GITDIR / "hookpid"
+    hook = repo.path / GITDIR / "hooks" / "post-commit"
+    hook.write_text("#!/bin/sh\necho $$ > .git/hookpid\nexec sleep 30\n")
+    hook.chmod(0o755)
+    repo.write("a.txt", "mine\n")
+    head = repo.head()
+    p = spawn(repo, "a.txt")
+    try:
+        until(lambda: (pidf.exists() and pidf.read_text().strip()) or p.poll() is not None)
+        p.send_signal(signal.SIGINT)
+        out, err = p.communicate(timeout=60)
+    finally:
+        p.kill()
+        if pidf.exists() and pidf.read_text().strip():
+            try:
+                os.kill(int(pidf.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    now = repo.head()
+    assert now != head and took(repo, now) == "a.txt"
+    assert p.returncode in (130, -signal.SIGINT), (p.returncode, out, err)
+    assert out == f"commit scratch: red signal exit 130, the commit stands: {now}\n", err
+    assert git(repo.path, "status", "--porcelain") == ""
