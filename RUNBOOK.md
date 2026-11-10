@@ -300,21 +300,28 @@ session:
     tree: suite.json          # required: a repo file with a `repos` list
     goal: [tool-a, tool-b]    # the repos whose landing counts; default every repo but this one
     window: 14                # days the detectors look back
-    every: 24                 # hours between runs; the floor is 24
+    every: 24                 # hours between runs; the floor is 24, the ceiling 8760
     detectors: [eff.idle]     # default all three
     thresholds: {eff.idle: 5} # a number, 0 or more, per detector
     read: {every: 168, floor: 168, turns: 40, context: 120000}
     record: history/reconcile # a relative folder inside the repo
 ```
 
+`reconcile: false` is off, as no key is. The record folder's real path, its
+links followed, lies inside the repo and outside `.git`, and the folder can
+be written; else the verb exits 2 before the detectors run.
+
 `agentik session reconcile [--json] [--force]` runs in the repo. When the
 newest `<record>/YYYY-MM-DD.md` says it ran less than `every` hours ago it
 prints `not due until <time>`, exits 0 and writes nothing; delete the record
-or pass `--force` to run now. Otherwise it writes that date's record (a
+or pass `--force` to run now. A record named or stamped after now (a clock
+that ran fast) is named in one line on stderr and left out, so it holds
+nothing off. Otherwise it writes that date's record (a
 second run on one date replaces it): the run line, then one row per detector
 with its value, threshold, flag and the shell command that reproduces the
 value, never a charter's or a transcript's text. It exits 0 when nothing is
-flagged and 1 when a finding is; `--json` gives `{due, record, flagged,
+flagged, 1 when a finding is and for nothing else, and 2 on any error, in
+one line; `--json` gives `{due, record, flagged,
 findings}`, or `{due, last, next}` when not due.
 
 ## 4. Budget and checkpoints as a signal
@@ -525,7 +532,8 @@ hang-up the launcher writes nothing more to the terminal).
   <n>: <its last line>`. The verb's `every` decides whether the detectors
   run. The pass is cut at 30 s, the launcher's own kill grace, and a failure,
   a cut or a bad key is that one line: the successor starts all the same. A
-  stop runs no pass.
+  stop runs no pass. A Ctrl-C, SIGTERM or STOP file during the pass ends it
+  within a second and stops the chain as the grace would; no successor starts.
 - Two STOP files hold the chain: `respawn/<chain>/STOP` and
   `respawn/STOP` under the state root (the `state-dir` line of
   `agentik session doctor`). Touch one and the running sitting finishes
