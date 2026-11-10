@@ -278,3 +278,31 @@ def test_fw4c_t15_a_runner_killed_mid_check_and_a_job_that_lands_reads_ok(repo, 
     assert ": exit 125 in " in err, err
     assert (rc, out) == (0, f"land scratch: ok {sha}, main readied\n"), err
     assert git(repo.path, "rev-parse", "main^2") == sha
+
+
+def test_fw4c_t16_the_floor_runs_thirteen_of_the_ported_land_tests():
+    # fold r1's ruling: under the floor python the cuts, the encoding and one green; the other
+    # 102 run once, under .venv.
+    import unittest
+
+    import test_land
+
+    class Case:
+        def __init__(self, name):
+            self._testMethodName = name
+
+        def skipTest(self, why):
+            raise unittest.SkipTest(why)
+
+    names = [n.name for f in ("test_land.py", "test_land_range.py")
+             for n in ast.walk(ast.parse((ROOT / "tests" / f).read_text()))
+             if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
+    floor = [n for n in names if test_land.FLOOR.search(n)]
+    assert (len(names), len(floor)) == (115, 13)
+    for name in names:
+        try:
+            test_land.one_run_under_312(Case(name))
+            skipped = False
+        except unittest.SkipTest:
+            skipped = True
+        assert skipped == (sys.version_info < (3, 10) and name not in floor), name

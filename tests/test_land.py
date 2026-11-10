@@ -31,13 +31,23 @@ MAKEFILE = (
     "\t@if [ -e LITTER ]; then touch litter.out; fi\n"
 )
 HYGIENE = "#!/bin/sh\necho hygiene >> \"$LAND_ORDER\"\nexit %d\n"
+# Under the floor python, the cuts, the encoding and one green: 13 of the 115 (FW4c's fold r1).
+FLOOR = re.compile(r"f4_|f5_|green_branch|f6_q7")
+
+
+def one_run_under_312(case):
+    """The rest is one run, under .venv, as test_bare_machine.py's proof is: what a second
+    python can catch here is the import, the signals and the encoding line."""
+    if sys.version_info < (3, 10) and not FLOOR.search(case._testMethodName):
+        case.skipTest("one run, under .venv: the floor runs 13 of the ported land tests")
 
 
 class LandCase(unittest.TestCase):
     """A scratch repo on main, with its worktrees where the flow puts them."""
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="land-test-"))
+        one_run_under_312(self)
+        self.tmp =os.path.realpath(tempfile.mkdtemp(prefix="land-test-"))
         self.addCleanup(self._teardown)
         gitconfig = os.path.join(self.tmp, "gitconfig")
         with open(gitconfig, "w") as fh:
@@ -1423,6 +1433,9 @@ class TestGate(LandCase):
 
 
 class TestScript(unittest.TestCase):
+    def setUp(self):
+        one_run_under_312(self)
+
     def test_e_no_push_in_the_script(self):
         p = subprocess.run(["grep", "-c", "git push", LAND_PY], text=True, stdout=subprocess.PIPE)
         self.assertEqual(p.stdout.strip(), "0")
