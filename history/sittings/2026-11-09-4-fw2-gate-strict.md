@@ -12,7 +12,7 @@
 - [x] charter written at open: this file
 - [x] the packet committed with this charter
 - [x] tests: T1 to T8 in `tests/test_fw2.py`, red at 942cace: `8 failed in 0.35s`
-- [ ] the code: R1 to R5
+- [x] the texts: R6; T1 to T7 green, the six neighbouring suites 340 passed; T8 waits on the texts
 - [ ] the texts: R6
 - [ ] the bump: R7, alpha.55; NICE row
 - [ ] verify: the gate once
@@ -25,4 +25,4 @@
 - none
 
 ## Next act
-the code: R1 to R5 in gate.py and cli.py
+the texts: R6
