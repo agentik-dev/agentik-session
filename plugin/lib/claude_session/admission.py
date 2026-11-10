@@ -14,6 +14,7 @@ Nothing here decides: S26's `admit` reads it.
 """
 from __future__ import annotations
 
+import bisect
 import fcntl
 import json
 import math
@@ -406,8 +407,8 @@ def _record_spend(d: Path, env, sid: str, line: dict) -> None:
 
 
 def record(sid, text: str, env, now: datetime | None = None) -> Path:
-    """Check stdin's object, then rotate, append, (on `end`) sweep and rewrite band.json
-    inside one lock."""
+    """Check stdin's object, then rotate, append, (on `end`) sweep and the spend line inside
+    the ledger's lock; band.json is rewritten after it, under its own (packet S54 R6)."""
     obj = parse(sid, text)
     now = now or datetime.now(timezone.utc)
     d = directory(env)
@@ -421,10 +422,10 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
         swept = _sweep(d, sid, now) if line["kind"] == "end" else []
         _append(d, [line, *swept])
         _record_spend(d, env, sid, line)
-        _write_band(d, now, {**rules.admission(_session_config(env, sid)), "demand": _demand_once(env)},
-                    env)
     finally:
         os.close(fd)
+    _write_band(d, now, {**rules.admission(_session_config(env, sid)), "demand": _demand_once(env)},
+                env)
     return d / LEDGER
 
 
@@ -518,12 +519,28 @@ def runs(rows) -> list:
     tool_use_id), or a resume of an ended helper to the helper's next done."""
     dones = sorted(((t, r) for r in rows if r.get("kind") == "done"
                     and (t := _when(r.get("ts"))) is not None), key=lambda x: x[0])
+    # Packet S54 R8: the dones indexed once by string agentId and string tool_use_id, each a
+    # list of positions in time order; `end` is the lowest position at or after t0 over the
+    # two keys, the first match the old scan found, in O(log n).
+    times = [t for t, _ in dones]
+    by_aid: dict = {}
+    by_tid: dict = {}
+    for i, (_, d) in enumerate(dones):
+        a, u = d.get("agentId"), d.get("tool_use_id")
+        if isinstance(a, str):
+            by_aid.setdefault(a, []).append(i)
+        if isinstance(u, str):
+            by_tid.setdefault(u, []).append(i)
 
     def end(t0, aid, tid):
-        for t, d in dones:
-            if t >= t0 and ((aid and d.get("agentId") == aid) or (tid and d.get("tool_use_id") == tid)):
-                return t, d
-        return None, None
+        lo, best = bisect.bisect_left(times, t0), None
+        for key, index in ((aid, by_aid), (tid, by_tid)):
+            pos = index.get(key) if key else None
+            if pos:
+                j = bisect.bisect_left(pos, lo)
+                if j < len(pos) and (best is None or pos[j] < best):
+                    best = pos[j]
+        return dones[best] if best is not None else (None, None)
 
     def run(t0, aid, tid, fam, typ):
         t1, d = end(t0, aid, tid)
@@ -1153,9 +1170,9 @@ def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
              "tool_use_id": req.get("tool_use_id")}
         _append(d, [{"ts": _ts(now), "session": sid, "kind": "verdict",
                      **{k: v[k] for k in VERDICT_KEYS}}])
-        _write_band(d, now, settings, env)
     finally:
         os.close(fd)
+    _write_band(d, now, settings, env)            # packet S54 R6: outside the ledger's lock
     out = {k: v[k] for k in ("verdict", "mode", "text", "peak", "window", "resume_at")}
     if out["window"] == NO_WINDOW:
         dem = at(now)
@@ -1165,9 +1182,12 @@ def admit(sid, text_in: str, env, now: datetime | None = None) -> dict:
 
 
 # ---- The band (design/admission-r1.md §3.5, §3.6; packet S27b): display only ----
-# `band()` is pure; `record` and `admit` rewrite band.json from it inside the lock, and the
-# module's band and the prompt hook draw `band_line` from that file. Nothing decides on it.
+# `band()` is pure; `record` and `admit` rewrite band.json from it after the ledger's lock,
+# under band.lock (packet S54 R7), and the module's band and the prompt hook draw `band_line`
+# from that file. Nothing decides on it.
 BAND = "band.json"
+BAND_LOCK = "band.lock"
+BAND_PASSES = 3                   # builds one holder runs while the ledger moves under it
 WINDOW = timedelta(hours=5)
 STALE_S = 120                     # the band's age shows past this, as M1's line does
 HELD = ("deferred", "wait")       # the verdicts that held a spawn (in observe: would have)
@@ -1530,21 +1550,53 @@ def session_band(b, sid):
     return a if isinstance(a, dict) else b
 
 
-def _write_band(d: Path, now: datetime, settings: dict, env=None) -> None:
-    """band.json from the whole ledger, inside the caller's lock; atomic and 0600 through
-    the private writer. A failure leaves the last band and says so on one stderr line: it is
-    display, never the record (fix round 1, F1)."""
+def _ledger_mark(d: Path):
+    """ledger.jsonl's (st_ino, st_size), None when absent: an append grows it, a rotation
+    replaces it."""
     try:
-        rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
-        mx = _user_mix(env) if env is not None else None       # F5: the user layer's, each write
-        if mx:
-            settings = {**settings, "mix": mx, "mix_carry": _load_carry(d), "mix_out": {}}
-        store._write_private(d / BAND, json.dumps(bands(rows, now, settings), allow_nan=False) + "\n")
-        if mx:
+        st = os.stat(d / LEDGER)
+    except OSError:
+        return None
+    return (st.st_ino, st.st_size)
+
+
+def _build_band(d: Path, now: datetime, settings: dict, env=None) -> None:
+    rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
+    mx = _user_mix(env) if env is not None else None       # F5: the user layer's, each write
+    if mx:
+        settings = {**settings, "mix": mx, "mix_carry": _load_carry(d), "mix_out": {}}
+    store._write_private(d / BAND, json.dumps(bands(rows, now, settings), allow_nan=False) + "\n")
+    if mx:
+        try:
+            _save_carry(d, settings["mix_carry"], settings["mix_out"], now)
+        except Exception:  # noqa: BLE001 - the carry is advice
+            pass
+
+
+def _write_band(d: Path, now: datetime, settings: dict, env=None) -> None:
+    """band.json (and mix.json) from the whole ledger, after the caller's ledger lock, under
+    `band.lock` taken without waiting (packet S54 R7): held, another build is running and
+    this returns silently. The holder marks the ledger, builds, closes the lock, and goes
+    round while the mark moved, at most BAND_PASSES builds: closing before the second mark,
+    every line appended meanwhile (whose own call met the lock held) and a rotation under the
+    read meet a build that read them. At the cap the band may trail: it is display. Atomic
+    and 0600 through the private writer. A failure leaves the last band and says so on one
+    stderr line: it is display, never the record (fix round 1, F1)."""
+    try:
+        for _ in range(BAND_PASSES):
+            fd = os.open(d / BAND_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
             try:
-                _save_carry(d, settings["mix_carry"], settings["mix_out"], now)
-            except Exception:  # noqa: BLE001 - the carry is advice
-                pass
+                os.fchmod(fd, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return                          # the holder goes round for this line
+                mark = _ledger_mark(d)
+                _build_band(d, now, settings, env)
+            finally:
+                os.close(fd)
+            if _ledger_mark(d) == mark:
+                return
     except Exception as e:  # noqa: BLE001 - the band never fails a record or a verdict
         why = " ".join(f"{type(e).__name__}: {e}".split())[:200]
         print(f"admission: band.json not written ({why}); the ledger line is kept", file=sys.stderr)

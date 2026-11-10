@@ -204,3 +204,171 @@ def test_s54_a2_report_hooks_counts_a_session_once(monkeypatch):
     rc, out, _ = run("report", "--hooks", "--json")
     got = json.loads(out)
     assert rc == 0 and got["ledger_rows"] == 1 and got["claude_md_bytes"]["newest"] == 902
+
+
+# --- a3: the band built outside the ledger's lock, under its own --------------------------
+
+def _adir():
+    from claude_session import admission, config
+    return config.state_dir(os.environ) / admission.DIR
+
+
+def _five(pct):
+    return [{"kind": "five_hour", "percentUsed": pct, "resetsAt": "2026-10-12T14:00:00+00:00"}]
+
+
+T_A = "test-sess-0000-1111-2222"
+T_B = "test-sess-0000-1111-3333"
+
+
+def test_s54_a3_record_during_build(monkeypatch, capsys):
+    from datetime import datetime, timezone
+    from claude_session import admission, config
+    config.ensure_dirs()
+    monkeypatch.setattr(admission, "LOCK_WAIT_S", 0.2)
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+    env = dict(os.environ)
+    real, calls = admission.bands, []
+
+    def bands(rows, at, settings, tz=None):
+        calls.append([r.get("session") for r in rows])
+        if len(calls) == 1:            # a second session records while the first build runs
+            admission.record(T_B, json.dumps({"kind": "reading", "rateLimits": _five(55)}),
+                             env, now)
+        return real(rows, at, settings, tz)
+
+    monkeypatch.setattr(admission, "bands", bands)
+    admission.record(T_A, json.dumps({"kind": "start", "interactive": True}), env, now)
+    lines = [json.loads(x) for x in (_adir() / admission.LEDGER).read_text().splitlines()]
+    assert [(x["session"], x["kind"]) for x in lines] == [(T_A, "start"), (T_B, "reading")]
+    assert len(calls) == 2 and T_B not in calls[0] and T_B in calls[1]
+    band = json.loads((_adir() / admission.BAND).read_text())
+    assert band["P"] == 55
+    assert "not written" not in capsys.readouterr().err
+
+
+def test_s54_a3_band_lock_not_waited_for(monkeypatch, capsys):
+    import fcntl
+    import stat as st
+    import time
+    from datetime import datetime, timezone
+    from claude_session import admission, config
+    config.ensure_dirs()
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+    env = dict(os.environ)
+    admission.record(T_A, json.dumps({"kind": "start", "interactive": True}), env, now)
+    lock = _adir() / "band.lock"
+    band = (_adir() / admission.BAND).read_bytes()
+    capsys.readouterr()
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        t0 = time.monotonic()
+        admission.record(T_B, json.dumps({"kind": "reading", "rateLimits": _five(55)}), env, now)
+        took = time.monotonic() - t0
+    finally:
+        os.close(fd)
+    lines = (_adir() / admission.LEDGER).read_text().splitlines()
+    assert len(lines) == 2 and json.loads(lines[1])["session"] == T_B
+    assert (_adir() / admission.BAND).read_bytes() == band
+    assert capsys.readouterr().err == ""
+    assert took < 1.0                                       # never waited for
+    assert admission.BAND_LOCK == "band.lock" and st.S_IMODE(lock.stat().st_mode) == 0o600
+
+
+class _Counted(dict):
+    """A ledger row that counts the `get`s made on it."""
+    gets = 0
+
+    def get(self, *a):
+        _Counted.gets += 1
+        return super().get(*a)
+
+
+def _old_runs(rows):
+    """`runs` at cba0b70, kept to compare: each spawn's end a scan of every done."""
+    from claude_session.admission import _minutes, _real, _str, _when, family, helper_type
+    dones = sorted(((t, r) for r in rows if r.get("kind") == "done"
+                    and (t := _when(r.get("ts"))) is not None), key=lambda x: x[0])
+
+    def end(t0, aid, tid):
+        for t, d in dones:
+            if t >= t0 and ((aid and d.get("agentId") == aid)
+                            or (tid and d.get("tool_use_id") == tid)):
+                return t, d
+        return None, None
+
+    def run(t0, aid, tid, fam, typ):
+        t1, d = end(t0, aid, tid)
+        mins = None
+        if d is not None and d.get("swept") is not True:
+            ms = _real(d.get("durationMs"))
+            mins = ms / 60000.0 if ms is not None and ms >= 0 else _minutes(t1 - t0)
+        return {"start": t0, "end": t1, "minutes": mins, "family": fam, "type": typ,
+                "agentId": aid, "tool_use_id": tid}
+
+    out, by_agent = [], {}
+    events = sorted(((t, r) for r in rows if r.get("kind") in ("spawn", "resume")
+                     and (t := _when(r.get("ts"))) is not None), key=lambda x: x[0])
+    for t0, r in events:
+        if r["kind"] == "spawn":
+            x = run(t0, _str(r.get("agentId")), _str(r.get("tool_use_id")),
+                    family(r.get("model"), r.get("parentModel")),
+                    helper_type(r.get("subagentType"), r.get("fork")))
+        else:
+            aid = _str(r.get("to"))
+            last = by_agent.get(aid)
+            if aid is None or (last is not None and (last["end"] is None or last["end"] > t0)):
+                continue
+            x = run(t0, aid, None, last["family"] if last else "other",
+                    last["type"] if last else "other")
+        out.append(x)
+        if x["agentId"]:
+            by_agent[x["agentId"]] = x
+    return out
+
+
+def _ts(base, s):
+    from datetime import timedelta
+    return (base + timedelta(seconds=s)).isoformat()
+
+
+def test_s54_a3_runs_linear():
+    import random
+    from datetime import datetime, timezone
+    from claude_session import admission
+    base = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
+    rows = [_Counted(ts=_ts(base, i), kind="spawn", agentId=f"a{i}", tool_use_id=f"t{i}",
+                     subagentType="general-purpose", model=None,
+                     parentModel="claude-opus-5-5", fork=False) for i in range(1000)]
+    rows += [_Counted(ts=_ts(base, 2000 + k), kind="done", agentId=f"a{i}", tool_use_id=None,
+                      durationMs=60000, swept=False)
+             for k, i in enumerate(reversed(range(1000)))]
+    _Counted.gets = 0
+    got = admission.runs(rows)
+    assert _Counted.gets <= 20 * len(rows), _Counted.gets
+    assert len(got) == 1000 and all(r["end"] is not None for r in got)
+    assert got == _old_runs(rows)
+    # Seeded random ledgers: ids shared and reused, ties in time, torn times, both keys.
+    for seed in range(60):
+        rnd = random.Random(seed)
+        aids = [f"a{k}" for k in range(rnd.randint(1, 6))] + [None, "", 7]
+        tids = [f"t{k}" for k in range(rnd.randint(1, 6))] + [None, ""]
+        rows = []
+        for _ in range(rnd.randint(0, 60)):
+            kind = rnd.choice(("spawn", "spawn", "resume", "done", "done", "done", "reading"))
+            ts = rnd.choice((_ts(base, rnd.randint(0, 40) * 30), "not a time", None))
+            r = {"ts": ts, "kind": kind}
+            if kind == "spawn":
+                r.update(agentId=rnd.choice(aids), tool_use_id=rnd.choice(tids),
+                         subagentType=rnd.choice(("Explore", "general-purpose", None)),
+                         model=rnd.choice((None, "claude-sonnet-5")),
+                         parentModel="claude-opus-5-5", fork=rnd.random() < .2)
+            elif kind == "resume":
+                r.update(to=rnd.choice(aids))
+            elif kind == "done":
+                r.update(agentId=rnd.choice(aids), tool_use_id=rnd.choice(tids),
+                         durationMs=rnd.choice((None, -1, 90000, 1.5e6)),
+                         swept=rnd.random() < .2)
+            rows.append(r)
+        assert admission.runs(rows) == _old_runs(rows), seed

@@ -342,7 +342,7 @@ def test_nothing_is_written_outside_admission(state):
             assert run({"kind": kind, **SAMPLE[kind]})[0] == 0
     assert all(f == config.APP or f.startswith(f"{config.APP}/admission")
                for f in _files(state)), _files(state)
-    assert sorted(p.name for p in adir(state).iterdir()) == ["band.json", "ledger.jsonl", "ledger.lock"]
+    assert sorted(p.name for p in adir(state).iterdir()) == ["band.json", "band.lock", "ledger.jsonl", "ledger.lock"]
 
 
 def _module_text() -> str:
