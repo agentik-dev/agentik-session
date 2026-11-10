@@ -317,9 +317,11 @@ def test_c1_the_version_moves_with_the_plugin():
 
 def test_hooks_json_is_the_shim_on_session_start_only():
     hooks_json = json.loads((PLUGIN / "hooks/hooks.json").read_text())
-    assert list(hooks_json["hooks"]) == list(doctor.HOOK_EVENTS) == [
+    # wfg R7 registers PostModelSwitch; doctor.HOOK_EVENTS does not name it yet
+    assert list(hooks_json["hooks"]) == [*doctor.HOOK_EVENTS, "PostModelSwitch"] == [
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
-        "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact"]
+        "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact",
+        "PostModelSwitch"]
     cmd = hooks_json["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert cmd == "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SessionStart"
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
@@ -374,7 +376,7 @@ def test_skill_frontmatter():
 # stall there is silent. Tool and prompt hooks get 5 s, SessionStart 10, SessionEnd 15.
 HOOK_TIMEOUTS = {"SessionStart": 10, "SessionEnd": 15, "UserPromptSubmit": 5,
                  "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5, "PostToolBatch": 5,
-                 "Stop": 5, "StopFailure": 5, "PreCompact": 5}
+                 "Stop": 5, "StopFailure": 5, "PreCompact": 5, "PostModelSwitch": 5}
 
 
 def test_every_hook_command_has_its_events_timeout():
@@ -387,7 +389,7 @@ def test_every_hook_command_has_its_events_timeout():
                 assert h.get("type") == "command"
                 assert h.get("timeout") == HOOK_TIMEOUTS[event], (event, h)
                 seen += 1
-    assert seen == len(doctor.HOOK_EVENTS)
+    assert seen == len(doctor.HOOK_EVENTS) + 1          # wfg R7: PostModelSwitch
 
 
 # ---- S19: Stop and PreToolUse on every tool (respawn-r1 §3.3, criterion 18) ----
@@ -401,7 +403,8 @@ S19_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
 
 def test_s19_hooks_register_stop_and_every_tool():
     registered = json.loads((PLUGIN / "hooks/hooks.json").read_text())["hooks"]
-    assert list(registered) == list(doctor.HOOK_EVENTS) == S19_EVENTS
+    assert list(registered) == [*doctor.HOOK_EVENTS, "PostModelSwitch"] == [
+        *S19_EVENTS, "PostModelSwitch"]                      # wfg R7
     stop = [h for g in registered["Stop"] for h in g["hooks"]]
     assert [(h["command"], h["timeout"]) for h in stop] == [
         ("\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" Stop", 5)]

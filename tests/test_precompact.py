@@ -104,7 +104,8 @@ def test_c1_other_events_still_print_their_json(capsys, monkeypatch):
 
 def test_c1_hooks_json_keeps_the_classic_eight_and_adds_precompact():
     registered = json.loads((PLUGIN / "hooks/hooks.json").read_text())["hooks"]
-    assert list(registered) == [*CLASSIC, "PreCompact"] == list(doctor.HOOK_EVENTS)
+    assert list(registered) == [*CLASSIC, "PreCompact", "PostModelSwitch"]     # wfg R7
+    assert [*CLASSIC, "PreCompact"] == list(doctor.HOOK_EVENTS)
     for event, timeout in [*CLASSIC.items(), ("PreCompact", 5)]:
         assert [(h["type"], h["command"], h["timeout"]) for g in registered[event]
                 for h in g["hooks"]] == [

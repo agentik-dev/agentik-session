@@ -23,7 +23,7 @@ if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type
 # Measure (packet S49, Amendment 1): the start, empty if `date` fails. The CLI ends the row.
 export AGENTIK_SESSION_HOOK_T0="$(date +%s%N 2>/dev/null)"
 case "$1" in
-  Stop|StopFailure|PostToolUseFailure|PostToolBatch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  Stop|StopFailure|PostToolUseFailure|PostToolBatch|PostModelSwitch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
   PreCompact) "$tool" hook "$1"; exit 0 ;;
 esac
 exec "$tool" hook "$1"

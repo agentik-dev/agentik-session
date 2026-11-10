@@ -30,6 +30,9 @@
     ],
     "PreCompact": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" PreCompact", "timeout": 5}]}
+    ],
+    "PostModelSwitch": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" PostModelSwitch", "timeout": 5}]}
     ]
   }
 }
