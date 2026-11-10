@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from claude_session import cli, gate, resolver
+from claude_session import commit as verb
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -394,3 +395,135 @@ def test_fw4d_r1_f2_sigint_in_the_post_commit_hook_the_commit_stands(repo):
     assert p.returncode in (130, -signal.SIGINT), (p.returncode, out, err)
     assert out == f"commit scratch: red signal exit 130, the commit stands: {now}\n", err
     assert git(repo.path, "status", "--porcelain") == ""
+
+
+def snapshot(where):
+    return where / "agentik-commit.index"
+
+
+def test_fw4d_r1_f3_a_restore_that_cannot_be_made_is_its_own_red(repo, monkeypatch):
+    """F3 (p02): an index.lock present when the red restores. The line names the snapshot, the
+    exit is not 0, the snapshot stays and is the index as found; the next call refuses on it."""
+    monkeypatch.setattr(verb, "RESTORE_WAIT", 0.2, raising=False)
+    repo.write("b.txt", "theirs\n")
+    git(repo.path, "add", "b.txt")
+    repo.write("a.txt", "mine\n")
+    before, head, gd = repo.index(), repo.head(), repo.path / GITDIR
+    rc, out, err = repo.commit("a.txt", check="sh -c 'touch .git/index.lock; exit 3'")
+    assert (rc, out) == (1, "commit scratch: red restore exit 1, the index as found is kept at "
+                            f"{snapshot(gd)}\n"), err
+    assert "red check exit 3" in err and repo.head() == head
+    os.unlink(str(gd / "index.lock"))
+    rc, out, err = repo.commit("b.txt")
+    refused(repo, rc, out, err, str(snapshot(gd)))
+    os.replace(str(snapshot(gd)), str(gd / "index"))
+    assert repo.index() == before
+
+
+def test_fw4d_r1_f3_in_a_linked_worktree_the_snapshot_is_its_own_git_dir(repo, monkeypatch):
+    """The ruling's worktree: a linked worktree's index lives in its own git dir, and so do the
+    lock and the snapshot."""
+    monkeypatch.setattr(verb, "RESTORE_WAIT", 0.2, raising=False)
+    wt = repo.path.parent / "wt"
+    git(repo.path, "worktree", "add", "-q", "-b", "wt", str(wt))
+    monkeypatch.chdir(wt)
+    (wt / "a.txt").write_text("mine\n")
+    before, gd = git(wt, "ls-files", "-s"), repo.path / GITDIR / "worktrees" / "wt"
+    rc, out, _ = repo.commit("a.txt", check="sh -c 'exit 3'")
+    assert (rc, out) == (3, "commit wt: red check exit 3\n") and git(wt, "ls-files", "-s") == before
+    assert not snapshot(gd).exists() and (gd / "agentik-commit.lock").exists()
+    rc, out, _ = repo.commit("a.txt", check=f"sh -c 'touch {gd}/index.lock; exit 3'")
+    assert (rc, out) == (1, f"commit wt: red restore exit 1, the index as found is kept at "
+                            f"{snapshot(gd)}\n")
+    os.unlink(str(gd / "index.lock"))
+    os.replace(str(snapshot(gd)), str(gd / "index"))
+    assert git(wt, "ls-files", "-s") == before
+
+
+def test_fw4d_r1_f4_a_case_folded_path_leaves_the_index_as_found(repo):
+    """F4b (p08): on a case-folding disk `SUB/new.txt` adds `sub/new.txt` and the call refuses as
+    nothing to commit, or the check reds; the index is as found (a case-keeping disk refuses)."""
+    repo.write("sub/s.txt", "base\n")
+    git(repo.path, "add", "sub/s.txt")
+    git(repo.path, "commit", "-qm", "sub")
+    repo.write("sub/new.txt", "n\n")
+    before = repo.index()
+    rc, out, err = repo.commit("SUB/new.txt", check="false")
+    assert (rc, out) in ((2, ""), (1, "commit scratch: red check exit 1\n")), err
+    assert repo.index() == before and not snapshot(repo.path / GITDIR).exists()
+
+
+def test_fw4d_r1_f4_a_file_replaced_by_a_directory_leaves_the_index_as_found(repo):
+    """F4a (p02): `d` tracked, then a directory, `d/x` named, a red check: `d` stays in the
+    index, as it was found."""
+    repo.write("d", "f\n")
+    git(repo.path, "add", "d")
+    git(repo.path, "commit", "-qm", "d")
+    os.unlink(str(repo.path / "d"))
+    repo.write("d/x", "x\n")
+    before = repo.index()
+    rc, out, _ = repo.commit("d/x", check="false")
+    assert (rc, out) == (1, "commit scratch: red check exit 1\n") and repo.index() == before
+
+
+def test_fw4d_r1_f5_unmerged_stages_come_back_as_they_were(repo):
+    """F5 (p02): a stash pop's conflict (no MERGE_HEAD), a red check: stages 1, 2, 3 again."""
+    repo.write("a.txt", "stash-side\n")
+    git(repo.path, "stash", "-q")
+    repo.write("a.txt", "main-side\n")
+    git(repo.path, "commit", "-qam", "main2")
+    subprocess.run(["git", "stash", "pop"], cwd=repo.path, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL)
+    repo.write("a.txt", "resolved\n")
+    before = repo.index()
+    assert " 1\ta.txt" in before and " 3\ta.txt" in before
+    rc, out, _ = repo.commit("a.txt", check="false")
+    assert (rc, out) == (1, "commit scratch: red check exit 1\n") and repo.index() == before
+
+
+def test_fw4d_r1_f6_an_exception_that_is_no_red_restores(repo, monkeypatch):
+    """F6 (p02): any exception through the call puts the index back, then goes on up."""
+    def boom(top, argv):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(verb, "_direct_check", boom)
+    repo.write("b.txt", "theirs\n")
+    git(repo.path, "add", "b.txt")
+    repo.write("a.txt", "mine\n")
+    before, head = repo.index(), repo.head()
+    with pytest.raises(RuntimeError):
+        repo.commit("a.txt")
+    assert (repo.index(), repo.head()) == (before, head)
+    assert not snapshot(repo.path / GITDIR).exists()
+
+
+def test_fw4d_r1_f7_sigterm_to_the_verb_restores_and_ends_the_check(repo):
+    """F7 (p02): SIGTERM to the verb during its check: exit 128+15, the index as found, and the
+    check does not outlive the verb."""
+    pidf = repo.path / GITDIR / "checkpid"
+    repo.write("b.txt", "theirs\n")
+    git(repo.path, "add", "b.txt")
+    repo.write("a.txt", "mine\n")
+    before, head = repo.index(), repo.head()
+    p = spawn(repo, "a.txt", check="sh -c 'echo $$ > .git/checkpid; exec sleep 30'")
+    try:
+        until(lambda: (pidf.exists() and pidf.read_text().strip()) or p.poll() is not None)
+        p.send_signal(signal.SIGTERM)
+        out, err = p.communicate(timeout=60)
+    finally:
+        p.kill()
+    cp = int(pidf.read_text())
+
+    def gone():
+        try:
+            os.kill(cp, 0)
+        except ProcessLookupError:
+            return True
+        return False
+    try:
+        until(gone, 10)
+    finally:
+        if not gone():
+            os.kill(cp, signal.SIGKILL)
+    assert (p.returncode, out) == (143, ""), err
+    assert (repo.index(), repo.head()) == (before, head)
+    assert not snapshot(repo.path / GITDIR).exists()

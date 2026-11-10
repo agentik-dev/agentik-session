@@ -24,21 +24,28 @@ stderr. Stdout is one line, last:
   commit <repo>: red <step> exit <code>, the commit stands: <sha>
                                                 a red or a signal once HEAD moved to this
                                                 call's commit: nothing is restored
+  commit <repo>: red restore exit 1, the index as found is kept at <snapshot>
 
 One call at a time per work tree: a lock in its git dir is held from before the add until the
 line is printed, so the `ok` sha is the commit this call made; a second call waits up to the
 gate's wall.
 
-On every red the named paths' index entries are put back as they were read, and no other entry
-is touched, so the index is as it was found.
+Before the add the index file is copied whole to the git dir (`agentik-commit.index`). On every
+other failure (a red, a refusal after the add, any exception, SIGINT, SIGTERM, SIGHUP) that
+copy goes back over the index by git's protocol (`index.lock`, then a rename), under the lock,
+so the index is as it was found, a path someone staged earlier included. A restore that cannot
+be made is `red restore`: the copy stays, and a later call refuses until it is moved back or
+removed. SIGKILL is out of reach: the copy is the way back.
 """
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import io
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -50,6 +57,8 @@ NAMED = 20
 DEVNULL = subprocess.DEVNULL
 LOCK = "agentik-commit.lock"         # in the git dir: one call at a time (round 1, F1)
 LOCK_RED = 124                       # a lock not had within the wall: `red lock exit 124`
+SNAP = "agentik-commit.index"        # in the git dir: the index file as found (F3, F4)
+RESTORE_WAIT = 2.0                   # seconds a restore waits on another writer's index.lock
 
 
 class Refused(Exception):
@@ -60,6 +69,48 @@ class Red(Exception):
     def __init__(self, step, code):
         super().__init__(step)
         self.step, self.code = step, code
+
+
+class _Signal(SystemExit):
+    """SIGTERM or SIGHUP, raised so the index goes back on the way out (F7); exit 128+n."""
+
+    def __init__(self, signum):
+        super().__init__(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals():
+    """SIGTERM and SIGHUP raise _Signal for the span (SIGINT is Python's KeyboardInterrupt)."""
+    def raise_(signum, frame):
+        raise _Signal(signum)
+    saved = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            if signal.getsignal(sig) != signal.SIG_IGN:     # nohup's SIGHUP stays ignored
+                saved[sig] = signal.signal(sig, raise_)
+        except (ValueError, OSError):   # not the main thread: no handler, as before
+            pass
+    try:
+        yield
+    finally:
+        for sig, was in saved.items():
+            signal.signal(sig, signal.SIG_DFL if was is None else was)
+
+
+@contextlib.contextmanager
+def _held():
+    """SIGINT, SIGTERM and SIGHUP held while the index goes back, so a second signal cannot cut
+    a restore halfway or leave index.lock behind; one sent meanwhile lands after."""
+    try:
+        was = signal.pthread_sigmask(signal.SIG_BLOCK,
+                                     {signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+    except (AttributeError, OSError, ValueError):
+        was = None
+    try:
+        yield
+    finally:
+        if was is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, was)
 
 
 def _env() -> dict:
@@ -102,7 +153,10 @@ def _git_path(top: str, name: str) -> str:
 def _lock(path: str, wall) -> int | None:
     """The commit lock (an flock on `path`, released when its descriptor closes or the process
     dies; the check never inherits it), waited for up to `wall` seconds; None past it."""
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+    except OSError as err:
+        raise Refused(f"the commit lock {path}: {err}") from None
     end, said = time.monotonic() + float(wall), False
     while True:
         try:
@@ -139,6 +193,8 @@ def _verdict(exc: BaseException) -> tuple:
         return exc.step, exc.code
     if isinstance(exc, KeyboardInterrupt):
         return "signal", 128 + signal.SIGINT
+    if isinstance(exc, _Signal):
+        return "signal", exc.code
     if isinstance(exc, SystemExit) and isinstance(exc.code, int):
         return "exit", exc.code
     return "error", 1
@@ -195,27 +251,66 @@ def _message(path: str) -> str:
     return os.path.abspath(path)
 
 
-def _entries(cwd: str, paths: list) -> dict:
-    """{full name: `mode sha stage`} for the named paths' index entries."""
-    _, fields, _ = _git(cwd, "ls-files", "-s", "--full-name", "-z", "--", *paths, z=True)
-    out = {}
-    for f in fields:
-        meta, _, name = f.partition("\t")
-        out[name] = meta
-    return out
+def _snapshot(index: str, snap: str) -> None:
+    """The index file copied whole to `snap`, its mtime kept (git's racy-entry test reads it);
+    an empty `snap` stands for no index. Written aside, then renamed: never half a snapshot."""
+    tmp = snap + ".tmp"
+    try:
+        try:
+            shutil.copy2(index, tmp)
+        except FileNotFoundError:
+            open(tmp, "wb").close()
+        os.replace(tmp, snap)
+    except OSError as err:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise Refused(f"the index cannot be copied to {snap}: {err}") from None
 
 
-def _restore(top: str, cwd: str, paths: list, before: dict) -> None:
-    """Put the named paths' entries back as `before` read them; nothing else."""
-    now = _entries(cwd, paths)
-    gone = [p for p in now if p not in before]
-    back = [p for p in before if now.get(p) != before[p]]
-    if gone:
-        _git(top, "update-index", "--force-remove", "-z", "--stdin",
-             stdin=b"".join(os.fsencode(p) + b"\0" for p in gone))
-    if back:
-        _git(top, "update-index", "-z", "--index-info",
-             stdin=b"".join(os.fsencode(f"{before[p]}\t{p}") + b"\0" for p in back))
+def _put_back(index: str, snap: str):
+    """The snapshot back over the index by git's own protocol: `index.lock` taken (O_EXCL, up to
+    RESTORE_WAIT behind another writer), the snapshot's bytes and mtime written into it, renamed
+    over the index; then the snapshot goes. None when done or never taken, else why not, the
+    snapshot left in place."""
+    if not os.path.exists(snap):
+        return None                     # not taken: the add never ran
+    lock = index + ".lock"
+    end = time.monotonic() + RESTORE_WAIT
+    while True:
+        try:
+            fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            break
+        except FileExistsError:
+            if time.monotonic() >= end:
+                return f"{lock} exists: another git holds the index"
+            time.sleep(0.05)
+        except OSError as err:
+            return f"{lock}: {err}"
+    try:
+        st = os.stat(snap)
+        if st.st_size:
+            with open(snap, "rb") as src:
+                data = src.read()
+            with os.fdopen(fd, "wb") as dst:
+                fd = None
+                dst.write(data)
+            os.utime(lock, ns=(st.st_atime_ns, st.st_mtime_ns))
+            os.replace(lock, index)
+        else:
+            os.close(fd)
+            fd = None
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(index)
+            os.unlink(lock)
+    except OSError as err:
+        if fd is not None:
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(lock)             # ours: made O_EXCL above and not renamed
+        return f"{index}: {err}"
+    with contextlib.suppress(OSError):
+        os.unlink(snap)
+    return None
 
 
 def _gate_check(top: str, argv: list, env, caller, wall) -> int:
@@ -274,28 +369,32 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
     wall = gate._config(env)["wall"]
     top = _top(cwd)
     name = os.path.basename(top)
-    fd = _lock(_git_path(top, LOCK), wall)
-    if fd is None:
-        print(f"commit {name}: red lock exit {LOCK_RED}", flush=True)
-        return LOCK_RED
-    try:
-        return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall)
-    finally:
-        os.close(fd)                    # the lock goes after the line, its sha read under it
+    with _signals():
+        fd = _lock(_git_path(top, LOCK), wall)
+        if fd is None:
+            print(f"commit {name}: red lock exit {LOCK_RED}", flush=True)
+            return LOCK_RED
+        try:
+            return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall)
+        finally:
+            os.close(fd)                # the lock goes after the line, its sha read under it
 
 
 def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
+    index, snap = _git_path(top, "index"), _git_path(top, SNAP)
+    if os.path.lexists(snap):
+        raise Refused(f"{snap} is the index as an earlier call found it, not put back: "
+                      f"`mv {snap} {index}` puts it back, or remove it; then call again")
     _require_state(top)
     _require_paths(top, cwd, paths)
-    before = _entries(cwd, paths)
-    old = None                          # HEAD before this call's `git commit`, once it runs
+    old, done = None, False             # HEAD before this call's `git commit`, once it runs
     try:
+        _snapshot(index, snap)
         code, _, err = _git(cwd, "add", "--", *paths)
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
             raise Red("add", _code(code))
         if _git(cwd, "diff", "--cached", "--quiet", "HEAD", "--", *paths)[0] == 0:
-            _restore(top, cwd, paths, before)
             raise Refused("nothing to commit in the named paths")
         code = _gate_check(top, argv, env, caller, wall) if gated else _direct_check(top, argv)
         if code != 0:
@@ -310,22 +409,41 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
             sys.stderr.write(err.decode(errors="replace"))
             raise Red("commit", _code(code))
         sha = _head(top)                # this call's commit: no other call holds the lock
-    except Refused:
-        raise
+        _drop(snap)
+        print(f"commit {name}: ok {sha}", flush=True)
+        done = True
+        return 0
     except BaseException as exc:
-        now = _head(top) if old is not None else None
-        if now and now != old:          # HEAD moved to this call's commit: it stands
-            step, code = _verdict(exc)
-            print(f"commit {name}: red {step} exit {code}, the commit stands: {now}", flush=True)
-            if isinstance(exc, Red):
-                return exc.code
+        if done:
             raise
+        with _held():
+            line = _failed(exc, top, name, old, index, snap)
+            if line:
+                print(line, flush=True)
+        if isinstance(exc, (Red, Refused)) and line.startswith(f"commit {name}: red restore "):
+            return 1
         if isinstance(exc, Red):
-            _restore(top, cwd, paths, before)
-            print(f"commit {name}: red {exc.step} exit {exc.code}", flush=True)
             return exc.code
-        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-            _restore(top, cwd, paths, before)
         raise
-    print(f"commit {name}: ok {sha}", flush=True)
-    return 0
+
+
+def _drop(snap: str) -> None:
+    with contextlib.suppress(OSError):
+        os.unlink(snap)
+
+
+def _failed(exc, top, name, old, index, snap):
+    """On a failure: the commit stands when HEAD moved to it, else the snapshot goes back; the
+    line to print ("" for a refusal or a signal before the commit, as found)."""
+    step, code = _verdict(exc)
+    now = _head(top) if old is not None else None
+    if now and now != old:              # HEAD moved to this call's commit: nothing restores
+        _drop(snap)
+        return f"commit {name}: red {step} exit {code}, the commit stands: {now}"
+    why = _put_back(index, snap)
+    if why:
+        tell = (f"commit-step: {exc if isinstance(exc, Refused) else f'red {step} exit {code}'}"
+                f"; the index was not put back ({why}): `mv {snap} {index}` puts it back")
+        print(tell, file=sys.stderr, flush=True)
+        return f"commit {name}: red restore exit 1, the index as found is kept at {snap}"
+    return f"commit {name}: red {step} exit {code}" if isinstance(exc, Red) else ""

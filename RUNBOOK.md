@@ -639,16 +639,23 @@ code. One call at a time per work tree: a lock in its git dir
 `ok` sha is the commit this call made; a second call waits up to the gate's
 wall, then `red lock exit 124`. Once HEAD has moved to this call's commit,
 nothing is restored: a red or a signal after it reads `red <step> exit
-<code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). On
-every other red the named paths' index entries are put back as they were
-read; no other entry is touched.
+<code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). Before
+the add the index file is copied whole to `agentik-commit.index` in the git
+dir; on every other failure (a red, a refusal after the add, an error,
+SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's own
+protocol (`index.lock`, then a rename), so the index is as it was found. A
+restore that cannot be made reads `red restore exit 1, the index as found
+is kept at <path>`; the copy stays, and a later call refuses until it is
+moved back over the index or removed. After a SIGKILL the copy is the way
+back.
 - Refused, exit 2, the index as found: no path; `-A`, `-u`; the whole tree
   (`.` at the top, `..` below it, its absolute path); a path outside the repo;
   an untracked nested repo, or a directory holding one, which git would add as
   a gitlink (each named, the first twenty; an ignored one is never added); a
   path git would not add; a missing or blank message file; an empty check; a
   merge, cherry-pick, revert or rebase under way; a detached HEAD; nothing to
-  commit in the named paths.
+  commit in the named paths; an earlier call's `agentik-commit.index` not put
+  back.
 - The check is one string, split as a shell would but run with no shell. When
   its first word is `make` or `gmake` it is one gate job in the repo, labelled
   `commit check` (its code `gate wait --strict`'s, its wait line on stderr),
