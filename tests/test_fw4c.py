@@ -7,6 +7,7 @@ import io
 import os
 import subprocess
 import sys
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -203,3 +204,77 @@ def test_fw4c_t13_the_suite_clears_the_mark_and_the_docs_name_the_verb():
     runbook = (ROOT / "RUNBOOK.md").read_text()
     assert "agentik-session gate land <repo> <branch> <sha> <merge-file>" in skill
     assert "gate land <repo> <branch> <sha> <merge-file>" in runbook and "--in-job" in runbook
+
+
+# ---- fold r1 (the refuter's F1): the verdict is the log's last land line of the repo ----------
+
+def _until(what, seconds=120):
+    t0 = time.monotonic()
+    while not what():
+        assert time.monotonic() - t0 < seconds, "not reached in %d s" % seconds
+        time.sleep(0.05)
+
+
+def test_fw4c_t14_a_writer_the_check_leaves_behind_keeps_the_land_line(repo, monkeypatch,
+                                                                        tmp_path):
+    # probe r1: the job lands and exits 0; a child of the check writes on after the land line
+    # until the runner, at the shipped poll (gate.POLL, 1 s), closes the job and its group.
+    def serve_at_the_shipped_poll(root, popen=None):
+        if not gate.entries(root):
+            return False
+        gate.serve(root, gate.Fx(idle=0, poll=gate.POLL))
+        return True
+
+    monkeypatch.setattr(gate, "spawn_serve", serve_at_the_shipped_poll)
+    stop = tmp_path / "stop"
+    (repo.path / "Makefile").write_text(
+        "check:\n\t@( i=0; while [ ! -e '%s' ] && [ $$i -lt 600 ]; do echo tick >&2; "
+        "sleep 0.1; i=$$((i+1)); done ) &\n" % stop)
+    git(repo.path, "commit", "-qam", "a check that leaves a writer behind")
+    sha = repo.branch("work", {"new.txt": ("new\n", 0o644)})
+    try:
+        rc, out, err = run("gate", "land", str(repo.path), "work", sha, str(repo.message))
+        log = Path(err.split("log ")[-1].strip()).read_text().splitlines()
+    finally:
+        stop.write_text("")
+    ok = f"land scratch: ok {sha}, main readied"
+    assert "tick" in log[log.index(ok) + 1:], "no line after the land line"
+    assert (rc, out) == (0, ok + "\n"), err
+    assert git(repo.path, "rev-parse", "main^2") == sha
+
+
+def test_fw4c_t15_a_runner_killed_mid_check_and_a_job_that_lands_reads_ok(repo, monkeypatch):
+    # probe r15: the runner dies in the check, the job lands, the next runner writes 125.
+    (repo.path / "Makefile").write_text("check:\n\t@sleep 2\n")
+    git(repo.path, "commit", "-qam", "a two-second check")
+    sha = repo.branch("work", {"new.txt": ("new\n", 0o644)})
+    spawn, wait, runners = gate.spawn_serve, gate.wait, []
+
+    def popen(argv, **kw):
+        runners.append(subprocess.Popen(argv, **kw))
+        return runners[-1]
+
+    def the_first_runner_dies(root, popen_=None):
+        if runners:                                   # wait found it dead: the next recovers
+            return spawn(root, popen=popen)
+        (e,) = gate.entries(root)
+        log = gate.entry_dir(root, e["id"]) / "log"
+        spawn(root, popen=popen)
+        _until(lambda: log.exists() and "land-step: check: make check in " in log.read_text())
+        runners[0].kill()
+        runners[0].wait()
+        _until(lambda: f"land scratch: ok {sha}" in log.read_text())
+        return True
+
+    monkeypatch.setattr(gate, "spawn_serve", the_first_runner_dies)
+    monkeypatch.setattr(gate, "wait", lambda root, gid: wait(root, gid, poll=0.2))
+    try:
+        rc, out, err = run("gate", "land", str(repo.path), "work", sha, str(repo.message))
+    finally:
+        for p in runners:
+            if p.poll() is None:
+                p.terminate()
+                p.wait(timeout=60)
+    assert ": exit 125 in " in err, err
+    assert (rc, out) == (0, f"land scratch: ok {sha}, main readied\n"), err
+    assert git(repo.path, "rev-parse", "main^2") == sha

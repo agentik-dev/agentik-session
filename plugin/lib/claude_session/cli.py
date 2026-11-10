@@ -1152,8 +1152,11 @@ def _gate_land(root, args, env) -> int:
     """`gate land <repo> <branch> <sha> <merge-file>` (packet FW4c): one landing as one gate
     job, the job `gate land --in-job` with the same four, absolute. Stdout is one line, the
     land line, last; the queued line and wait's go to stderr; the exit is the job's
-    (`wait --strict`'s). A job's log with no land line of this repo reads `red gate`, never
-    ok. `--in-job` is that job: it runs the steps here, and only inside a gate job."""
+    (`wait --strict`'s). The verdict is the log's last land line of this repo, never the log's
+    last line (fold r1, F1); an ok line is exit 0, since the steps write it last, so a code
+    after it is the gate's (125, the runner died), not the job's. A job's log with no land
+    line of this repo reads `red gate`, never ok. `--in-job` is that job: it runs the steps
+    here, and only inside a gate job."""
     from . import gate, land
     mark = env.get(gate.JOB_MARK) or ""
     if args.in_job:
@@ -1193,11 +1196,13 @@ def _gate_land(root, args, env) -> int:
         _die(f"gate land: {e['id']} has no result under {gate.gate_dir(root)}", 1)
     print(gate.wait_line(result), file=sys.stderr, flush=True)
     code = gate.strict_code(result)
-    line = gate.last_line(result.get("log"), e["id"]) or ""
-    ok = line.startswith(f"land {name}: ok ") and code == 0
-    if not ok and not line.startswith(f"land {name}: red "):
+    line = gate.last_line(result.get("log"), e["id"], f"land {name}: ") or ""
+    if line.startswith(f"land {name}: ok "):
+        code = 0
+    else:
         code = code or 1
-        line = f"land {name}: red gate exit {code}"
+        if not line.startswith(f"land {name}: red "):
+            line = f"land {name}: red gate exit {code}"
     print(line, flush=True)
     return code
 

@@ -843,10 +843,11 @@ def wait_line(result: dict) -> str:
             f"{_minutes(result.get('seconds'))} min; log {result.get('log')}")
 
 
-def last_line(path, gid: str) -> str | None:
+def last_line(path, gid: str, prefix: str = "") -> str | None:
     """A job log's last non-empty line that is not the gate's own (`gate <gid>: ...`, which
-    `_start`, `_close` and `_finish` write), read from its last 64 KiB; None when there is
-    none or the log is unreadable (packet FW4c, R3)."""
+    `_start`, `_close` and `_finish` write) and starts with `prefix`, read from its last
+    64 KiB; None when there is none or the log is unreadable (packet FW4c, R3; `gate land`
+    passes `land <name>: `, since a child of the check may write after the land line, F1)."""
     skip = f"gate {gid}: "
     try:
         with open(path, "rb") as fh:
@@ -854,7 +855,7 @@ def last_line(path, gid: str) -> str | None:
             lines = [ln.strip() for ln in fh.read().decode(errors="replace").splitlines()]
     except (OSError, ValueError, TypeError):
         return None
-    lines = [ln for ln in lines if ln and not ln.startswith(skip)]
+    lines = [ln for ln in lines if ln and not ln.startswith(skip) and ln.startswith(prefix)]
     return lines[-1] if lines else None
 
 
