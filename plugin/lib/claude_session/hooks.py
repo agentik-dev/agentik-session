@@ -35,6 +35,19 @@ from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
 
+# Packet n33 R6: a launcher name (a path to bin/agentik-session and `-m claude_session` too),
+# `charter`, flags (each with at most one value), `open` or `close`. A plain pattern: a quoted
+# mention that names the launcher is denied too, and the helper rewords it.
+_FLAGS = r"(?:\s+-[^\s;&|()]*(?:\s+[^-\s;&|()][^\s;&|()]*)?)*"
+HELPER_CHARTER = re.compile(
+    r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])" + _FLAGS
+    + r"\s+charter" + _FLAGS + r"\s+(?:open|close)(?![\w.-])")
+HELPER_CHARTER_DENY = (
+    "agentik-session: a helper's charter open or close would take or write its sitting's "
+    "record (a helper's Bash carries its parent's session id). Write your charter by hand, "
+    "check it with `agentik-session charter check <file>`, and put a probe's own call to "
+    "charter open or close in a script file run under a scratch state home.")
+
 _TOKEN = re.compile(r"[^A-Za-z0-9_.:-]")
 _WSRC = re.compile(r"[^A-Za-z0-9_.:\[\]-]")       # a window's source keeps `[1m]`
 
@@ -178,11 +191,29 @@ def _close_call(payload: dict, env) -> None:
         pass
 
 
+def _helper_charter(payload: dict) -> bool:
+    """Packet n33 R6: a helper's (agent_id) Bash whose command runs this tool's charter open
+    or close (HELPER_CHARTER)."""
+    if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
+        return False
+    cmd = (payload.get("tool_input") or {}).get("command")
+    return isinstance(cmd, str) and HELPER_CHARTER.search(cmd) is not None
+
+
 def pre_tool_use(payload: dict, env=None) -> dict:
     """The spawn gate (§2.2): under `ask` or `deny`, a spawn in the late zones
     asks, and under `deny` one in the reserve is refused. A subagent's call: {}.
     Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only."""
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
+    if _helper_charter(payload):     # n33 R6: whatever the posture, and no call opened
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": HELPER_CHARTER_DENY,
+            },
+            "systemMessage": "agentik-session: denied a helper's charter open or close.",
+        }
     _open_call(payload, os.environ if env is None else env)
     tool = payload.get("tool_name") or ""
     if tool not in SPAWNING_TOOLS or payload.get("agent_id"):
