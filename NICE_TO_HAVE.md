@@ -29,6 +29,8 @@ Findings that block nothing, one row each, in agentik-hq design/05 §2's table: 
 | n35 | S4 | `claude_session/admission.py` | The mix read one Fable reset twice: two drops 22 s apart, the cause not proven | 2026-11-09 19:08, `admission/band.json`: `mix.phase.drops` 16:34:30 and 16:34:52, each 50.0 to 1.0, `resets_left` 0 against `resets: 1` | 2026-11-09, the hq sitting |
 | n36 | S4 | `claude_session/gate.py` | A key's estimate mixes its commands: a land and a check of one repo share a key, so `est <m> min` is the median of both; a key per command would split them | packet FW2 R4: `gate.estimates` keys on `entry_key` alone | 2026-11-09, FW2's builder |
 | n37 | S4 | `claude_session/gate.py` | `_head`'s `GIT_WAIT` timeout has no test: a `git` that hangs past it should read None, and nothing pins that | the refuter's mutation M8 of FW2 passes the suite; a test needs a hang, so packet FW2's fold left it out | 2026-11-09, FW2's refuter |
+| n38 | S4 | `claude_session/hooks.py` | A helper can still run `set fill`: its shell carries its parent's `CLAUDE_CODE_SESSION_ID` and no helper mark, so `rules.FILL`'s words are the only guard; a PreToolUse refusal of `set fill` under a payload's `agent_id` would hold it | packet FW1b section 4 (the refuter's A6, confirmed) | 2026-11-09, FW1b's builder |
+| n39 | S4 | `claude_session/fill.py` | A hard-killed session's overlay outlives it with its fill word; nothing sweeps it, and only its stamp (its end, never past the week's reset) turns it off | packet FW1b section 4; SessionEnd deletes an overlay only when it fires | 2026-11-09, FW1b's builder |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 

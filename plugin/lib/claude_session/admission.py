@@ -48,8 +48,9 @@ INPUT_KEYS = {
     "done": ("agentId", "tool_use_id", "durationMs", "usage"),
     "end": ("reason",),
 }
-# Keys the verb sets itself: start's chain (its own environment), done's swept (the sweep).
-OWN_KEYS = {"start": ("chain",), "done": ("swept",)}
+# Keys the verb sets itself: start's chain (its own environment), done's swept (the sweep),
+# spawn's fill (packet FW1b R7: the word in force, set only while it is).
+OWN_KEYS = {"start": ("chain",), "done": ("swept",), "spawn": ("fill",)}
 LINE_KEYS = {k: v + OWN_KEYS.get(k, ()) for k, v in INPUT_KEYS.items()}
 
 
@@ -269,7 +270,21 @@ def line_for(sid: str, obj: dict, env, now: datetime) -> dict:
         line["chain"] = env.get("CLAUDE_SESSION_CHAIN") or None
     if kind == "done":
         line["swept"] = False
+    if kind == "spawn":
+        word = _fill_word(env, sid, now)
+        if word:                       # packet FW1b R7: the mark, only while fill is on
+            line["fill"] = word
     return line
+
+
+def _fill_word(env, sid: str, now: datetime):
+    """The fill word in force for `sid` at `now`, else None; never raises."""
+    try:
+        from . import fill
+        return fill.read(fill.overlay(config.state_dir(env), sid), _session_config(env, sid),
+                         env, now)[0]
+    except Exception:  # noqa: BLE001 - the mark is advice; the spawn's line stands
+        return None
 
 
 def _lock(d: Path) -> int:
@@ -824,6 +839,17 @@ def account(lims):
             if t is not None:
                 return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     return None
+
+
+def week_reset(rows, sid, now: datetime):
+    """The seven-day reset of `sid`'s login (packet FW1b R2): its own newest seven-day
+    reading's resetsAt when that is ahead of `now`; None with no such reading, since a
+    passed one says the week has reset and another session's may be another login's."""
+    mine = [x for x in readings(rows, SEVEN) if x[1] == sid]
+    if not mine:
+        return None
+    t = _newest(mine)[3]
+    return t if t > now else None
 
 
 def _sid(r):
