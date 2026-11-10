@@ -46,6 +46,8 @@ INHERITED = ("ANTHROPIC_MODEL", "CLAUDE_SESSION_PROFILE", "CLAUDE_SESSION_CONFIG
              "CLAUDE_SESSION_HELPER", "CLAUDE_SESSION_DEPTH", "CLAUDE_SESSION_MAX_TURNS",
              "CLAUDE_SESSION_MODEL",
              "RELAY_ROW", "CLAUDE_SESSION_CHAIN",
+             # the mark of the gate job the suite runs in (packet FW4c)
+             "CLAUDE_SESSION_GATE_JOB",
              # the marks of the Claude Code session the suite runs in, which `run`
              # refuses (S20 ruling 10)
              "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",

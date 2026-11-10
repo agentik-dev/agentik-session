@@ -169,7 +169,7 @@ def test_serve_runs_fifo_and_writes_the_result_last(w):
     assert gate.serve(w.root, w.fx()) == 0
     assert [s[0] for s in w.spawned] == [["a", "x"], ["b", "x"]]
     _, kw, _ = w.spawned[0]
-    assert (kw["cwd"], kw["env"]) == (os.path.realpath(w.repo), ENV)
+    assert (kw["cwd"], kw["env"]) == (os.path.realpath(w.repo), {**ENV, gate.JOB_MARK: a["id"]})
     assert kw["start_new_session"] is True and kw["close_fds"] is True
     assert kw["stderr"] == subprocess.STDOUT
     ra, rb = w.result(a["id"]), w.result(b["id"])
