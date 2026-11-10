@@ -18,7 +18,9 @@
 - [x] verify: gate 20261109-195158-775 exit 0 in 9 min (2549 passed in 295 s, floor 2525 + 3 skipped in 219 s, mod 196, readme fresh)
 - [x] review round 1, BA1: FULL's parts hold no `;` (`_PART`), T3's four cases red at 05388e4
 - [x] review round 1, AA1: STALLED_LINE's parts the same, T4's two cases red at 076137a; the status line 2553
-- [ ] the gate once more, then the exit line
+- [x] gate 20261109-202820-777 exit 2: 2553 passed, floor 2529 + 3 skipped; red only on plugin-version-check (charter.py past alpha.53)
+- [x] the bump: alpha.54, the status line, rendered.sha256 re-hashed
+- [ ] the gate a second time (a red stops), then the exit line
 
 ## Handover
 - Choice (consumer: the refuter): the meter check reads <what> to its first `;`; WAITING_LINE's `\S` let it take FULL's <how to tell> (test_charter's how-to-tell case).
@@ -26,8 +28,9 @@
 - Choice (consumer: the refuter): R11's refusals name today's charters of the suffix, or the record and all of today's charters; both end `name the file: charter close <file>`.
 - Choice (consumer: the refuter): R8's test_charter count is 35: S52's continue test closed two `-hq` bare, which R11 refuses; it now closes by name. test_rules' near-bound label grew so it still crosses with the 1h tail.
 - Choice (consumer: the refuter): README.md and its source edited by hand, as S54, the source 16,382 B; T3's fixture names "another repo" for the public scan.
+- Choice (consumer: the coordinator): alpha.54, not R9's alpha.53; the review's fix touched charter.py after the bump, and plugin-version-check wants a new version.
 
 ## Next act
-the gate once, on a clean tree
+the gate a second time, on a clean tree
 
 exit: FW1a done at gate 20261109-195158-775 exit 0; R1 to R11, alpha.53 and NICE n27 to n35 committed; nothing pushed
