@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """recordlint: HANDOFF.md and NICE_TO_HAVE.md held to their tables (hq design/05 §2, §4).
 
     recordlint [FILE...]
