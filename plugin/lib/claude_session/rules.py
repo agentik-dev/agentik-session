@@ -139,6 +139,9 @@ HINT = {"1h": "cache 1h ({why}): an idle wake waits at most {warm} s, so the cac
         "off": "cache off ({why}): no wait keeps it warm; an idle wait takes the long "
                "fallback, never an early wake to keep a cache"}
 TAIL = "; agentik-session rules prints both"
+# With a fill word on the block holds three parts, and `rules` prints all three; two bytes
+# shorter, so the cache part stays with either word (the FW1b refuter round's F3).
+TAIL_FILL = "; agentik-session rules lists all"
 
 _LABEL = re.compile(r"[A-Za-z0-9 '.,-]*")
 
@@ -223,8 +226,10 @@ def clause(session, ttl=None, fill=None) -> str:
     BLOCK_MAX bytes opening `; `. With pacing on and `ttl` known (`1h`, `5m`), the pacing
     part ends with CLAUSE[ttl] when the whole block still fits; never cut for it (S30).
     `fill`, fill.part's `fill <word> to <Ddd HH:MM>` while the word is on, takes the
-    pacing part's `fill off` (packet FW1b R6)."""
+    pacing part's `fill off` (packet FW1b R6), and the tail is TAIL_FILL."""
     pr, pa = parts(session)
+    on = isinstance(fill, str) and bool(fill)
+    tail = TAIL_FILL if on and pa["enabled"] else TAIL
     out = []
     if pr["enabled"]:
         labels = ", ".join(f"{n} {_label(pr['levels'][n])}".rstrip() for n in LEVELS)
@@ -232,14 +237,14 @@ def clause(session, ttl=None, fill=None) -> str:
     if pa["enabled"]:
         out.append(f"pacing: wake in the act's last tool call, a pending helper is the wake "
                    f"(one fallback, {pa['fallback']}s+), a wait is said and cheap; "
-                   f"{fill if isinstance(fill, str) and fill else 'fill off'}")
+                   f"{fill if on else 'fill off'}")
     if not out:
         return ""
     if pa["enabled"] and ttl in CLAUSE:
-        named = "; " + "; ".join(out) + CLAUSE[ttl] + TAIL
+        named = "; " + "; ".join(out) + CLAUSE[ttl] + tail
         if len(named.encode()) <= BLOCK_MAX:
             return named
-    return ("; " + "; ".join(out) + TAIL)[:BLOCK_MAX]
+    return ("; " + "; ".join(out) + tail)[:BLOCK_MAX]
 
 
 def render(session, life=None, fill=None) -> str:

@@ -236,8 +236,9 @@ def _fill_part(sid, session, env):
         from datetime import datetime, timezone
         from . import fill
         state = resolver.state_dir(env)
-        if session is None:
-            session = _load_json(resolver.session_dir(state, sid) / "resolved.json").get("session")
+        if session is None:                     # the verb's, `rules`' and the mark's seat (F4)
+            from . import admission
+            session = admission._session_config(env, sid)
         return fill.part(fill.overlay(state, sid), session, env, datetime.now(timezone.utc))
     except Exception:  # noqa: BLE001 - the part never breaks a hook
         return None

@@ -209,7 +209,7 @@ def test_fw1b_only_this_sessions_overlay(week, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path / "repo")
     monkeypatch.setenv("CLAUDE_SESSION_FILL", "opus")
     assert _rules_last() == "fill: off"                  # a config, a profile, a layer, the env
-    (d / "resolved.json").unlink()                       # and resolved afresh from the layers
+    (d / "resolved.json").unlink()                       # and with no resolved file (F4)
     monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "orchestrator")
     assert _rules_last() == "fill: off"
     _overlay_path("another-session-0000").parent.mkdir(parents=True, exist_ok=True)
@@ -220,6 +220,7 @@ def test_fw1b_only_this_sessions_overlay(week, tmp_path, monkeypatch):
         _overlay_path().write_text(json.dumps({"fill": bad}))
         assert _rules_last() == "fill: off (not a stamped word)", bad
     _overlay_path().write_text(json.dumps({"fill": live}))
+    _seat()                                              # F4: the seat is the resolved file's
     assert _rules_last() == f"fill: opus to {F().wall(week - timedelta(days=1))}"
 
 
