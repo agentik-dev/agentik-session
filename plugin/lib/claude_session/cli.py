@@ -247,7 +247,10 @@ def cmd_report(args) -> int:
             return 2
         print(json.dumps(rows, indent=2) if args.json else ledger.chain_table(rows))
         return 0
-    rows = ledger.read(resolver.state_dir(os.environ), args.since)
+    # Packet S54 R4, R5: `read`'s rows, each session's last, and the count folded, in one read.
+    rows, folded = ledger.fold(ledger.lines(resolver.state_dir(os.environ)), args.since)
+    note = (f"folded: {folded} earlier rows; a resumed session reads as its last"
+            if folded > 0 else None)
     # The admission section (packet S27b ruling 5) follows the plain table, and stands alone
     # when the session ledger is empty: an idle window is reported, never hidden (§3.6).
     if not rows:
@@ -258,8 +261,12 @@ def cmd_report(args) -> int:
         return 2
     if args.json:
         print(json.dumps(rows, indent=2))
+        if note:
+            print(note, file=sys.stderr)
         return 0
     print(ledger.table(rows))
+    if note:
+        print(note)
     print()
     print(admission.report(os.environ))
     return 0
@@ -733,13 +740,12 @@ def _recorded_charter() -> str | None:
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
         return None
-    try:
+    try:                                         # read as the hook reads it (hooks._load_json)
         sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
-        got = json.loads((sdir / hooks.CHARTER_REC).read_text(encoding="utf-8"))
-        path = got.get("path") if isinstance(got, dict) else None
-        return path if isinstance(path, str) else None
+        path = hooks._load_json(sdir / hooks.CHARTER_REC).get("path")
     except (OSError, ValueError):
         return None
+    return path if isinstance(path, str) else None
 
 
 def _respawn_check(args) -> tuple[str, str, str, str | None] | None:

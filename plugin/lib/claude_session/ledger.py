@@ -3,7 +3,9 @@
 The line carries burn-report's `per_session` fields plus the sitting's own, and
 nothing else: the writer refuses any key outside LEDGER_KEYS, so message content
 can never reach the file. A respawn chain adds two closed line kinds, `restart` and
-`stop` (respawn-r1 §3.6); session lines carry no `kind`, and `read` returns only them.
+`stop` (respawn-r1 §3.6); session lines carry no `kind`, and `read` returns only them, each
+session's last (packet S54: a resumed session ends twice under one id). The file stays
+append-only.
 """
 
 from __future__ import annotations
@@ -103,25 +105,52 @@ def _append_line(state: Path, line: str) -> Path:
     return p
 
 
-def read(state: Path, since: str | None = None) -> list[dict]:
-    """The ledger's session lines (those without `kind`), those ended on or after
-    `since` (YYYY-MM-DD)."""
+def lines(state: Path) -> list[dict]:
+    """Packet S54 R4: every session line (those without `kind`) as `read` parses it,
+    unfiltered and unfolded, in the file's order."""
     out = []
     try:
-        lines = path(state).read_text().splitlines()
+        raw_lines = path(state).read_text().splitlines()
     except OSError:
         return out
-    for raw in lines:
+    for raw in raw_lines:
         try:
             d = json.loads(raw)
         except ValueError:
             continue
         if not isinstance(d, dict) or "kind" in d:
             continue
-        if since and str(d.get("ended") or "")[:10] < since:
-            continue
         out.append(d)
     return out
+
+
+def fold(rows: list[dict], since: str | None = None) -> tuple[list[dict], int]:
+    """Packet S54 R4: (kept, folded). Each string `session`'s last row, in that row's place
+    (a row without a string `session` is kept), then those ended on or after `since`
+    (YYYY-MM-DD). A resumed session ends twice and keeps its id, so its last row carries the
+    whole transcript; `folded` counts the earlier rows of the sessions kept."""
+    last, seen = {}, {}
+    for i, d in enumerate(rows):
+        s = d.get("session")
+        if isinstance(s, str):
+            last[s], seen[s] = i, seen.get(s, 0) + 1
+    kept, folded = [], 0
+    for i, d in enumerate(rows):
+        s = d.get("session")
+        if isinstance(s, str) and last[s] != i:
+            continue
+        if since and str(d.get("ended") or "")[:10] < since:
+            continue
+        kept.append(d)
+        if isinstance(s, str):
+            folded += seen[s] - 1
+    return kept, folded
+
+
+def read(state: Path, since: str | None = None) -> list[dict]:
+    """The ledger's session lines (those without `kind`), each session's last, those ended
+    on or after `since` (YYYY-MM-DD): `fold(lines(state), since)`'s kept rows."""
+    return fold(lines(state), since)[0]
 
 
 def read_chains(state: Path, since: str | None = None) -> list[dict]:
