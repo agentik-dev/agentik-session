@@ -309,6 +309,7 @@ EVASIONS = (
     "$(which agentik-session) charter open g", '"$(command -v agentik-session)" charter open g',
     "T=agentik-session; $T charter open g", "agentik-session charter o''pen g",
     'agentik-session charter "cl"ose', "agentik-session charter o\\pen g",
+    'agentik-session ch"art"er open g', "agentik-session ch\\arter close",
 )
 
 
@@ -344,7 +345,11 @@ def test_n33_t18_the_rules_edges(repo):
     passes = ("myagentik-session charter open g", "xclaude-session charter close",
               "claude-sessions charter open g", "agentik-session-old charter open g",
               'agentik-session status\ngrep -n "charter open" SKILL.md',
-              "agentik-session charter check a.md\necho charter open")
+              "agentik-session charter check a.md\necho charter open",
+              'agentik-session charter "check" f', "agentik-session charter \\check f",
+              "agentik-session status; cat notes-charter", "agentik-session status; cat charters",
+              "agentik-session status; cat charter.md charter-open.md",
+              "echo charter open; agentik-session status")
     for cmd in passes:
         assert not _denied(hooks.pre_tool_use(_bash(cmd))), cmd
     denied = ("agentik-session charter check.md", "agentik-session charter checkout x",
@@ -352,7 +357,7 @@ def test_n33_t18_the_rules_edges(repo):
               "agentik-session charter close.md",
               "agentik-session charter check a.md && agentik-session charter close",
               "agentik-session charter check a.md; charter open g",
-              "agentik-session charter\ncheck f")
+              "agentik-session charter\ncheck f", "agentik-session charter\rcheck f")
     for cmd in denied:
         assert _denied(hooks.pre_tool_use(_bash(cmd))), cmd
 
@@ -366,11 +371,14 @@ def test_n33_t19_a_quoted_exit_mark_mid_line_still_holds(repo):
     assert rc == 2 and str(a) in err, (rc, out, err)
 
 
-def test_n33_t20_a_flagged_helper_open_neither_refuses_nor_records(repo, monkeypatch):
-    """T20, F7 M10: under CLAUDE_SESSION_HELPER=1 an open writes no record, so it takes none
-    and does not refuse: a new file, the record unchanged."""
+def test_n33_t20_an_open_that_cannot_record_neither_refuses_nor_records(repo, tmp_path):
+    """T20, F7 M10: an open whose directory is no longer the session's recorded cwd's (its
+    request.json moved) writes no record, so it takes none and does not refuse: a new file,
+    the record unchanged."""
     a = _open("A goal")
-    monkeypatch.setenv("CLAUDE_SESSION_HELPER", "1")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    resolver.save_request(_sdir(A), elsewhere, None, None)
     b = _open("helper goal")
     assert b != a and _rec(A) == {"path": str(a)}
 

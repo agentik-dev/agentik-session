@@ -35,18 +35,46 @@ from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
 
-# Packet n33 R6: a launcher name (a path to bin/agentik-session and `-m claude_session` too),
-# `charter`, flags (each with at most one value), `open` or `close`. A plain pattern: a quoted
-# mention that names the launcher is denied too, and the helper rewords it.
-_FLAGS = r"(?:\s+-[^\s;&|()]*(?:\s+[^-\s;&|()][^\s;&|()]*)?)*"
-HELPER_CHARTER = re.compile(
-    r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])" + _FLAGS
-    + r"\s+charter" + _FLAGS + r"\s+(?:open|close)(?![\w.-])")
+# Packet n33 R6, as the review folded it (fail-closed, linear): the rule reads no flags. In a
+# helper's command, a launcher name (a path to bin/agentik-session and `-m claude_session` too)
+# followed on the same logical line by the word `charter` is denied unless the word right after
+# that `charter` is a verb that only reads; every `charter` after the launcher is read. Quotes
+# and backslash-newlines are dropped first (a lone backslash too: it quotes the next byte), so
+# a quoted or continued spelling reads as the plain one. Each regex has one repetition at most
+# and none nests, so the pass is linear in the command's length. A quoted mention that names
+# the launcher is denied too, and the helper rewords it.
+CHARTER_READS = ("check",)          # `charter`'s verbs that write nothing: never open, never close
+_LAUNCHER = re.compile(r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])")
+_CHARTER_WORD = re.compile(r"(?<![\w-])charter(?![\w.-])")
+_CHARTER_READ = re.compile(r"[ \t]+(?:" + "|".join(CHARTER_READS) + r")(?![\w.-])")
+
+
+class _HelperCharter:
+    """The rule, with a compiled pattern's `search`: the first `charter` it denies (a match in
+    the plain text), else None."""
+
+    @staticmethod
+    def plain(cmd: str) -> str:
+        return cmd.replace("\\\n", "").replace("'", "").replace('"', "").replace("\\", "")
+
+    def search(self, cmd: str):
+        for line in self.plain(cmd).split("\n"):
+            launcher = _LAUNCHER.search(line)
+            if launcher is None:
+                continue
+            for word in _CHARTER_WORD.finditer(line, launcher.end()):
+                if _CHARTER_READ.match(line, word.end()) is None:
+                    return word
+        return None
+
+
+HELPER_CHARTER = _HelperCharter()
 HELPER_CHARTER_DENY = (
     "agentik-session: a helper's charter open or close would take or write its sitting's "
-    "record (a helper's Bash carries its parent's session id). Write your charter by hand, "
-    "check it with `agentik-session charter check <file>`, and put a probe's own call to "
-    "charter open or close in a script file run under a scratch state home.")
+    "record (a helper's Bash carries its parent's session id). Write your charter by hand "
+    "(a helper's one charter call is `agentik-session charter check <file>`, the verb first), "
+    "and put a probe's own call to charter open or close in a script file run under a scratch "
+    "state home.")
 
 _TOKEN = re.compile(r"[^A-Za-z0-9_.:-]")
 _WSRC = re.compile(r"[^A-Za-z0-9_.:\[\]-]")       # a window's source keeps `[1m]`
@@ -192,8 +220,8 @@ def _close_call(payload: dict, env) -> None:
 
 
 def _helper_charter(payload: dict) -> bool:
-    """Packet n33 R6: a helper's (agent_id) Bash whose command runs this tool's charter open
-    or close (HELPER_CHARTER)."""
+    """Packet n33 R6: a helper's (agent_id) Bash whose command names this tool's `charter`
+    with any word but a read-only verb right after it (HELPER_CHARTER)."""
     if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
         return False
     cmd = (payload.get("tool_input") or {}).get("command")
