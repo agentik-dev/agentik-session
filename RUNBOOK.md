@@ -31,14 +31,14 @@ resolves to deny, even though Claude Code still reports success. Read section
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
-   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
+   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
+   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch`, `PostModelSwitch` and `PreCompact` (keeping
    PreCompact's stdout, its block), so no turn end, no helper's loop and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
@@ -334,6 +334,16 @@ Postures, least to most restrictive, all confirmed by test:
 - `deny`: returns `"deny"` only in the reserve zone; in wind-down it still
   just asks.
 
+Whatever the posture, the spawn rule (packet wfg) denies before launch: a
+`Workflow` script it cannot bound to 8 agents, each with a literal `model`,
+and any Fable spawn (`Agent`, `Task`, or a script's agent) unless
+`model.json` (SessionStart, then each `PostModelSwitch`) and the meter both
+read Fable; the denial names the lines and the rewrite (the skill lists them).
+
+- With the plugin off or its hook timed out nothing denies: a timed-out hook
+  does not block the call, and the tool's own caps alone hold, 16 agents at
+  once and 1000 a run.
+
 A checkpoint is a commit or a durable record: run one and the session is
 handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
 where `-c` runs `git add -u` (tracked files only) and commits. It never
@@ -453,8 +463,11 @@ that waits for a person, so `run` warns once and still runs. A list flag
 as `--flag=value`. A sitting restarts only when its charter's
 `## Next act` opens on `RESPAWN`, the main thread ran `agentik session
 checkpoint --respawn --charter <file>`, and the turn has ended and stood
-`settle` seconds with no helper call open. The launcher then ends the
-sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
+`settle` seconds with no helper call open. A helper call left open 20
+minutes with no helper activity since reads as stale (a rejected call
+never closes its file): the launcher goes on past it, says so in one line
+once the terminal is back, and names it in the restart line's
+`stale_calls`. The launcher then ends the sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
 the ledger and starts the next. A sitting that exits without a confirmed
 RESPAWN stops the chain, and a crash (a nonzero exit) is never restarted.
 Every stop but a hang-up prints a start line that runs as printed (after a
