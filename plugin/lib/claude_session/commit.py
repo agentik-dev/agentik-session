@@ -20,6 +20,11 @@ stderr. Stdout is one line, last:
   commit <repo>: red check exit <code>          the check's code (127, 126, 128+n a signal)
   commit <repo>: red moved exit 1               a named path changed during the check
   commit <repo>: red <add|commit> exit <code>   git's own red
+  commit <repo>: red lock exit 124              another call held the lock past the wall
+
+One call at a time per work tree: a lock in its git dir is held from before the add until the
+line is printed, so the `ok` sha is the commit this call made; a second call waits up to the
+gate's wall.
 
 On every red the named paths' index entries are put back as they were read, and no other entry
 is touched, so the index is as it was found.
@@ -27,6 +32,7 @@ is touched, so the index is as it was found.
 
 from __future__ import annotations
 
+import fcntl
 import io
 import os
 import shlex
@@ -38,6 +44,8 @@ IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", 
 MAKES = ("make", "gmake")
 NAMED = 20
 DEVNULL = subprocess.DEVNULL
+LOCK = "agentik-commit.lock"         # in the git dir: one call at a time (round 1, F1)
+LOCK_RED = 124                       # a lock not had within the wall: `red lock exit 124`
 
 
 class Refused(Exception):
@@ -76,6 +84,39 @@ def _top(cwd: str) -> str:
     if code != 0 or not top:
         raise Refused("not inside a git work tree: " + cwd)
     return os.path.realpath(top)
+
+
+def _git_path(top: str, name: str) -> str:
+    """`name` in the git dir of the work tree at `top` (a linked worktree's own, where its index
+    and HEAD live)."""
+    code, path, _ = _git(top, "rev-parse", "--git-path", name)
+    if code != 0 or not path:
+        raise Refused(f"no git dir for {top}")
+    return os.path.join(top, path)
+
+
+def _lock(path: str, wall) -> int | None:
+    """The commit lock (an flock on `path`, released when its descriptor closes or the process
+    dies; the check never inherits it), waited for up to `wall` seconds; None past it."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+    end, said = time.monotonic() + float(wall), False
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if not said:
+                holder = os.pread(fd, 32, 0).decode(errors="replace").strip() or "?"
+                print(f"commit-step: waiting for {path}, held by pid {holder}, up to {wall} s",
+                      file=sys.stderr, flush=True)
+                said = True
+            if time.monotonic() >= end:
+                os.close(fd)
+                return None
+            time.sleep(0.1)
+    os.ftruncate(fd, 0)
+    os.pwrite(fd, f"{os.getpid()}\n".encode(), 0)
+    return fd
 
 
 def _require_state(top: str) -> None:
@@ -198,17 +239,27 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
     if not argv:
         raise Refused("--check is empty")
     msg = _message(message)
-    gated = uses_gate(argv)
-    caller = wall = None
+    from . import gate
+    gated, caller = uses_gate(argv), None
     if gated:
-        from . import gate
         try:
             caller = gate.resolve_caller(args, env)
         except gate.GateError as err:
             raise Refused(str(err)) from None
-        wall = gate._config(env)["wall"]
+    wall = gate._config(env)["wall"]
     top = _top(cwd)
     name = os.path.basename(top)
+    fd = _lock(_git_path(top, LOCK), wall)
+    if fd is None:
+        print(f"commit {name}: red lock exit {LOCK_RED}", flush=True)
+        return LOCK_RED
+    try:
+        return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall)
+    finally:
+        os.close(fd)                    # the lock goes after the line, its sha read under it
+
+
+def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
     _require_state(top)
     _require_paths(top, cwd, paths)
     before = _entries(cwd, paths)
@@ -231,12 +282,13 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
             raise Red("commit", code)
-    except Red as red:
+        sha = _git(top, "rev-parse", "HEAD")[1]     # this call's commit: no other call holds
+    except Red as red:                              # the lock between the commit and here
         _restore(top, cwd, paths, before)
         print(f"commit {name}: red {red.step} exit {red.code}", flush=True)
         return red.code
     except (KeyboardInterrupt, SystemExit):
         _restore(top, cwd, paths, before)
         raise
-    print(f"commit {name}: ok {_git(top, 'rev-parse', 'HEAD')[1]}", flush=True)
+    print(f"commit {name}: ok {sha}", flush=True)
     return 0

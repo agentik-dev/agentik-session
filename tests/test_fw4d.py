@@ -3,9 +3,13 @@
 and the index as it was found on every red and refusal. Each test is red at 36c84ea (alpha.60):
 the verb does not exist. Every repo and queue is under the test's temp roots."""
 import ast
+import fcntl
 import io
 import os
+import signal
 import subprocess
+import sys
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -275,3 +279,70 @@ def test_fw4d_t13_the_docs_name_the_verb():
     assert "gitlink" in runbook and "--only" in runbook
     tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "commit.py").read_text())
     assert ast.get_docstring(tree).count("make") >= 1
+
+
+# ---- round 1's fold (hq REFUTE-2026-11-10-fw4d-r1 and its rulings); each red at 30ae6fb ------
+
+LIB = ROOT / "plugin" / "lib"
+GITDIR = ".git"
+
+
+def spawn(repo, *argv, check="true"):
+    """The verb in its own process, as a harness runs it (for the races and the signals)."""
+    env = dict(os.environ, PYTHONPATH=str(LIB), PYTHONDONTWRITEBYTECODE="1")
+    return subprocess.Popen([sys.executable, "-m", "claude_session", "commit", *argv, "--check",
+                             check, "--message-file", str(repo.msg)], cwd=repo.path, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def until(cond, secs=30):
+    end = time.monotonic() + secs
+    while not cond():
+        assert time.monotonic() < end, "timed out"
+        time.sleep(0.05)
+
+
+def took(repo, sha):
+    return git(repo.path, "show", "--name-only", "--format=", sha)
+
+
+def test_fw4d_r1_f1_two_calls_at_once_each_ok_names_its_own_commit(repo):
+    """F1 (p07, p08): A's post-commit hook holds until HEAD moves past A's commit or 3 s pass,
+    and B starts once A is in it. With no lock B commits in that window and A's line names B's
+    commit; with the lock B waits for A's line, and each line names the call's own commit."""
+    hook = repo.path / GITDIR / "hooks" / "post-commit"
+    hook.write_text("#!/bin/sh\n[ -e .git/arm ] || exit 0\nrm -f .git/arm\n"
+                    "me=$(git rev-parse HEAD)\ntouch .git/inhook\ni=0\n"
+                    "while [ $i -lt 30 ]; do\n  [ \"$(git rev-parse HEAD)\" != \"$me\" ] && exit 0\n"
+                    "  sleep 0.1; i=$((i+1))\ndone\n")
+    hook.chmod(0o755)
+    (repo.path / GITDIR / "arm").write_text("")
+    repo.write("a.txt", "A\n")
+    repo.write("b.txt", "B\n")
+    a = spawn(repo, "a.txt")
+    until(lambda: (repo.path / GITDIR / "inhook").exists() or a.poll() is not None)
+    b = spawn(repo, "b.txt")
+    (oa, ea), (ob, eb) = a.communicate(timeout=120), b.communicate(timeout=120)
+    assert (a.returncode, b.returncode) == (0, 0), (oa, ea, ob, eb)
+    for out, path in ((oa, "a.txt"), (ob, "b.txt")):
+        assert out.startswith("commit scratch: ok ") and took(repo, out.split()[-1]) == path, out
+    assert git(repo.path, "status", "--porcelain") == ""
+
+
+def test_fw4d_r1_f1_a_held_lock_waits_to_the_wall_then_reds(repo, monkeypatch):
+    """F1: one call at a time per repo; a second waits up to the verb's wall (the gate's), then
+    one red line, the index and HEAD as found."""
+    monkeypatch.setattr(gate, "_config", lambda env, log=None: {"wall": 0.5})
+    fd = os.open(str(repo.path / GITDIR / "agentik-commit.lock"), os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        repo.write("a.txt", "mine\n")
+        before, head, t = repo.index(), repo.head(), time.monotonic()
+        rc, out, err = repo.commit("a.txt")
+        assert (rc, out) == (124, "commit scratch: red lock exit 124\n"), err
+        assert time.monotonic() - t >= 0.5 and "waiting" in err
+        assert (repo.index(), repo.head()) == (before, head)
+    finally:
+        os.close(fd)
+    rc, out, _ = repo.commit("a.txt")
+    assert rc == 0 and out == f"commit scratch: ok {repo.head()}\n"

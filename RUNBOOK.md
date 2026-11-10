@@ -634,7 +634,10 @@ glob), as git takes them from the cwd. Stdout is one line, last:
 `commit <repo>: ok <sha>` (exit 0), or `red check exit <code>` (the check's
 code: 127 not found, 126 not runnable, 128+n a signal), `red moved exit 1` (a
 named path changed during the check), `red add` or `red commit` with git's
-code. On every red the named paths' index entries are put back as they were
+code. One call at a time per work tree: a lock in its git dir
+(`agentik-commit.lock`) is held from before the add until the line, so the
+`ok` sha is the commit this call made; a second call waits up to the gate's
+wall, then `red lock exit 124`. On every red the named paths' index entries are put back as they were
 read; no other entry is touched.
 - Refused, exit 2, the index as found: no path; `-A`, `-u`; the whole tree
   (`.` at the top, `..` below it, its absolute path); a path outside the repo;
