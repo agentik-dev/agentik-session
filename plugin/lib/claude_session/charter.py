@@ -19,6 +19,7 @@ and While waiting's `- none`; `close` fills the Handover. While waiting's lines 
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
@@ -257,12 +258,37 @@ def _suffix(row: str | None) -> str:
     return f"-{row}" if row and ROW_RE.match(row) else ""
 
 
+def bare_target(dir, row: str | None, recorded: str | None) -> Path:
+    """Packet S54 R1: the file a bare `close` writes. `recorded` (this sitting's
+    `sessions/<sid>/charter.json` path) wins when it is absolute, a file, and its directory
+    resolves to `dir`'s; the target is then `Path(dir) / <its name>`, so the caller prints
+    `dir`'s spelling. Else today's newest, when its name carries `open`'s suffix for `row`.
+    Raises CharterError, nothing written, when there is none today or when today's newest is
+    another suffix's (another sitting's file: the refusal names both and asks for the file)."""
+    if isinstance(recorded, str) and os.path.isabs(recorded):
+        try:
+            if (os.path.isfile(recorded) and os.path.realpath(os.path.dirname(recorded))
+                    == os.path.realpath(dir)):
+                return Path(dir) / os.path.basename(recorded)
+        except (OSError, ValueError):
+            pass
+    date, suffix = today(), _suffix(row)
+    found = _numbered(Path(dir), date)
+    if not found:
+        raise CharterError(f"no charter for today under {dir}")
+    n, newest = found[-1]
+    if newest.name == f"{date}-{n}{suffix}.md":
+        return newest
+    own = [p for k, p in found if p.name == f"{date}-{k}{suffix}.md"]
+    raise CharterError(
+        f"today's newest charter, {newest}, is another sitting's; this sitting's newest "
+        f"today: {own[-1] if own else 'none today'}; name the file: charter close <file>")
+
+
 def adoptable(dir, row: str | None = None) -> Path | None:
-    """`open --continue` (design/05 §6): today's newest charter of any suffix, the one a bare
-    `close` writes (`newest_today`), when its name carries `open`'s suffix for `row` and it is
-    under CONTINUE_BELOW bytes; None when there is none, when the newest is another suffix's
-    (the newest is live: adopting an older one would let `close` write the other chain's file)
-    or when it is at the mark (the next sitting spills to n+1). Reads the size only, never the
+    """`open --continue` (design/05 §6): today's newest charter of any suffix, when its name
+    carries `open`'s suffix for `row` and it is under CONTINUE_BELOW bytes; None when there is
+    none, when the newest is another suffix's (the newest is live) or when it is at the mark (the next sitting spills to n+1). Reads the size only, never the
     bytes."""
     date, suffix = today(), _suffix(row)
     found = _numbered(Path(dir), date)

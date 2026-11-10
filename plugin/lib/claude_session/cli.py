@@ -400,10 +400,12 @@ def cmd_charter(args) -> int:
     if args.args:
         path = args.args[0]
     else:
+        # Packet S54 R2: this sitting's recorded charter, else today's newest of its suffix.
         d = args.dir or _charter_dir(_session_section(cwd))
-        path = charter.newest_today(d)
-        if path is None:
-            _die(f"no charter for today under {d}", 2)
+        try:
+            path = charter.bare_target(d, os.environ.get("RELAY_ROW"), _recorded_charter())
+        except charter.CharterError as e:
+            _die(str(e), 2)
     try:
         charter.close(path, args.exit or "goal met", _this_meter())
     except OSError as e:
@@ -722,6 +724,22 @@ def _record_charter(path, section: dict) -> None:
     except OSError as e:
         print(f"note: charter open: the session's charter record was not written: {e}",
               file=sys.stderr)
+
+
+def _recorded_charter() -> str | None:
+    """Packet S54 R2: the path `charter open` recorded in this sitting's session dir
+    (`sessions/<sid>/charter.json`), read only with a valid session id and outside a helper;
+    any failure reads as None."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
+        return None
+    try:
+        sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
+        got = json.loads((sdir / hooks.CHARTER_REC).read_text(encoding="utf-8"))
+        path = got.get("path") if isinstance(got, dict) else None
+        return path if isinstance(path, str) else None
+    except (OSError, ValueError):
+        return None
 
 
 def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
