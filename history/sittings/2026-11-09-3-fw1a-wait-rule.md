@@ -15,7 +15,7 @@
 - [x] the code: R1 to R4, R11 (fffc3da); R5 to R7 (be5b70a); R8's edits: test_charter 35, test_rules 11, test_hook_session_start 7
 - [x] the texts: R10, SKILL.md, RUNBOOK.md, README.md and its source (16,382 B)
 - [x] the bump: R9, alpha.53, status line 2549 (collected), rendered.sha256 re-hashed (`shasum -c` OK); NICE n27 to n35
-- [ ] verify: the gate, once
+- [x] verify: gate 20261109-195158-775 exit 0 in 9 min (2549 passed in 295 s, floor 2525 + 3 skipped in 219 s, mod 196, readme fresh)
 
 ## Handover
 - Choice (consumer: the refuter): the meter check reads <what> to its first `;`; WAITING_LINE's `\S` let it take FULL's <how to tell> (test_charter's how-to-tell case).
@@ -25,4 +25,6 @@
 - Choice (consumer: the refuter): README.md and its source edited by hand, as S54, the source 16,382 B; T3's fixture names "another repo" for the public scan.
 
 ## Next act
-the gate, once, on a clean tree
+none: the branch waits on its refuter and landing
+
+exit: FW1a done at gate 20261109-195158-775 exit 0; R1 to R11, alpha.53 and NICE n27 to n35 committed; nothing pushed
