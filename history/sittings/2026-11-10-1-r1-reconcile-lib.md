@@ -18,7 +18,9 @@
 - fold of refuter round 1 (hq's REFUTE-2026-11-10-r1-r1, its dispositions): F1, F2 (ruled), F3, F6, F9; NICE F4, F5, F7, F8
 - [x] fold tests: 33 cases appended to `tests/test_r1.py`, none edited; red at ba48d6d: `10 failed, 29 passed` under 3.12.7 and 3.9.6 (F1 x4, F6, F2 x4, F3); the F9 cases pass there and are red only under their mutation
 - [x] fold code: `39 passed` under 3.12.7 and 3.9.6; 19 mutations each red alone (M1 M3 M4 M5 M7 M10 M11 M13 M16 M17 M18 M19 M21 M22 M23, and F1 F2 F3 F6 undone)
-- [ ] NICE rows, alpha.60, gate
+- [x] NICE n43 (F4), n44 (F5), n45 (F7), n46 (F8), each row under 400 characters
+- [x] bump: alpha.60 (plugin-version-check asked; later packets read up by one), status line 2628 (collected) by hand, sidecar re-hashed (`shasum -c` OK), source 16,381 B
+- [ ] verify: one gate
 
 ## Handover
 - open by level: none yet
