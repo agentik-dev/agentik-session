@@ -14,7 +14,8 @@
 - [x] the guard (ae3fa92): the prototype read and applied; PostModelSwitch registered last; test_doctor (3 tests) and test_precompact (2) amended; RUNBOOK step 2 and the guard's bullet. test_wfg `64 passed`; with hooks, doctor, precompact, readme `279 passed` (both pythons)
 - [x] cost, 100,259 B script: `measure` 9.2 ms (3.12), 9.0 ms (3.9); the hook process +18.1 ms, +19.3 ms over a Bash call of the same size (load 13 to 20)
 - [x] SKILL, NICE n58 to n60 (844e068, a3d7a30); alpha.64, status line 2741 (30a83b7)
-- [ ] the gate once; the range scan
+- [x] lint (compileall, both pythons) 0; doclint 0; recordlint 0; hygiene tree 0 hits; range `commits: 7 scanned, 0 with a hit outside the allowlist`
+- [ ] the gate: not run here. `make check` took past 540 s on main (u1: 3.12 alone 704 s), and the builder's rule leaves a verify line past 540 s to the gate after the builder
 
 ## Handover
 - Rulings (the coordinator): Q1 the ceiling 8; Q2 Fable in a workflow only under a Fable session, labelled design or refutation, two at most; Q3 and Q4 not in this packet; deny, never rewrite input; R6 as written
@@ -23,7 +24,8 @@
 - decide, owner: the coordinator: `doctor.HOOK_EVENTS` lacks PostModelSwitch; `doctor.py` is outside may-touch (n59); consumer: the doctor's `plugin` line
 - decide, owner: the coordinator: the pin asked for n33 on main; it is not (bfc66ae), so the rule sits first in `pre_tool_use`, and n33's landing meets it there; consumer: whichever lands second
 - A single unreproduced red under load (1 failed of 279, both pythons at once, load 18 to 23); five reruns green
-- exit: open
+- decide, owner: the coordinator: the gate's verdict on this head, by one `gate run` from the coordinator's side
+- exit: checkpoint; all items built and committed, targeted tests green on both pythons, the gate left to the coordinator; nothing pushed
 
 ## Next act
-the gate, then the range scan
+the coordinator's gate on the head, then its read
