@@ -237,6 +237,7 @@ agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, 
 agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>, est on stderr
 agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
+agentik-session gate land <repo> <branch> <sha> <merge-file>   # one landing, one gate job; stdout its land line, exit the job's
 agentik-session gate status     # what runs, what waits (each with its est), the last five done
 ```
 
