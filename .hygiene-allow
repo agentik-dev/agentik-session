@@ -99,3 +99,9 @@ tests/test_hooks.py: renamed
 # tests name the relay's legacy packet stems.
 scripts/doclint: renamed
 tests/test_doclint.py: renamed
+# Two throwaway test identities on the reserved .invalid domain, written whole in two
+# commits of FW4d's fold 2 (the tests', and the charter line quoting them). History is
+# append-only, so those commits cannot be remade; the tree holds none (the tests split
+# them since). These two rows go once those commits are pushed.
+tests/test_fw4d.py: email
+history/sittings/2026-11-10-9-fw4d-fold-2.md: email
