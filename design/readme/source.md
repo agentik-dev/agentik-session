@@ -30,7 +30,7 @@ Each command wraps one CLI verb.
 | `/session:status` | `/session:status --json` | this session's meter: context, turns, zone |
 | `/session:profile` | `/session:profile builder` | list the profiles, or show one resolved for this repo |
 | `/session:set` | `/session:set posture ask` | change one setting for this session; `--save` keeps it |
-| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only (`git add -u`) |
+| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only |
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
 | `/session:gate` | `/session:gate --json` | the gate queue: running, queued, the last five done |
@@ -53,15 +53,16 @@ CLI verbs (`agentik session --help`):
 | `set` | `agentik session set posture deny --save` |
 | `checkpoint` | `agentik session checkpoint -m "tests green"`; `agentik-session checkpoint --respawn --charter <file>` |
 | `status` | `agentik session status` |
-| `report` | `agentik session report --since 2026-09-01`; `agentik session report --chains --json` |
+| `report` | `agentik session report --since 2026-09-01` |
 | `charter` | `agentik session charter open "render the README"` |
 | `budget` | `agentik session budget` |
 | `rules` | `agentik session rules` |
 | `run` | `agentik session run --chain loop -- --model 'opus[1m]' "/loop 30m check in"` |
 | `gate` | `agentik session gate run . -- make check` |
+| `reconcile` | `agentik session reconcile` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task|Workflow` only), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task`, and denies `Workflow`), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
 ## Profiles
 
@@ -168,7 +169,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 - `make test`: the whole suite, with a fake `claude` on PATH and no quota spent.
 - Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
-- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), an 840 s wall, held off above load 4 x cores.
+- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), a 1800 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 
 ## Conventions shared with the sibling plugins
@@ -182,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.63`, rendered `2026-11-10`, `2758` tests in the suite.
+Status: version `v2.0.0-alpha.69`, rendered `2026-11-10`, `2969` tests in the suite.
 
 ## Credit
 

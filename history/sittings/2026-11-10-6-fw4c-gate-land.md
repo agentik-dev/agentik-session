@@ -13,7 +13,7 @@
 - [x] the packet committed with this charter (sections renamed to doclint's packet shape, the Q1 ruling added; no ruling word moved)
 - [x] tests: T1 to T13 in `tests/test_fw4c.py`, red at 36c84ea: `15 failed` under 3.12.7 and 3.9.6; the ported pair, conftest's line and test_gate's assertion with them
 - [x] the verb: R1 to R5 (land.py, the mark, the doors, self_argv); T1 to T13 `15 passed` under 3.12.7 and 3.9.6; with the ported pair, test_gate and the four unedited neighbours `383 passed` under 3.12.7, under 3.9.6 `381 passed, 2 failed` at load 90 (T3's 2 s wall cut the job before land.py's SIGTERM handler; test_land f4's 30 s subprocess timeout), both green alone after
-- [x] the texts and the bump: R6 (SKILL one line, RUNBOOK §5 one bullet), NICE n54 to n56 (the packet's three), alpha.63 (main alpha.60; alpha.61 and .62 held by other branches), status line 2758 (collected) by hand, sidecar re-hashed (`shasum -c` OK), source 16,381 B
+- [x] the texts and the bump: R6 (SKILL one line, RUNBOOK §5 one bullet), NICE n69 to n71 (the packet's three; filed as n54 to n56, renumbered past main's n68 at the merge of main 0656411), alpha.63 (main alpha.60; alpha.61 and .62 held by other branches), status line 2758 (collected) by hand, sidecar re-hashed (`shasum -c` OK), source 16,381 B
 - [ ] verify: red twice, both the wall: gate 20261110-042400-856 exit 2 in 841 s (3.12 at 44%, load 70 to 100); gate 20261110-052750-870 exit 2 in 14 min, 3.12 `2758 passed` in 641 s at load 11 to 12, the floor at 44% when `bounded: wall of 840 s reached`. The new 130 tests take 224 s a python at load 11
 
 ## Handover
@@ -27,7 +27,7 @@
 - none
 
 ## Exit
-exit taken: built and committed (bed0fb1 cef243b a362a57 c2eb49f, this charter last); alpha.63; NICE n54 to n56; verify red by the wall twice, the fork above undecided; range scan 0 hits; nothing pushed
+exit taken: built and committed (bed0fb1 cef243b a362a57 c2eb49f, this charter last); alpha.63; NICE n69 to n71; verify red by the wall twice, the fork above undecided; range scan 0 hits; nothing pushed
 
 ## Next act
 none in scope: the fork above, then verify

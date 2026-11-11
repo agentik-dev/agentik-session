@@ -31,14 +31,14 @@ resolves to deny, even though Claude Code still reports success. Read section
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
-   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`) through `hooks/run`, which execs
+   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch` and `PreCompact` (keeping
+   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch`, `PostModelSwitch` and `PreCompact` (keeping
    PreCompact's stdout, its block), so no turn end, no helper's loop and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
@@ -288,6 +288,42 @@ seconds, `waiting` 1 to 9. Anything else, or either key set to null or a
 scalar, fails the resolve and names the key. A field outside them is dropped
 and listed for the doctor as `<layer>: session.<key>.<field>`.
 
+**The reconcile key.** `session.reconcile` turns on the reconciler's
+detectors for a repo that holds a tree file (packet R2). It resolves through
+every layer as `respawn` does, and only `agentik session reconcile` checks
+it, so a bad key never refuses a session: the verb exits 2 and names each
+bad key by its path.
+
+```yaml
+session:
+  reconcile:
+    tree: suite.json          # required: a repo file with a `repos` list
+    goal: [tool-a, tool-b]    # the repos whose landing counts; default every repo but this one
+    window: 14                # days the detectors look back
+    every: 24                 # hours between runs; the floor is 24, the ceiling 8760
+    detectors: [eff.idle]     # default all three
+    thresholds: {eff.idle: 5} # a number, 0 or more, per detector
+    read: {every: 168, floor: 168, turns: 40, context: 120000}
+    record: history/reconcile # a relative folder inside the repo
+```
+
+`reconcile: false` is off, as no key is. The record folder's real path, its
+links followed, lies inside the repo and outside `.git`, and the folder can
+be written; else the verb exits 2 before the detectors run.
+
+`agentik session reconcile [--json] [--force]` runs in the repo. When the
+newest `<record>/YYYY-MM-DD.md` says it ran less than `every` hours ago it
+prints `not due until <time>`, exits 0 and writes nothing; delete the record
+or pass `--force` to run now. A record named or stamped after now (a clock
+that ran fast) is named in one line on stderr and left out, so it holds
+nothing off. Otherwise it writes that date's record (a
+second run on one date replaces it): the run line, then one row per detector
+with its value, threshold, flag and the shell command that reproduces the
+value, never a charter's or a transcript's text. It exits 0 when nothing is
+flagged, 1 when a finding is and for nothing else, and 2 on any error, in
+one line; `--json` gives `{due, record, flagged,
+findings}`, or `{due, last, next}` when not due.
+
 ## 4. Budget and checkpoints as a signal
 
 The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
@@ -333,6 +369,17 @@ Postures, least to most restrictive, all confirmed by test:
   `permissionDecision: "ask"`. The reason names the zone.
 - `deny`: returns `"deny"` only in the reserve zone; in wind-down it still
   just asks.
+
+Whatever the posture, a helper's call too, the spawn rule (packets wfd, wfg)
+denies two spawns. Every `Workflow` call, unread, with one line: this suite
+runs no workflows; spawn helpers with the Agent tool, each naming its model.
+And a Fable `Agent` or `Task` unless `model.json` (SessionStart, then each
+`PostModelSwitch`) and the meter both read Fable; its line says to name
+`model: 'opus'`.
+
+- With the plugin off or its hook timed out nothing denies: a timed-out hook
+  does not block the call, and the tool's own caps alone hold, 16 agents at
+  once and 1000 a run.
 
 A checkpoint is a commit or a durable record: run one and the session is
 handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
@@ -420,6 +467,14 @@ prompt cache's lifetime.
   exits 1 on either (2 on a refusal); `close`
   keeps its exit. A wait on the usage meter is exempt. `check` resolves
   from the current directory, and a failed resolve warns nothing.
+- A helper's Bash carries its sitting's session id, so the PreToolUse hook denies a helper's
+  Bash that names `agentik-session charter` (any launcher name, quotes and continuations
+  read through) with any word but `check` right after `charter`, flags included, whatever
+  the posture: write the charter by hand (a helper's one charter call is
+  `charter check <file>`, the verb first), and put a probe's own call in a script file. With hooks off, `charter open` refuses, exit 2 and
+  nothing written, to move the record off a charter still open in the same directory: close
+  it, open in a worktree, or take it on purpose with `charter open --replace`; a bare close
+  then refuses while the replaced file stays open.
 - Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
@@ -445,8 +500,11 @@ that waits for a person, so `run` warns once and still runs. A list flag
 as `--flag=value`. A sitting restarts only when its charter's
 `## Next act` opens on `RESPAWN`, the main thread ran `agentik session
 checkpoint --respawn --charter <file>`, and the turn has ended and stood
-`settle` seconds with no helper call open. The launcher then ends the
-sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
+`settle` seconds with no helper call open. A helper call left open 20
+minutes with no helper activity since reads as stale (a rejected call
+never closes its file): the launcher goes on past it, says so in one line
+once the terminal is back, and names it in the restart line's
+`stale_calls`. The launcher then ends the sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
 the ledger and starts the next. A sitting that exits without a confirmed
 RESPAWN stops the chain, and a crash (a nonzero exit) is never restarted.
 Every stop but a hang-up prints a start line that runs as printed (after a
@@ -490,6 +548,14 @@ hang-up the launcher writes nothing more to the terminal).
 - The guards are `session: {respawn: {cap, floor, settle}}` in the config
   layers (defaults 20 restarts in any 24 h, 600 s, 60 s); `--cap`,
   `--floor` and `--settle` override them for one chain.
+- When the repo sets `session.reconcile` (section 3), each restart runs
+  `agentik session reconcile` once, after the restart line and before the
+  successor starts, and the terminal shows one line, `<chain>: reconcile exit
+  <n>: <its last line>`. The verb's `every` decides whether the detectors
+  run. The pass is cut at 30 s, the launcher's own kill grace, and a failure,
+  a cut or a bad key is that one line: the successor starts all the same. A
+  stop runs no pass. A Ctrl-C, SIGTERM or STOP file during the pass ends it
+  within a second and stops the chain as the grace would; no successor starts.
 - Two STOP files hold the chain: `respawn/<chain>/STOP` and
   `respawn/STOP` under the state root (the `state-dir` line of
   `agentik session doctor`). Touch one and the running sitting finishes
