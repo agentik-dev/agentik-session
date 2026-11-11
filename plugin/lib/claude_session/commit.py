@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import io
 import os
 import shlex
@@ -59,6 +60,7 @@ LOCK = "agentik-commit.lock"         # in the git dir: one call at a time (round
 LOCK_RED = 124                       # a lock not had within the wall: `red lock exit 124`
 SNAP = "agentik-commit.index"        # in the git dir: the index file as found (F3, F4)
 RESTORE_WAIT = 2.0                   # seconds a restore waits on another writer's index.lock
+MOVED = "the index moved under the check: nothing is restored"     # fold 2: another writer
 
 
 class Refused(Exception):
@@ -182,6 +184,14 @@ def _head(top: str) -> str:
     return _git(top, "rev-parse", "-q", "--verify", "HEAD")[1]
 
 
+def _entries(top: str) -> str:
+    """A hash of the index's entries (`ls-files -s -z`: mode, blob, stage, path), so a stat-only
+    refresh (anyone's `git status`) is no change and a staged path or a commit's is."""
+    p = subprocess.run(("git", "ls-files", "-s", "-z"), cwd=top, env=_env(), stdin=DEVNULL,
+                       stdout=subprocess.PIPE, stderr=DEVNULL)
+    return f"{p.returncode}:{hashlib.sha256(p.stdout).hexdigest()}"
+
+
 def _code(rc: int) -> int:
     """A child's code as a shell reads it: 128+n for a signal."""
     return rc if rc >= 0 else 128 - rc
@@ -195,6 +205,8 @@ def _verdict(exc: BaseException) -> tuple:
         return "signal", 128 + signal.SIGINT
     if isinstance(exc, _Signal):
         return "signal", exc.code
+    if isinstance(exc, Refused):
+        return "refused", 2
     if isinstance(exc, SystemExit) and isinstance(exc.code, int):
         return "exit", exc.code
     return "error", 1
@@ -267,11 +279,12 @@ def _snapshot(index: str, snap: str) -> None:
         raise Refused(f"the index cannot be copied to {snap}: {err}") from None
 
 
-def _put_back(index: str, snap: str):
+def _put_back(index: str, snap: str, unmoved=None):
     """The snapshot back over the index by git's own protocol: `index.lock` taken (O_EXCL, up to
     RESTORE_WAIT behind another writer), the snapshot's bytes and mtime written into it, renamed
-    over the index; then the snapshot goes. None when done or never taken, else why not, the
-    snapshot left in place."""
+    over the index; then the snapshot goes. None when done or never taken, MOVED when
+    `unmoved()`, asked under index.lock so no git writes between, says another writer moved HEAD
+    or the index (the lock let go, nothing written), else why not, the snapshot left in place."""
     if not os.path.exists(snap):
         return None                     # not taken: the add never ran
     lock = index + ".lock"
@@ -287,6 +300,11 @@ def _put_back(index: str, snap: str):
         except OSError as err:
             return f"{lock}: {err}"
     try:
+        if unmoved is not None and not unmoved():
+            os.close(fd)
+            fd = None
+            os.unlink(lock)
+            return MOVED
         st = os.stat(snap)
         if st.st_size:
             with open(snap, "rb") as src:
@@ -388,9 +406,11 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
     _require_state(top)
     _require_paths(top, cwd, paths)
     old, done = None, False             # HEAD before this call's `git commit`, once it runs
+    base, after = _head(top), None      # HEAD before the add; the entries right after it
     try:
         _snapshot(index, snap)
         code, _, err = _git(cwd, "add", "--", *paths)
+        after = _entries(top)
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
             raise Red("add", _code(code))
@@ -417,7 +437,7 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
         if done:
             raise
         with _held():
-            line = _failed(exc, top, name, old, index, snap)
+            line = _failed(exc, top, cwd, name, paths, (base, after, old), index, snap)
             if line:
                 print(line, flush=True)
         if isinstance(exc, (Red, Refused)) and line.startswith(f"commit {name}: red restore "):
@@ -432,15 +452,46 @@ def _drop(snap: str) -> None:
         os.unlink(snap)
 
 
-def _failed(exc, top, name, old, index, snap):
-    """On a failure: the commit stands when HEAD moved to it, else the snapshot goes back; the
-    line to print ("" for a refusal or a signal before the commit, as found)."""
+def _tell_moved(exc, step, code, top, cwd, paths, base) -> None:
+    """Stderr for the index that moved: what moved, and this call's paths still staged against
+    HEAD with the way to unstage them; the other writer's state is left as it stands."""
+    now = _head(top)
+    what = (f"HEAD moved from {base or 'no commit'} to {now or 'no commit'}" if now != base
+            else "another writer changed the index")
+    _, names, _ = _git(cwd, "diff", "--cached", "--name-only", "-z", "--", *paths, z=True)
+    if names:
+        quoted = " ".join(shlex.quote(n) for n in names)
+        left = (f"this call's paths still staged: {', '.join(names)}; "
+                f"`git -C {shlex.quote(top)} restore --staged -- {quoted}` unstages them")
+    else:
+        left = "none of this call's paths is staged against HEAD"
+    red = exc if isinstance(exc, Refused) else f"red {step} exit {code}"
+    print(f"commit-step: {red}; {what} during the check, so the index as found is not put back "
+          f"over it: {left}", file=sys.stderr, flush=True)
+
+
+def _failed(exc, top, cwd, name, paths, heads, index, snap):
+    """On a failure: the commit stands when HEAD moved to it; else the snapshot goes back only
+    when HEAD is still the one read before the add and the entries are those read after it
+    (`after` None: the add itself was cut, HEAD alone is asked), since over another writer's
+    newer HEAD or index the old index would stage their work's reversal; the line to print
+    ("" for a refusal or a signal before the commit, as found)."""
     step, code = _verdict(exc)
+    base, after, old = heads
     now = _head(top) if old is not None else None
     if now and now != old:              # HEAD moved to this call's commit: nothing restores
         _drop(snap)
         return f"commit {name}: red {step} exit {code}, the commit stands: {now}"
-    why = _put_back(index, snap)
+
+    def unmoved():
+        return _head(top) == base and (after is None or _entries(top) == after)
+    why = None
+    if os.path.exists(snap):
+        why = MOVED if not unmoved() else _put_back(index, snap, unmoved)
+    if why is MOVED:
+        _drop(snap)                     # stale: putting it back is the harm
+        _tell_moved(exc, step, code, top, cwd, paths, base)
+        return f"commit {name}: red {step} exit {code}, {MOVED}"
     if why:
         tell = (f"commit-step: {exc if isinstance(exc, Refused) else f'red {step} exit {code}'}"
                 f"; the index was not put back ({why}): `mv {snap} {index}` puts it back")
