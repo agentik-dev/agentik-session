@@ -800,6 +800,20 @@ def cmd_set(args) -> int:
     return 0
 
 
+def cmd_commit(args) -> int:
+    """`agentik session commit <paths...> --check <cmd> --message-file <f>` (packet FW4d): add
+    by path, check, commit on green; the check's code on red, 2 for a refusal."""
+    from . import commit
+    for flag, word in (("all", "-A"), ("update", "-u")):
+        if getattr(args, flag):
+            _die(f"commit: {word} is refused: it takes every changed path; name each path", 2)
+    try:
+        return commit.commit(os.getcwd(), list(args.paths), args.check, args.message_file,
+                             os.environ, args)
+    except commit.Refused as err:
+        _die(f"commit: {err}", 2)
+
+
 def _rewrite_resolved(model_set: bool = False) -> None:
     """`set` is the one other writer of resolved.json (§2.3): same request, new overlay.
     A model set here is newer than the SessionStart payload's (round 2 F1): the request
@@ -1395,6 +1409,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="with fill reset or fill opus, never with fill off: the zoned "
                          "ISO time the word ends at, as 2026-11-10T18:00-08:00")
     se.set_defaults(func=cmd_set)
+
+    cm = sub.add_parser("commit", help="add by explicit path, run the check, commit on green")
+    cm.add_argument("paths", nargs="*", help="each path to commit, as git takes it from the cwd")
+    cm.add_argument("--check", required=True, metavar="CMD",
+                    help="the check, one string split as a shell would (no shell); its first "
+                         "word make or gmake runs it as a gate job")
+    cm.add_argument("--message-file", required=True, metavar="FILE", help="the commit message")
+    cm.add_argument("--session", metavar="SID",
+                    help="the session told of a gate check (default: $CLAUDE_CODE_SESSION_ID)")
+    cm.add_argument("-A", "--all", action="store_true", help="refused: name each path")
+    cm.add_argument("-u", "--update", action="store_true", help="refused: name each path")
+    cm.set_defaults(func=cmd_commit)
 
     cp = sub.add_parser("checkpoint", help="mark a handoff-ready point")
     cp.add_argument("-m", "--message")

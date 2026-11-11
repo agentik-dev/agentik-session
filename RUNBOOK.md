@@ -698,3 +698,50 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 | `gate/runner.log` | the runner's stdout and stderr |
 | `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days; it keeps `head` (the repo's commit, read before the spawn; null when unknown or never started) and `key` |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |
+
+## 6. Commit by path
+
+`agentik session commit <paths...> --check <cmd> --message-file <f>` (packet
+FW4d) adds each named path, runs the check in the repo's top and commits on
+green with `git commit --only`, so a path someone else staged stays staged and
+out of the commit. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
+glob), as git takes them from the cwd. Stdout is one line, last:
+`commit <repo>: ok <sha>` (exit 0), or `red check exit <code>` (the check's
+code: 127 not found, 126 not runnable, 128+n a signal), `red moved exit 1` (a
+named path changed during the check), `red add` or `red commit` with git's
+code. One call at a time per work tree: a lock in its git dir
+(`agentik-commit.lock`) is held from before the add until the line, so the
+`ok` sha is the commit this call made; a second call waits up to the gate's
+wall, then `red lock exit 124`. Once HEAD has moved to this call's commit,
+nothing is restored: a red or a signal after it reads `red <step> exit
+<code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). Before
+the add HEAD's sha is read and the index file copied whole to
+`agentik-commit.index` in the git dir; right after the add, the index's
+entries (`git ls-files -s -z`: a stat-only refresh, anyone's `git status`,
+is no change). On every other failure (a red, a refusal after the add, an
+error, SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's
+own protocol (`index.lock`, then a rename) only when HEAD is that sha and
+the entries are those, asked again under `index.lock`; then the index is as
+it was found. Otherwise another writer moved HEAD or the index during the
+check, and the old index over theirs would stage their work's reversal:
+nothing is written, the copy is dropped, and the line reads `red <step>
+exit <code>, the index moved under the check: nothing is restored` (the
+red's own code; `red refused exit 2` for a refusal, `red signal exit 143`
+for SIGTERM), stderr naming this call's paths still staged and
+`git -C <top> restore --staged -- <paths>` to unstage them. A restore that
+cannot be made reads `red restore exit 1, the index as found is kept at
+<path>`; the copy stays, and a later call refuses until it is moved back
+over the index or removed. After a SIGKILL the copy is the way back.
+- Refused, exit 2, the index as found: no path; `-A`, `-u`; the whole tree
+  (`.` at the top, `..` below it, its absolute path); a path outside the repo;
+  an untracked nested repo, or a directory holding one, which git would add as
+  a gitlink (each named, the first twenty; an ignored one is never added); a
+  path git would not add; a missing or blank message file; an empty check; a
+  merge, cherry-pick, revert or rebase under way; a detached HEAD; nothing to
+  commit in the named paths; an earlier call's `agentik-commit.index` not put
+  back.
+- The check is one string, split as a shell would but run with no shell. When
+  its first word is `make` or `gmake` it is one gate job in the repo, labelled
+  `commit check` (its code `gate wait --strict`'s, its wait line on stderr),
+  since the gate holds every `make` on the machine; any other check, a
+  `sh -c '...'` wrapper too, runs directly, its output on stderr.

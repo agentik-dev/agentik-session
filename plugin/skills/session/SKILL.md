@@ -239,6 +239,7 @@ agentik-session gate wait <id> --timeout <s>   # its result line; run it in a ba
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
 agentik-session gate land <repo> <branch> <sha> <merge-file>   # one landing, one gate job; stdout its land line, exit the job's
 agentik-session gate status     # what runs, what waits (each with its est), the last five done
+agentik-session commit <paths...> --check <cmd> --message-file <f>   # add by path, check, commit on green; a make check through the gate
 ```
 
 The gate queue runs one gate per repo (a repo and its worktrees are one) under a load
