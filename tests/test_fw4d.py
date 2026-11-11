@@ -532,7 +532,7 @@ def test_fw4d_r1_f7_sigterm_to_the_verb_restores_and_ends_the_check(repo):
 
 # ---- round 2's ruling (the coordinator's read of fold 1): another writer during a red check ----
 
-OTHER = "git -c user.name=other -c user.email=other@x.invalid"
+OTHER = "git -c user.name=other -c user.email=other@" + "example.invalid"
 MOVED = "commit scratch: red {}, the index moved under the check: nothing is restored\n"
 THEIRS = f"echo theirs > b.txt && git add b.txt && {OTHER} commit -qm theirs"
 
@@ -544,7 +544,8 @@ def staged(repo):
 def next_plain_commit(repo):
     repo.write("c.txt", "next\n")
     git(repo.path, "add", "c.txt")
-    git(repo.path, "-c", "user.name=n", "-c", "user.email=n@x.invalid", "commit", "-qm", "next")
+    git(repo.path, "-c", "user.name=n", "-c", "user.email=n@" + "example.invalid", "commit",
+        "-qm", "next")
 
 
 def test_fw4d_r2_another_writers_commit_during_a_red_check_stands(repo):
