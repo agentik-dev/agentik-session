@@ -1155,6 +1155,36 @@ def cmd_gate(args) -> int:
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
+def cmd_reconcile(args) -> int:
+    """`agentik session reconcile [--json] [--force]` (packet R2): R1's detectors over the
+    tree the cwd's `session.reconcile` names, when `every` hours have passed since the last
+    record. 0 clean or not due, 1 a finding flagged and nothing else, 2 the config, an
+    unwritable record or any other error, one line and never a traceback (R2's review fold,
+    F4)."""
+    from .reconcile import runner
+
+    def warn(line):
+        print(line, file=sys.stderr)
+    try:
+        code, lines, doc = runner.run(os.getcwd(), dict(os.environ), time.time(), args.force,
+                                      warn=warn)
+    except runner.ConfigError as e:
+        for line in str(e).splitlines():
+            print(f"error: agentik-session reconcile: {line}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        _die(f"agentik-session reconcile: the record was not written ({e})", 2)
+    except Exception as e:                       # noqa: BLE001  (exit 1 is flagged alone)
+        why = " ".join(str(e).split()) or "no message"
+        _die(f"agentik-session reconcile: {type(e).__name__}: {why}", 2)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        for line in lines:
+            print(line)
+    return code
+
+
 def cmd_unattended(args) -> int:
     """`agentik session unattended run|status|report` (hq design/07 §2): the unattended
     loop. `run` exits 0 on queue-spent, until or max-rows, 3 on
@@ -1427,6 +1457,13 @@ def build_parser() -> argparse.ArgumentParser:
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
+
+    rk = sub.add_parser("reconcile", help="the reconciler's detectors when due "
+                                          "(session.reconcile): one record, 0 clean or not "
+                                          "due, 1 flagged, 2 the config")
+    rk.add_argument("--json", action="store_true", help="the findings, or when not due, as JSON")
+    rk.add_argument("--force", action="store_true", help="run though `every` has not elapsed")
+    rk.set_defaults(func=cmd_reconcile)
 
     nt = sub.add_parser("unattended", help="the unattended loop: one claude -p builder per queue "
                                        "row, landed through the gate, to a stop")

@@ -288,6 +288,42 @@ seconds, `waiting` 1 to 9. Anything else, or either key set to null or a
 scalar, fails the resolve and names the key. A field outside them is dropped
 and listed for the doctor as `<layer>: session.<key>.<field>`.
 
+**The reconcile key.** `session.reconcile` turns on the reconciler's
+detectors for a repo that holds a tree file (packet R2). It resolves through
+every layer as `respawn` does, and only `agentik session reconcile` checks
+it, so a bad key never refuses a session: the verb exits 2 and names each
+bad key by its path.
+
+```yaml
+session:
+  reconcile:
+    tree: suite.json          # required: a repo file with a `repos` list
+    goal: [tool-a, tool-b]    # the repos whose landing counts; default every repo but this one
+    window: 14                # days the detectors look back
+    every: 24                 # hours between runs; the floor is 24, the ceiling 8760
+    detectors: [eff.idle]     # default all three
+    thresholds: {eff.idle: 5} # a number, 0 or more, per detector
+    read: {every: 168, floor: 168, turns: 40, context: 120000}
+    record: history/reconcile # a relative folder inside the repo
+```
+
+`reconcile: false` is off, as no key is. The record folder's real path, its
+links followed, lies inside the repo and outside `.git`, and the folder can
+be written; else the verb exits 2 before the detectors run.
+
+`agentik session reconcile [--json] [--force]` runs in the repo. When the
+newest `<record>/YYYY-MM-DD.md` says it ran less than `every` hours ago it
+prints `not due until <time>`, exits 0 and writes nothing; delete the record
+or pass `--force` to run now. A record named or stamped after now (a clock
+that ran fast) is named in one line on stderr and left out, so it holds
+nothing off. Otherwise it writes that date's record (a
+second run on one date replaces it): the run line, then one row per detector
+with its value, threshold, flag and the shell command that reproduces the
+value, never a charter's or a transcript's text. It exits 0 when nothing is
+flagged, 1 when a finding is and for nothing else, and 2 on any error, in
+one line; `--json` gives `{due, record, flagged,
+findings}`, or `{due, last, next}` when not due.
+
 ## 4. Budget and checkpoints as a signal
 
 The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
@@ -511,6 +547,14 @@ hang-up the launcher writes nothing more to the terminal).
 - The guards are `session: {respawn: {cap, floor, settle}}` in the config
   layers (defaults 20 restarts in any 24 h, 600 s, 60 s); `--cap`,
   `--floor` and `--settle` override them for one chain.
+- When the repo sets `session.reconcile` (section 3), each restart runs
+  `agentik session reconcile` once, after the restart line and before the
+  successor starts, and the terminal shows one line, `<chain>: reconcile exit
+  <n>: <its last line>`. The verb's `every` decides whether the detectors
+  run. The pass is cut at 30 s, the launcher's own kill grace, and a failure,
+  a cut or a bad key is that one line: the successor starts all the same. A
+  stop runs no pass. A Ctrl-C, SIGTERM or STOP file during the pass ends it
+  within a second and stops the chain as the grace would; no successor starts.
 - Two STOP files hold the chain: `respawn/<chain>/STOP` and
   `respawn/STOP` under the state root (the `state-dir` line of
   `agentik session doctor`). Touch one and the running sitting finishes

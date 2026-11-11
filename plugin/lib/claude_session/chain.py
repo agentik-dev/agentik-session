@@ -63,6 +63,13 @@ _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overl
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
 _EVERY = re.compile(r"\bevery\s+(\d+)\s*([smhd])[a-z]*\s*$", re.I)   # `/loop <p> every 2h`
 _MINUTES = {"s": 1 / 60, "m": 1, "h": 60, "d": 1440}
+# Packet R2: the reconciler's pass at a respawn close is cut at this many seconds, the
+# launcher's own `kill_grace`, so a successor never waits on it longer.
+RECONCILE_WAIT = 30
+# R2's review fold, F1: while the pass runs, the launcher's stops are read this often, so a
+# Ctrl-C, SIGTERM or STOP file ends the pass's process within a second.
+RECONCILE_POLL = 0.2
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # C0, DEL and C1: never to the owner's tty
 _COMPACT = re.compile(r"(?:^|\s)/compact(?:\s|$)")     # the command, never a path's part
 
 
@@ -216,6 +223,21 @@ def prompt_gap(args) -> str | None:
     return gap
 
 
+def reconcile_argv() -> list:
+    """The close's pass (packet R2): this interpreter and this tree's launcher, as
+    `gate.spawn_serve` runs its runner, then the verb with no `--force`."""
+    runner = Path(__file__).resolve().parent.parent / "agentik-session"
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
+    prefix = os.path.join(cache, "agentik", "pycache")
+    return [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner), "reconcile"]
+
+
+def _clean(line: str) -> str:
+    """One line of the pass's output for the owner's terminal: control characters dropped,
+    whitespace folded (R2's review fold, F7)."""
+    return " ".join(_CONTROL.sub("", line).split())
+
+
 def home(state, name: str) -> Path | None:
     """The chain `name`'s home, `<state>/respawn/<name>/` (its lock, STOP, held.json and,
     since S39, state.md with state.json); None for a name that is not a chain's."""
@@ -324,6 +346,38 @@ class Effects:
 
     def append(self, state: Path, entry: dict) -> Path:
         return ledger.append_chain(state, entry)
+
+    halt = None     # R2's review fold, F1: the chain's stop check, read while the pass runs
+
+    def reconcile(self, cwd, timeout: float) -> tuple:
+        """(the pass's exit, its last line): stdin /dev/null, output captured, cut at
+        `timeout`; the exit is None when the pass was cut, stopped or did not start. Every
+        RECONCILE_POLL seconds `halt` is read: a stop kills the pass (R2's review fold, F1).
+        The line is decoded with replacement and holds no control character (F7)."""
+        halt = self.halt or (lambda: None)
+        try:
+            proc = subprocess.Popen(reconcile_argv(), cwd=str(cwd), stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as e:
+            return None, f"did not start ({e})"
+        end = time.monotonic() + timeout
+        with proc:
+            while True:
+                left = end - time.monotonic()
+                try:
+                    out, err = proc.communicate(timeout=max(0.0, min(RECONCILE_POLL, left)))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                why = "stopped" if halt() else (f"cut after {timeout:g} s"
+                                                if time.monotonic() >= end else None)
+                if why is not None:
+                    proc.kill()
+                    proc.wait()
+                    return None, why
+        lines = [l for l in map(_clean, out.decode("utf-8", "replace").splitlines()) if l] or \
+                [l for l in map(_clean, err.decode("utf-8", "replace").splitlines()) if l]
+        return proc.returncode, lines[-1][:300] if lines else ""
 
     def restarts(self, state: Path, chain: str, now: float) -> int:
         return ledger.restarts_in(state, chain, now)
@@ -475,10 +529,32 @@ class Chain:
                         self.fx.say(f"{self.name}: the successor runs on --model {carried}, "
                                     "the model the sitting ended on; the start line says "
                                     f"--model {start_model}")
-                    prev, sid, args = sid, nxt, succ
-                    continue
+                    self._reconcile()             # R2: after the restart line, before the successor
+                    reason = self._halted()       # R2's review fold, F1: a stop in the pass
+                    if reason is None:
+                        prev, sid, args = sid, nxt, succ
+                        continue
             self._stop(sid, reason, code, seconds)
             return code
+
+    def _reconcile(self) -> None:
+        """Packet R2, the close: the reconciler's pass when the repo sets `session.reconcile`
+        (the verb's `every` decides whether it runs the detectors). One line said, cut at
+        RECONCILE_WAIT; nothing here stops or holds the successor past that bound."""
+        try:
+            from .reconcile import runner
+            cwd = Path.cwd()
+            if not runner.wanted(cwd, getattr(self, "env", None) or {}):
+                return
+            self.fx.halt = self._halted          # F1: read by the pass while it runs
+            try:
+                rc, line = self.fx.reconcile(cwd, RECONCILE_WAIT)
+            finally:
+                self.fx.halt = None
+        except Exception as e:                   # noqa: BLE001  (a pass never stops a chain)
+            rc, line = None, f"did not run ({e})"
+        what = "reconcile" if rc is None else f"reconcile exit {rc}"
+        self.fx.say(f"{self.name}: {what}: {line}" if line else f"{self.name}: {what}")
 
     def _carry(self, sid: str) -> tuple[list, str | None, str | None]:
         """`carry` for the ending sitting, always against the start line (S34 ruling 3):
@@ -738,15 +814,27 @@ class Chain:
                     f"{self.home / 'STOP'} or press Ctrl-C to end the chain")
         end = self.fx.now() + self.grace
         while True:
-            if signal.SIGINT in self.got or signal.SIGQUIT in self.got:
-                return "interrupted"
-            if self._stopping():
-                return "hangup" if signal.SIGHUP in self.got else "terminated"
+            took = self._signalled()
+            if took is not None:
+                return took
             left = end - self.fx.now()
             if left <= 0:
                 break
             self.fx.sleep(min(self.poll, left))
         return "stop-file" if self._stop_file() else None
+
+    def _signalled(self) -> str | None:
+        """The grace's stop by a signal: `interrupted`, `hangup` or `terminated`, or None."""
+        if signal.SIGINT in self.got or signal.SIGQUIT in self.got:
+            return "interrupted"
+        if self._stopping():
+            return "hangup" if signal.SIGHUP in self.got else "terminated"
+        return None
+
+    def _halted(self) -> str | None:
+        """The grace's own checks and reasons, read again during and right after the close's
+        pass (R2's review fold, F1): a signal, else the stop file, else None."""
+        return self._signalled() or ("stop-file" if self._stop_file() else None)
 
     def _stop(self, sid: str, reason: str, code: int, seconds: int) -> None:
         env = getattr(self, "env", {})
