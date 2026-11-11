@@ -24,18 +24,28 @@ stderr. Stdout is one line, last:
   commit <repo>: red <step> exit <code>, the commit stands: <sha>
                                                 a red or a signal once HEAD moved to this
                                                 call's commit: nothing is restored
+  commit <repo>: red <step> exit <code>, the index moved under the check: nothing is restored
+                                                another writer moved HEAD or the index during
+                                                the check: their state stands (a refusal reads
+                                                `red refused exit 2`)
   commit <repo>: red restore exit 1, the index as found is kept at <snapshot>
 
 One call at a time per work tree: a lock in its git dir is held from before the add until the
 line is printed, so the `ok` sha is the commit this call made; a second call waits up to the
 gate's wall.
 
-Before the add the index file is copied whole to the git dir (`agentik-commit.index`). On every
-other failure (a red, a refusal after the add, any exception, SIGINT, SIGTERM, SIGHUP) that
-copy goes back over the index by git's protocol (`index.lock`, then a rename), under the lock,
-so the index is as it was found, a path someone staged earlier included. A restore that cannot
-be made is `red restore`: the copy stays, and a later call refuses until it is moved back or
-removed. SIGKILL is out of reach: the copy is the way back.
+Before the add, HEAD's sha is read and the index file copied whole to the git dir
+(`agentik-commit.index`); right after the add, the index's entries (`ls-files -s -z`, so a
+stat-only refresh such as anyone's `git status` is no change). On every other failure (a red,
+a refusal after the add, any exception, SIGINT, SIGTERM, SIGHUP) the copy goes back over the
+index by git's protocol (`index.lock`, then a rename), under the lock, only when HEAD is that
+sha and the entries are those, asked again under index.lock: then the index is as it was found,
+a path someone staged earlier included. Otherwise another writer moved HEAD or the index during
+the check, and the old index over theirs would stage their work's reversal: nothing is written,
+the copy is dropped, the line says so, and stderr names this call's paths still staged with
+`git restore --staged -- <paths>`. A restore that cannot be made is `red restore`: the copy
+stays, and a later call refuses until it is moved back or removed. SIGKILL is out of reach: the
+copy is the way back.
 """
 
 from __future__ import annotations
