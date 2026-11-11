@@ -3,6 +3,7 @@
 and the index as it was found on every red and refusal. Each test is red at 36c84ea (alpha.60):
 the verb does not exist. Every repo and queue is under the test's temp roots."""
 import ast
+import contextlib
 import fcntl
 import io
 import os
@@ -527,3 +528,87 @@ def test_fw4d_r1_f7_sigterm_to_the_verb_restores_and_ends_the_check(repo):
     assert (p.returncode, out) == (143, ""), err
     assert (repo.index(), repo.head()) == (before, head)
     assert not snapshot(repo.path / GITDIR).exists()
+
+
+# ---- round 2's ruling (the coordinator's read of fold 1): another writer during a red check ----
+
+OTHER = "git -c user.name=other -c user.email=other@x.invalid"
+MOVED = "commit scratch: red {}, the index moved under the check: nothing is restored\n"
+THEIRS = f"echo theirs > b.txt && git add b.txt && {OTHER} commit -qm theirs"
+
+
+def staged(repo):
+    return git(repo.path, "diff", "--cached", "--name-only").split()
+
+
+def next_plain_commit(repo):
+    repo.write("c.txt", "next\n")
+    git(repo.path, "add", "c.txt")
+    git(repo.path, "-c", "user.name=n", "-c", "user.email=n@x.invalid", "commit", "-qm", "next")
+
+
+def test_fw4d_r2_another_writers_commit_during_a_red_check_stands(repo):
+    """The probe (fw4d-probe/probe.sh): the check commits b.txt with plain git, then reds. The
+    index as found is not put back over the newer HEAD, so b.txt is no reversal staged against
+    it, the line says the index moved, and the next plain commit keeps the other writer's b.txt."""
+    repo.write("a.txt", "mine\n")
+    head = repo.head()
+    rc, out, err = repo.commit("a.txt", check=f"sh -c '{THEIRS} && exit 1'")
+    assert (rc, out) == (1, MOVED.format("check exit 1")), err
+    assert repo.head() != head and git(repo.path, "show", "HEAD:b.txt") == "theirs"
+    assert "b.txt" not in staged(repo) and "mv " not in err
+    assert not snapshot(repo.path / GITDIR).exists()
+    next_plain_commit(repo)
+    assert git(repo.path, "show", "HEAD:b.txt") == "theirs"
+    assert took(repo, "HEAD") == "c.txt"
+
+
+def test_fw4d_r2_another_writers_staging_during_a_red_check_stays(repo):
+    """Another writer only stages c.txt during a red check: it stays staged, this call's a.txt
+    too (nothing is restored), and stderr names a.txt and the way to unstage it."""
+    repo.write("a.txt", "mine\n")
+    head = repo.head()
+    rc, out, err = repo.commit("a.txt", check="sh -c 'echo c > c.txt && git add c.txt && exit 1'")
+    assert (rc, out) == (1, MOVED.format("check exit 1")), err
+    assert repo.head() == head and staged(repo) == ["a.txt", "c.txt"]
+    assert "restore --staged -- a.txt" in err and "mv " not in err
+    assert not snapshot(repo.path / GITDIR).exists()
+
+
+def test_fw4d_r2_a_status_refresh_during_a_red_check_restores_as_found(repo):
+    """A `git status` during a red check, no other writer: it rewrites the index file (a stat
+    refresh) and no entry, so the index goes back as found, the line as before."""
+    repo.write("b.txt", "theirs\n")
+    git(repo.path, "add", "b.txt")
+    repo.write("a.txt", "mine\n")
+    before, head, gd = repo.index(), repo.head(), repo.path / GITDIR
+    check = ("sh -c 'cksum < .git/index > .git/i1 && touch -t 202001010000 b.txt Makefile && "
+             "git status --porcelain > /dev/null && cksum < .git/index > .git/i2 && exit 1'")
+    rc, out, err = repo.commit("a.txt", check=check)
+    assert (rc, out) == (1, "commit scratch: red check exit 1\n"), err
+    assert (gd / "i1").read_text() != (gd / "i2").read_text()      # the refresh wrote the index
+    assert (repo.index(), repo.head()) == (before, head)
+    assert not snapshot(gd).exists()
+
+
+def test_fw4d_r2_sigterm_after_another_writers_commit_restores_nothing(repo):
+    """SIGTERM to the verb during a check that another writer's commit ran in: exit 128+15,
+    the line says the index moved, the other writer's b.txt stands in HEAD and in the index."""
+    pidf = repo.path / GITDIR / "checkpid"
+    repo.write("a.txt", "mine\n")
+    head = repo.head()
+    p = spawn(repo, "a.txt", check=f"sh -c '{THEIRS} && echo $$ > .git/checkpid && exec sleep 30'")
+    try:
+        until(lambda: (pidf.exists() and pidf.read_text().strip()) or p.poll() is not None)
+        p.send_signal(signal.SIGTERM)
+        out, err = p.communicate(timeout=60)
+    finally:
+        p.kill()
+        if pidf.exists() and pidf.read_text().strip():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pidf.read_text()), signal.SIGKILL)      # the check, if it outlived
+    assert (p.returncode, out) == (143, MOVED.format("signal exit 143")), err
+    assert repo.head() != head and git(repo.path, "show", "HEAD:b.txt") == "theirs"
+    assert "b.txt" not in staged(repo) and not snapshot(repo.path / GITDIR).exists()
+    next_plain_commit(repo)
+    assert git(repo.path, "show", "HEAD:b.txt") == "theirs"
