@@ -111,7 +111,7 @@ Two lines arrive as hook context; act on them, do not argue with them:
 
 The **posture** decides how loud the budget is. `off` says nothing (`scratch`,
 `local-only`); `signal` (the default) speaks on the prompt and after tools and
-never blocks; `ask` asks before an Agent, Task or Workflow spawn from the
+never blocks; `ask` asks before an Agent or Task spawn from the
 wind-down zone on; `deny` also refuses such a spawn in the reserve (the
 `builder` profile).
 
@@ -119,6 +119,13 @@ wind-down zone on; `deny` also refuses such a spawn in the reserve (the
 not retry it or work around it.** The remainder is reserved so that you can
 finish cleanly: stop starting new work, commit what is in flight, and write the
 handoff.
+
+**The spawn rule** (packets wfd, wfg) holds whatever the posture, a helper's call too.
+- No workflows: every `Workflow` call is denied with one line. Spawn helpers with
+  the Agent tool, each naming its model, and do not call Workflow again.
+- A Fable helper (`Agent` or `Task` with a Fable `model`) starts only under a Fable
+  session, as both `model.json` and the meter read it; else name `model: 'opus'`.
+  "Not known" (no record yet, or a switch not yet seen) clears after one tool call.
 
 ## The charter
 
@@ -130,6 +137,7 @@ open one before the first act.
 ```bash
 agentik-session charter open "<goal>"          # writes <dir>/<today>-<n>.md, prints its path
 agentik-session charter open --continue "<goal>"  # adopts today's newest of the suffix under 3,584 B, else as open
+agentik-session charter open --replace "<goal>"   # takes this sitting's record off a charter still open here; never in a helper
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest, or two of its suffix stand with no record
 ```
@@ -229,6 +237,7 @@ agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, 
 agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>, est on stderr
 agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
+agentik-session gate land <repo> <branch> <sha> <merge-file>   # one landing, one gate job; stdout its land line, exit the job's
 agentik-session gate status     # what runs, what waits (each with its est), the last five done
 agentik-session commit <paths...> --check <cmd> --message-file <f>   # add by path, check, commit on green; a make check through the gate
 ```

@@ -52,10 +52,24 @@ _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowe
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 20, "floor": 600, "settle": 60}
 HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
+# u1 R1: a helper call open this long, and no helper stamp as recent, is stale: a rejected
+# call fires no Post, so its file would hold the launcher forever. Bash's ceiling is 600 s.
+STALE_CALL = 1200
+# The fold of u1's round 1: a call's `at` is its opening only when it is a finite time not
+# after now and not before this floor (2001-09-09): one before it is in another unit, or no
+# stamp of the hooks', which write time.time(). Any other call file is aged from first sight.
+AT_FLOOR = 1e9
 _GUARD_SESSION = "respawn-chain"     # the id the guards resolve under; no overlay is read
 _LOOP = re.compile(r"^/loop\s+(\d+)\s*([smhd])(?![A-Za-z])")
 _EVERY = re.compile(r"\bevery\s+(\d+)\s*([smhd])[a-z]*\s*$", re.I)   # `/loop <p> every 2h`
 _MINUTES = {"s": 1 / 60, "m": 1, "h": 60, "d": 1440}
+# Packet R2: the reconciler's pass at a respawn close is cut at this many seconds, the
+# launcher's own `kill_grace`, so a successor never waits on it longer.
+RECONCILE_WAIT = 30
+# R2's review fold, F1: while the pass runs, the launcher's stops are read this often, so a
+# Ctrl-C, SIGTERM or STOP file ends the pass's process within a second.
+RECONCILE_POLL = 0.2
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # C0, DEL and C1: never to the owner's tty
 _COMPACT = re.compile(r"(?:^|\s)/compact(?:\s|$)")     # the command, never a path's part
 
 
@@ -209,6 +223,21 @@ def prompt_gap(args) -> str | None:
     return gap
 
 
+def reconcile_argv() -> list:
+    """The close's pass (packet R2): this interpreter and this tree's launcher, as
+    `gate.spawn_serve` runs its runner, then the verb with no `--force`."""
+    runner = Path(__file__).resolve().parent.parent / "agentik-session"
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.environ.get("HOME", ""), ".cache")
+    prefix = os.path.join(cache, "agentik", "pycache")
+    return [sys.executable, "-I", "-X", "pycache_prefix=" + prefix, str(runner), "reconcile"]
+
+
+def _clean(line: str) -> str:
+    """One line of the pass's output for the owner's terminal: control characters dropped,
+    whitespace folded (R2's review fold, F7)."""
+    return " ".join(_CONTROL.sub("", line).split())
+
+
 def home(state, name: str) -> Path | None:
     """The chain `name`'s home, `<state>/respawn/<name>/` (its lock, STOP, held.json and,
     since S39, state.md with state.json); None for a name that is not a chain's."""
@@ -250,6 +279,13 @@ def _num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _opened(at, now: float) -> bool:
+    """u1's fold: a call file's `at` is when it opened only as a finite time from
+    AT_FLOOR to now; NaN, an infinity, a future stamp or another unit is not. Compared,
+    never subtracted: a JSON integer too large for a float compares exactly."""
+    return _num(at) and AT_FLOOR <= at <= now
+
+
 def _status(rc: int) -> int:
     """A child's status as a shell reports it: a signal N is 128+N (ruling 8)."""
     return 128 - rc if rc < 0 else rc
@@ -261,6 +297,10 @@ class Effects:
 
     def now(self) -> float:
         return time.time()
+
+    def monotonic(self) -> float:
+        """A clock that does not go back: a call file's first sight (u1's fold)."""
+        return time.monotonic()
 
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
@@ -307,6 +347,38 @@ class Effects:
     def append(self, state: Path, entry: dict) -> Path:
         return ledger.append_chain(state, entry)
 
+    halt = None     # R2's review fold, F1: the chain's stop check, read while the pass runs
+
+    def reconcile(self, cwd, timeout: float) -> tuple:
+        """(the pass's exit, its last line): stdin /dev/null, output captured, cut at
+        `timeout`; the exit is None when the pass was cut, stopped or did not start. Every
+        RECONCILE_POLL seconds `halt` is read: a stop kills the pass (R2's review fold, F1).
+        The line is decoded with replacement and holds no control character (F7)."""
+        halt = self.halt or (lambda: None)
+        try:
+            proc = subprocess.Popen(reconcile_argv(), cwd=str(cwd), stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as e:
+            return None, f"did not start ({e})"
+        end = time.monotonic() + timeout
+        with proc:
+            while True:
+                left = end - time.monotonic()
+                try:
+                    out, err = proc.communicate(timeout=max(0.0, min(RECONCILE_POLL, left)))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                why = "stopped" if halt() else (f"cut after {timeout:g} s"
+                                                if time.monotonic() >= end else None)
+                if why is not None:
+                    proc.kill()
+                    proc.wait()
+                    return None, why
+        lines = [l for l in map(_clean, out.decode("utf-8", "replace").splitlines()) if l] or \
+                [l for l in map(_clean, err.decode("utf-8", "replace").splitlines()) if l]
+        return proc.returncode, lines[-1][:300] if lines else ""
+
     def restarts(self, state: Path, chain: str, now: float) -> int:
         return ledger.restarts_in(state, chain, now)
 
@@ -317,11 +389,15 @@ class Chain:
     again before each restart; `poll`, `grace` and `kill_grace` are seconds."""
 
     def __init__(self, name, args, state, effects, guards, *, poll=2, grace=10,
-                 kill_grace=30, argv=None, warnings=()):
+                 kill_grace=30, argv=None, warnings=(), stale_call=STALE_CALL):
         self.name, self.args, self.state, self.fx = name, list(args), Path(state), effects
         self.warnings = list(warnings)  # said once, after the lock and the guards hold
         self._guards = guards
         self.poll, self.grace, self.kill_grace = poll, grace, kill_grace
+        self.stale_call = stale_call    # u1 R1: seconds before an open helper call is stale
+        self._stale: list[dict] = []    # the stale calls the last ready read went past
+        self._first: dict[str, float] = {}  # a call file's first sight, on fx.monotonic()
+        self.went_past: list[dict] = []     # and those of the child the launcher ended
         self.argv = list(argv) if argv else ["agentik", "session", "run", "--chain", name,
                                              "--", *self.args]
         self.home = self.state / "respawn" / name
@@ -420,6 +496,10 @@ class Chain:
             rc, ended_by, held = self._watch(proc, sid, start)
             cut = len(self.got)                  # the signals taken while the child ran
             self.fx.tty_restore(attrs)                     # §3.7: before anything prints
+            if self.went_past:                   # u1 R1's word, before the grace line
+                self.fx.say(f"{self.name}: went on past a stale helper call: " + "; ".join(
+                    f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
+                    for s in self.went_past))
             seconds = round(self.fx.now() - start)
             reason, code, marker, count = self._decide(sid, start, rc, ended_by, held)
             if reason is None:
@@ -434,7 +514,8 @@ class Chain:
                          "charter_sha256": marker.get("charter_sha256"),
                          "sitting_seconds": seconds, "ended_by": ended_by or "exit",
                          "restarts_24h": count + 1, "cap": self.g["cap"],
-                         "model": carried, "start_model": start_model}      # S34 ruling 4
+                         "model": carried, "start_model": start_model,      # S34 ruling 4
+                         "stale_calls": list(self.went_past) or None}       # u1 R1
                 try:
                     self.fx.append(self.state, entry)       # §3.5: before the successor
                 except (OSError, ledger.LedgerError) as e:
@@ -448,10 +529,32 @@ class Chain:
                         self.fx.say(f"{self.name}: the successor runs on --model {carried}, "
                                     "the model the sitting ended on; the start line says "
                                     f"--model {start_model}")
-                    prev, sid, args = sid, nxt, succ
-                    continue
+                    self._reconcile()             # R2: after the restart line, before the successor
+                    reason = self._halted()       # R2's review fold, F1: a stop in the pass
+                    if reason is None:
+                        prev, sid, args = sid, nxt, succ
+                        continue
             self._stop(sid, reason, code, seconds)
             return code
+
+    def _reconcile(self) -> None:
+        """Packet R2, the close: the reconciler's pass when the repo sets `session.reconcile`
+        (the verb's `every` decides whether it runs the detectors). One line said, cut at
+        RECONCILE_WAIT; nothing here stops or holds the successor past that bound."""
+        try:
+            from .reconcile import runner
+            cwd = Path.cwd()
+            if not runner.wanted(cwd, getattr(self, "env", None) or {}):
+                return
+            self.fx.halt = self._halted          # F1: read by the pass while it runs
+            try:
+                rc, line = self.fx.reconcile(cwd, RECONCILE_WAIT)
+            finally:
+                self.fx.halt = None
+        except Exception as e:                   # noqa: BLE001  (a pass never stops a chain)
+            rc, line = None, f"did not run ({e})"
+        what = "reconcile" if rc is None else f"reconcile exit {rc}"
+        self.fx.say(f"{self.name}: {what}: {line}" if line else f"{self.name}: {what}")
 
     def _carry(self, sid: str) -> tuple[list, str | None, str | None]:
         """`carry` for the ending sitting, always against the start line (S34 ruling 3):
@@ -474,6 +577,8 @@ class Chain:
         sdir = resolver.session_dir(self.state, sid)
         held = ended_by = term_at = seen = None
         forwarded = False
+        self.went_past = []                  # u1 R1: the stale calls this child's end passed
+        self._first = {}                     # and the first sights of its odd call files
         self._said = ""                      # a file a past watch left goes at the first say
         try:
             while True:
@@ -522,6 +627,8 @@ class Chain:
         if not self._resolve():                  # §4: a config edit counts before the signal
             return "config", seen, False
         held = self._checks(sdir, sid, start, now)           # N4: again, right before
+        if held is None:
+            self.went_past = list(self._stale)       # u1 R1: said once the terminal is back
         return held, seen, held is None
 
     def _resolve(self) -> bool:
@@ -561,9 +668,14 @@ class Chain:
             return
         self._said = reason
 
-    def _ready(self, sdir: Path, now: float) -> bool:
+    def _ready(self, sdir: Path, now: float, mono: float | None = None) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,
-        the end has stood `settle`, the helpers are quiet `settle` and none has a call open."""
+        the end has stood `settle`, the helpers are quiet `settle` and none has a call open,
+        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since. A True
+        keeps the stale calls in `_stale`, `[{"id", "age"}]`, the age in whole seconds.
+        A call whose `at` is no time (`_opened`) is aged from the launcher's first sight of
+        its name on `mono`, `fx.monotonic()` by default, and its age is None (u1's fold)."""
+        mono = self.fx.monotonic() if mono is None else mono
         settle = self.g["settle"]
         marker, te = _json(sdir / hooks.MARKER) or {}, _json(sdir / hooks.TURN_ENDED) or {}
         written, ended = marker.get("written"), te.get("at")
@@ -575,14 +687,39 @@ class Chain:
         # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
         # close between the two reads leaves a fresh stamp, never a gap.
         try:
-            if any(not p.name.startswith(".") for p in (sdir / hooks.CALLS).iterdir()):
-                return False
+            paths = sorted(p for p in (sdir / hooks.CALLS).iterdir() if not p.name.startswith("."))
         except FileNotFoundError:
-            pass
+            paths = []
         except OSError:
-            return False
+            paths = [sdir / hooks.CALLS]     # calls/ will not list: aged from first sight
+        calls = []                           # (id, age in seconds, from `at` or not)
+        for p in paths:
+            try:
+                at = (_json(p) or {}).get("at")
+            except Exception:                # one file's error holds a poll at most (fold)
+                at = None
+            seen = self._first.get(str(p))
+            if _opened(at, now) and (seen is None or now - at >= mono - seen):
+                calls.append((p.name, now - at, True))
+            else:                            # the older of `at` and first sight counts
+                seen = self._first.setdefault(str(p), mono)
+                calls.append((p.name, mono - seen, False))
         helper = _json(sdir / hooks.HELPER_ACTIVITY)
-        return helper is None or (_num(helper.get("at")) and now - helper["at"] >= settle)
+        if helper is not None and not _num(helper.get("at")):
+            return False                     # a malformed stamp holds
+        # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
+        # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
+        h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+        recent = h is not None and h > now - self.stale_call
+        stale = []
+        for cid, age, timed in calls:
+            if recent or age < self.stale_call:
+                return False
+            stale.append({"id": cid, "age": int(age) if timed else None})
+        if h is not None and h > now - settle:
+            return False
+        self._stale = stale
+        return True
 
     # ---- the checks (§3.4, §3.5) --------------------------------------------------------
 
@@ -677,15 +814,27 @@ class Chain:
                     f"{self.home / 'STOP'} or press Ctrl-C to end the chain")
         end = self.fx.now() + self.grace
         while True:
-            if signal.SIGINT in self.got or signal.SIGQUIT in self.got:
-                return "interrupted"
-            if self._stopping():
-                return "hangup" if signal.SIGHUP in self.got else "terminated"
+            took = self._signalled()
+            if took is not None:
+                return took
             left = end - self.fx.now()
             if left <= 0:
                 break
             self.fx.sleep(min(self.poll, left))
         return "stop-file" if self._stop_file() else None
+
+    def _signalled(self) -> str | None:
+        """The grace's stop by a signal: `interrupted`, `hangup` or `terminated`, or None."""
+        if signal.SIGINT in self.got or signal.SIGQUIT in self.got:
+            return "interrupted"
+        if self._stopping():
+            return "hangup" if signal.SIGHUP in self.got else "terminated"
+        return None
+
+    def _halted(self) -> str | None:
+        """The grace's own checks and reasons, read again during and right after the close's
+        pass (R2's review fold, F1): a signal, else the stop file, else None."""
+        return self._signalled() or ("stop-file" if self._stop_file() else None)
 
     def _stop(self, sid: str, reason: str, code: int, seconds: int) -> None:
         env = getattr(self, "env", {})

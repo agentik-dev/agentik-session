@@ -181,8 +181,8 @@ def test_stop_line_names_the_reason(tmp_path, reason):
 
 def test_makefile_gate_is_bounded():
     text = (ROOT / "Makefile").read_text()
-    # 840 s plus the grace fits inside the relay's 900 s timeout (ADV10-1)
-    assert ("scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked"
+    # 1800 s, the owner's ruling of 2026-11-10 (was 840 s inside the relay's 900, ADV10-1)
+    assert ("scripts/bounded --lock .check.lock --wall 1800 --load 4 -- $(MAKE) check-unlocked"
             in text)
     # the README render spawns `claude -p`: walled and held off like the gate (ADV10-6);
     # test_readme.py holds the wall to the renderer's budget (F5)

@@ -300,7 +300,34 @@ def _suffix(row: str | None) -> str:
     return f"-{row}" if row and ROW_RE.match(row) else ""
 
 
-def bare_target(dir, row: str | None, recorded: str | None) -> Path:
+EXIT_MARK = "- exit taken: "
+
+
+def still_open(path) -> bool:
+    """Packet n33 R1: a charter file is still open while it is a file with no line opening
+    with `- exit taken: ` (the line `close` appends); a gone or unreadable file is not."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return False
+    return not any(l.startswith(EXIT_MARK) for l in text.splitlines())
+
+
+def held(dir, recorded) -> Path | None:
+    """Packet n33 R1: the file a session's record holds in `dir`: `recorded` when it is
+    absolute, its directory resolves to `dir`'s and it is still open; else None (a gone,
+    closed or outside record holds nothing)."""
+    if not isinstance(recorded, str) or not os.path.isabs(recorded):
+        return None
+    try:
+        inside = os.path.realpath(os.path.dirname(recorded)) == os.path.realpath(dir)
+    except (OSError, ValueError):
+        return None
+    return Path(recorded) if inside and still_open(recorded) else None
+
+
+def bare_target(dir, row: str | None, recorded: str | None,
+                replaced: str | None = None) -> Path:
     """Packet S54 R1: the file a bare `close` writes. `recorded` (this sitting's
     `sessions/<sid>/charter.json` path) wins when it is absolute, a file, and its directory
     resolves to `dir`'s; the target is then `Path(dir) / <its name>`, so the caller prints
@@ -309,19 +336,28 @@ def bare_target(dir, row: str | None, recorded: str | None) -> Path:
     charters of `open`'s suffix for `row` (another sitting may own the newest); each refusal
     names today's charters and `close <file>`. Else today's newest, when its name carries the
     suffix. Raises CharterError, nothing written, on a refusal, when there is none today, or
-    when today's newest is another suffix's (another sitting's file)."""
+    when today's newest is another suffix's (another sitting's file). Packet n33 R3: a
+    winning record that `open --replace` wrote while `replaced` stood open refuses while
+    `replaced` is still open in `dir`."""
     date, suffix = today(), _suffix(row)
     found = _numbered(Path(dir), date)
     own = [p for k, p in found if p.name == f"{date}-{k}{suffix}.md"]
     ask = "name the file: charter close <file>"
     if isinstance(recorded, str) and os.path.isabs(recorded):
+        wins = False
         try:
             inside = (os.path.realpath(os.path.dirname(recorded))
                       == os.path.realpath(dir))
-            if inside and os.path.isfile(recorded):
-                return Path(dir) / os.path.basename(recorded)
+            wins = inside and os.path.isfile(recorded)
         except (OSError, ValueError):
             inside = True
+        if wins:                     # n33 R3: raised here, outside the try's ValueError
+            moved = held(dir, replaced)
+            if moved is not None:
+                raise CharterError(
+                    f"this session's record names {recorded}, opened with --replace while "
+                    f"{moved} stood open, and it still does; {ask}")
+            return Path(dir) / os.path.basename(recorded)
         if not inside:
             listed = ", ".join(str(p) for _, p in found) or "none"
             raise CharterError(

@@ -99,6 +99,8 @@ tests/test_hooks.py: renamed
 # tests name the relay's legacy packet stems.
 scripts/doclint: renamed
 tests/test_doclint.py: renamed
+# n33's tests name the old launcher link among the five names the hook denies.
+tests/test_n33.py: renamed
 # Two throwaway test identities on the reserved .invalid domain, written whole in two
 # commits of FW4d's fold 2 (the tests', and the charter line quoting them). History is
 # append-only, so those commits cannot be remade; the tree holds none (the tests split

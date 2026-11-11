@@ -70,7 +70,9 @@ OLD_RELAY = "agent-relay"
 SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools",
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
                 "builders", "push", "device", "charter", "verify", "respawn", "priority",
-                "pacing", "admission")
+                "pacing", "admission", "reconcile")
+# `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
+# are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
 RESPAWN_KEYS = ("cap", "floor", "settle")
 POSTURES = ("off", "signal", "ask", "deny")

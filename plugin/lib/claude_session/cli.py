@@ -374,6 +374,8 @@ def cmd_charter(args) -> int:
     """The sitting's charter: open, check, close (the shape of D10)."""
     if getattr(args, "cont", False) and args.action != "open":
         _die(f"charter --continue is read only with open, not {args.action}", 2)
+    if getattr(args, "replace", False) and args.action != "open":
+        _die(f"charter --replace is read only with open, not {args.action}", 2)
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
@@ -399,6 +401,17 @@ def cmd_charter(args) -> int:
         # design/05 §6: --continue adopts today's newest charter, when it is of this suffix
         # and under 3,584 bytes, recorded and printed as a new one is, its bytes untouched.
         path = charter.adoptable(d, row) if getattr(args, "cont", False) else None
+        # Packet n33 R1: an open that would move this sitting's record off a charter still
+        # open in the same directory (a helper's Bash carries its parent's id) refuses,
+        # before any write, unless --replace; R2 records what a replace moved off.
+        recorded = _recorded_charter()
+        holds = charter.held(d, recorded) if _records_here(d, section) else None
+        if holds is not None and path is not None and _same(path, holds):
+            holds = None                         # --continue adopts the recorded file
+        if holds is not None and not getattr(args, "replace", False):
+            _die(f"charter open: this session's record names {holds}, still open (no exit "
+                 f"line); close it first (charter close {holds}), open in a worktree of your "
+                 "own, or take the record on purpose with charter open --replace", 2)
         if path is None:
             rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
             rc2, head = gitinfo._git(cwd, "rev-parse", "--short", "HEAD")
@@ -406,7 +419,8 @@ def cmd_charter(args) -> int:
                                 head.strip() if rc2 == 0 else None,
                                 repo=os.path.basename(top.strip()) if rc == 0 else None,
                                 row=row)
-        _record_charter(path, section)
+        _record_charter(path, section,
+                        replaced=str(holds) if holds is not None else None)
         print(path)
         return 0
     if len(args.args) > 1:
@@ -418,7 +432,8 @@ def cmd_charter(args) -> int:
         # suffix; an outside record, or two of the suffix with no record, refuses.
         d = args.dir or _charter_dir(_session_section(cwd))
         try:
-            path = charter.bare_target(d, os.environ.get("RELAY_ROW"), _recorded_charter())
+            path = charter.bare_target(d, os.environ.get("RELAY_ROW"), _recorded_charter(),
+                                       _recorded_charter("replaced"))
         except charter.CharterError as e:
             _die(str(e), 2)
     try:
@@ -826,7 +841,32 @@ def _rewrite_resolved(model_set: bool = False) -> None:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
 
 
-def _record_charter(path, section: dict) -> None:
+def _same(a, b) -> bool:
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except (OSError, ValueError):
+        return False
+
+
+def _records_here(d, section: dict) -> os.PathLike | None:
+    """Packet n33: `_record_charter`'s tests, read before the open. The session dir when an
+    open in directory `d` would write this sitting's record: a valid session id outside a
+    helper, the session dir there, and `d` exactly `<the session's cwd>/<charter dir>`, the
+    cwd read from its `request.json`; else None."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
+        return None
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
+    if not sdir.is_dir():
+        return None
+    scwd = (resolver.load_request(sdir) or {}).get("cwd")
+    if not isinstance(scwd, str) or not os.path.isabs(scwd):
+        return None
+    want = os.path.join(scwd, hooks._charter({"session": section}))
+    return sdir if _same(os.path.abspath(d), want) else None
+
+
+def _record_charter(path, section: dict, replaced: str | None = None) -> None:
     """S33 ruling 2: `charter open` records the file it made, absolute, in this sitting's
     session dir (`sessions/<sid>/charter.json` {path}), found as `checkpoint --respawn`
     finds it; the CHECKPOINT line names it under a launcher. It writes only when the file's
@@ -834,37 +874,32 @@ def _record_charter(path, section: dict) -> None:
     dir's `request.json` (R1: a helper's Bash carries its parent's id, so its open in a
     worktree never takes the parent's record). Without a session id, in a helper, with no
     session dir or no recorded cwd it writes nothing; a failed write is a note, never a
-    refusal, since the charter is open either way."""
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
-    if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
+    refusal, since the charter is open either way. Packet n33 R2: `replaced`, the still-open
+    file an `open --replace` moved the record off, is kept as {path, replaced}."""
+    sdir = _records_here(os.path.dirname(os.path.abspath(path)), section)
+    if sdir is None:
         return
-    sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
-    if not sdir.is_dir():
-        return
-    scwd = (resolver.load_request(sdir) or {}).get("cwd")
-    if not isinstance(scwd, str) or not os.path.isabs(scwd):
-        return
-    want = os.path.join(scwd, hooks._charter({"session": section}))
-    if os.path.realpath(os.path.dirname(os.path.abspath(path))) != os.path.realpath(want):
-        return
+    rec = {"path": os.path.abspath(path)}
+    if replaced is not None and not _same(replaced, path):
+        rec["replaced"] = replaced
     try:
-        store._write_private(sdir / hooks.CHARTER_REC,
-                             json.dumps({"path": os.path.abspath(path)}) + "\n")
+        store._write_private(sdir / hooks.CHARTER_REC, json.dumps(rec) + "\n")
     except OSError as e:
         print(f"note: charter open: the session's charter record was not written: {e}",
               file=sys.stderr)
 
 
-def _recorded_charter() -> str | None:
+def _recorded_charter(key: str = "path") -> str | None:
     """Packet S54 R2: the path `charter open` recorded in this sitting's session dir
     (`sessions/<sid>/charter.json`), read only with a valid session id and outside a helper;
-    any failure reads as None."""
+    any failure reads as None. Packet n33 R3: `key` "replaced" reads what a replace moved
+    off."""
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     if not hooks._SID.match(sid) or os.environ.get("CLAUDE_SESSION_HELPER") == "1":
         return None
     try:                                         # read as the hook reads it (hooks._load_json)
         sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
-        path = hooks._load_json(sdir / hooks.CHARTER_REC).get("path")
+        path = hooks._load_json(sdir / hooks.CHARTER_REC).get(key)
     except (OSError, ValueError):
         return None
     return path if isinstance(path, str) else None
@@ -1092,10 +1127,11 @@ def cmd_run(args) -> int:
 
 
 def cmd_gate(args) -> int:
-    """`agentik session gate run|wait|status` (design/gate-r1.md): the per-Mac gate queue.
+    """`agentik session gate run|wait|status|land` (design/gate-r1.md): the per-Mac gate queue.
     `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
     guide's rule: exit codes report the task, not the content), the job's code with
-    --strict (packet FW2), 1 past --timeout; `serve` is the runner, internal."""
+    --strict (packet FW2), 1 past --timeout; `land` exits the landing's code (packet FW4c);
+    `serve` is the runner, internal."""
     from pathlib import Path
     from . import gate
     env = os.environ
@@ -1105,6 +1141,8 @@ def cmd_gate(args) -> int:
         return gate.serve(root)
     if verb == "wait":
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
+    if verb == "land":
+        return _gate_land(root, args, env)
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
@@ -1134,6 +1172,36 @@ def cmd_gate(args) -> int:
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
+def cmd_reconcile(args) -> int:
+    """`agentik session reconcile [--json] [--force]` (packet R2): R1's detectors over the
+    tree the cwd's `session.reconcile` names, when `every` hours have passed since the last
+    record. 0 clean or not due, 1 a finding flagged and nothing else, 2 the config, an
+    unwritable record or any other error, one line and never a traceback (R2's review fold,
+    F4)."""
+    from .reconcile import runner
+
+    def warn(line):
+        print(line, file=sys.stderr)
+    try:
+        code, lines, doc = runner.run(os.getcwd(), dict(os.environ), time.time(), args.force,
+                                      warn=warn)
+    except runner.ConfigError as e:
+        for line in str(e).splitlines():
+            print(f"error: agentik-session reconcile: {line}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        _die(f"agentik-session reconcile: the record was not written ({e})", 2)
+    except Exception as e:                       # noqa: BLE001  (exit 1 is flagged alone)
+        why = " ".join(str(e).split()) or "no message"
+        _die(f"agentik-session reconcile: {type(e).__name__}: {why}", 2)
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        for line in lines:
+            print(line)
+    return code
+
+
 def cmd_unattended(args) -> int:
     """`agentik session unattended run|status|report` (hq design/07 §2): the unattended
     loop. `run` exits 0 on queue-spent, until or max-rows, 3 on
@@ -1157,6 +1225,65 @@ def cmd_unattended(args) -> int:
                          land=args.land)
     except unattended.UnattendedError as err:
         _die(f"unattended run: {err}", 2)
+
+
+def _gate_land(root, args, env) -> int:
+    """`gate land <repo> <branch> <sha> <merge-file>` (packet FW4c): one landing as one gate
+    job, the job `gate land --in-job` with the same four, absolute. Stdout is one line, the
+    land line, last; the queued line and wait's go to stderr; the exit is the job's
+    (`wait --strict`'s). The verdict is the log's last land line of this repo, never the log's
+    last line (fold r1, F1); an ok line is exit 0, since the steps write it last, so a code
+    after it is the gate's (125, the runner died), not the job's. A job's log with no land
+    line of this repo reads `red gate`, never ok. `--in-job` is that job: it runs the steps
+    here, and only inside a gate job."""
+    from . import gate, land
+    mark = env.get(gate.JOB_MARK) or ""
+    if args.in_job:
+        if not mark:
+            _die("gate land --in-job runs only inside a gate job, which sets "
+                 f"{gate.JOB_MARK}; queue it: agentik session gate land <repo> <branch> <sha> "
+                 "<merge-file>", 2)
+        return land.main(list(args.args))
+    if mark:
+        _die(f"gate land: this is gate job {mark[:40]}; a landing queued here waits on its "
+             "own repo until the wall cuts it: run gate land --in-job", 2)
+    if len(args.args) != 4:
+        print("land-step: " + land.USAGE, file=sys.stderr)
+        print("land ?: red usage exit 2", flush=True)
+        return 2
+    repo = land.resolve_repo(args.args[0])
+    name = os.path.basename(repo)
+    if not os.path.isdir(repo):
+        print(f"land-step: no such directory: {repo}", file=sys.stderr)
+        print(f"land {name}: red repo exit 1", flush=True)
+        return 1
+    branch, sha, merge = args.args[1], args.args[2], os.path.abspath(args.args[3])
+    command = [*gate.self_argv(), "gate", "land", "--in-job", repo, branch, sha, merge]
+    try:
+        caller = gate.resolve_caller(args, env)
+        wall = args.wall if args.wall is not None else _gate_wall(env)
+        e = gate.enqueue(root, repo, command, dict(env), [], wall, f"land {branch}", caller,
+                         time.time())
+    except gate.GateError as err:
+        _die(f"gate land: {err}", 2)
+    gate.spawn_serve(root)
+    print(f"queued {e['id']} position {gate.position(root, e['id'])} repo {e['repo']} "
+          f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
+          file=sys.stderr, flush=True)
+    rc, result = gate.wait(root, e["id"])
+    if rc != 0 or result is None:
+        _die(f"gate land: {e['id']} has no result under {gate.gate_dir(root)}", 1)
+    print(gate.wait_line(result), file=sys.stderr, flush=True)
+    code = gate.strict_code(result)
+    line = gate.last_line(result.get("log"), e["id"], f"land {name}: ") or ""
+    if line.startswith(f"land {name}: ok "):
+        code = 0
+    else:
+        code = code or 1
+        if not line.startswith(f"land {name}: red "):
+            line = f"land {name}: red gate exit {code}"
+    print(line, flush=True)
+    return code
 
 
 def _gate_wall(env) -> int:
@@ -1365,6 +1492,9 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("--continue", dest="cont", action="store_true",
                     help="open: adopt today's newest charter of the same suffix while under "
                          "3,584 bytes, writing nothing to it; else open the next")
+    ch.add_argument("--replace", action="store_true",
+                    help="open: take this sitting's record off a charter still open in the "
+                         "same directory, recording the file it replaced")
     ch.set_defaults(func=cmd_charter)
 
     ru = sub.add_parser("rules", help="the priority and pacing this session meets, "
@@ -1389,7 +1519,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gt = sub.add_parser("gate", help="the gate queue: one running per repo under a load "
                                       "ceiling, its result to the caller")
-    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status")
+    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status|land")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")
     gr.add_argument("--session", metavar="SID",
@@ -1410,11 +1540,28 @@ def build_parser() -> argparse.ArgumentParser:
                     help="exit the job's code (0 to 255, else 1), not 0; wait's own 2 (no such "
                          "id) and 1 (the timeout) print nothing on stdout, so a line there "
                          "marks the code as the job's")
+    gl = gsub.add_parser("land", help="land a branch as one gate job: check, hygiene, merge "
+                                       "--no-ff on main, remove the worktree, delete the branch")
+    gl.add_argument("args", nargs="*", metavar="repo branch sha merge-file",
+                    help="the repo (a bare name is under ~/code), the branch, its head's sha, "
+                         "the merge message's file")
+    gl.add_argument("--session", metavar="SID",
+                    help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
+    gl.add_argument("--wall", type=_positive_int, metavar="SECONDS",
+                    help="cut the landing after SECONDS (default: gate.wall, 5400)")
+    gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
+
+    rk = sub.add_parser("reconcile", help="the reconciler's detectors when due "
+                                          "(session.reconcile): one record, 0 clean or not "
+                                          "due, 1 flagged, 2 the config")
+    rk.add_argument("--json", action="store_true", help="the findings, or when not due, as JSON")
+    rk.add_argument("--force", action="store_true", help="run though `every` has not elapsed")
+    rk.set_defaults(func=cmd_reconcile)
 
     nt = sub.add_parser("unattended", help="the unattended loop: one claude -p builder per queue "
                                        "row, landed through the gate, to a stop")
