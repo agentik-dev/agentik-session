@@ -370,11 +370,12 @@ Postures, least to most restrictive, all confirmed by test:
 - `deny`: returns `"deny"` only in the reserve zone; in wind-down it still
   just asks.
 
-Whatever the posture, the spawn rule (packet wfg) denies before launch: a
-`Workflow` script it cannot bound to 8 agents, each with a literal `model`,
-and any Fable spawn (`Agent`, `Task`, or a script's agent) unless
-`model.json` (SessionStart, then each `PostModelSwitch`) and the meter both
-read Fable; the denial names the lines and the rewrite (the skill lists them).
+Whatever the posture, a helper's call too, the spawn rule (packets wfd, wfg)
+denies two spawns. Every `Workflow` call, unread, with one line: this suite
+runs no workflows; spawn helpers with the Agent tool, each naming its model.
+And a Fable `Agent` or `Task` unless `model.json` (SessionStart, then each
+`PostModelSwitch`) and the meter both read Fable; its line says to name
+`model: 'opus'`.
 
 - With the plugin off or its hook timed out nothing denies: a timed-out hook
   does not block the call, and the tool's own caps alone hold, 16 agents at

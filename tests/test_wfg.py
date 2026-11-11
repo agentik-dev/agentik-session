@@ -1,13 +1,12 @@
-"""Packet wfg: the Workflow guard and the Fable spawn rule, through the PreToolUse hook.
+"""Packets wfg and wfd: the Fable spawn rule through the PreToolUse hook, and `family`.
 
-Fixtures under tests/fixtures/wfg/ are three of the scripts a sitting ran on 2026-11-10
-(their shapes kept, their text replaced) and one fixed sweep of six Opus agents.
+The script checker is gone with the Workflow tool (packet wfd, `tests/test_wfd.py`): what
+stays here is the owner's rule that a Fable helper starts only under a Fable session, the
+model records it reads (SessionStart and PostModelSwitch), and its failure that denies.
 """
 import json
-import statistics
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -15,10 +14,7 @@ import pytest
 from claude_session import config, hooks
 
 ROOT = Path(__file__).resolve().parents[1]
-FIX = ROOT / "tests" / "fixtures" / "wfg"
 SID = "test-sess-0000-1111-2222"
-META = "export const meta = { name: 'x', description: 'y' }\n"
-OPUS = "{ label: 'a', model: 'opus' }"
 
 
 @pytest.fixture(autouse=True)
@@ -50,13 +46,6 @@ def parent(model=None, meter=None):
             p.write_text(json.dumps({"model": m}))
 
 
-def wf(script=None, **ti):
-    if script is not None:
-        ti["script"] = script
-    return hooks.pre_tool_use({"tool_name": "Workflow", "session_id": SID, "tool_input": ti,
-                               "tool_use_id": "toolu_wfg"})
-
-
 def reason(out):
     hso = out["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny" and hso["hookEventName"] == "PreToolUse"
@@ -71,155 +60,6 @@ def spawn(model=None, tool="Agent", **extra):
     if model is not None:
         ti["model"] = model
     return hooks.pre_tool_use({"tool_name": tool, "session_id": SID, "tool_input": ti, **extra})
-
-
-# --- T1, T2: the runaway's own shapes are denied; the fixed sweep passes ------------------
-
-@pytest.mark.parametrize("name, words", [
-    ("runaway_sweep_verify.js", ("lines 30, 31, 35, 37: every agent( names its model",
-                                 "line 31: a list known only at run time", ".slice(0, N)")),
-    ("runaway_review_fix.js", ("no spread", "line 35: a list known only at run time")),
-    ("runaway_spread_model.js", ("lines 21, 24, 30, 31, 32, 42: an agent's options must be a "
-                                 "plain literal, no spread",)),
-])
-def test_t1_the_runaways_own_shapes_are_denied(name, words):
-    parent("claude-fable-5-2", "claude-fable-5-2")     # the model that night's sitting ran
-    r = reason(wf((FIX / name).read_text()))
-    for w in words:
-        assert w in r, r
-
-
-def test_t2_six_opus_agents_each_model_named_pass():
-    src = (FIX / "pass_six_opus.js").read_text()
-    assert guard().measure(src, "opus") == (6, [])
-    for model in ("claude-opus-5-5", "claude-fable-5-2", None):
-        parent(model, model)
-        assert wf(src) == {}
-
-
-# --- T3: the count and the ceiling -------------------------------------------------------
-
-def lits(n):
-    return META + "\n".join(f"const r{i} = await agent('p{i}', {OPUS})" for i in range(n))
-
-
-def test_t3_the_ceiling_is_eight():
-    g = guard()
-    assert g.MAX_AGENTS == 8
-    assert g.measure(lits(8)) == (8, [])
-    total, why = g.measure(lits(9))
-    assert total == 9 and why == ["the script can start 9 agents and the ceiling is 8: cut the "
-                                  "lists, or split the work across turns"]
-
-
-@pytest.mark.parametrize("body, total", [
-    ("const A = ['a', 'b', 'c']\nawait parallel(A.map(a => () => agent(a, %s)))", 3),
-    ("const A = ['a', 'b', 'c']\nawait pipeline(A, a => agent(a, %s), (r, a) => agent(r, %s))", 6),
-    ("const r = await agent('find', %s)\n"
-     "await parallel(r.items.slice(0, 5).map(f => () => agent(f, %s)))", 6),
-    ("await parallel([() => agent('a', %s), () => agent('b', %s)])", 2),
-    ("await parallel(['a', 'b'].map(x => () => agent(x, %s).then(r => agent(r, %s))))", 4),
-    ("const A = ['a', 'b']\nconst B = ['c', 'd']\n"
-     "await parallel(A.map(a => () => parallel(B.map(b => () => agent(a + b, %s)))))", 4),
-    ("const x = cond ? await agent('a', %s) : await agent('b', %s)\n"
-     "if (x) { await agent(`c ${await agent('d', %s)}`, %s) }", 4),
-    ("log('no helper at all')", 0),
-])
-def test_t3_what_the_static_read_counts(body, total):
-    assert guard().measure(META + body.replace("%s", OPUS)) == (total, [])
-
-
-# --- T4: what it cannot bound, it denies, with the rewrite -------------------------------
-
-@pytest.mark.parametrize("body, word", [
-    ("for (const x of xs) { await agent(x, %s) }", "inside a loop"),
-    ("for (const x of xs)\n  await agent(x, %s)", "inside a loop"),
-    ("while (budget.remaining() > 5) { await agent('x', %s) }", "inside a loop"),
-    ("do { await agent('x', %s) } while (more)", "inside a loop"),
-    ("const mk = x => agent(x, %s)\nawait mk('a')", "helper function"),
-    ("const mk = x =>\n  agent(x, %s)\nawait mk('a')", "helper function"),
-    ("async function mk(x) { return agent(x, %s) }\nawait mk('a')", "named function"),
-    ("await Promise.all(Array.from({ length: 50 }, () => agent('x', %s)))", "another call's callback"),
-    ("xs.forEach(x => { agent(x, %s) })", "another call's callback"),
-    ("await parallel(args.map(a => () => agent(a, %s)))", "`args` is not a fixed list"),
-    ("await parallel(found.items.map(a => () => agent(a, %s)))", "known only at run time"),
-    ("await parallel(A.filter(Boolean).map(a => () => agent(a, %s)))", "known only at run time"),
-    ("const A = []\nfor (const x of xs) A.push(x)\nawait parallel(A.map(a => () => agent(a, %s)))",
-     "`A` is not a fixed list"),
-    ("const A = ['a', ...more]\nawait parallel(A.map(a => () => agent(a, %s)))", "spread"),
-    ("let A = ['a']\nA = big\nawait parallel(A.map(a => () => agent(a, %s)))", "`A` is not a fixed list"),
-    ("const A = ['a']\nawait parallel(xs.map(A => () => parallel(A.map(a => () => agent(a, %s)))))",
-     "`A` is not a fixed list"),
-    ("const T = [() => agent('a', %s)]\nawait parallel(T)\nawait parallel(T)", "never kept in a name"),
-    ("const A = ['a']\nconst T = A.map(a => () => agent(a, %s))\nawait parallel(T)\nawait parallel(T)",
-     "never kept in a name"),
-    ("const A = ['a']\nawait pipeline(A, a => () => agent(a, %s), t => parallel([t, t, t]))",
-     "never kept in a name"),
-    ("await (async () => { await agent('x', %s) })()", "another call's callback"),
-    ("const o = { run() { return agent('x', %s) } }\nawait o.run()", "named function"),
-    ("for (const x of xs)\n  if (x)\n    await agent(x, %s)", "inside a loop"),
-    ("const A = ['a']\nA.length = 50\nawait parallel(A.map(a => () => agent(a, %s)))", "`A` is not a fixed list"),
-    ("await parallel(Array(50).fill(0).map(() => () => agent('x', %s)))", "known only at run time"),
-    ("await workflow('saved-sweep')", "`workflow` hides agents"),
-    ("await parallel(['a', 'b'].map(agent))", "other than as a direct call"),
-    ("const a = agent\nawait a('x', %s)", "other than as a direct call"),
-    ("await agent('say agent(x) twice', %s)", "appears inside a string"),
-    ("// agent('old', {})\nawait agent('x', %s)", "appears inside a string"),
-    ("await agent(`open ${'x'", "cannot read the script"),
-    ("await agent('x', %s))", "cannot read the script"),
-])
-def test_t4_a_shape_with_no_bound_is_denied(body, word):
-    total, why = guard().measure(META + body.replace("%s", OPUS))
-    assert why and any(word in w for w in why), why
-    assert word in reason(wf(META + body.replace("%s", OPUS)))
-
-
-def test_t4_a_regex_or_a_nested_template_hides_nothing():
-    g = guard()
-    src = META + ("const ok = /[\"'`/]\\/x/.test(s)\nconst h = a / b / c\n"
-                  f"await agent(`a ${{`b ${{await agent('in', {OPUS})}}`}} c`, {OPUS})")
-    assert g.measure(src) == (2, [])
-
-
-# --- T5: every agent( names its model ----------------------------------------------------
-
-@pytest.mark.parametrize("call, word", [
-    ("agent('x')", "names its model in an options literal"),
-    ("agent('x', { label: 'a' })", "names its model in its own options"),
-    ("agent('x', { label: 'a', ...O })", "no spread"),
-    ("agent('x', O)", "names its model in an options literal"),
-    ("agent('x', { label: 'a', model: M })", "must be a literal family name"),
-    ("agent('x', { label: 'a', model })", "names its model in its own options"),
-    ("agent('x', { label: 'a', model: 'inherit' })", "must be a literal family name"),
-    ("agent('x', { label: 'a', schema: { properties: { model: 'opus' } } })",
-     "names its model in its own options"),
-])
-def test_t5_an_agent_without_a_literal_model_is_denied(call, word):
-    assert word in reason(wf(META + "const r = await " + call))
-
-
-def test_t5_a_full_model_id_and_a_nested_schema_pass():
-    src = META + ("await agent('x', { schema: { type: 'object', properties: { model: { type: "
-                  "'string' } } }, label: `a:${k}`, model: \"claude-opus-5-5\" })")
-    assert guard().measure(src) == (1, [])
-
-
-# --- T6: Fable inside a workflow ---------------------------------------------------------
-
-FABLE = META + "await agent('x', { label: '%s', model: 'fable' })"
-
-
-def test_t6_fable_in_a_workflow_needs_a_fable_session_and_a_design_or_refute_label():
-    parent("claude-opus-5-5", "claude-opus-5-5")
-    assert "only under a Fable session (this one runs opus)" in reason(wf(FABLE % "design:api"))
-    parent()
-    assert "the session's model is not known" in reason(wf(FABLE % "design:api"))
-    parent("claude-fable-5-2", "claude-fable-5-2")
-    assert wf(FABLE % "design:api") == {} and wf(FABLE % "refute:plan") == {}
-    assert "label that starts with design or refute" in reason(wf(FABLE % "verify:1"))
-    three = META + "\n".join("await agent('x', { label: 'design:%d', model: 'fable' })" % i
-                             for i in range(3))
-    assert "3 Fable agents and the ceiling is 2" in reason(wf(three))
 
 
 # --- T7: a Fable helper starts only under a Fable session (the owner's rule) --------------
@@ -277,52 +117,6 @@ def test_t7_the_model_unknown_fails_closed_for_fable_only():
     assert json.loads((sdir() / "model.json").read_text())["model"] == "claude-fable-5-2"
 
 
-# --- T8: the script by path, by name, and a guard that fails -----------------------------
-
-def test_t8_a_resume_by_script_path_is_read(tmp_path):
-    bad = tmp_path / "bad.js"
-    bad.write_text((FIX / "runaway_sweep_verify.js").read_text())
-    assert "names its model" in reason(wf(scriptPath=str(bad), resumeFromRunId="wf_1"))
-    good = tmp_path / "good.js"
-    good.write_text((FIX / "pass_six_opus.js").read_text())
-    assert wf(scriptPath=str(good), resumeFromRunId="wf_1") == {}
-    for ti in ({"scriptPath": str(tmp_path / "none.js")}, {"name": "saved-sweep"}, {},
-               {"scriptPath": str(tmp_path)}, {"script": 7}):
-        assert "names no script the guard can read" in reason(wf(**ti))
-    link = tmp_path / "link.js"
-    link.symlink_to(good)
-    assert "names no script the guard can read" in reason(wf(scriptPath=str(link)))
-    big = tmp_path / "big.js"
-    big.write_text(META + "// " + "x" * guard().MAX_SCRIPT)
-    assert "names no script the guard can read" in reason(wf(scriptPath=str(big)))
-    assert "over 256 KB" in reason(wf(META + "// " + "x" * guard().MAX_SCRIPT))
-
-
-def test_t8_a_guard_that_raises_denies(monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("x")
-    monkeypatch.setattr(guard(), "check", boom)
-    r = reason(wf((FIX / "pass_six_opus.js").read_text()))
-    assert "the guard failed (RuntimeError) and fails closed" in r
-
-
-# --- T9: whatever the posture; other tools untouched --------------------------------------
-
-def test_t9_the_rule_holds_under_every_posture_and_touches_no_other_tool(monkeypatch):
-    from claude_session import sessionconfig
-    bad = (FIX / "runaway_sweep_verify.js").read_text()
-    for posture in ("off", "signal", "ask", "deny"):
-        cfgs = sessionconfig.load_configs()
-        cfgs["t"] = sessionconfig.SessionConfig(name="t", posture=posture)
-        sessionconfig.save_configs(cfgs)
-        monkeypatch.setenv("CLAUDE_SESSION_CONFIG", "t")
-        reason(wf(bad))
-    monkeypatch.delenv("CLAUDE_SESSION_CONFIG")
-    assert hooks.pre_tool_use({"tool_name": "Bash", "session_id": SID,
-                               "tool_input": {"command": "echo agent( model: 'fable'"}}) == {}
-    assert hooks.pre_tool_use({"tool_name": "Write", "session_id": SID,
-                               "tool_input": {"script": bad, "model": "fable"}}) == {}
-
 
 # --- T10: the event is registered and its hook is silent ---------------------------------
 
@@ -342,109 +136,8 @@ def test_t10_post_model_switch_is_registered_and_silent(tmp_path):
     assert len(rec) == 1 and json.loads(rec[0].read_text())["model"] == "claude-opus-5-5"
 
 
-# --- T11: the cost -----------------------------------------------------------------------
 
-def test_t11_a_100_kb_script_costs_under_50_ms():
-    src = (FIX / "pass_six_opus.js").read_text()
-    pad = "Read the area's files and report each claim with the command that shows it. "
-    src = src.replace("Report as verified only what you ran.", pad * 1300)
-    assert 100_000 < len(src) < guard().MAX_SCRIPT
-    payload = {"tool_name": "Workflow", "session_id": SID, "tool_input": {"script": src}}
-    times = []
-    for _ in range(9):
-        t0 = time.process_time()
-        assert hooks._spawn_rule(payload, {}) is None
-        times.append(time.process_time() - t0)
-    assert statistics.median(times) < 0.050, times
-    g = guard()                                  # the worst case stays far inside the 5 s timeout
-    calls = "\n".join(f"await parallel(A{i}.map(a => () => agent(`${{a}} " + "x" * 3500
-                      + f"`, {OPUS})))" for i in range(g.MAX_SITES))
-    wide = META + "\n".join(f"const A{i} = ['a', 'b']" for i in range(g.MAX_SITES)) + "\n" + calls
-    assert 200_000 < len(wide) < g.MAX_SCRIPT
-    t0 = time.process_time()
-    total, why = g.measure(wide)
-    assert total == 2 * g.MAX_SITES and "ceiling is 8" in why[0]
-    assert time.process_time() - t0 < 0.5
-    many = META + "\n".join(f"await agent('x', {OPUS})" for _ in range(g.MAX_SITES + 1))
-    assert g.measure(many) == (0, ["the script holds 65 agent( calls and the guard reads 64"])
-
-
-# --- T12 to T18: the refuter's round 1 (REFUTE wfg r1), each probe a deny ---------------
-# The probes' real counts, from a node harness that runs each script with stub agents:
-# b1 12, b1b 10, b2 20, b12 20, b3 1 (Fable), b7 1 (Fable), b4 12, b5 12, b6 12, b10 20, b11 6.
-
-@pytest.mark.parametrize("name, word", [
-    ("b1_unicode", "escape"),                 # F1: `\u0061gent(` hid every call
-    ("b1b_eval", "escape"),                   # F1: `\u0065val(`
-    ("b2_regexdiv", "?.("),                   # F2: a division read as a regex
-    ("b12_regex_after_paren", "?.("),         # F2: a regex read as a division
-    ("b3_dupkey", "plain `key: value`"),      # F3: a quoted second model key
-    ("b7_getter", "plain `key: value`"),      # F3: a getter named model
-    ("b4_flatmap", "the direct argument"),    # F4: thunks through .flatMap
-    ("b5_push", "is not a fixed list"),       # F5: L['push'](...)
-    ("b6_nullish", "is not a fixed list"),    # F5: L[11] ??= ...
-    ("b10_defparam", "default"),              # F6: agent( in a default parameter
-    ("b11_defparam_fable", "default"),        # F6, under a Fable parent
-])
-@pytest.mark.parametrize("parent_family", ["opus", "fable"])
-def test_t12_each_refuter_probe_is_denied(name, word, parent_family):
-    total, why = guard().measure((FIX / (name + ".js")).read_text(), parent_family)
-    assert why and any(word in w for w in why), (total, why)
-
-
-@pytest.mark.parametrize("name", ["b1_unicode", "b2_regexdiv", "b3_dupkey", "b4_flatmap",
-                                  "b10_defparam"])
-def test_t12_the_probes_are_denied_through_the_hook(name):
-    parent("claude-opus-5-5", "claude-opus-5-5")
-    assert "Workflow denied before launch" in reason(wf((FIX / (name + ".js")).read_text()))
-
-
-@pytest.mark.parametrize("name, total", [("ok_six", 6), ("ok_legal", 7),
-                                         ("pass_six_opus", 6)])
-def test_t13_the_plain_legal_scripts_stay_allowed(name, total):
-    src = (FIX / (name + ".js")).read_text()
-    assert guard().measure(src, "opus") == (total, [])
-    parent("claude-opus-5-5", "claude-opus-5-5")
-    assert wf(src) == {}
-
-
-@pytest.mark.parametrize("body, word", [
-    ("await \\x61gent('p', " + OPUS + ")", "escape"),
-    ("await parallel([1].map(i => () => agent('p', " + OPUS + ")))\nconst f = Function", "`Function`"),
-    ("await agent('p', " + OPUS + ")\nconst g = globalThis", "`globalThis`"),
-    ("await agent('p', " + OPUS + ")\nconst c = [].constructor", "`constructor`"),
-    ("await agent('p', " + OPUS + ")\nReflect.apply(agent, null, [])", "`Reflect`"),
-    ("await agent('p', " + OPUS + ")\nwith (o) { x() }", "`with`"),
-    ("await agent('p', " + OPUS + ")\nawait import('x')", "`import(`"),
-    ("await agent('p', " + OPUS + ")\nconst s = 'an agent here'", "more times"),
-    ("await agent('p', " + OPUS + ")\nawait this.agent('p', " + OPUS + ")", "more times"),
-])
-def test_t14_the_raw_backstop_counts_too_much_never_too_little(body, word):
-    total, why = guard().measure(META + body, "opus")
-    assert why and any(word in w for w in why), (total, why)
-
-
-@pytest.mark.parametrize("opts", [
-    "{ label: 'a', model: 'opus', model: 'opus' }",
-    "{ label: 'a', ['model']: 'fable', model: 'opus' }",
-    "{ label: 'a', \"model\": 'opus' }",
-    "{ label: 'a', model }",
-    "{ label: 'a', model() { return 'opus' } }",
-    "{ label: 'a', set model(v) {}, model: 'opus' }",
-])
-def test_t15_one_literal_model_key_in_plain_options(opts):
-    total, why = guard().measure(META + "await agent('p', " + opts + ")", "opus")
-    assert why, (total, why)
-
-
-def test_t16_the_guard_bounds_its_own_work(monkeypatch):
-    src = (FIX / "pass_six_opus.js").read_text()
-    monkeypatch.setattr(guard(), "BUDGET", 0.0)
-    total, why = guard().measure(src, "opus")
-    assert why and "budget" in why[0], why
-    parent("claude-opus-5-5", "claude-opus-5-5")
-    assert "budget" in reason(wf(src))
-
+# --- T17: an exception in the agent rule denies ------------------------------------------
 
 def test_t17_an_exception_in_the_agent_rule_denies(monkeypatch):
     def boom(*a, **k):
@@ -455,10 +148,3 @@ def test_t17_an_exception_in_the_agent_rule_denies(monkeypatch):
     monkeypatch.setattr(guard(), "family", boom)
     assert "fails closed" in reason(spawn("opus"))
 
-
-def test_t18_script_and_script_path_together_are_denied(tmp_path):
-    f = tmp_path / "nine.js"
-    f.write_text((FIX / "b9_nine.js").read_text())
-    parent("claude-opus-5-5", "claude-opus-5-5")
-    assert "both" in reason(wf("return 1", scriptPath=str(f)))
-    assert "both" in reason(wf((FIX / "ok_six.js").read_text(), scriptPath=str(f)))
