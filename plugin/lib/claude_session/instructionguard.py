@@ -263,7 +263,8 @@ def _heredocs(text: str):
 
 
 def _commands(text: str):
-    """Simple commands: (words, the words after a write redirection), in order."""
+    """Simple commands: (words, the words after a write redirection), in order; `(` and `)`
+    as (`(`, None) and (`)`, None)."""
     lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCT)
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -279,6 +280,8 @@ def _commands(text: str):
                     if words or outs:
                         yield words, outs
                     words, outs, expect = [], [], None
+                    if op in "()":
+                        yield op, None            # a subshell's bounds: its folder ends at `)`
             continue
         if expect is not None:
             if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
@@ -364,8 +367,14 @@ def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
     cannot split it."""
     text, bodies = _heredocs(command)
     text = text.replace("\\\n", " ")
-    found, here = [], cwd
+    found, here, subshells, pushed = [], cwd, [], []
     for words, outs in list(_commands(text)):
+        if outs is None:                  # r1 F1: a subshell's `cd` ends with it
+            if words == "(":
+                subshells.append(here)
+            elif subshells:
+                here = subshells.pop()
+            continue
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
         words = [w for w in words if not _PH_RE.match(w)]
         for o in outs:
@@ -377,10 +386,14 @@ def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
         if not words:
             continue
         name, args = os.path.basename(words[0]), words[1:]
-        plain = [a for a in args if not a.startswith("-")]
+        plain = [a for a in args if a and not a.startswith("-")]
         if name in ("cd", "pushd"):
+            if name == "pushd":
+                pushed.append(here)
             here = (_resolve(args[0], here, env) if len(args) == 1 else
                     _tilde("~", env) if not args else None)
+        elif name == "popd":              # r1 F1: back to pushd's folder, else unknown
+            here = pushed.pop() if pushed and not args else None
         elif name in _SHELLS and "-c" in args and depth == 0:
             i = args.index("-c")
             if i + 1 < len(args):
@@ -404,7 +417,7 @@ def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
             if "-c" in args and args.index("-c") + 1 < len(args):
                 codes.append(args[args.index("-c") + 1])
             for code in codes:
-                found += [("write", _resolve(s, here, env)) for s in _py_literals(code)]
+                found += [("write", _resolve(s, here, env)) for s in _py_literals(code) if s]
     return found
 
 
@@ -419,11 +432,14 @@ def _bash_gated(payload: dict, env) -> str | None:
     cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and "\0" not in cwd else None
     try:
         found = bash_targets(command, cwd, env)
-    except ValueError:                    # an open quote: it passes, as every form not named
+    except ValueError:                    # an open quote: it passes, with one line (r1 F6)
+        log(payload, env, "open", None, why="the line cannot be split")
         return None
     cache: dict = {}
+    unresolved = False
     for kind, path in found:
         if path is None:
+            unresolved = True
             continue
         if kind == "write" and gated(path, env, cache):
             return path
@@ -431,6 +447,8 @@ def _bash_gated(payload: dict, env) -> str | None:
             lf = _removes_list(path, env, cache)
             if lf is not None:
                 return lf
+    if unresolved:                        # r1 F6: an unresolved target passes, with one line
+        log(payload, env, "open", None, why="a target cannot be resolved")
     return None
 
 
