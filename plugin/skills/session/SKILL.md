@@ -135,6 +135,11 @@ handoff.
   use an agent type that names its own model.
   "Not known" (no record yet, or a switch not yet seen) clears after one tool call.
 
+**The instruction guard** (packet g2): an `Edit`, `Write`, `MultiEdit` or `NotebookEdit` of
+instruction text (`CLAUDE.md`, `AGENTS.md`, the ledger, rules, the settings that act as
+prompts) asks the owner in a main thread and is refused in a helper or a `-p` run. Do not
+route around it through Bash: change the file through the `decisions:instruct` skill.
+
 ## The charter
 
 The charter is the sitting's live head: one file per sitting under the

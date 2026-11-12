@@ -17,7 +17,7 @@ claude plugin install session@agentik
 
 - The plugin carries the code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`, 3.9 or newer, with no clone, venv or launcher. Hooks never use PATH, so a session keeps its version until it respawns.
 - `/session:install-cli` gives the terminal a CLI, which a fresh Mac's relay band needs: it freezes the plugin's `lib/` under `~/.local/share/agentik-session/<hash>/` and writes `~/.local/bin/agentik-session`, run with `-I` under `/usr/bin/python3`. From a clone, `make install`; a dirty tree exits 2.
-- Then run `agentik session doctor`. It checks the tool, the plugin and its hooks, notes an absent optional sibling, and lists the instruction files a repo's last session loaded; exit 2 names the failing check and its remedy.
+- Then run `agentik session doctor`. It checks the tool, plugin and hooks, notes an absent optional sibling, and lists the instruction files a repo's last session loaded; exit 2 names the failing check and its remedy.
 - To upgrade: `claude plugin update session@agentik`; new sessions pick it up, live ones at their respawn; a new session moves a launcher forward.
 - At run time, the tool uses only the Python standard library.
 
@@ -62,7 +62,7 @@ CLI verbs (`agentik session --help`):
 | `reconcile` | `agentik session reconcile` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (its spawn gate acts on `Agent|Task`, and denies `Workflow`), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, asks before editing instruction text), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
 ## Profiles
 
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.78`, rendered `2026-11-10`, `3146` tests in the suite.
+Status: version `v2.0.0-alpha.80`, rendered `2026-11-10`, `3193` tests in the suite.
 
 ## Credit
 

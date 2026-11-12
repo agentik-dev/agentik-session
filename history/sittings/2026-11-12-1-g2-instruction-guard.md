@@ -9,17 +9,22 @@
 | agents | 0 |
 
 ## Done-ness
-- [ ] packet
-- [ ] tests first (red at the pin)
-- [ ] R1 to R4: the guard, wired into PreToolUse
-- [ ] R5: the doctor's guard line
-- [ ] R6: records, version, NICE rows (t1 r2 F1 to F3 and two older; g1 F1 to F4)
-- [ ] hygiene over the range; the gate's `make check`
+- [x] packet (2b89c1f)
+- [x] tests first (c32b025): `tests/test_g2_guard.py`; at the pin `1 error` (no module) under 3.12 and 3.9.6
+- [x] R1 to R5 (4720d11): `instructionguard.py`, the hook's call before a helper's call opens, `doctor._check_guard`; alpha.79; the doctor's row order and the readers' table gain the new names
+- [x] R6 (records commit): SKILL, RUNBOOK, README (+9 B, source 16,382 of 16,384), alpha.80, status `3193`; NICE n105 to n114; n31 to n42 (S4) moved to the overflow for recordlint's bound
+- [ ] the gate's `make check`
 
 ## Handover
-- decide, owner: none yet
+- Choice: the headless test is `harness.claude_argv` (SessionEnd's reader): `-p`, `--print`, `--print=` anywhere in the argv denies; an unread argv denies (R2's "deny where unsure")
+- Choice: the guard row lives in `doctor.run`, not `instructions.rows`, so g1's rows and tests stay as they are
+- Choice: the exemption (`tests`, `testdata`, `fixtures`) reads the path below the nearest top level or the user's folder only
+- Choice: a tree folder's `.claude/CLAUDE.md` is guarded beside its `CLAUDE.md` (g1's FOLDER_FILES); both `CLAUDE_CONFIG_DIR` and `~/.claude` are the user's folder
+- Choice: "the two older ones" of t1 r2 read as its two Observations on behaviour as on main (n108, n109)
+- Choice: no g1 finding fixed: the R5 change rewrites none of their lines
+- decide, owner: none
 
 ## Next act
-the packet
+the gate's `make check`, then the hand-back
 
 - exit taken: (open)
