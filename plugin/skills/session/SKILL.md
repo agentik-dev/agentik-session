@@ -135,10 +135,11 @@ handoff.
   use an agent type that names its own model.
   "Not known" (no record yet, or a switch not yet seen) clears after one tool call.
 
-**The instruction guard** (packet g2): an `Edit`, `Write`, `MultiEdit` or `NotebookEdit` of
-instruction text (`CLAUDE.md`, `AGENTS.md`, the ledger, rules, the settings that act as
-prompts) asks the owner in a main thread and is refused in a helper or a `-p` run. Do not
-route around it through Bash: change the file through the `decisions:instruct` skill.
+**The edit gates** (packet g2b): an edit, or a Bash line that writes it, of a file named in
+a checkout's `.claude/edit-gates` or the user's `edit-gates` (and of either list) is refused in
+every mode. Do not write the file another way: make the change through the
+`decisions:instruct` skill, which writes it with `agentik session gates write` on the
+owner's yes. `agentik session gates` lists what is gated here.
 
 ## The charter
 

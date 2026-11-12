@@ -107,33 +107,41 @@ them fails the doctor:
 
 The doctor prints bytes and no ceiling: the ceilings of these files are the decisions tool's.
 
-### The prompt before an edit of instruction text
+### The edit gates
 
-The PreToolUse hook reads `Edit`, `Write`, `MultiEdit` and `NotebookEdit` (no other tool, and
-never a Bash line). When the target is instruction text, it answers `ask` in a main thread, so
-Claude Code's own dialog shows the edit, and `deny` in a helper (`agent_id`), in a `-p` run, and
-where the nearest `claude` ancestor's argv cannot be read. That argv is read word by word from
-the kernel, and its options as the CLI reads them: past the prompt, up to `--` or a subcommand
-(`-cp` is `-c -p`), so `claude go -p` is a `-p` run while a prompt or an option's value that
-holds `-p` stays a main thread. Where only the `ps` line can be read, a `-p` after the first
-prompt word is refused. The reason names the path and sends the change through the
-`decisions:instruct` skill. Guarded are, in the user's folder
-(`CLAUDE_CONFIG_DIR`, and `~/.claude`), `CLAUDE.md`, `settings.json` and the `rules`, `hooks`,
-`agents` and `plugins` folders; a tree folder's `CLAUDE.md` (a folder holding a main checkout);
-and at a checkout's top level, a worktree's wherever it is, `CLAUDE.md`, `CLAUDE.local.md`,
-`.claude/CLAUDE.md`, `AGENTS.md`, `.claude/rules/**`, `DECISIONS.md` and
-`.claude/settings*.json`. A path under `tests/`, `testdata/` or a fixtures folder is never
-guarded, nor is the prompt text in a repo's source (`plugin/skills/*/SKILL.md` and the like).
-Where the volume folds case, as macOS's does by default, a name matches in any case: `claude.md`
-is `CLAUDE.md`, and `~/.Claude` is `~/.claude`.
+A file is gated when a list names it: the checkout's tracked `.claude/edit-gates` (a path or
+glob a line, relative to the top level, the nearest folder above the target holding `.git`, so a
+worktree's own list applies; `#` a comment; a line with `..` or a leading `/` matches nothing),
+or the user's `edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or
+`~/`). Both list files are always gated. `agentik decisions render` and `answer` add the files
+they write to their scope's list; any other line is one the owner approves through the lane.
+`agentik session gates` prints both lists as they apply where it runs.
+
+The PreToolUse hook denies an `Edit`, `Write`, `MultiEdit` or `NotebookEdit` of a gated file in
+every permission mode and every run, a helper's included; it never asks, since the `auto` mode
+approved a hook's ask with no dialog. The reason names the path and sends the change through
+the `decisions:instruct` skill, whose question reaches the owner. A Bash line is read too (g3):
+a line holding none of `>`, `tee`, `sed`, `perl`, `cp`, `mv`, `install`, `python`, `rm`,
+`unlink` or `git` costs one regex search and opens no file; otherwise `shlex` splits it, and a
+redirection (a heredoc's own included), `tee`, `sed -i`, `perl -i`, `cp`, `mv` or `install` onto
+a gated file, one level of `bash -c`, a literal `cd`, a `python -c` literal or a
+`python3 - <<EOF` body beside `open(` or `write_`, are refused, as is removing a list file
+(`rm`, `unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it). A target with `$`,
+a backquote or a glob, and a line `shlex` cannot split, pass. A path matches by its absolute
+and its real spelling, in any case where the volume folds case.
+
+The lane's write: `agentik session gates write <file> --from <draft> --preview` prints the diff,
+the byte change and a hash and writes nothing; `--expect <hash>` writes the draft atomically,
+keeping the file's mode, and refuses a file or draft changed since, a changed line of a
+generated block, a `.json` draft that does not parse, and an ungated target.
 
 It has no knob: no profile key, session setting or variable opens a path. It fails open: an
-error or a target it cannot resolve lets the call through and writes a line to the session's
-`guard.jsonl` (0600, 64 KiB at most), where each ask and deny is logged too. On a path it does
-not guard it adds no output; the check takes about 0.1 ms. The doctor's `guard` row, after the
-`instructions` rows, says it is on and counts the prompts and refusals of the repo's newest
-logged session. Under `auto`, Claude Code's classifier may refuse a write into a `.claude`
-folder before any prompt (hq design/09 §7.2).
+error lets the call through and writes an `open` line to the session's `guard.jsonl` (0600,
+64 KiB at most), where each refusal is logged too, a helper's by its `agent_id`. It spawns no
+process and reads no launch line. The doctor's `guard` row, after the `instructions` rows,
+says it is on, how many lines are gated here, and counts the refusals of the repo's newest
+logged session. Under `auto`, whether the lane may write inside a `.claude` folder is the
+owner's test (hq design/09 §7.2, step 7).
 
 ## 2. Choosing a profile
 
