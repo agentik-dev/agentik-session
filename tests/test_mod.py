@@ -23,6 +23,7 @@ CLASSIC = {   # the pin's (1204d4c) classic block: event -> (matcher, timeout); 
     "Stop": (None, 5), "StopFailure": (None, 5), "SessionEnd": (None, 15),
     "PreCompact": (None, 5),          # S34 adds StopFailure
     "PostModelSwitch": (None, 5),     # wfg R7
+    "InstructionsLoaded": (None, 5),  # g1 R1
 }
 
 # The three sibling plugins, spelled in pieces so the hygiene scan of this file finds none.
