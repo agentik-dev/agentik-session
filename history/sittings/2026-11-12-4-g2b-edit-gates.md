@@ -15,7 +15,7 @@
 - [x] records: RUNBOOK's edit gates section, the session skill's paragraph, README alpha.84 and 3248 tests, `.hygiene-allow` three rows
 - [x] the gate: 20261112-095800-1166 exit 2 (README source 16406 B over its ceiling, fixed f67ea6e); 20261112-100428-1168 exit 2 with every test green (3248 passed; floor 3122 passed, 105 skipped) and only plugin-version-check asking a bump for the skill's paragraph: alpha.84 committed, `plugin-version-check` clean, the gate not rerun (the tool-call bound); the next gate runs after me
 
-- [x] review r1 (`REFUTE-2026-11-12-g2b-r1.md`): F1 (a subshell's `cd`, `popd`) and F6 (an unresolved Bash target logs one `open` line) fixed; tests red at f1d4de5 (10 failed), green after (112, 3.12 and 3.9.6); alpha.85
+- [x] review r1 (`REFUTE-2026-11-12-g2b-r1.md`): F1 (a subshell's `cd`, `popd`) and F6 (an unresolved Bash target logs one `open` line) fixed; tests red at f1d4de5 (10 failed), green after (112, 3.12 and 3.9.6); alpha.85; README 3259 tests. Gate 20261112-101647-1169 on f1d4de5 exit 2 (the worktree changed under it: 3248 != 3259); gate 20261112-102746-1170 on 1c101a6, a still worktree: exit 0 in 656 s (3259 passed; floor 3133 passed, 105 skipped)
 
 ## Handover
 - Choice: `popd` returns to its own `pushd`'s folder when the line holds one, else the folder is unknown (the coordinator's None); so `pushd docs; popd; printf x >> CLAUDE.md` denies
@@ -25,6 +25,6 @@
 - decide, owner: none
 
 ## Next act
-the gate on the r1 tip, then review round 2; the owner's `auto` test held
+review round 2; the owner's `auto` test held
 
 - exit taken: done at the tool-call bound; acceptance 1 to 6 green, the last gate's tests green, its one red (the version check) fixed and not rerun; nothing pushed, no install
