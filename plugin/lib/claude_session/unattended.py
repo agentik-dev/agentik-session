@@ -49,6 +49,9 @@ CONTINUE = (
     "your charter's done-ness list, finish each unchecked act of the packet, run the packet's "
     "acceptance lines, and commit. End only when every acceptance line passes, or say what "
     "blocks it in the charter's handover.")
+# Packet u2 R5: a child's effort, never the interactive default; the relay's queue key and values.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+BUILDER_EFFORT = "high"          # when the builder profile names no level the loop knows
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}\Z")
 RUN = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)\Z")
 
@@ -221,9 +224,9 @@ def _append(path: Path, text: str) -> None:
 # ---- the queue (ruling 2) --------------------------------------------------------------
 
 HEAD_KEYS = ("version", "defaults", "rows")
-DEFAULT_KEYS = ("model", "turns", "context", "usd", "wall", "merge", "verify")
+DEFAULT_KEYS = ("model", "turns", "context", "usd", "wall", "merge", "verify", "effort")
 ROW_KEYS = ("id", "packet", "model", "budget", "parked", "merge", "base", "depends_on", "kind",
-            "verify")
+            "verify", "effort")
 BUDGET_KEYS = ("turns", "usd", "context", "wall")
 _ITEM = re.compile(r"^(\s*)- (.*)$")
 _ROWS = re.compile(r"^rows\s*:\s*(#.*)?$")
@@ -362,7 +365,7 @@ def plan(q: dict, keep, log) -> list:
                     "wall": b.get("wall", d.get("wall")), "merge": r.get("merge", d.get("merge")),
                     "verify": r.get("verify", d.get("verify")), "base": r.get("base"),
                     "depends_on": r.get("depends_on"), "parked": r.get("parked"),
-                    "kind": r.get("kind")})
+                    "kind": r.get("kind"), "effort": r.get("effort", d.get("effort"))})
     if keep:
         unknown = [k for k in keep if k not in {p["id"] for p in out}]
         if unknown:
@@ -397,6 +400,8 @@ def judge_row(p: dict, repo: Path, landed=frozenset()):
         return "refused", "base"
     if not isinstance(p["model"], str) or not p["model"]:
         return "refused", "model"
+    if p.get("effort") is not None and p["effort"] not in EFFORTS:
+        return "refused", "effort"
     if type(p["turns"]) is not int or p["turns"] <= 0 or not _num(p["usd"]):
         return "refused", "budget"
     if wall_seconds(p["wall"]) is None:
@@ -470,12 +475,24 @@ def _usd(v) -> str:
     return f"{round(float(v), 2):g}"
 
 
+def builder_effort(env) -> str:
+    """The `builder` profile's effort, the user's layer over the shipped one; `high` when it
+    names none the loop knows or the profiles cannot be read (packet u2 R5)."""
+    try:
+        v = (resolver.load_profiles(env)[1].get("builder") or {}).get("effort")
+    except Exception:       # noqa: BLE001  (an unreadable layer is the fallback, never a stop)
+        v = None
+    return v if v in EFFORTS else BUILDER_EFFORT
+
+
 def spawn_argv(model: str, turns: int, usd, sid: str | None = None,
-               resume: str | None = None) -> list:
-    """The relay's spawn line (`SpawnArgv`); a resume names its session and no new one."""
+               resume: str | None = None, effort: str | None = None) -> list:
+    """The relay's spawn line (`SpawnArgv`); a resume names its session and no new one; the
+    level after the model (packet u2 R5)."""
     a = ["claude", "-p"] + (["--resume", resume] if resume else [])
-    a += ["--permission-mode", "auto", "--allowedTools", ALLOWED_TOOLS, "--model", model,
-          "--max-turns", str(turns), "--max-budget-usd", _usd(usd),
+    a += ["--permission-mode", "auto", "--allowedTools", ALLOWED_TOOLS, "--model", model]
+    a += (["--effort", effort] if effort else [])
+    a += ["--max-turns", str(turns), "--max-budget-usd", _usd(usd),
           "--output-format", "stream-json", "--verbose"]
     return a + (["--session-id", sid] if sid else [])
 
@@ -751,6 +768,7 @@ class _Run:
     max_rows: int | None = None
     spawned: int = 0
     landed: set = field(default_factory=set)
+    effort: dict = field(default_factory=dict)      # row id: the level it ran at
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -769,7 +787,7 @@ class _Run:
     def row(self, p, state, reason=None, sha=None, wt=None, sid=None) -> None:
         rec = {"row": p["id"], "state": state, "reason": reason, "sha": sha,
                "worktree": str(wt) if wt else None, "merge": p.get("merge"),
-               "verify": p.get("verify")}
+               "verify": p.get("verify"), "effort": self.effort.get(p["id"])}
         if state in ("red", "limit") and wt and sid:
             rec["resume"] = f"cd {wt} && claude --resume {sid}"
         self.record("row", **rec)
@@ -780,8 +798,8 @@ class _Run:
         """One child to its exit: (Part, rc, the watchdog's cut or None)."""
         rid = p["id"]
         adm = admit(self.nid, p["model"], self.fx.env)
-        self.record("spawn", row=rid, part=n, model=p["model"], turns=turns, usd=usd,
-                    session_id=sid, argv=argv, admission=adm)
+        self.record("spawn", row=rid, part=n, model=p["model"], effort=self.effort.get(rid),
+                    turns=turns, usd=usd, session_id=sid, argv=argv, admission=adm)
         env = child_env(self.fx.env, p["model"], turns, remotes(wt))
         part = Part()
         proc = self.proc = start(argv, wt, env, text, self.dir / f"{rid}.stderr", self.fx)
@@ -896,7 +914,8 @@ class _Run:
             return None
         text = prompt((self.repo / p["packet"]).read_text())
         sid = str(uuid.uuid4())
-        argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid)
+        effort = self.effort[p["id"]] = p.get("effort") or builder_effort(self.fx.env)
+        argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid, effort=effort)
         self.spawned += 1
         part, rc, cut = self.part(p, wt, 1, argv, sid, text, p["turns"], p["usd"])
         return self.end(p, wt, head, part, rc, cut, sid, 1)
@@ -965,7 +984,7 @@ class _Run:
         spent_t, spent_u = r.get("num_turns"), r.get("total_cost_usd")
         turns = max(10, p["turns"] - (spent_t if type(spent_t) is int else 0))
         usd = max(5, round(p["usd"] - (spent_u if type(spent_u) in (int, float) else 0), 2))
-        argv = spawn_argv(p["model"], turns, usd, resume=sid)
+        argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
         part2, rc, cut = self.part(p, wt, n + 1, argv, sid, CONTINUE + "\n", turns, usd)
         return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
@@ -1173,16 +1192,18 @@ def report(d: Path) -> str:
           for s in ("landed", "built", "red", "limit")}
     out = [f"# The unattended run {d.name}", "", head]
     for title, cols, items in (
-            ("Landed", ("row", "sha", "reason"),
-             [(e["row"], (e.get("sha") or "")[:12], e.get("reason")) for e in by["landed"]]),
-            ("Built", ("row", "sha", "reason", "worktree"),
-             [(e["row"], e.get("sha"), e.get("reason"), e.get("worktree")) for e in by["built"]]),
-            ("Red", ("row", "reason", "resume"),
-             [(e["row"], e.get("reason"), e.get("resume")) for e in by["red"]]),
-            ("Limited", ("row", "limit_kind", "resets_at", "action"),
+            ("Landed", ("row", "sha", "reason", "effort"),
+             [(e["row"], (e.get("sha") or "")[:12], e.get("reason"), e.get("effort"))
+              for e in by["landed"]]),
+            ("Built", ("row", "sha", "reason", "worktree", "effort"),
+             [(e["row"], e.get("sha"), e.get("reason"), e.get("worktree"), e.get("effort"))
+              for e in by["built"]]),
+            ("Red", ("row", "reason", "resume", "effort"),
+             [(e["row"], e.get("reason"), e.get("resume"), e.get("effort")) for e in by["red"]]),
+            ("Limited", ("row", "limit_kind", "resets_at", "action", "effort"),
              [(e["row"], limits.get(e["row"], {}).get("limit_kind", e.get("reason")),
                _local_reset(limits.get(e["row"], {}).get("resets_at")),
-               limits.get(e["row"], {}).get("action")) for e in by["limit"]]),
+               limits.get(e["row"], {}).get("action"), e.get("effort")) for e in by["limit"]]),
             ("Refused and skipped", ("row", "reason"),
              [(e["row"], e.get("reason")) for e in rows.values()
               if e.get("state") in ("refused", "skip")])):
