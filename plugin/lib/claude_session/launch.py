@@ -14,6 +14,7 @@ copies of it.
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import shutil
@@ -22,7 +23,9 @@ from pathlib import Path
 
 from .sessionconfig import SessionConfig
 
-# Where a plugin name is looked up when the config names one. Checked in order.
+# Where a plugin name is looked up when the config names one. Checked in order; then, when
+# nothing is found, a checkout one level below the first, since a repo may sit in a folder
+# under ~/code.
 PLUGIN_SEARCH = [
     Path.home() / "code",
     Path.home() / ".claude" / "plugins",
@@ -99,6 +102,17 @@ def resolve_plugin(name: str) -> Path | None:
             p = base / cand
             if p.is_dir():
                 return p
+    for base in PLUGIN_SEARCH[:1]:
+        for cand in (c for c in candidates if os.sep not in c):
+            # a checkout, by its real path: one reached by two paths counts once
+            found = sorted({os.path.realpath(f) for f in glob.glob(os.path.join(
+                glob.escape(str(base)), "*", glob.escape(cand)))
+                if os.path.isdir(f) and os.path.exists(os.path.join(f, ".git"))})
+            if len(found) > 1:
+                raise LaunchError(f"plugin {name!r}: more than one checkout at "
+                                  f"{base / '*' / cand}: {', '.join(found)}; name one by its path")
+            if found:
+                return Path(found[0])
     p = Path(name).expanduser()
     return p if p.is_dir() else None
 

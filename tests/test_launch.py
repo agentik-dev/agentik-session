@@ -333,3 +333,111 @@ def test_c13_a_new_name_in_any_folder_beats_an_old_name_in_an_earlier_one(tmp_pa
     (plugins / "agentik-respeak").mkdir(parents=True)
     monkeypatch.setattr(launch, "PLUGIN_SEARCH", [code, plugins])
     assert launch.resolve_plugin("respeak") == plugins / "agentik-respeak"
+
+
+# A repo may sit in a folder under ~/code: when no folder holds the name directly, a checkout one
+# level below the first search folder serves.
+@pytest.fixture
+def roots(tmp_path, monkeypatch):
+    code, plugins = tmp_path / "code", tmp_path / "plugins"
+    code.mkdir()
+    plugins.mkdir()
+    monkeypatch.setattr(launch, "PLUGIN_SEARCH", [code, plugins])
+    return code, plugins
+
+
+def checkout(path):
+    (path / ".git").mkdir(parents=True)
+    return path
+
+
+def test_tree_a_directory_at_code_name_wins(roots):
+    code, _ = roots
+    (code / "alpha").mkdir()
+    checkout(code / "tree" / "alpha")
+    assert launch.resolve_plugin("alpha") == code / "alpha"
+
+
+def test_tree_one_level_down(roots):
+    code, _ = roots
+    checkout(code / "tree" / "alpha")
+    assert launch.resolve_plugin("alpha") == code / "tree" / "alpha"
+
+
+def test_tree_a_plain_file_at_the_old_name_is_no_match(roots):
+    code, _ = roots
+    (code / "alpha").write_text("moved into the tree folder\n")
+    checkout(code / "tree" / "alpha")
+    assert launch.resolve_plugin("alpha") == code / "tree" / "alpha"
+
+
+def test_tree_none_is_none_and_the_plugins_root_is_not_read_deeper(roots):
+    code, plugins = roots
+    checkout(plugins / "market" / "alpha")
+    checkout(code / ".hidden" / "alpha")
+    (code / "plain" / "alpha").mkdir(parents=True)     # no checkout: never a match below
+    assert launch.resolve_plugin("alpha") is None
+
+
+def test_tree_more_than_one_is_an_error_naming_each(roots):
+    code, _ = roots
+    checkout(code / "tree" / "alpha")
+    checkout(code / "other" / "alpha")
+    (code / "plain" / "alpha").mkdir(parents=True)
+    with pytest.raises(launch.LaunchError) as caught:
+        launch.resolve_plugin("alpha")
+    assert "more than one checkout" in str(caught.value)
+    assert str(code / "tree" / "alpha") in str(caught.value)
+    assert str(code / "other" / "alpha") in str(caught.value)
+    assert str(code / "plain" / "alpha") not in str(caught.value)
+
+
+def test_tree_the_error_reaches_build(roots, fake_bins):
+    code, _ = roots
+    checkout(code / "tree" / "alpha")
+    checkout(code / "other" / "alpha")
+    with pytest.raises(launch.LaunchError, match="more than one checkout"):
+        launch.build(SessionConfig(name="f", plugins=["alpha"]))
+
+
+def test_tree_a_direct_alias_beats_a_short_name_below(roots):
+    # the review's repro: the agentik-* checkout in ~/code, a plain folder of the short name below
+    code, _ = roots
+    direct = checkout(code / "agentik-respeak")
+    (code / "beta" / "respeak").mkdir(parents=True)
+    assert launch.resolve_plugin("respeak") == direct
+    (code / "beta" / "respeak" / ".git").mkdir()
+    assert launch.resolve_plugin("respeak") == direct
+
+
+def test_tree_any_direct_name_beats_every_name_below(roots):
+    # every name in every folder first, in the old order; only then a checkout below
+    code, _ = roots
+    (code / "claude-code-respeak").mkdir()
+    checkout(code / "tree" / "agentik-respeak")
+    assert launch.resolve_plugin("respeak") == code / "claude-code-respeak"
+
+
+def test_tree_an_alias_below_when_nothing_is_direct(roots):
+    code, _ = roots
+    checkout(code / "tree" / "claude-code-respeak")
+    new = checkout(code / "other" / "agentik-respeak")
+    assert launch.resolve_plugin("respeak") == new
+
+
+def test_tree_one_checkout_by_two_paths_counts_once(roots):
+    code, _ = roots
+    real = checkout(code / "tree" / "alpha")
+    (code / "other").mkdir()
+    (code / "other" / "alpha").symlink_to(real)
+    (code / "zeta").symlink_to(code / "tree")
+    assert launch.resolve_plugin("alpha") == real
+
+
+def test_tree_a_name_with_a_slash_stays_a_path(roots, tmp_path):
+    code, _ = roots
+    checkout(code / "tree" / "deep" / "alpha")
+    assert launch.resolve_plugin("deep/alpha") is None
+    elsewhere = tmp_path / "elsewhere" / "alpha"
+    elsewhere.mkdir(parents=True)
+    assert launch.resolve_plugin(str(elsewhere)) == elsewhere
