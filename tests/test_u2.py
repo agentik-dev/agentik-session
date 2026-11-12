@@ -475,6 +475,20 @@ def test_f9_an_empty_row_effort_takes_the_defaults():
         assert got == want, defaults
 
 
+def test_n2_a_zero_or_false_level_is_refused(tmp_path):
+    """Second review N2: only a null or an empty level falls through R5's order; `0` and
+    `false`, on a row or in the defaults, are levels the loop does not know: refused."""
+    (tmp_path / "a.md").write_text("x\n")
+    for v in ("0", "false"):
+        for text in (f"version: 1\ndefaults: {{model: m, turns: 9, usd: 5, wall: 1h, effort: medium}}\n"
+                     f"rows:\n  - id: a\n    packet: a.md\n    effort: {v}\n",
+                     f"version: 1\ndefaults: {{model: m, turns: 9, usd: 5, wall: 1h, effort: {v}}}\n"
+                     "rows:\n  - id: a\n    packet: a.md\n"):
+            (p,) = unattended.plan(unattended.read_queue(text), None, lambda s: None)
+            assert p["effort"] is not None and not isinstance(p["effort"], str), (v, p["effort"])
+            assert unattended.judge_row(p, tmp_path) == ("refused", "effort"), (v, text)
+
+
 def test_t9_effort_fallback_and_refusal(box, monkeypatch):
     _packet(box, "green-row", "`true` exits 0")
     real = resolver.load_profiles

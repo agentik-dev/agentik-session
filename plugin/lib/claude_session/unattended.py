@@ -341,6 +341,14 @@ def wall_seconds(v):
     return h * 3600 + mi * 60 + s or None
 
 
+def _given(*values):
+    """The first value that is neither None nor the empty string, else None."""
+    for v in values:
+        if v is not None and v != "":
+            return v
+    return None
+
+
 def plan(q: dict, keep, log) -> list:
     """Each row with the defaults under it, in file order; every key the loop does not
     honour is one `log` line. `keep` (the `--rows` ids) keeps those; an unknown one is a
@@ -369,8 +377,9 @@ def plan(q: dict, keep, log) -> list:
                     "verify": r.get("verify", d.get("verify")), "base": r.get("base"),
                     "depends_on": r.get("depends_on"), "parked": r.get("parked"),
                     "kind": r.get("kind"),
-                    # R5's order, review F9: an empty or null level is no level
-                    "effort": r.get("effort") or d.get("effort") or None})
+                    # R5's order, review F9: an empty or null level is no level; a 0 or a
+                    # false is a level, refused by judge_row (second review N2)
+                    "effort": _given(r.get("effort"), d.get("effort"))})
     if keep:
         unknown = [k for k in keep if k not in {p["id"] for p in out}]
         if unknown:
