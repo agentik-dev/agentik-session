@@ -13,9 +13,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -33,8 +36,25 @@ POLL = 30.0
 WALL = 4 * 3600
 ALLOWED_TOOLS = "Bash Edit Write MultiEdit NotebookEdit"     # relay DefaultAllowedTools
 DENIED_PUSH_URL = "relay-denies-push"                         # relay DeniedPushURL
-HEADING = "# The packet; the repo's CLAUDE.md carries the rules"
-CONTINUE = "continue from your charter's act in flight; your commits stand"
+# Packet u2 R1: the child's prompt over the packet (the audit's finding C2, verbatim).
+PROMPT = (
+    "# You are one unattended builder; the packet below is your whole task\n\n"
+    "You run headless (`claude -p`): a message with no tool call ends the sitting, and nobody "
+    "reads it until the run is over. Build every act the packet lists, one commit per act, and "
+    "end your turn only when the last act is committed and the tree is clean, or when nothing "
+    "can move; then say why in the charter's handover. An error, a timeout or a failing test is "
+    "work: diagnose it and get past it. A hook's denial and the packet's wall are deliberate: "
+    "leave them and take another way. Do each act yourself in the foreground: no agent, no "
+    "background command, no wait on a notification.")
+# Packet u2 R4: what a limit's resume says, sent after the reset.
+CONTINUE = (
+    "You stopped at the account's usage limit, which has now reset; your commits stand. Read "
+    "your charter's done-ness list, finish each unchecked act of the packet, run the packet's "
+    "acceptance lines, and commit. End only when every acceptance line passes, or say what "
+    "blocks it in the charter's handover.")
+# Packet u2 R5: a child's effort, never the interactive default; the relay's queue key and values.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+BUILDER_EFFORT = "high"          # when the builder profile names no level the loop knows
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}\Z")
 RUN = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)\Z")
 
@@ -207,9 +227,9 @@ def _append(path: Path, text: str) -> None:
 # ---- the queue (ruling 2) --------------------------------------------------------------
 
 HEAD_KEYS = ("version", "defaults", "rows")
-DEFAULT_KEYS = ("model", "turns", "context", "usd", "wall", "merge", "verify")
+DEFAULT_KEYS = ("model", "turns", "context", "usd", "wall", "merge", "verify", "effort")
 ROW_KEYS = ("id", "packet", "model", "budget", "parked", "merge", "base", "depends_on", "kind",
-            "verify")
+            "verify", "effort")
 BUDGET_KEYS = ("turns", "usd", "context", "wall")
 _ITEM = re.compile(r"^(\s*)- (.*)$")
 _ROWS = re.compile(r"^rows\s*:\s*(#.*)?$")
@@ -321,6 +341,14 @@ def wall_seconds(v):
     return h * 3600 + mi * 60 + s or None
 
 
+def _given(*values):
+    """The first value that is neither None nor the empty string, else None."""
+    for v in values:
+        if v is not None and v != "":
+            return v
+    return None
+
+
 def plan(q: dict, keep, log) -> list:
     """Each row with the defaults under it, in file order; every key the loop does not
     honour is one `log` line. `keep` (the `--rows` ids) keeps those; an unknown one is a
@@ -348,7 +376,10 @@ def plan(q: dict, keep, log) -> list:
                     "wall": b.get("wall", d.get("wall")), "merge": r.get("merge", d.get("merge")),
                     "verify": r.get("verify", d.get("verify")), "base": r.get("base"),
                     "depends_on": r.get("depends_on"), "parked": r.get("parked"),
-                    "kind": r.get("kind")})
+                    "kind": r.get("kind"),
+                    # R5's order, review F9: an empty or null level is no level; a 0 or a
+                    # false is a level, refused by judge_row (second review N2)
+                    "effort": _given(r.get("effort"), d.get("effort"))})
     if keep:
         unknown = [k for k in keep if k not in {p["id"] for p in out}]
         if unknown:
@@ -383,6 +414,8 @@ def judge_row(p: dict, repo: Path, landed=frozenset()):
         return "refused", "base"
     if not isinstance(p["model"], str) or not p["model"]:
         return "refused", "model"
+    if p.get("effort") is not None and p["effort"] not in EFFORTS:
+        return "refused", "effort"
     if type(p["turns"]) is not int or p["turns"] <= 0 or not _num(p["usd"]):
         return "refused", "budget"
     if wall_seconds(p["wall"]) is None:
@@ -450,18 +483,370 @@ def dirty(wt: Path) -> bool:
     return _status(wt) != ""
 
 
+# ---- the acceptance lines (packet u2 R2) ---------------------------------------
+# The cell as agentik-relay internal/packet/packet.go reads it (`table`, `splitRow`,
+# `acceptance`, `expect`), each line judged as night.Holds and gate.rerun judge it.
+
+SH = "/bin/sh"
+LINE_LIMIT = 900.0               # effects.Timeout: an acceptance line's limit
+CUT_EXIT = 124                   # effects.CutExit: the exit at the limit
+UNRUN_EXITS = (126, 127)         # the shell's: not executable, not found (review F2)
+LAST_CAP = 200                   # effects.LastCap
+OUT_CAP = 65536                  # effects.OutputCap: the tail of each stream read
+TEXT_CAP = 400                   # effects.TextCap: a ledger string
+PIPE_GRACE = 5.0
+CONTINUATIONS = 2                # packet u2 R3: named continuations a row, at most
+PASSES = ("green", "same-as-main")
+TAIL = ("Continue with the acts that make them hold. If one is blocked, say what blocks it in "
+        "the charter's handover.")
+_OR_MORE = re.compile(r"^reads (\d+) or more\b", re.A)
+_READS = re.compile(r"^reads (`[^`]*`|\S+)", re.A)
+_NUMBER = re.compile(r"^(under|exits) (\d+)\b", re.A)
+_AS_MAIN = re.compile(r"^as main\b", re.A)
+_INT = re.compile(r"^[+-]?\d+\Z", re.A)
+
+
+class AcceptanceError(ValueError):
+    """The packet's acceptance cell cannot be read: the row is refused before its spawn."""
+
+
+@dataclass(frozen=True)
+class Line:
+    """One acceptance item: its shell line and what it must show (`reads`, `reads-or-more`,
+    `under`, `exits`, `as-main`)."""
+    shell: str
+    expect: str
+    kind: str
+    value: str = ""
+    n: int = 0
+
+
+def _split_row(s: str) -> list:
+    """`splitRow`: a table row cut at every `|` not escaped as `\\|`."""
+    s = s.strip()
+    s = s[1:] if s.startswith("|") else s
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    out, start, j = [], 0, 0
+    while j < len(s):
+        if s[j] == "\\":
+            j += 2
+            continue
+        if s[j] == "|":
+            out.append(s[start:j])
+            start = j + 1
+        j += 1
+    return out + [s[start:]]
+
+
+def _unescape(s: str) -> str:
+    return s.replace("\\|", "|")
+
+
+def _expect(shell: str, e: str) -> Line:
+    m = _OR_MORE.match(e)
+    if m:
+        return Line(shell, e, "reads-or-more", m.group(1), int(m.group(1)))
+    m = _READS.match(e)
+    if m:
+        v = _unescape(m.group(1).strip("`"))
+        return Line(shell, e, "reads", v, int(v) if _INT.match(v) else 0)
+    m = _NUMBER.match(e)
+    if m:
+        return Line(shell, e, "under" if m.group(1) == "under" else "exits", m.group(2),
+                    int(m.group(2)))
+    if _AS_MAIN.match(e):
+        return Line(shell, e, "as-main")
+    raise AcceptanceError(f"`{shell[:80]}`: no expectation (want reads, reads <n> or more, "
+                          "under, exits or as main)")
+
+
+HEADER_ROWS = ("from", "pin", "wall", "may touch", "acceptance", "budget")   # packet.Rows
+VERIFY_ROW = "verify"                                                        # packet.VerifyRow
+
+
+def _header(text: str) -> list:
+    """`table`: the header table directly after the title (the first non-blank line, a `# `
+    heading), its heading row and rule, then each row's (name, value) while lines open with
+    `|`; any other table in the packet is never read."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i == len(lines) or not lines[i].startswith("# "):
+        raise AcceptanceError("no title: want `# Packet <id>: <title>` as the first line")
+    i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i + 1 >= len(lines) or not lines[i].startswith("|") or not lines[i + 1].startswith("|"):
+        raise AcceptanceError("no acceptance row: no header table directly after the title")
+    rows = []
+    for ln in lines[i + 2:]:
+        if not ln.startswith("|"):
+            break
+        c = _split_row(ln)
+        name = c[0].strip().lower()
+        if len(c) != 2:
+            raise AcceptanceError(f"row {name[:40]}: {len(c)} cells, want 2: an unescaped | "
+                                  "inside a span splits the row")
+        rows.append((name, c[1].strip()))
+    return rows
+
+
+def acceptance(text: str) -> list:
+    """The packet's acceptance lines, from its header table's `acceptance` row (`header`: a
+    duplicate or an extra row refuses the packet; the rows' order and a missing row other than
+    `acceptance` are left to the relay, since they change no cell read): the cell cut at each
+    `;` outside a code span, each item a span and an expectation; else AcceptanceError."""
+    rows, seen = _header(text), set()
+    for name, _ in rows:
+        if name not in HEADER_ROWS + (VERIFY_ROW,):
+            raise AcceptanceError(f"row {name[:40]}: extra header row")
+        if name in seen:
+            raise AcceptanceError(f"row {name}: duplicate header row")
+        seen.add(name)
+    cell = dict(rows).get("acceptance")
+    if cell is None:
+        raise AcceptanceError("no acceptance row in the packet's header table")
+    items, start, inside = [], 0, False
+    for j, ch in enumerate(cell):
+        if ch == "`":
+            inside = not inside
+        elif ch == ";" and not inside:
+            items.append(cell[start:j])
+            start = j + 1
+    if inside:
+        raise AcceptanceError("unterminated backtick span")
+    out = []
+    for it in items + [cell[start:]]:
+        it = it.strip()
+        if not it:
+            continue
+        if not it.startswith("`"):
+            raise AcceptanceError(f"item {len(out) + 1}: no shell span")
+        end = it.index("`", 1)
+        out.append(_expect(_unescape(it[1:end]), it[end + 1:].strip()))
+    if not out:
+        raise AcceptanceError("no item")
+    return out
+
+
+def line_holds(ln: Line, exit_code, last: str) -> bool:
+    """`night.Holds`: the expectation against an exit and a last line; `as main` holds on main,
+    where a line is its own baseline."""
+    t = (last or "").strip()
+    n = int(t) if _INT.match(t) else None
+    if ln.kind == "reads":
+        return t == ln.value
+    if ln.kind == "reads-or-more":
+        return n is not None and n >= ln.n
+    if ln.kind == "under":
+        return n is not None and n < ln.n
+    if ln.kind == "exits":
+        return exit_code == ln.n
+    return ln.kind == "as-main"
+
+
+def _last_of(data: bytes) -> str:
+    for ln in reversed(data[-OUT_CAP:].decode(errors="replace").split("\n")):
+        if ln.strip():
+            return ln.strip()[:LAST_CAP]
+    return ""
+
+
+def _killpg(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def run_line(cwd: Path, shell: str, env: dict) -> dict:
+    """One line under `/bin/sh -c` in cwd, in its own session, cut at LINE_LIMIT (exit 124,
+    `cut`), its group killed after; `exit` None and `error` when it could not run."""
+    try:
+        proc = subprocess.Popen([SH, "-c", shell], cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
+    except (OSError, ValueError) as e:
+        return {"exit": None, "last": f"{type(e).__name__}: {e}"[:LAST_CAP], "cut": False,
+                "error": True}
+    cut = False
+    try:
+        out, err = proc.communicate(timeout=LINE_LIMIT)
+    except subprocess.TimeoutExpired:
+        cut = True
+        _killpg(proc.pid)
+        try:
+            out, err = proc.communicate(timeout=PIPE_GRACE)
+        except subprocess.TimeoutExpired:       # a process that left the group holds a pipe
+            for fh in (proc.stdout, proc.stderr):
+                fh.close()
+            proc.wait()
+            return {"exit": None, "cut": True, "error": True,
+                    "last": f"orphans: the line's output still held {PIPE_GRACE:g} s after its cut"}
+    _killpg(proc.pid)                           # whatever it left running in its group
+    rc = CUT_EXIT if cut else (proc.returncode if proc.returncode >= 0 else -1)
+    return {"exit": rc, "last": _last_of(out) or _last_of(err), "cut": cut, "error": False}
+
+
+# The relay's scratch home (effects scratchEnv): a line never writes under the live home.
+SCRATCH = (("HOME", ""), ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
+           ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"), ("GOCACHE", "go-build"),
+           ("GOBIN", "bin"), ("GOMODCACHE", "gomod"), ("PYTHONPYCACHEPREFIX", "pycache"))
+
+
+def line_env(environ: dict, home: str, remotes: list) -> dict:
+    """The child's environment less its profile, under a scratch home and TMPDIR, at depth
+    1, with the push barrier; pytest's cache plugin kept on (review F7: off, a test using
+    the `cache` fixture errors here and passes in the gate), its directory in the scratch
+    home, so a line leaves no `.pytest_cache` in a tree that does not ignore it (the
+    dirty-tree check reads the tree after a continuation)."""
+    out = {k: v for k, v in environ.items() if not k.startswith("CLAUDE") and not (
+        k.startswith("RELAY_") and k != "RELAY_DEVICE_VERBS")}
+    out.update({k: os.path.join(home, leaf) if leaf else home for k, leaf in SCRATCH})
+    cache = "-o cache_dir=" + shlex.quote(os.path.join(home, "pytest-cache"))
+    out.update({"TMPDIR": os.path.join(home, "tmp"), "RELAY_MEASURE_DEPTH": "1",
+                "PYTEST_ADDOPTS": (out.get("PYTEST_ADDOPTS", "") + " " + cache).strip()})
+    return push_deny(out, remotes)
+
+
+def _unrun(got: dict | None) -> bool:
+    """It could not run: no start, or the shell's 126 (not executable) or 127 (not found)."""
+    return got is None or bool(got.get("error")) or got.get("exit") in UNRUN_EXITS
+
+
+def judge_line(ln: Line, got: dict, base: dict | None) -> str:
+    """`gate.rerun`, where the loop cannot be sure a line passed it is not a pass: `unrun`
+    when it could not run (review F2: exit 126 or 127 too); `red` when it was cut at the
+    limit, whatever it expects (F3); an `as main` line `unrun` when its baseline could not run
+    or was cut, else `same-as-main` (green at exit 0) when its exit and last line are its
+    baseline's, else `red`; every other line `green` when it holds, else `red`."""
+    if _unrun(got):
+        return "unrun"
+    if got.get("cut"):
+        return "red"
+    if ln.kind == "as-main":
+        if _unrun(base) or base.get("cut"):
+            return "unrun"
+        if (got["exit"], got["last"]) == (base["exit"], base["last"]):
+            return "green" if got["exit"] == 0 else "same-as-main"
+        return "red"
+    return "green" if line_holds(ln, got["exit"], got["last"]) else "red"
+
+
+def run_lines(wt: Path, lines: list, env: dict, pick=None) -> list:
+    """Each line (those `pick` keeps) run in wt under one scratch home, removed after; a
+    line left out is None."""
+    home = tempfile.mkdtemp(prefix="unattended-lines-")
+    try:
+        os.mkdir(os.path.join(home, "tmp"))
+        e = line_env(env, home, remotes(wt))
+        return [run_line(wt, ln.shell, e) if pick is None or pick(ln) else None for ln in lines]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def _as_main(ln: Line) -> bool:
+    return ln.kind == "as-main"
+
+
+def pin_baseline(repo: Path, sha: str | None, lines: list, env: dict) -> list:
+    """Packet u2 R2, review F4: each `as main` line run once in a temporary detached tree at
+    main's sha at the row's pin, never in the staged tree (a reused branch tree would be its
+    own baseline); `<repo>/.venv` linked there as `stage` links it. The tree is removed after,
+    on an error too. A line it cannot measure is an error, so it is `unrun`; another line is
+    None."""
+    def failed(why: str) -> list:
+        return [{"exit": None, "last": why[:LAST_CAP], "cut": False, "error": True}
+                if _as_main(ln) else None for ln in lines]
+    if not sha:
+        return failed("no main sha at the pin")
+    top = tempfile.mkdtemp(prefix="unattended-pin-")
+    tree = Path(top) / "tree"
+    try:
+        r = _git(repo, "worktree", "add", "--detach", str(tree), sha)
+        if r.returncode != 0:
+            return failed("pin tree: " + ((r.stderr.strip().splitlines() or ["git worktree add "
+                                                                             "failed"])[-1]))
+        if (repo / ".venv").exists() and not os.path.lexists(tree / ".venv"):
+            os.symlink(str(repo / ".venv"), str(tree / ".venv"))
+        return run_lines(tree, lines, env, _as_main)
+    finally:
+        removed = _git(repo, "worktree", "remove", "--force", str(tree)).returncode == 0
+        mine = os.path.realpath(top) + os.sep
+        shutil.rmtree(top, ignore_errors=True)
+        if not removed:                 # never a prune: it drops other sittings' trees (N1)
+            _drop_records(repo, mine)
+
+
+def _drop_records(repo: Path, inside: str) -> None:
+    """Second review N1: the repo's worktree entries whose `gitdir` file points under
+    `inside`, read from each entry, never guessed by name, removed; every other record is
+    left as it is, since the loop never removes or prunes a tree it did not make."""
+    common = _out(repo, "rev-parse", "--git-common-dir")
+    if not common:
+        return
+    d = Path(common) if os.path.isabs(common) else Path(repo) / common
+    try:
+        entries = list((d / "worktrees").iterdir())
+    except OSError:
+        return
+    for e in entries:
+        try:
+            gitdir = (e / "gitdir").read_text(errors="replace").strip()
+        except OSError:
+            continue
+        if gitdir and os.path.realpath(gitdir).startswith(inside):
+            shutil.rmtree(e, ignore_errors=True)
+
+
+def _said(c: dict) -> str:
+    """One failing line for the child: what it returned and what it wants."""
+    if c["status"] == "unrun" and (c["exit"] is None or c["exit"] in UNRUN_EXITS):
+        got = "could not run (" + (f"exit {c['exit']}: " if c["exit"] is not None else "") \
+            + f"{c['last']})"
+    elif c["status"] == "unrun":
+        got = "could not be judged: its run at the pin could not run or was cut"
+    else:
+        got = f"returned exit {c['exit']}" + (f", cut at {LINE_LIMIT:g} s" if c["cut"] else "") \
+            + (f", last line \"{c['last']}\"" if c["last"] else ", no output")
+    want = c["expect"]
+    if c["main_exit"] is not None or c["main_last"] is not None:
+        want += f" (at the pin: exit {c['main_exit']}, last line \"{c['main_last']}\")"
+    return f"`{c['shell']}` {got}; it wants: {want}"
+
+
+def continuation(failing: list) -> str:
+    """Packet u2 R3: the message that names each failing line."""
+    return ("The packet's acceptance lines do not all hold yet; the loop ran them in this tree "
+            "after your turn:\n" + "".join(f"- {_said(c)}\n" for c in failing) + TAIL + "\n")
+
+
 # ---- the spawn (ruling 5) --------------------------------------------------------------
 
 def _usd(v) -> str:
     return f"{round(float(v), 2):g}"
 
 
+def builder_effort(env) -> str:
+    """The `builder` profile's effort, the user's layer over the shipped one; `high` when it
+    names none the loop knows or the profiles cannot be read (packet u2 R5)."""
+    try:
+        v = (resolver.load_profiles(env)[1].get("builder") or {}).get("effort")
+    except Exception:       # noqa: BLE001  (an unreadable layer is the fallback, never a stop)
+        v = None
+    return v if v in EFFORTS else BUILDER_EFFORT
+
+
 def spawn_argv(model: str, turns: int, usd, sid: str | None = None,
-               resume: str | None = None) -> list:
-    """The relay's spawn line (`SpawnArgv`); a resume names its session and no new one."""
+               resume: str | None = None, effort: str | None = None) -> list:
+    """The relay's spawn line (`SpawnArgv`); a resume names its session and no new one; the
+    level after the model (packet u2 R5)."""
     a = ["claude", "-p"] + (["--resume", resume] if resume else [])
-    a += ["--permission-mode", "auto", "--allowedTools", ALLOWED_TOOLS, "--model", model,
-          "--max-turns", str(turns), "--max-budget-usd", _usd(usd),
+    a += ["--permission-mode", "auto", "--allowedTools", ALLOWED_TOOLS, "--model", model]
+    a += (["--effort", effort] if effort else [])
+    a += ["--max-turns", str(turns), "--max-budget-usd", _usd(usd),
           "--output-format", "stream-json", "--verbose"]
     return a + (["--session-id", sid] if sid else [])
 
@@ -499,7 +884,7 @@ def remotes(wt: Path) -> list:
 
 
 def prompt(packet_text: str) -> str:
-    return f"{HEADING}\n\n{packet_text}"
+    return f"{PROMPT}\n\n{packet_text}"
 
 
 def start(argv: list, cwd: Path, env: dict, text: str, stderr_path: Path, fx: Fx):
@@ -721,6 +1106,25 @@ def verdict(rc, out: str, sha: str) -> tuple:
 
 
 @dataclass
+class _Row:
+    """One row's running tally (packet u2): its acceptance lines and their baseline at the
+    pin, its limits and continuations, and what its parts spent."""
+    lines: list
+    base: list | None = None
+    limits: int = 0
+    continues: int = 0
+    turns: int = 0
+    usd: float = 0.0
+
+
+def _check(i: int, ln: Line, got: dict, base: dict | None, status: str) -> dict:
+    """One line's result, as the ledger keeps it."""
+    return {"line": i, "shell": ln.shell[:TEXT_CAP], "expect": ln.expect[:TEXT_CAP],
+            "exit": got["exit"], "last": got["last"], "cut": got["cut"], "status": status,
+            "main_exit": base and base["exit"], "main_last": base and base["last"]}
+
+
+@dataclass
 class _Run:
     repo: Path
     nid: str
@@ -737,6 +1141,8 @@ class _Run:
     max_rows: int | None = None
     spawned: int = 0
     landed: set = field(default_factory=set)
+    effort: dict = field(default_factory=dict)      # row id: the level it ran at
+    cur: _Row | None = None                          # the running row's tally
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -752,10 +1158,10 @@ class _Run:
         self.record("limit", row=rid, limit_kind=lim["kind"], resets_at=lim["resets_at"],
                     source=lim["source"], action=action, **kw)
 
-    def row(self, p, state, reason=None, sha=None, wt=None, sid=None) -> None:
+    def row(self, p, state, reason=None, sha=None, wt=None, sid=None, **more) -> None:
         rec = {"row": p["id"], "state": state, "reason": reason, "sha": sha,
                "worktree": str(wt) if wt else None, "merge": p.get("merge"),
-               "verify": p.get("verify")}
+               "verify": p.get("verify"), "effort": self.effort.get(p["id"]), **more}
         if state in ("red", "limit") and wt and sid:
             rec["resume"] = f"cd {wt} && claude --resume {sid}"
         self.record("row", **rec)
@@ -766,8 +1172,8 @@ class _Run:
         """One child to its exit: (Part, rc, the watchdog's cut or None)."""
         rid = p["id"]
         adm = admit(self.nid, p["model"], self.fx.env)
-        self.record("spawn", row=rid, part=n, model=p["model"], turns=turns, usd=usd,
-                    session_id=sid, argv=argv, admission=adm)
+        self.record("spawn", row=rid, part=n, model=p["model"], effort=self.effort.get(rid),
+                    turns=turns, usd=usd, session_id=sid, argv=argv, admission=adm)
         env = child_env(self.fx.env, p["model"], turns, remotes(wt))
         part = Part()
         proc = self.proc = start(argv, wt, env, text, self.dir / f"{rid}.stderr", self.fx)
@@ -781,8 +1187,11 @@ class _Run:
             reader.join(5.0)
         self.proc = None
         r = part.result or {}
-        cost = r.get("total_cost_usd")
+        cost, spent = r.get("total_cost_usd"), r.get("num_turns")
         self.cost += cost if type(cost) in (int, float) else 0
+        if self.cur is not None:
+            self.cur.usd += cost if type(cost) in (int, float) else 0
+            self.cur.turns += spent if type(spent) is int else 0
         self.record("exit", row=rid, part=n, rc=proc.returncode, subtype=r.get("subtype"),
                     is_error=r.get("is_error"), num_turns=r.get("num_turns"),
                     total_cost_usd=cost, duration_ms=r.get("duration_ms"),
@@ -867,22 +1276,61 @@ class _Run:
         else:
             self.row(p, "red", reason, sha=sha, wt=wt, sid=sid)
 
+    def left(self, p) -> tuple:
+        """A resume's budget: the row's less what every part spent, never under 10 turns or
+        $5."""
+        return (max(10, p["turns"] - self.cur.turns),
+                max(5, round(p["usd"] - self.cur.usd, 2)))
+
+    def baseline(self, p, pin) -> list:
+        """Packet u2 R2: each `as main` line run once at main's sha at the pin, in a tree of
+        its own (`pin_baseline`, review F4), before the spawn; a `baseline` line. Another line
+        is None: it is judged on its own."""
+        got = pin_baseline(self.repo, pin, self.cur.lines, self.fx.env)
+        self.record("baseline", row=p["id"], pin=pin, lines=[
+            {"line": i, "exit": g and g["exit"], "last": g and g["last"], "error": g and g["error"]}
+            for i, g in enumerate(got, 1)])
+        return got
+
+    def accept(self, p, wt, n) -> list:
+        """Packet u2 R2: every line in the row's tree, judged against its baseline; an
+        `accept` line; the checks."""
+        base = self.cur.base or [None] * len(self.cur.lines)
+        got = run_lines(wt, self.cur.lines, self.fx.env)
+        checks = [_check(i, ln, g, b, judge_line(ln, g, b))
+                  for i, (ln, g, b) in enumerate(zip(self.cur.lines, got, base), 1)]
+        self.record("accept", row=p["id"], part=n, lines=checks)
+        return checks
+
     def do_row(self, p) -> str | None:
         """The row, start to end; the run's stop reason, or None to go on."""
+        self.cur = None
         j = judge_row(p, self.repo, self.landed)
         if j:
             self.row(p, *j)
             return None
+        text = (self.repo / p["packet"]).read_text(errors="replace")
+        try:
+            lines = acceptance(text)
+        except AcceptanceError as e:
+            self.log(f"{p['id']}: acceptance: {e}"[:300])
+            self.row(p, "refused", "acceptance")
+            return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
+        pin = _out(self.repo, "rev-parse", "--verify", "--quiet", "main^{commit}")
         wt, head = stage(self.repo, p["id"], "main")     # a landed base is on main now
         if wt is None:
             self.log(f"{p['id']}: stage: {head}")
             self.row(p, "red", "stage")
             return None
-        text = prompt((self.repo / p["packet"]).read_text())
+        self.cur = _Row(lines)
+        if any(_as_main(ln) for ln in lines):
+            self.cur.base = self.baseline(p, pin)
+        text = prompt(text)
         sid = str(uuid.uuid4())
-        argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid)
+        effort = self.effort[p["id"]] = p.get("effort") or builder_effort(self.fx.env)
+        argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid, effort=effort)
         self.spawned += 1
         part, rc, cut = self.part(p, wt, 1, argv, sid, text, p["turns"], p["usd"])
         return self.end(p, wt, head, part, rc, cut, sid, 1)
@@ -907,14 +1355,38 @@ class _Run:
             self.row(p, "red", "dirty-tree", sha=sha, wt=wt, sid=sid)
         elif part.result.get("is_error"):
             self.row(p, "red", "stream-error", sha=sha, wt=wt, sid=sid)
-        elif p.get("merge") != "merge-on-green":
-            self.row(p, "built", sha=sha, wt=wt)
-        elif not self.land:
-            self.log(f"{p['id']}: merge-on-green with no land script; it stays on its branch")
-            self.row(p, "built", "no-land", sha=sha, wt=wt)
         else:
-            self.land_row(p, wt, sha, sid)
+            return self.finish(p, wt, head, sha, sid, n)
         return None
+
+    def finish(self, p, wt, head, sha, sid, n) -> str | None:
+        """Packet u2 R2, R3: a commit, a clean tree, a non-error result; then the acceptance
+        lines. All pass: built, or it lands. One fails: a named continuation of the same
+        session, two at most, then red `acceptance` with the failing lines."""
+        rid = p["id"]
+        failing = [c for c in self.accept(p, wt, n) if c["status"] not in PASSES]
+        if not failing:
+            if p.get("merge") != "merge-on-green":
+                self.row(p, "built", sha=sha, wt=wt)
+            elif not self.land:
+                self.log(f"{rid}: merge-on-green with no land script; it stays on its branch")
+                self.row(p, "built", "no-land", sha=sha, wt=wt)
+            else:
+                self.land_row(p, wt, sha, sid)
+            return None
+        stop = "signal" if self.term else "owner-stop" if self.stopped() else None
+        if stop or self.cur.continues >= CONTINUATIONS:
+            self.row(p, "red", "acceptance", sha=sha, wt=wt, sid=sid, failing=failing)
+            return stop
+        self.cur.continues += 1
+        turns, usd = self.left(p)
+        self.record("continue", row=rid, part=n + 1, reason="acceptance",
+                    failing=[c["line"] for c in failing])
+        self.fx.say(f"{rid}: {len(failing)} acceptance line(s) fail; continuation "
+                    f"{self.cur.continues} of {CONTINUATIONS}")
+        argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
+        part2, rc, cut = self.part(p, wt, n + 1, argv, sid, continuation(failing), turns, usd)
+        return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
 
     def limited(self, p, wt, head, part, sid, n) -> str | None:
@@ -923,7 +1395,8 @@ class _Run:
         weekly limit or a second one stops the run `usage-limit`. Never a kill."""
         lim, rid = part.limit, p["id"]
         kind, reset = lim["kind"], lim["resets_at"]
-        if n > 1 or kind.startswith("seven_day"):
+        self.cur.limits += 1                    # counted by limits, not parts (packet u2 R4)
+        if self.cur.limits > 1 or kind.startswith("seven_day"):
             self.limit(rid, lim, "stop")
             self.row(p, "limit", kind, wt=wt, sid=sid)
             return "usage-limit"
@@ -947,11 +1420,8 @@ class _Run:
         if self.term or self.stopped():
             self.row(p, "limit", kind, wt=wt, sid=sid)
             return "signal" if self.term else "owner-stop"
-        r = part.result or {}
-        spent_t, spent_u = r.get("num_turns"), r.get("total_cost_usd")
-        turns = max(10, p["turns"] - (spent_t if type(spent_t) is int else 0))
-        usd = max(5, round(p["usd"] - (spent_u if type(spent_u) in (int, float) else 0), 2))
-        argv = spawn_argv(p["model"], turns, usd, resume=sid)
+        turns, usd = self.left(p)
+        argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
         part2, rc, cut = self.part(p, wt, n + 1, argv, sid, CONTINUE + "\n", turns, usd)
         return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
@@ -1159,16 +1629,18 @@ def report(d: Path) -> str:
           for s in ("landed", "built", "red", "limit")}
     out = [f"# The unattended run {d.name}", "", head]
     for title, cols, items in (
-            ("Landed", ("row", "sha", "reason"),
-             [(e["row"], (e.get("sha") or "")[:12], e.get("reason")) for e in by["landed"]]),
-            ("Built", ("row", "sha", "reason", "worktree"),
-             [(e["row"], e.get("sha"), e.get("reason"), e.get("worktree")) for e in by["built"]]),
-            ("Red", ("row", "reason", "resume"),
-             [(e["row"], e.get("reason"), e.get("resume")) for e in by["red"]]),
-            ("Limited", ("row", "limit_kind", "resets_at", "action"),
+            ("Landed", ("row", "sha", "reason", "effort"),
+             [(e["row"], (e.get("sha") or "")[:12], e.get("reason"), e.get("effort"))
+              for e in by["landed"]]),
+            ("Built", ("row", "sha", "reason", "worktree", "effort"),
+             [(e["row"], e.get("sha"), e.get("reason"), e.get("worktree"), e.get("effort"))
+              for e in by["built"]]),
+            ("Red", ("row", "reason", "resume", "effort"),
+             [(e["row"], e.get("reason"), e.get("resume"), e.get("effort")) for e in by["red"]]),
+            ("Limited", ("row", "limit_kind", "resets_at", "action", "effort"),
              [(e["row"], limits.get(e["row"], {}).get("limit_kind", e.get("reason")),
                _local_reset(limits.get(e["row"], {}).get("resets_at")),
-               limits.get(e["row"], {}).get("action")) for e in by["limit"]]),
+               limits.get(e["row"], {}).get("action"), e.get("effort")) for e in by["limit"]]),
             ("Refused and skipped", ("row", "reason"),
              [(e["row"], e.get("reason")) for e in rows.values()
               if e.get("state") in ("refused", "skip")])):

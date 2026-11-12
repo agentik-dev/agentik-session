@@ -1,12 +1,16 @@
 # NICE overflow: agentik-session
 
-Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B bound (its rule 6), the oldest first, appended. Each keeps its id; a row leaves when it lands, as there. Moved 2026-11-10 at FW4d's merge: every S4 row found before 2026-11-09.
+Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B bound (its rule 6), the oldest first, appended. Each keeps its id; a row leaves when it lands, as there. Moved 2026-11-10 at FW4d's merge: every S4 row found before 2026-11-09. Moved 2026-11-11 at u2's fold: n17, n18, n19 and n21, the oldest S4 rows then open.
 
 ## From the open findings
 
 | id | level | area | finding | evidence | from |
 |---|---|---|---|---|---|
 | n1 | S4 | `design/readme/source.md` | The README's source sits 2 B under its 16,384 B ceiling, so no new README line fits (s52's `--continue` line did not) until the source is trimmed or the ceiling moves | 16,382 B at 823003e; `tests/test_readme.py:25` | 2026-11-01, s52's builder |
+| n17 | S4 | `design/readme/source.md` | `session.admission.mix` (shares, fable_cap, resets, until, prices) has no README line; the source has no room (n1) | packet S53 ruling 1 | 2026-11-09, S53's builder |
+| n18 | S4 | `claude_session/meter.py` | F6's rest: a fork recounts its parent's turns in spend (each session's seen set is its own); needs a seen set shared across sessions. A real fork keeping `requestId`/`message.id` is a lead | `meter.parse`: a.jsonl [r1/m1], b.jsonl [r1/m1, r2/m2], 1M fable input each: 8.0 + 16.0 = 24.0, true 16.0 | 2026-11-09, S53's builder |
+| n19 | S4 | `claude_session/admission.py` | `_real` raises on an int past a double, so `band_line` raises and the hook drops the whole line; the mod's `fig` drops only the part | `band_line(json.loads('{"P7": 1' + '0' * 400 + '}'))`: OverflowError | 2026-11-09, S53's builder |
+| n21 | S4 | `hooks/session.ts` | `pctOf`: a figure from 2^53 to 1e21 prints its short digits, Python all; the writer makes none; `BigInt(r)` from 2^53 | `p8.py <worktree> hand`: py `fable 100000000000000016/50`, ts `...020/50` | 2026-11-09, S53's last review D1 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 
