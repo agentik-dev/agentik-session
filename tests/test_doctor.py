@@ -95,7 +95,7 @@ def test_green_machine_in_order(machine):
     assert [c.name for c in rep.checks] == [
         "claude", "python", "state-dir", "plugin", "decisions", "respeak", "relay-plugin",
         "profiles", "resolved", "meter", "meter-hook", "config", "git", "relay", "mod",
-        "measure", "launcher", "instructions"]                  # g1 R2: no log, one row
+        "measure", "launcher", "instructions", "guard"]         # g1 R2: no log, one row; g2 R5
 
 
 def test_no_claude_on_path(machine):

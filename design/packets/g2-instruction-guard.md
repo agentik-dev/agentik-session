@@ -5,7 +5,7 @@
 | from | the management sitting's coordinator, 2026-11-11, brief g2; the design is the management repo's design/09 (§7.2 all of it: what the guard is, what it does not do, the guarded files; §1 fact F11). The owner, 2026-11-11: "making sure that the rulings/guidelines/claude configs get updated the correct way through a lane, not ad hoc." |
 | pin | main at `9bd9571` (2.0.0-alpha.78, g1 on it). Version 2.0.0-alpha.79 (the code's commit), 2.0.0-alpha.80 (the records' commit, which changes the skill's page). Worktree `.claude/worktrees/g2-instruction-guard`, its branch the same name; `.venv` and `.venv-floor` linked from the main checkout |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make`; no `claude`; no test reads live state; no relay verb. HELD after review: it lands only after the owner's attended test that a hook's `ask` reaches the dialog under the `auto` mode |
-| may touch | `plugin/lib/claude_session/{instructionguard,hooks,instructions}.py` (`instructionguard.py` new); `plugin/.claude-plugin/plugin.json`; `plugin/skills/session/SKILL.md`; `RUNBOOK.md`, `README.md`, `design/readme/{source.md,rendered.sha256}`; `NICE_TO_HAVE.md`; `tests/test_g2_guard.py` (new); this packet, committed first |
+| may touch | `plugin/lib/claude_session/{instructionguard,hooks,doctor}.py` (`instructionguard.py` new); `plugin/.claude-plugin/plugin.json`; `plugin/skills/session/SKILL.md`; `RUNBOOK.md`, `README.md`, `design/readme/{source.md,rendered.sha256}`; `NICE_TO_HAVE.md`; `tests/test_g2_guard.py` (new), the doctor's row order in `tests/test_doctor.py` and the readers' table in `tests/test_bare_machine.py`; this packet, committed first |
 | verify | the gate queue's `make check`; while building, pytest directly under `.venv` and `.venv-floor`, `scripts/hygiene --require-private --commits main..HEAD`, `scripts/plugin-version-check`, `scripts/recordlint` |
 | acceptance | `.venv/bin/python -m pytest -q tests/test_g2_guard.py tests/test_g1_instructions.py tests/test_hooks.py tests/test_doctor.py tests/test_wfd.py tests/test_wfg.py tests/test_n33.py` green, and the same under `.venv-floor` (the first file absent at the pin: red); `scripts/hygiene --require-private --commits main..HEAD` exits 0 |
 | budget | the packet first, then the failing tests, then the change, by explicit path. `claude-opus-5-5`, about 90 tool calls |
@@ -23,7 +23,7 @@
 - **R2, what it answers.** A main thread: `ask`. A helper (`agent_id`), a `-p` run, or a run whose `claude` argv cannot be read: `deny`. The reason is §7.2's text word for word, the path filled in: it names the path as instruction text every session pays for, and the ledger plugin's `instruct` skill as the lane (the test holds the text; the word is the hygiene scan's, so this page does not spell it).
 - **R3, fails open, stays cheap.** An exception, or a target that is not a non-empty string: the call passes, and one line goes to `sessions/<sid>/guard.jsonl` (0600, capped at 64 KiB). Each ask and deny is a line there too. A target whose name and path cannot be guarded is decided by string tests alone, with no file read.
 - **R4, no knob.** The guard reads no profile, session setting or environment variable but `HOME` and `CLAUDE_CONFIG_DIR` (where the user's folder is) and the state root (where its log goes).
-- **R5, the doctor.** One `guard` row, after the `instructions` rows: the guard is on, and the prompts and refusals that the repo's newest session (g1's `newest`) logged.
+- **R5, the doctor.** One `guard` row (`doctor._check_guard`), after the `instructions` rows, so g1's rows and their tests stay as they are: the guard is on, and the prompts and refusals that the repo's newest session (g1's `newest`) logged.
 - **R6, records.** The skill's page, the RUNBOOK and the README name the guard; t1 round two's F1 to F3 with two older observations, and g1's F1 to F4, become rows of `NICE_TO_HAVE.md`.
 
 ## 3. Interfaces: the acceptance table
@@ -42,7 +42,7 @@
 
 ### What changes
 
-`instructionguard.py` holds the matcher, the run's kind and the log. `hooks.pre_tool_use` calls it after the spawn rules and before a helper's call opens, so a refused call opens none. `instructions.rows` gains the `guard` row.
+`instructionguard.py` holds the matcher, the run's kind and the log. `hooks.pre_tool_use` calls it after the spawn rules and before a helper's call opens, so a refused call opens none. `doctor.run` gains the `guard` row after g1's rows; `guard.jsonl`'s reader joins the bare-machine readers' table.
 
 ## 4. Findings that name this row: ledger, NICE, forks
 
