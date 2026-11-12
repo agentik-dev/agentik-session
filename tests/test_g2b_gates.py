@@ -526,3 +526,31 @@ def test_f6_a_resolved_ungated_target_logs_nothing(box):
     for command in ("echo x >> notes.md", "sed -i '' s/a/b/ notes.md", "ls 2>&1 | head"):
         assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
     assert _log(box) == []
+
+
+# ---- review round 2 (the hardening round): F1 quoted parens, F2 case patterns, F3 pushd ----
+
+R2_DENIED = [
+    ("docs", "grep -c '(' a.py; cd ..; grep -c ')' a.py; printf x >> CLAUDE.md"),     # F1
+    ("docs", "echo \\(; cd ..; echo \\); printf x >> CLAUDE.md"),                      # F1
+    ("", "(cd docs; echo ')'; printf x >> ../CLAUDE.md)"),                             # F1
+    ("", "(cd docs && case $x in *) printf x >> ../CLAUDE.md;; esac)"),                # F2
+    ("", "(cd docs; case $x in a) ;; esac; cd ..); printf x >> CLAUDE.md"),            # F2
+    ("", "pushd docs; (pushd ..); popd; printf x >> CLAUDE.md"),                       # F3
+    ("", "pushd docs; (popd); popd; printf x >> CLAUDE.md"),                           # N3, by F3
+    ("docs", "echo \"(\"; cd ..; echo \")\"; printf x >> CLAUDE.md"),                  # F1, dquote
+    ("", "case $x in (a) cd docs;; esac; cd ..; printf x >> CLAUDE.md"),               # F2, (a)
+]
+
+
+@pytest.mark.parametrize("where,command", R2_DENIED)
+def test_r2_each_repro_denies(box, where, command):
+    cwd = box.repo / where if where else box.repo
+    out = instructionguard.check(_bash(command, cwd), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+def test_r2_an_unmatched_paren_leaves_the_folder_unknown(box):
+    command = "cd docs; ) ; printf x >> ../CLAUDE.md"
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+    assert [r["decision"] for r in _log(box)] == ["open"]
