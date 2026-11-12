@@ -14,8 +14,8 @@ import subprocess
 import sys
 import time
 
-from . import (admission, charter, doctor, gitinfo, harness, hooks, install, launch, ledger, measure,
-               meter, mod, resolver, rules, sessionconfig, store)
+from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
+               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -115,6 +115,16 @@ def cmd_doctor(args) -> int:
     rep = doctor.run()
     print(json.dumps(rep.as_dict(), indent=2) if args.json else doctor.render(rep))
     return 0 if rep.ok else 2
+
+
+def cmd_gates(args) -> int:
+    """g2b: what the edit gates guard here; `gates write`, the lane's write of a gated file."""
+    if getattr(args, "gates_verb", None) == "write":
+        return instructionguard.gates_write(args.file, args.draft, args.expect, os.environ,
+                                            os.getcwd(), sys.stdout, sys.stderr)
+    for line in instructionguard.listing(os.environ, os.getcwd()):
+        print(line)
+    return 0
 
 
 def cmd_install_cli(args) -> int:
@@ -1590,6 +1600,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     nt.set_defaults(func=cmd_unattended)
 
+
+    eg = sub.add_parser("gates", help="what the edit gates guard here; `gates write` writes a "
+                        "gated file from a draft, on the owner's yes")
+    egsub = eg.add_subparsers(dest="gates_verb", metavar="write")
+    ew = egsub.add_parser("write", help="preview a gated file's draft (diff, bytes, hash), or "
+                          "write it with --expect <hash>")
+    ew.add_argument("file", help="the gated file")
+    ew.add_argument("--from", dest="draft", required=True, metavar="DRAFT",
+                    help="an ungated file holding the whole new text")
+    emx = ew.add_mutually_exclusive_group()
+    emx.add_argument("--preview", action="store_true", help="print the diff, the byte change "
+                     "and the hash; write nothing (the default)")
+    emx.add_argument("--expect", metavar="HASH", help="write, when the file and the draft "
+                     "are as the preview hashed them")
+    eg.set_defaults(func=cmd_gates)
 
     hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks
     hk.add_argument("event", choices=sorted(hooks.HANDLERS))

@@ -10,16 +10,17 @@
 
 ## Done-ness
 - [x] the packet committed
-- [ ] tests first, red at the pin
-- [ ] acceptance 1, 2, 4, 5 (Edit tools, matching, no spawn, fail open)
-- [ ] acceptance 3 (g3 on Bash)
-- [ ] acceptance 6 (`gates write`) and the doctor's row
+- [x] tests first: `tests/test_g2b_gates.py`, red at 3e1f8ad, 69 failed, 32 passed (04fc06e); g2's guard tests removed
+- [x] acceptance 1 to 6 green at once (the module is one rewrite): 101 passed in `tests/test_g2b_gates.py`; with g1, hooks, doctor, cli, bare_machine, wfd, wfg, n33: 3.12 and 3.9.6 green; plugin 2.0.0-alpha.83
 - [ ] records (README, RUNBOOK), the gate's `make check`
 
 ## Handover
-- decide, owner: none yet
+- Choice: a Bash target with `$`, a glob or an open quote passes with no log line (a form not named); an Edit target that cannot be resolved keeps g2's `open` line
+- Choice: `gates write` with neither flag previews; a gated draft is refused; a new block or a dropped one counts as a changed block line
+- Choice: `rm -rf` of a whole checkout (a worktree's cleanup) is not a list file's removal; `rm -rf .claude` inside one is
+- decide, owner: none
 
 ## Next act
-tests first
+records (README, RUNBOOK), then the gate's `make check`
 
 - exit taken: (open)

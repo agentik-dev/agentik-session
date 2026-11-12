@@ -554,8 +554,8 @@ def _check_instructions(env, cwd, plugins, sections) -> list:
 
 
 def _check_guard(env, cwd) -> Check:
-    """Packet g2 R5: the instruction guard is on (it has no knob), and the prompts and refusals
-    the repo's newest session logged. Never a failure."""
+    """Packets g2 R5 and g2b R4: the edit gates are on (they have no knob), how many lines are
+    gated here, and the refusals the repo's newest session logged. Never a failure."""
     try:
         detail = instructionguard.doctor_row(env, cwd)
     except Exception:                                   # noqa: BLE001

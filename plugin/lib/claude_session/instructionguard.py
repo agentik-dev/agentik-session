@@ -1,165 +1,151 @@
-"""The prompt before an edit of instruction text (packet g2; hq design/09 §7.2).
+"""The edit gates (packet g2b; hq design/09 §7.2).
 
-R1: `Edit`, `Write`, `MultiEdit` and `NotebookEdit` on a guarded path, and no other tool (a
-Bash line is never read). Guarded are the instruction files and the settings that act as
-prompts: under the user's folder (`CLAUDE_CONFIG_DIR`, and `~/.claude`) `CLAUDE.md`,
-`settings.json` and the `rules`, `hooks`, `agents` and `plugins` folders; a tree folder's
-`CLAUDE.md` (a folder that holds a main checkout, a child with a `.git` directory); and at a
-checkout's top level (the nearest folder above the target holding `.git`, a worktree's file
-included) `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `.claude/rules/**`,
-the ledger file and `.claude/settings*.json`. A folder `tests`, `testdata` or `fixtures` below
-the matched root (the user's folder, or the nearest top level) exempts the path. A name is the
-file it names (r1 F2): where the volume folds case, `claude.md` is `CLAUDE.md`.
+R1: a file is gated when a list names it: the checkout's tracked `.claude/edit-gates` (a path or
+glob a line, relative to the top level, the nearest folder above the target holding `.git`, a
+worktree's own; `#` a comment; a line with `..` or a leading `/` matches nothing) or the user's
+`edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or `~/`). Both list
+files are always gated. A target's absolute and real paths are both matched, case folded where
+the volume folds case. Every other file passes in silence, with no log line.
 
-R2: `ask` in a main thread; `deny` in a helper (`agent_id`), in a `-p` run, and where the
-nearest `claude` ancestor's argv cannot be read (found by `harness.claude_argv`, SessionEnd's
-reader). Only its options are read (r1 F1), as Claude Code's CLI (commander) parses them (r2
-F4): the argv is read word by word from the kernel, options are read past the prompt until `--`
-or a subcommand, and an option's value or a prompt is never taken for an option. Where only the
-`ps` line can be read, a print word after the first prompt word denies.
-R3: an exception or a target that is not a usable string lets the call through, and one line
-goes to the session's `guard.jsonl`, never to the model; each ask and deny is a line there too.
-R4: no knob. The environment is read for `HOME` and `CLAUDE_CONFIG_DIR` (where the user's folder
-is) and the state root (where the log goes), nothing else.
+R2: `Edit`, `Write`, `MultiEdit` and `NotebookEdit` of a gated file, and (g3) a Bash line that
+writes one, are denied in every permission mode and every run, with one reason that routes the
+model to the instruct skill. The gate never asks: the `auto` mode approved a hook's ask with no
+dialog (the owner's test of 2026-11-12). The lane writes a gated file with `gates write`.
+
+R3, g3: a Bash line holding no write word costs one regex search and opens no file. Otherwise
+`shlex` splits it into simple commands; the targets are redirections (a heredoc's own included),
+`tee`, `sed -i`, `perl -i`, `cp`, `mv` and `install` (their last word or `-t` folder), one level
+of `bash -c` or `sh -c`, after a literal `cd`, and string literals in `python -c` code, or a
+`python -` heredoc body, that also holds `open(` or `write_`. A list file's removal (`rm`,
+`unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it) is refused too. A target
+with `$`, a backquote or a glob, and a line `shlex` cannot split, pass: the gate fails open.
+
+R4: an exception lets the call through with one `open` line in the session's `guard.jsonl`;
+each refusal is a line there too, naming a helper by the payload's `agent_id`. No knob: the
+environment is read for `HOME` and `CLAUDE_CONFIG_DIR` and the state root, nothing else. No
+process is spawned and no launch line is read.
 """
-
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
 
-from . import harness, resolver
+from . import resolver
 
 TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path",
-         "NotebookEdit": "notebook_path"}
-LEDGER_FILE = "DECISION" "S.md"           # spelled in two pieces for the hygiene scan
-SKILL = "decision" "s:instruct"
-REASON = ("agentik-session: `{path}` is instruction text that every session pays for. Change it "
-          "through the `" + SKILL + "` skill, which reviews the change and writes it with the "
-          "tool that owns the file.")
+         "NotebookEdit": "notebook_path", "Bash": "command"}
+SKILL = "decision" "s:instruct"           # spelled in two pieces for the hygiene scan
+REASON = ("agentik-session: `{path}` is gated: an edit of it is refused in every permission "
+          "mode. Make the change through the `" + SKILL + "` skill, which shows the owner the "
+          "change and its cost and writes it only on the owner's yes. Do not write the file "
+          "another way.")
+LIST = "edit-gates"
+REPO_LIST = ".claude/" + LIST
 LOG = "guard.jsonl"
 LOG_CAP = 64 * 1024                       # past this a session's guard log takes no more lines
 TEXT_CAP = 1024
-SCAN_CAP = 512                            # a tree folder's entries read, at most
-EXEMPT = frozenset({"tests", "testdata", "fixtures"})
-NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", LEDGER_FILE})
-TOP_FILES = frozenset({("CLAUDE.md",), ("CLAUDE.local.md",), (".claude", "CLAUDE.md"),
-                       ("AGENTS.md",), (LEDGER_FILE,)})
-USER_FILES = frozenset({("CLAUDE.md",), ("settings.json",)})
-USER_TREES = frozenset({"rules", "hooks", "agents", "plugins"})
-PRINT = ("-p", "--print")
-# r1 F1: the CLI's short flags (commander, which reads `-cp` as `-c -p`): 0 takes no value, 1 the
-# rest of its word or the next word, 2 the rest of its word or a next word that is no option.
-_SHORT = {"c": 0, "p": 0, "h": 0, "v": 0, "n": 1, "d": 2, "r": 2, "w": 2}
-_LONG_BARE = frozenset(o for o in harness._BARE_OPTS if o.startswith("--"))
-_LONG_VALUED = frozenset(o for o in harness._VALUED_OPTS if o.startswith("--")) | {"--effort"}
-_LONG_OPTIONAL = frozenset(o for o in harness._OPTIONAL_OPTS if o.startswith("--"))
-_LONG_LIST = frozenset(harness._LIST_OPTS)
-_LONG_TAKES = _LONG_VALUED | _LONG_OPTIONAL      # a value after `=` is theirs
-# r2 F4: root subcommands of Claude Code 2.1.322; root parsing stops at one standing first. A
-# name missing here only reads a later `-p` as the flag (a deny), so the list stays short.
-_SUBCOMMANDS = frozenset({"mcp", "plugin", "doctor", "update", "install"})
-_PROC = "/proc"                           # where a /proc/<pid>/cmdline exists, the reader's
-_CTL_KERN, _KERN_PROCARGS2 = 1, 49        # darwin's sysctl names (sys/sysctl.h)
+LIST_CAP = 64 * 1024                      # a list's bytes read, at most
 _PC_CASE_SENSITIVE = 11                   # darwin's pathconf name; Python's table lacks it
-_SETTINGS = re.compile(r"settings[^/]*\.json\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
+_GLOB = frozenset("*?[")
 
 
-# ---- R1: which path ---------------------------------------------------------------------
+# ---- R1: the lists ----------------------------------------------------------------------
 
-def user_dirs(env) -> list[Path]:
-    home = env.get("HOME") or str(Path.home())
-    dirs = [Path(home) / ".claude"]
+def _home(env) -> str:
+    return env.get("HOME") or str(Path.home())
+
+
+def _tilde(word: str, env) -> str | None:
+    if word == "~" or word.startswith("~/"):
+        return _home(env) + word[1:]
+    return None if word.startswith("~") else word
+
+
+def user_dir(env) -> str:
     moved = env.get("CLAUDE_CONFIG_DIR")
     if moved:
-        dirs.insert(0, Path(os.path.expanduser(moved)))
-    return dirs
+        return _tilde(moved, env) or moved
+    return os.path.join(_home(env), ".claude")
 
 
-def _fold(s: str, fold: bool) -> str:
-    return s.casefold() if fold else s
+def _read_list(path: str, cache: dict) -> list:
+    if path not in cache:
+        lines = []
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(LIST_CAP)
+            for line in raw.decode("utf-8", "replace").splitlines():
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    lines.append(s)
+        except OSError:
+            pass
+        cache[path] = lines
+    return cache[path]
 
 
-def _keys(fold: bool) -> dict:
-    f = lambda s: _fold(s, fold)             # noqa: E731
-    return {"names": frozenset(map(f, NAMES)), "exempt": frozenset(map(f, EXEMPT)),
-            "top": frozenset(tuple(map(f, t)) for t in TOP_FILES),
-            "user": frozenset(tuple(map(f, t)) for t in USER_FILES),
-            "trees": frozenset(map(f, USER_TREES)), "claude": f(".claude"), "rules": f("rules"),
-            "md": f("CLAUDE.md")}
+def repo_lines(top: str, cache: dict) -> list:
+    """The repo list's lines that can match: relative, no `..` part."""
+    out = []
+    for s in _read_list(os.path.join(top, ".claude", LIST), cache):
+        while s.startswith("./"):
+            s = s[2:]
+        if s and not s.startswith("/") and ".." not in s.split("/"):
+            out.append(s)
+    return out
 
 
-_KEYS = {False: _keys(False), True: _keys(True)}
+def _user_raw(env, cache: dict) -> list:
+    return [s for s in _read_list(os.path.join(user_dir(env), LIST), cache)
+            if s.startswith("/") or s.startswith("~/")]
 
 
-def _below(p: Path, root: Path, fold: bool = False) -> tuple | None:
-    """The parts of `p` below `root`, each folded when `fold`; None when `p` is not below it."""
-    pp = tuple(_fold(x, fold) for x in p.parts)
-    rp = tuple(_fold(x, fold) for x in root.parts)
-    return pp[len(rp):] if pp[:len(rp)] == rp else None
+def user_lines(env, cache: dict) -> list:
+    """The user list's lines, absolute: `~/` read against the home folder."""
+    return [os.path.normpath(_tilde(s, env)) for s in _user_raw(env, cache)]
 
 
-def _exempt(rel: tuple, fold: bool = False) -> bool:
-    return bool(_KEYS[fold]["exempt"].intersection(rel[:-1]))
-
-
-def _user_file(p: Path, env, fold: bool = False) -> bool:
-    k = _KEYS[fold]
-    for d in user_dirs(env):
-        for root in {Path(os.path.abspath(str(d))), Path(os.path.realpath(str(d)))}:
-            rel = _below(p, root, fold)
-            if not rel or _exempt(rel, fold):
-                continue
-            if rel in k["user"] or (len(rel) > 1 and rel[0] in k["trees"]):
-                return True
-    return False
-
-
-def _top(p: Path) -> Path | None:
-    """The nearest folder above `p` that holds a `.git` (a directory, or a worktree's file)."""
-    for d in p.parents:
-        if os.path.lexists(os.path.join(str(d), ".git")):
+def _top(p: str, itself: bool = False) -> str | None:
+    """The nearest folder above `p` (or `p`, with `itself`) that holds a `.git`."""
+    d = p if itself else os.path.dirname(p)
+    while True:
+        if os.path.lexists(os.path.join(d, ".git")):
             return d
-    return None
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
 
 
-def _holds_main_checkout(folder: Path) -> bool:
-    try:
-        with os.scandir(str(folder)) as it:
-            for n, e in enumerate(it):
-                if n >= SCAN_CAP:
-                    return False
-                if e.is_dir(follow_symlinks=False) and os.path.isdir(os.path.join(e.path, ".git")):
-                    return True
-    except OSError:
-        return False
-    return False
+def _match(name: str, pat: str, fold: bool) -> bool:
+    if fold:
+        name, pat = name.casefold(), pat.casefold()
+    return name == pat or (bool(_GLOB & set(pat)) and fnmatch.fnmatchcase(name, pat))
 
 
-def _checkout_file(p: Path, fold: bool = False) -> bool:
-    k = _KEYS[fold]
-    parts = tuple(_fold(x, fold) for x in p.parts)
-    if parts[-1] not in k["names"] and k["claude"] not in parts:
-        return False                      # the cheap pass: no name or folder that is guarded
+def _gated_form(p: str, env, cache: dict, fold: bool) -> bool:
     top = _top(p)
     if top is not None:
-        rel = _below(p, top, fold)
-        if not rel or _exempt(rel, fold):
-            return False
-        if rel in k["top"]:
+        rel = p[len(top):].lstrip("/")
+        if _match(rel, REPO_LIST, fold) or any(_match(rel, pat, fold)
+                                               for pat in repo_lines(top, cache)):
             return True
-        if len(rel) > 2 and rel[:2] == (k["claude"], k["rules"]):
+    ud = user_dir(env)
+    for u in {os.path.abspath(ud), os.path.realpath(ud)}:
+        if _match(p, os.path.join(u, LIST), fold):
             return True
-        if len(rel) == 2 and rel[0] == k["claude"] and _SETTINGS.match(rel[1]):
-            return True                   # the pattern is lower case, so a folded name meets it
-    if parts and parts[-1] == k["md"]:   # a tree folder's file, or its `.claude/CLAUDE.md`
-        folder = p.parent.parent if _fold(p.parent.name, fold) == k["claude"] else p.parent
-        return _holds_main_checkout(folder)
+    for pat in user_lines(env, cache):
+        pats = {pat} if _GLOB & set(pat) else {pat, os.path.realpath(pat)}
+        if any(_match(p, q, fold) for q in pats):
+            return True
     return False
 
 
@@ -191,242 +177,270 @@ def _case_blind(path: str) -> bool:
         probe = up
 
 
-def guarded(path: str, env) -> bool:
-    """True for a guarded path (R1), by its absolute spelling or its real path; a spelling that
-    differs from a guarded one only in case where the volume folds case (r1 F2)."""
-    forms = {Path(os.path.abspath(path)), Path(os.path.realpath(path))}
-    if any(_user_file(p, env) or _checkout_file(p) for p in forms):
+def gated(path: str, env, cache: dict | None = None) -> bool:
+    """True for a file a list names, or a list file itself, by its absolute spelling or its
+    real path; a spelling that differs only in case where the volume folds case."""
+    cache = {} if cache is None else cache
+    forms = {os.path.abspath(path), os.path.realpath(path)}
+    if any(_gated_form(p, env, cache, False) for p in forms):
         return True
-    return any((_user_file(p, env, True) or _checkout_file(p, True)) and _case_blind(str(p))
-               for p in forms)
+    return any(_gated_form(p, env, cache, True) and _case_blind(p) for p in forms)
 
 
-# ---- R2: which run ----------------------------------------------------------------------
-
-_SYSCTL = []                              # libc's sysctl, loaded on the first guarded call
-
-
-def _sysctl():
-    if not _SYSCTL:
-        import ctypes
-        f = ctypes.CDLL(None, use_errno=True).sysctl
-        f.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
-                      ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
-        f.restype = ctypes.c_int
-        _SYSCTL.append(f)
-    return _SYSCTL[0]
+def _under(a: str, b: str, fold: bool) -> bool:
+    """True when `a` is `b` or inside it."""
+    if fold:
+        a, b = a.casefold(), b.casefold()
+    return a == b or a.startswith(b.rstrip("/") + "/")
 
 
-def _procargs(pid: int) -> list[str] | None:
-    """darwin's KERN_PROCARGS2 holds argc, the exec path, argc words, then the environment. Only
-    the argc words are read, and the buffer is zeroed after: no environment is kept."""
-    import ctypes
-    sysctl = _sysctl()
-    mib = (ctypes.c_int * 3)(_CTL_KERN, _KERN_PROCARGS2, pid)
-    size = ctypes.c_size_t(0)
-    if sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or not 4 < size.value <= 1 << 24:
-        return None
-    buf = ctypes.create_string_buffer(size.value + 1)      # a NUL past the end, whatever comes
-    try:
-        if sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
-            return None
-        n, base = min(size.value, len(buf) - 1), ctypes.addressof(buf)
-        argc = ctypes.c_int.from_buffer(buf).value
-        pos = 4 + len(ctypes.string_at(base + 4))          # past the exec path
-        while pos < n and buf[pos] == b"\0":               # and its padding
-            pos += 1
-        words = []
-        for _ in range(argc if 0 < argc <= 1 << 16 else 0):
-            if pos >= n:
-                return None
-            w = ctypes.string_at(base + pos)
-            words.append(os.fsdecode(w))
-            pos += len(w) + 1
-        return words or None
-    finally:
-        ctypes.memset(buf, 0, len(buf))
+def _removes_list(t: str, env, cache: dict) -> str | None:
+    """The list file that removing or moving `t` takes away, if any: its checkout's list (`t`
+    inside that checkout, never the checkout itself), or the user's."""
+    for p in {os.path.abspath(t), os.path.realpath(t)}:
+        for fold in (False, True):
+            if fold and not _case_blind(p):
+                continue
+            top = _top(p, itself=True)
+            if top is not None and not _under(top, p, fold):
+                lf = os.path.join(top, ".claude", LIST)
+                if _under(lf, p, fold):
+                    return lf
+            ud = user_dir(env)
+            for u in {os.path.abspath(ud), os.path.realpath(ud)}:
+                lf = os.path.join(u, LIST)
+                if _under(lf, p, fold):
+                    return lf
+    return None
 
 
-def argv_words(pid) -> list[str] | None:
-    """One process's argv, word by word: `/proc/<pid>/cmdline` where it exists, else darwin's
-    KERN_PROCARGS2. None when the kernel will not say (another user's process, a zombie, no
-    such pid, a sandbox) and on any error: it never raises."""
-    try:
-        if not isinstance(pid, int) or not 0 < pid < 1 << 31:
-            return None
-        proc = os.path.join(_PROC, str(pid), "cmdline")
-        if os.path.exists(proc):
-            with open(proc, "rb") as f:
-                raw = f.read(1 << 24)
-            words = [os.fsdecode(w) for w in raw.split(b"\0")]
-            return words[:-1] if len(words) > 1 and words[-1] == "" else None
-        return _procargs(pid) if sys.platform == "darwin" else None
-    except Exception:                                   # noqa: BLE001 - R3: never into the hook
-        return None
+# ---- R3, g3: the Bash line --------------------------------------------------------------
+
+_WRITE_WORD = re.compile(r">|\b(?:tee|sed|perl|cp|mv|install|python[0-9.]*|rm|unlink|git)\b")
+_HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Za-z0-9_.-]+))")
+_PH = "__g3_heredoc_%d__"
+_PH_RE = re.compile(r"__g3_heredoc_(\d+)__\Z")
+_PUNCT = ";&|<>()\n"
+_OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;|\|&|[;&|()\n]")
+_WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
+_READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
+_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_WRAPPERS = frozenset({"sudo", "env", "command", "exec", "nohup", "time", "builtin", "nice"})
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_PY = re.compile(r"python[0-9.]*\Z")
+_SED_I = re.compile(r"-[nErsuz]*i|--in-place")
+_PERL_I = re.compile(r"-[pnlaws0]*i")
+_LITERAL = re.compile(r"""(['"])((?:\\.|(?!\1)[^\\\n])*)\1""")
+_TAKES = {"install": frozenset({"-m", "-o", "-g", "-S", "--mode", "--owner", "--group",
+                                "--suffix"}),
+          "cp": frozenset({"-S", "--suffix"}), "mv": frozenset({"-S", "--suffix"})}
 
 
-def claude_argv(pid=None) -> tuple[list[str] | None, bool]:
-    """The nearest `claude` ancestor's argv and whether it was read word by word (r2 F4). The
-    ancestor is the one `harness.claude_argv` finds by `ps`; its argv is then read from the
-    kernel, and where that fails, or names no `claude`, the `ps` line split on whitespace is
-    returned with False. (None, False) when no ancestor is found."""
-    asked = []
+def _heredocs(text: str):
+    """The text with each heredoc's body taken out and its operator turned into a placeholder
+    word; the bodies, by the placeholder's index."""
+    lines, out, bodies, i = text.split("\n"), [], [], 0
+    while i < len(lines):
+        pending = []
 
-    def ps(p):
-        asked.append(p)
-        return harness._ps(p)
-    joined = harness.claude_argv(ps=ps, pid=pid)
-    if not joined:
-        return None, False
-    try:
-        words = argv_words(asked[-1]) if asked else None
-    except Exception:                                   # noqa: BLE001 - R3: never into the hook
-        words = None
-    if words and os.path.basename(words[0]) == "claude":
-        return words, True
-    return joined, False
-
-
-def _option(w: str) -> bool:
-    return len(w) > 1 and w[0] == "-"     # commander's maybeOption
-
-
-def _maybe_print(w: str) -> bool:
-    return w in PRINT or w.startswith("--print=") or (
-        w.startswith("-") and not w.startswith("--") and "p" in w[1:])
-
-
-def _either(a, b):
-    return a if a == b else None
-
-
-def _exact(words) -> bool | None:
-    """The walk on argv word by word, as commander's parseOptions reads it: options past the
-    prompt, `--` ends them, a subcommand standing first ends them, a valued option takes the next
-    word whatever it is. An option the tables do not know may take one word or none; where the
-    two readings differ the answer is None. res[i][f]: the answer from word i on, f true while
-    no operand and no unknown option has stood (a subcommand may still come)."""
-    n = len(words)
-    res = [[False, False] for _ in range(n + 2)]
-    for i in range(n - 1, -1, -1):
-        a, nxt = words[i], (words[i + 1] if i + 1 < n else None)
-        for f in (0, 1):
-            if a == "--":
-                r = False
-            elif not _option(a):
-                r = False if f and a in _SUBCOMMANDS else res[i + 1][0]
-            elif a.startswith("--"):
-                name = a.split("=", 1)[0]
-                if name == "--print":
-                    r = True
-                elif "=" in a:
-                    r = res[i + 1][f if name in _LONG_TAKES else 0]
-                elif a in _LONG_BARE:
-                    r = res[i + 1][f]
-                elif a in _LONG_VALUED:
-                    r = res[i + 2][f]
-                elif a in _LONG_OPTIONAL:
-                    r = res[i + 2 if nxt is not None and not _option(nxt) else i + 1][f]
-                elif a in _LONG_LIST:     # a required list: its first word whatever it is,
-                    j = i + 2             # then every word up to the next option
-                    while j < n and not _option(words[j]):
-                        j += 1
-                    k = i + 1
-                    while k < n and not _option(words[k]):
-                        k += 1
-                    r = _either(res[min(j, n)][f], res[k][f])
-                else:
-                    r = _either(res[i + 1][0], res[min(i + 2, n)][0])
-            else:                         # short flags, combined as commander reads them
-                r = res[i + 1][f]
-                for k, ch in enumerate(a[1:], 1):
-                    kind, rest = _SHORT.get(ch), a[k + 1:]
-                    if kind is None:
-                        r = None if "p" in rest else _either(res[i + 1][0], res[min(i + 2, n)][0])
-                        break
-                    if ch == "p":
-                        r = True
-                        break
-                    if kind and rest:
-                        break             # the rest of the word is its value
-                    if kind == 1 or (kind == 2 and nxt is not None and not _option(nxt)):
-                        r = res[i + 2][f]
-                        break
-            res[i][f] = r
-    return res[0][1]
-
-
-def _joined(words) -> bool | None:
-    """The fallback walk on the `ps` line, its words joined with spaces and split again (r1 F1):
-    it ends at the first prompt word or `--`, an option's value is never taken for an option.
-    Since a prompt or a value may be many words, a word past the end that may be the print flag
-    leaves it unsure (None), as one the walk cannot read does."""
-    i = 0
-    while i < len(words):
-        a = words[i]
-        if a in ("--", "-") or not a.startswith("-"):
-            return _unsure(words[i + 1:])  # the first prompt word
-        if a.startswith("--"):
-            if a.split("=", 1)[0] == "--print":
-                return True
-            if "=" in a or a in _LONG_BARE:
-                pass                      # its value is its own, or it takes none
-            elif a in _LONG_VALUED:
-                i += 1
-            elif a in _LONG_OPTIONAL:
-                i += 1 if i + 1 < len(words) and not words[i + 1].startswith("-") else 0
-            elif a in _LONG_LIST:         # commander's list: every word up to the next option
-                while i + 1 < len(words) and not words[i + 1].startswith("-"):
-                    i += 1
-            else:
-                return _unsure(words[i + 1:])
-        else:                             # short flags, combined as commander reads them
-            for k, ch in enumerate(a[1:], 1):
-                kind = _SHORT.get(ch)
-                if kind is None:
-                    return _unsure([a[k:]] + words[i + 1:])
-                if ch == "p":
-                    return True
-                if kind and k < len(a) - 1:
-                    break                 # the rest of the word is its value
-                if kind == 1 or (kind == 2 and i + 1 < len(words)
-                                 and not words[i + 1].startswith("-")):
-                    i += 1
+        def sub(m):
+            delim = next(g for g in (m.group(2), m.group(3), m.group(4)) if g is not None)
+            pending.append((len(bodies), m.group(1) == "-", delim))
+            bodies.append("")
+            return " " + _PH % (len(bodies) - 1) + " "
+        out.append(_HEREDOC.sub(sub, lines[i]))
         i += 1
-    return False
+        for idx, strip, delim in pending:
+            body = []
+            while i < len(lines):
+                line = lines[i]
+                i += 1
+                if (line.lstrip("\t") if strip else line) == delim:
+                    break
+                body.append(line)
+            bodies[idx] = "\n".join(body)
+    return "\n".join(out), bodies
 
 
-def _unsure(rest) -> bool | None:
-    """None (unsure) when a later word may be the print flag, else False, since no word is."""
-    return None if any(_maybe_print(w) for w in rest) else False
+def _commands(text: str):
+    """Simple commands: (words, the words after a write redirection), in order."""
+    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCT)
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    words, outs, expect = [], [], None
+    for tok in lex:
+        if tok and set(tok) <= set(_PUNCT):
+            for op in _OPS.findall(tok):
+                if op in _WRITE_OPS or op in _READ_OPS:
+                    if words and words[-1].isdigit():
+                        words.pop()               # `2>`: the descriptor, not a word
+                    expect = op
+                else:
+                    if words or outs:
+                        yield words, outs
+                    words, outs, expect = [], [], None
+            continue
+        if expect is not None:
+            if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
+                outs.append(tok)
+            expect = None
+            continue
+        words.append(tok)
+    if words or outs:
+        yield words, outs
 
 
-def headless(argv, exact: bool = True) -> bool | None:
-    """True when `-p` or `--print` stands among argv's options (argv[0] the program), False when
-    none does, None where it cannot tell. `exact`: argv as the kernel holds it, word by word;
-    else the `ps` line split on whitespace."""
-    words = [str(a) for a in (argv or [])[1:]]
-    return _exact(words) if exact else _joined(words)
+def _resolve(word: str, cwd, env) -> str | None:
+    if not word or word == "-" or "\0" in word or any(c in word for c in "$`*?[{"):
+        return None
+    word = _tilde(word, env)
+    if word is None:
+        return None
+    if os.path.isabs(word):
+        return os.path.normpath(word)
+    return os.path.normpath(os.path.join(cwd, word)) if cwd else None
 
 
-def run_kind(payload: dict) -> str:
-    """`helper`, `headless`, `unknown` or `main`."""
-    if payload.get("agent_id"):
-        return "helper"
-    argv, exact = claude_argv()
-    if not argv:
-        return "unknown"
-    h = headless(argv, exact)
-    return "headless" if h else ("unknown" if h is None else "main")
+def _py_literals(code: str) -> list:
+    if "open(" not in code and "write_" not in code:
+        return []
+    return [m.group(2) for m in _LITERAL.finditer(code)]
 
 
-# ---- R3: the log ------------------------------------------------------------------------
+def _copy_like(name: str, args: list, cwd, env):
+    """(sources, destinations) of `cp`, `mv` or `install`."""
+    srcs, tdir, i, done = [], None, 0, False
+    while i < len(args):
+        a = args[i]
+        if done or not a.startswith("-") or a == "-":
+            srcs.append(a)
+        elif a == "--":
+            done = True
+        elif a in ("-t", "--target-directory"):
+            tdir = args[i + 1] if i + 1 < len(args) else None
+            i += 1
+        elif a.startswith("--target-directory="):
+            tdir = a.split("=", 1)[1]
+        elif a.startswith("-t") and not a.startswith("--"):
+            tdir = a[2:]
+        elif a in _TAKES.get(name, ()):
+            i += 1
+        i += 1
+    if tdir is not None:
+        return srcs, [os.path.join(tdir, os.path.basename(s.rstrip("/"))) for s in srcs]
+    if len(srcs) < 2:
+        return srcs, []
+    dst, srcs = srcs[-1], srcs[:-1]
+    r = _resolve(dst, cwd, env)
+    if r is not None and os.path.isdir(r):
+        return srcs, [os.path.join(dst, os.path.basename(s.rstrip("/"))) for s in srcs]
+    return srcs, [dst]
+
+
+def _git(args: list, cwd, env, found: list) -> None:
+    i, gcwd = 0, cwd
+    while i < len(args) and args[i].startswith("-"):
+        if args[i] == "-C" and i + 1 < len(args):
+            gcwd = _resolve(args[i + 1], cwd, env)
+            i += 2
+        elif args[i] in ("-c", "--git-dir", "--work-tree"):
+            i += 2
+        else:
+            i += 1
+    if i >= len(args):
+        return
+    sub, rest = args[i], args[i + 1:]
+    paths = []
+    if sub in ("rm", "restore"):
+        paths = [a for a in rest if not a.startswith("-")]
+    elif sub == "checkout" and "--" in rest:
+        paths = rest[rest.index("--") + 1:]
+    for p in paths:
+        found.append(("remove", _resolve(p, gcwd, env)))
+
+
+def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
+    """[(`write` or `remove`, a path or None)] in the line's order; ValueError where `shlex`
+    cannot split it."""
+    text, bodies = _heredocs(command)
+    text = text.replace("\\\n", " ")
+    found, here = [], cwd
+    for words, outs in list(_commands(text)):
+        mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
+        words = [w for w in words if not _PH_RE.match(w)]
+        for o in outs:
+            if not _PH_RE.match(o):
+                found.append(("write", _resolve(o, here, env)))
+        while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
+                         or (words[0].startswith("-") and len(words) > 1)):
+            words = words[1:]
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        plain = [a for a in args if not a.startswith("-")]
+        if name in ("cd", "pushd"):
+            here = (_resolve(args[0], here, env) if len(args) == 1 else
+                    _tilde("~", env) if not args else None)
+        elif name in _SHELLS and "-c" in args and depth == 0:
+            i = args.index("-c")
+            if i + 1 < len(args):
+                found += bash_targets(args[i + 1], here, env, depth + 1)
+        elif name == "tee":
+            found += [("write", _resolve(a, here, env)) for a in plain]
+        elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
+                (name == "perl" and any(_PERL_I.match(a) for a in args)):
+            found += [("write", _resolve(a, here, env)) for a in plain]
+        elif name in _TAKES:
+            srcs, dsts = _copy_like(name, args, here, env)
+            found += [("write", _resolve(d, here, env)) for d in dsts]
+            if name == "mv":
+                found += [("remove", _resolve(s, here, env)) for s in srcs]
+        elif name in ("rm", "unlink"):
+            found += [("remove", _resolve(a, here, env)) for a in plain]
+        elif name == "git":
+            _git(args, here, env, found)
+        elif _PY.match(name):
+            codes = list(mine)
+            if "-c" in args and args.index("-c") + 1 < len(args):
+                codes.append(args[args.index("-c") + 1])
+            for code in codes:
+                found += [("write", _resolve(s, here, env)) for s in _py_literals(code)]
+    return found
+
+
+def _bash_gated(payload: dict, env) -> str | None:
+    """The first gated target of a Bash line (a list file, for a removal); None when it has
+    none the gate can read."""
+    ti = payload.get("tool_input")
+    command = ti.get("command") if isinstance(ti, dict) else None
+    if not isinstance(command, str) or not _WRITE_WORD.search(command):
+        return None
+    cwd = payload.get("cwd")
+    cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and "\0" not in cwd else None
+    try:
+        found = bash_targets(command, cwd, env)
+    except ValueError:                    # an open quote: it passes, as every form not named
+        return None
+    cache: dict = {}
+    for kind, path in found:
+        if path is None:
+            continue
+        if kind == "write" and gated(path, env, cache):
+            return path
+        if kind == "remove":
+            lf = _removes_list(path, env, cache)
+            if lf is not None:
+                return lf
+    return None
+
+
+# ---- R4: the log ------------------------------------------------------------------------
 
 def _text(v) -> str | None:
     return v[:TEXT_CAP] if isinstance(v, str) else None
 
 
-def log(payload: dict, env, decision: str, path, run=None, why=None) -> None:
+def log(payload: dict, env, decision: str, path, why=None) -> None:
     """One line in `sessions/<sid>/guard.jsonl` (0600); a line that would carry the log past
     LOG_CAP is not written. Never raises."""
     try:
@@ -435,7 +449,7 @@ def log(payload: dict, env, decision: str, path, run=None, why=None) -> None:
             return
         line = (json.dumps({"at": time.time(), "decision": decision,
                             "tool": _text(payload.get("tool_name")), "path": _text(path),
-                            "run": run, "agent_id": _text(payload.get("agent_id")),
+                            "agent_id": _text(payload.get("agent_id")),
                             "why": _text(why)}, ensure_ascii=False) + "\n").encode()
         sdir = resolver.session_dir(resolver.state_dir(env), sid)
         sdir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -466,35 +480,171 @@ def _target(payload: dict) -> str | None:
 
 
 def check(payload: dict, env) -> dict:
-    """The PreToolUse answer for one call: {} when the call is not the guard's, else `ask` or
-    `deny` with §7.2's reason. Fails open: an error or a target it cannot resolve gives {}."""
+    """The PreToolUse answer for one call: {} when it touches no gated file, else `deny` with
+    §7.2's reason. Fails open: an error gives {} and one `open` line."""
     tool = payload.get("tool_name")
     if not isinstance(tool, str) or tool not in TOOLS:
         return {}
     path = None
     try:
-        path = _target(payload)
-        if path is None:
-            log(payload, env, "open", None, why="the target cannot be resolved")
-            return {}
-        if not guarded(path, env):
-            return {}
-        run = run_kind(payload)
-        decision = "ask" if run == "main" else "deny"
-        log(payload, env, decision, path, run)
+        if tool == "Bash":
+            path = _bash_gated(payload, env)
+            if path is None:
+                return {}
+        else:
+            path = _target(payload)
+            if path is None:
+                log(payload, env, "open", None, why="the target cannot be resolved")
+                return {}
+            if not gated(path, env):
+                return {}
+        log(payload, env, "deny", path)
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                       "permissionDecision": decision,
+                                       "permissionDecision": "deny",
                                        "permissionDecisionReason": REASON.format(path=path)}}
-    except Exception as e:                              # noqa: BLE001 - R3: fail open
+    except Exception as e:                              # noqa: BLE001 - R4: fail open
         log(payload, env, "open", path, why=type(e).__name__)
         return {}
 
 
-# ---- R5: the doctor's line --------------------------------------------------------------
+# ---- the lane's write: `agentik session gates write` ------------------------------------
 
-def counts(sdir) -> tuple[int, int, int]:
-    """(prompts, refusals, calls let through on an error) in one session's guard log."""
-    n = {"ask": 0, "deny": 0, "open": 0}
+_BEGIN = "<!-- BEGIN GENERATED:"
+_END = "<!-- END GENERATED:"
+
+
+def lane_hash(current: bytes | None, draft: bytes) -> str:
+    """The hash the preview prints and `--expect` checks: the file as it stands and the draft."""
+    h = hashlib.sha256(b"agentik-session gates write\0")
+    h.update(b"absent" if current is None else hashlib.sha256(current).digest())
+    h.update(hashlib.sha256(draft).digest())
+    return h.hexdigest()[:16]
+
+
+def _blocks(text: str) -> list:
+    out, cur = [], None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith(_BEGIN):
+            cur = [line]
+        elif cur is not None:
+            cur.append(line)
+            if s.startswith(_END):
+                out.append("\n".join(cur))
+                cur = None
+    if cur is not None:
+        out.append("\n".join(cur))
+    return out
+
+
+def gates_write(file: str, draft: str, expect, env, cwd: str, out, err) -> int:
+    """Preview (no `expect`): the diff, the byte change and the hash, nothing written. With
+    `expect`: the draft written atomically, the file's mode kept, when nothing changed since."""
+    import difflib
+    import tempfile
+    t = os.path.normpath(os.path.join(cwd, _tilde(file, env) or file))
+    d = os.path.normpath(os.path.join(cwd, _tilde(draft, env) or draft))
+    say = "agentik-session: gates write: "
+    if not gated(t, env):
+        err.write(f"{say}{t} is not gated, so it takes an ordinary edit; nothing written\n")
+        return 1
+    if gated(d, env):
+        err.write(f"{say}the draft {d} is gated; a draft is an ungated file; nothing written\n")
+        return 1
+    try:
+        with open(d, "rb") as f:
+            new = f.read()
+    except OSError as e:
+        err.write(f"{say}the draft cannot be read ({e.strerror}); nothing written\n")
+        return 1
+    real = os.path.realpath(t)
+    try:
+        with open(real, "rb") as f:
+            old = f.read()
+    except FileNotFoundError:
+        old = None
+    except OSError as e:
+        err.write(f"{say}{t} cannot be read ({e.strerror}); nothing written\n")
+        return 1
+    old_text = (old or b"").decode("utf-8", "replace")
+    new_text = new.decode("utf-8", "replace")
+    if _blocks(old_text) != _blocks(new_text):
+        err.write(f"{say}the draft changes a generated block's line in {t}; a block is "
+                  "written by `agentik decisions render`; nothing written\n")
+        return 1
+    if t.lower().endswith(".json"):
+        try:
+            json.loads(new_text)
+        except ValueError as e:
+            err.write(f"{say}the draft is not valid JSON ({e}); nothing written\n")
+            return 1
+    h = lane_hash(old, new)
+    was = len(old or b"")
+    if expect is None:
+        out.writelines(difflib.unified_diff(old_text.splitlines(keepends=True),
+                                            new_text.splitlines(keepends=True), t,
+                                            t + " (draft)"))
+        out.write(f"bytes: {was} -> {len(new)} ({len(new) - was:+d})\n")
+        out.write(f"hash: {h}\n")
+        out.write(f"on the owner's yes: agentik session gates write {shlex.quote(t)} --from "
+                  f"{shlex.quote(d)} --expect {h}\n")
+        return 0
+    if expect != h:
+        err.write(f"{say}the file or the draft changed since the preview (now {h}, expected "
+                  f"{expect}); preview again; nothing written\n")
+        return 1
+    mode = (os.stat(real).st_mode & 0o7777) if old is not None else 0o644
+    fd, tmp = tempfile.mkstemp(prefix=".gates-", dir=os.path.dirname(real))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(new)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, real)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    out.write(f"gates: wrote {t}: {was} -> {len(new)} B ({len(new) - was:+d})\n")
+    return 0
+
+
+def listing(env, cwd: str) -> list:
+    """What is gated where `cwd` is: the checkout's list and the user's, each with its lines."""
+    cache: dict = {}
+    rows = []
+    top = _top(os.path.abspath(cwd), itself=True)
+    if top is not None:
+        lf = os.path.join(top, ".claude", LIST)
+        lines = repo_lines(top, cache)
+        state = "" if os.path.exists(lf) else ", absent"
+        rows.append(f"{lf} (this checkout's list, itself gated{state}): {len(lines)} lines")
+        rows += [f"  {s}" for s in lines]
+    else:
+        rows.append("no checkout here: only the user's list applies")
+    lf = os.path.join(user_dir(env), LIST)
+    lines = _user_raw(env, cache)
+    state = "" if os.path.exists(lf) else ", absent"
+    rows.append(f"{lf} (the user's list, itself gated{state}): {len(lines)} lines")
+    rows += [f"  {s}" for s in lines]
+    return rows
+
+
+def count_here(env, cwd) -> int:
+    cache: dict = {}
+    top = _top(os.path.abspath(str(cwd)), itself=True)
+    return (len(repo_lines(top, cache)) if top else 0) + len(user_lines(env, cache))
+
+
+# ---- R4: the doctor's line --------------------------------------------------------------
+
+def counts(sdir) -> tuple:
+    """(0, refusals, calls let through on an error) in one session's guard log; the first
+    place is g2's prompts, which the gate never makes."""
+    n = {"deny": 0, "open": 0}
     try:
         with open(Path(sdir) / LOG, "rb") as f:
             raw = f.read(LOG_CAP + 4096)
@@ -507,20 +657,25 @@ def counts(sdir) -> tuple[int, int, int]:
             continue
         if isinstance(d, dict) and d.get("decision") in n:
             n[d["decision"]] += 1
-    return n["ask"], n["deny"], n["open"]
+    return 0, n["deny"], n["open"]
 
 
 def doctor_row(env, cwd) -> str:
-    """One line: the guard is on, and what this repo's newest session (g1's `newest`) logged."""
+    """One line: the gates are on, how many lines are gated here, and what this repo's newest
+    session (g1's `newest`) logged."""
     from . import instructions
+    try:
+        n = count_here(env, cwd)
+    except Exception:                                   # noqa: BLE001
+        n = 0
     try:
         main = instructions.main_checkout(cwd)
         found = instructions.newest(resolver.state_dir(env), main)
     except Exception:                                   # noqa: BLE001
-        return "on (the repo's sessions cannot be read)"
+        return f"on; {n} gated here (the repo's sessions cannot be read)"
     if found is None:
-        return f"on; no session of {main} has a log to count its prompts and refusals"
+        return f"on; {n} gated here; no session of {main} has a log to count its refusals"
     sid = found[0]
-    asks, denies, opened = counts(resolver.session_dir(resolver.state_dir(env), sid))
-    tail = f", {opened} let through on an error" if opened else ""
-    return f"on; session {sid}: {asks} prompts, {denies} refusals{tail}"
+    _, denies, opened = counts(resolver.session_dir(resolver.state_dir(env), sid))
+    return (f"on; {n} gated here; session {sid}: {denies} refusals, {opened} let through on "
+            "an error")

@@ -556,7 +556,7 @@ READERS = {
     ("hooks", "_load_json"): ("h.json", {"at": 1.0}, lambda m, d: m["hooks"]._load_json(d / "h.json")),
     ("instructions", "read_log"): ("instructions.jsonl", {"at": 1.0, "file_path": "/x/CLAUDE.md"},
                                    lambda m, d: m["instructions"].read_log(d)),     # packet g1
-    ("instructionguard", "counts"): ("guard.jsonl", {"at": 1.0, "decision": "ask", "path": "/x/CLAUDE.md"},
+    ("instructionguard", "counts"): ("guard.jsonl", {"at": 1.0, "decision": "deny", "path": "/x/CLAUDE.md"},
                                      lambda m, d: m["instructionguard"].counts(d)),  # packet g2
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
@@ -596,7 +596,8 @@ NOT_STATE = {("__init__", "_pin"), ("admission", "decode"), ("chain", "_checks")
              ("doctor", "_plugin_list"), ("doctor", "_check_plugin"), ("doctor", "_check_meter_hook"),
              ("doctor", "hooks_of"), ("hooks", "_with_gate"), ("hooks", "dispatch"), ("hooks", "_confirm"),
              ("ledger", "read_chains"), ("ledger", "restarts_in"), ("meter", "_scan"), ("unattended", "_parse"),
-             ("resolver", "resolve"), ("yamlsubset", "_scalar")}
+             ("resolver", "resolve"), ("yamlsubset", "_scalar"),
+             ("instructionguard", "gates_write")}   # g2b: a `.json` draft checked, no state
 
 
 def test_the_table_names_every_reader():
