@@ -96,6 +96,31 @@ def test_t2_parser():
             unattended.acceptance(text)
 
 
+def test_f1_only_the_header_table_after_the_title():
+    """Review F1: the cell is read only from the header table directly after the title, as the
+    relay's `table()` and `header()` read it; a fenced example, a later table, a duplicate or
+    an extra row is never read."""
+    fence = ("# Packet p: t\n\nProse. Acceptance: the tests pass.\n\n## An example\n\n```\n"
+             "| item | value |\n|---|---|\n| acceptance | `true` exits 0 |\n```\n")
+    later = ("# Packet p: t\n\n| item | value |\n|---|---|\n| pin | main |\n\n## 5\n\n"
+             "| item | value |\n|---|---|\n| acceptance | `true` exits 0 |\n")
+    for text, why in ((fence, "no header table"), (later, "no acceptance row"),
+                      ("intro\n# Packet p: t\n" + _table("`true` exits 0")[13:], "no title"),
+                      ("# Packet p: t\n\n  | item | value |\n  |---|---|\n"
+                       "  | acceptance | `true` exits 0 |\n", "no header table"),
+                      (_table("`true` exits 0") + "| acceptance | `false` exits 0 |\n", "duplicate"),
+                      (_table("`true` exits 0") + "| needs | x |\n", "extra"),
+                      (_table("`true` exits 0") + "| wall | a | b |\n", "row wall: 3 cells")):
+        with pytest.raises(unattended.AcceptanceError, match=why):
+            unattended.acceptance(text)
+    full = ("# Packet p: t\n\n| item | value |\n|---|---|\n| from | x |\n| pin | y |\n| wall | z |\n"
+            "| may touch | `a` |\n| acceptance | `true` exits 0 |\n| budget | 9 turns, 9k context |\n"
+            "| verify | `make check` |\n\n## 1. What the source says\n\n| acceptance | `false` exits 0 |\n")
+    assert [ln.shell for ln in unattended.acceptance(full)] == ["true"]
+    early = full.replace("| verify | `make check` |\n", "").replace("| budget", "| verify | `v` |\n| budget")
+    assert [ln.shell for ln in unattended.acceptance(early)] == ["true"]     # this repo's order
+
+
 # ---- R2, R3: a failing line ---------------------------------------------------------
 
 def test_t3_failing_line_never_lands(box):

@@ -502,7 +502,7 @@ def test_land_ok(box):
     q.write_text(q.read_text().replace("depends_on: [green-row]", "depends_on: [limit-row]\n"
                                        "    base: limit-row"))
     (box.repo / "design" / "packets" / "limit-row.md").write_text(
-        "intro\n## Packet limit-row: the land step\n" + ACCEPT)
+        "# Packet limit-row: the land step\n" + ACCEPT)        # review F1: the title first
     (box.repo / "scripts").mkdir()
     land = box.repo / "scripts" / "land"
     land.write_text("#!/bin/sh\nexit 9\n")

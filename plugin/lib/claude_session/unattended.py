@@ -548,22 +548,53 @@ def _expect(shell: str, e: str) -> Line:
                           "under, exits or as main)")
 
 
-def acceptance(text: str) -> list:
-    """The packet's acceptance lines, from its table's `acceptance` row: the cell cut at each
-    `;` outside a code span, each item a span and an expectation; else AcceptanceError."""
-    cell = None
-    for ln in text.replace("\r\n", "\n").split("\n"):
+HEADER_ROWS = ("from", "pin", "wall", "may touch", "acceptance", "budget")   # packet.Rows
+VERIFY_ROW = "verify"                                                        # packet.VerifyRow
+
+
+def _header(text: str) -> list:
+    """`table`: the header table directly after the title (the first non-blank line, a `# `
+    heading), its heading row and rule, then each row's (name, value) while lines open with
+    `|`; any other table in the packet is never read."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i == len(lines) or not lines[i].startswith("# "):
+        raise AcceptanceError("no title: want `# Packet <id>: <title>` as the first line")
+    i += 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i + 1 >= len(lines) or not lines[i].startswith("|") or not lines[i + 1].startswith("|"):
+        raise AcceptanceError("no acceptance row: no header table directly after the title")
+    rows = []
+    for ln in lines[i + 2:]:
         if not ln.startswith("|"):
-            continue
-        c = _split_row(ln)
-        if c[0].strip().lower() == "acceptance":
-            if len(c) != 2:
-                raise AcceptanceError(f"{len(c)} cells, want 2: an unescaped | inside a span "
-                                      "splits the row")
-            cell = c[1].strip()
             break
+        c = _split_row(ln)
+        name = c[0].strip().lower()
+        if len(c) != 2:
+            raise AcceptanceError(f"row {name[:40]}: {len(c)} cells, want 2: an unescaped | "
+                                  "inside a span splits the row")
+        rows.append((name, c[1].strip()))
+    return rows
+
+
+def acceptance(text: str) -> list:
+    """The packet's acceptance lines, from its header table's `acceptance` row (`header`: a
+    duplicate or an extra row refuses the packet; the rows' order and a missing row other than
+    `acceptance` are left to the relay, since they change no cell read): the cell cut at each
+    `;` outside a code span, each item a span and an expectation; else AcceptanceError."""
+    rows, seen = _header(text), set()
+    for name, _ in rows:
+        if name not in HEADER_ROWS + (VERIFY_ROW,):
+            raise AcceptanceError(f"row {name[:40]}: extra header row")
+        if name in seen:
+            raise AcceptanceError(f"row {name}: duplicate header row")
+        seen.add(name)
+    cell = dict(rows).get("acceptance")
     if cell is None:
-        raise AcceptanceError("no acceptance row in the packet's table")
+        raise AcceptanceError("no acceptance row in the packet's header table")
     items, start, inside = [], 0, False
     for j, ch in enumerate(cell):
         if ch == "`":
