@@ -135,6 +135,12 @@ handoff.
   use an agent type that names its own model.
   "Not known" (no record yet, or a switch not yet seen) clears after one tool call.
 
+**The edit gates** (packet g2b): an edit, or a Bash line that writes it, of a file named in
+a checkout's `.claude/edit-gates` or the user's `edit-gates` (and of either list) is refused in
+every mode. Do not write the file another way: make the change through the
+`decisions:instruct` skill, which writes it with `agentik session gates write` on the
+owner's yes. `agentik session gates` lists what is gated here.
+
 ## The charter
 
 The charter is the sitting's live head: one file per sitting under the

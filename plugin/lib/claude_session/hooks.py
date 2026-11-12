@@ -29,8 +29,8 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import (budget, charter, gate, harness, install, instructions, ledger, meter, policystore,
-               resolver, rules, sessionconfig, store, workflowguard)
+from . import (budget, charter, gate, harness, install, instructionguard, instructions, ledger,
+               meter, policystore, resolver, rules, sessionconfig, store, workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
@@ -414,6 +414,13 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             return _deny(line, None)
         if line:
             return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+    if tool in instructionguard.TOOLS:   # g2b: an edit or a Bash write of a gated file is refused
+        try:
+            guard = instructionguard.check(payload, os.environ if env is None else env)
+        except Exception:                               # noqa: BLE001  (R4: fails open)
+            guard = {}
+        if guard:
+            return guard             # a refused call opens none
     _open_call(payload, os.environ if env is None else env)
     if tool not in SPAWNING_TOOLS or payload.get("agent_id"):
         return {}

@@ -16,7 +16,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import SEMVER, demand, hooks, install, instructions, measure, meter, mod, resolver
+from . import (SEMVER, demand, hooks, install, instructionguard, instructions, measure, meter,
+               mod, resolver)
 
 PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
@@ -552,6 +553,16 @@ def _check_instructions(env, cwd, plugins, sections) -> list:
             for name, detail, kind in instructions.rows(env, cwd, plugins, sections)]
 
 
+def _check_guard(env, cwd) -> Check:
+    """Packets g2 R5 and g2b R4: the edit gates are on (they have no knob), how many lines are
+    gated here, and the refusals the repo's newest session logged. Never a failure."""
+    try:
+        detail = instructionguard.doctor_row(env, cwd)
+    except Exception:                                   # noqa: BLE001
+        detail = "on"
+    return Check("guard", True, detail)
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
     cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
@@ -580,6 +591,7 @@ def run(env=None, cwd=None) -> Report:
     add(_check_launcher(env, plugins))   # sc3: the rows above keep their places
     for row in _check_instructions(env, cwd, plugins, sections):
         add(row)                 # g1: after launcher, so every row of the pin keeps its place
+    add(_check_guard(env, cwd))  # g2 R5: after the instructions rows, one row
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):

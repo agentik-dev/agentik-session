@@ -107,3 +107,7 @@ tests/test_n33.py: renamed
 # them since). These two rows go once those commits are pushed.
 tests/test_fw4d.py: email
 history/sittings/2026-11-10-9-fw4d-fold-2.md: email
+# g2b: the edit gates name the ledger tool that writes a gated file (its render verb, its skill).
+design/packets/g2b-edit-gates.md: sibling
+plugin/lib/claude_session/instructionguard.py: sibling
+tests/test_g2b_gates.py: sibling
