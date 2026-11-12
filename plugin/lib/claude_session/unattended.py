@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -686,13 +687,16 @@ SCRATCH = (("HOME", ""), ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "stat
 
 def line_env(environ: dict, home: str, remotes: list) -> dict:
     """The child's environment less its profile, under a scratch home and TMPDIR, at depth
-    1, with the push barrier; pytest's cache off, so a line leaves no `.pytest_cache` in a
-    tree that does not ignore it (the dirty-tree check reads the tree after a continuation)."""
+    1, with the push barrier; pytest's cache plugin kept on (review F7: off, a test using
+    the `cache` fixture errors here and passes in the gate), its directory in the scratch
+    home, so a line leaves no `.pytest_cache` in a tree that does not ignore it (the
+    dirty-tree check reads the tree after a continuation)."""
     out = {k: v for k, v in environ.items() if not k.startswith("CLAUDE") and not (
         k.startswith("RELAY_") and k != "RELAY_DEVICE_VERBS")}
     out.update({k: os.path.join(home, leaf) if leaf else home for k, leaf in SCRATCH})
+    cache = "-o cache_dir=" + shlex.quote(os.path.join(home, "pytest-cache"))
     out.update({"TMPDIR": os.path.join(home, "tmp"), "RELAY_MEASURE_DEPTH": "1",
-                "PYTEST_ADDOPTS": (out.get("PYTEST_ADDOPTS", "") + " -p no:cacheprovider").strip()})
+                "PYTEST_ADDOPTS": (out.get("PYTEST_ADDOPTS", "") + " " + cache).strip()})
     return push_deny(out, remotes)
 
 

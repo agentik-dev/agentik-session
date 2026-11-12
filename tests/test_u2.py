@@ -7,6 +7,8 @@ and gate of tests/fixtures/unattended/ stand in, through test_unattended's Box: 
 `claude` runs and no request is spent.
 """
 import os
+import subprocess
+import sys
 import time
 
 import pytest
@@ -299,9 +301,28 @@ def test_t5_line_env():
                               "/s", ["origin"])
     assert (env["HOME"], env["XDG_STATE_HOME"], env["TMPDIR"], env["PYTHONPYCACHEPREFIX"]) == (
         "/s", "/s/state", "/s/tmp", "/s/pycache")
-    assert env["PYTEST_ADDOPTS"] == "-x -p no:cacheprovider" and env["RELAY_MEASURE_DEPTH"] == "1"
+    assert env["PYTEST_ADDOPTS"] == "-x -o cache_dir=/s/pytest-cache"           # review F7
+    assert env["RELAY_MEASURE_DEPTH"] == "1"
     assert "CLAUDECODE" not in env and "RELAY_ROW" not in env and env["RELAY_DEVICE_VERBS"] == "none"
     assert env["GIT_CONFIG_VALUE_1"] == "relay-denies-push"
+
+
+def test_f7_pytest_cache_on_and_the_tree_clean(tmp_path):
+    """Review F7: the cache plugin stays on, so a test using the `cache` fixture gives the
+    gate's verdict; its directory is in the scratch home, so a repo that does not ignore
+    `.pytest_cache` stays clean."""
+    repo = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    (repo / "test_c.py").write_text("def test_a(cache):\n    cache.set('k', 1)\n\n"
+                                    "def test_b():\n    pass\n")
+    _git(repo, "add", "test_c.py")
+    _git(repo, "commit", "-q", "-m", "a test")
+    lines = unattended.acceptance(_table(f"`{sys.executable} -m pytest -q test_c.py` "
+                                         "exits 0; `test -d .pytest_cache` exits 1"))
+    env = {k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"}
+    got = unattended.run_lines(repo, lines, env)
+    assert [unattended.judge_line(ln, g, None) for ln, g in zip(lines, got)] == ["green", "green"]
+    assert "2 passed" in got[0]["last"] and unattended._status(repo) == ""
 
 
 def test_t10_no_cell_refused_before_the_spawn(box):
