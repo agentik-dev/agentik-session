@@ -497,3 +497,32 @@ def test_r4_doctor_row_in_the_report(machine):  # noqa: F811
     assert rep.ok and len(rows) == 1 and rows[0].ok and not rows[0].warn
     assert re.fullmatch(rf"on; \d+ gated here; session {SID}: 0 refusals, 0 let through on an "
                         r"error", rows[0].detail), rows[0].detail
+
+
+# ---- review round 1: F1 (a subshell's or a popd's folder), F6 (an unresolved target logs) --
+
+@pytest.mark.parametrize("command", [
+    "(cd docs && ls); printf x >> CLAUDE.md",
+    "pushd docs; popd; printf x >> CLAUDE.md",
+    "cd docs && (cd ..; ls) && printf x >> ../CLAUDE.md",
+    "( cd /tmp ) ; echo x > CLAUDE.md",
+])
+def test_f1_a_subshells_or_a_popds_folder_does_not_outlive_it(box, command):
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+@pytest.mark.parametrize("command", [
+    "popd; printf x >> CLAUDE.md", "cd $X; printf x >> CLAUDE.md", "cd - && echo x > CLAUDE.md",
+    "echo x >> $X", "echo x >> CLAUDE.m*", "echo 'x >> CLAUDE.md",
+])
+def test_f6_an_unresolved_bash_target_passes_with_one_open_line(box, command):
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+    rows = _log(box)
+    assert [(r["decision"], r["tool"]) for r in rows] == [("open", "Bash")], rows
+
+
+def test_f6_a_resolved_ungated_target_logs_nothing(box):
+    for command in ("echo x >> notes.md", "sed -i '' s/a/b/ notes.md", "ls 2>&1 | head"):
+        assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+    assert _log(box) == []
