@@ -52,7 +52,7 @@ def machine(tmp_path, monkeypatch):
     (install / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
         "SessionStart": [], "PreToolUse": [], "PostToolUse": [], "PostToolUseFailure": [],
         "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "StopFailure": [], "SessionEnd": [],
-        "PreCompact": [], "PostModelSwitch": []}}))                   # wfg R7
+        "PreCompact": [], "PostModelSwitch": [], "InstructionsLoaded": []}}))   # wfg R7; g1 R1
     plugins = [
         {"id": "session@agentik", "version": "2.0.0", "enabled": True,
          "installPath": str(install)},
@@ -95,7 +95,7 @@ def test_green_machine_in_order(machine):
     assert [c.name for c in rep.checks] == [
         "claude", "python", "state-dir", "plugin", "decisions", "respeak", "relay-plugin",
         "profiles", "resolved", "meter", "meter-hook", "config", "git", "relay", "mod",
-        "measure", "launcher"]
+        "measure", "launcher", "instructions"]                  # g1 R2: no log, one row
 
 
 def test_no_claude_on_path(machine):
@@ -320,7 +320,7 @@ def test_hooks_json_is_the_shim_on_session_start_only():
     assert list(hooks_json["hooks"]) == list(doctor.HOOK_EVENTS) == [
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
         "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact",
-        "PostModelSwitch"]
+        "PostModelSwitch", "InstructionsLoaded"]
     cmd = hooks_json["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert cmd == "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SessionStart"
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
@@ -375,7 +375,8 @@ def test_skill_frontmatter():
 # stall there is silent. Tool and prompt hooks get 5 s, SessionStart 10, SessionEnd 15.
 HOOK_TIMEOUTS = {"SessionStart": 10, "SessionEnd": 15, "UserPromptSubmit": 5,
                  "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5, "PostToolBatch": 5,
-                 "Stop": 5, "StopFailure": 5, "PreCompact": 5, "PostModelSwitch": 5}
+                 "Stop": 5, "StopFailure": 5, "PreCompact": 5, "PostModelSwitch": 5,
+                 "InstructionsLoaded": 5}      # g1 R1: the plugin's hook timeout
 
 
 def test_every_hook_command_has_its_events_timeout():
@@ -395,8 +396,8 @@ def test_every_hook_command_has_its_events_timeout():
 
 S19_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
               "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
-              "PreCompact", "PostModelSwitch"]
-# wfg adds PostModelSwitch (R7); S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
+              "PreCompact", "PostModelSwitch", "InstructionsLoaded"]
+# g1 adds InstructionsLoaded (R1); wfg adds PostModelSwitch (R7); S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
 # PreCompact (mod-r1 §6); S34 adds StopFailure (ruling 5)
 
 

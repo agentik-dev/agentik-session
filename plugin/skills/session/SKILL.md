@@ -277,5 +277,7 @@ A login's window mode is read from its readings at every call: `five_hour` by de
 
 The measure: the same module hands every `session.measure` (`{context, rateLimits, cost, changed}`) to `agentik-session measure record --session <id>` (exit 0, 1 no session, 2 refused, an unreadable window included), which writes `measure.json` and, when the window has moved, rewrites `resolved.json`; `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>%` (or `not comparable`, or `none`) and `doctor` warns at 10%. Its `context.window` is the window pick's first source; its other figures decide nothing, and the budget never reads it.
 
+The instruction files: the `InstructionsLoaded` hook logs each `CLAUDE.md` or rules file a session loads to its `instructions.jsonl` (path, why, from where, when) and prints nothing. `doctor`, run in a repo, lists the files the repo's newest logged session loaded, each with its bytes as it stands now (`gone` if deleted), and their sum; then warns, never failing, on a tree's folder file that did not load (`tree-file`), a plugin whose descriptions pass 1,024 B (`plugin-descs`), a `MEMORY.md` past 8 KiB (`memory-index`), and `effort` or `model` set both by the profile and in the user's `settings.json` (`two-places`); and notes the memory files written since the repo's previous session ended (`memory-notes`). It prints no ceiling.
+
 Each has a command: `/session:status`, `/session:profile`, `/session:set`,
 `/session:checkpoint`, `/session:doctor`, `/session:report`, `/session:gate`.

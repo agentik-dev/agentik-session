@@ -33,6 +33,9 @@
     ],
     "PostModelSwitch": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" PostModelSwitch", "timeout": 5}]}
+    ],
+    "InstructionsLoaded": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" InstructionsLoaded", "timeout": 5}]}
     ]
   }
 }

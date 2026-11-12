@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import SEMVER, demand, hooks, install, measure, meter, mod, resolver
+from . import SEMVER, demand, hooks, install, instructions, measure, meter, mod, resolver
 
 PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
@@ -32,7 +32,8 @@ CLAUDE_FLAGS = ("--model", "--effort", "--tools", "--permission-mode",
 FRESH_S = 120
 HOOK_EVENTS = ("SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
                "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
-               "PreCompact", "PostModelSwitch")               # wfg R7: PostModelSwitch
+               "PreCompact", "PostModelSwitch",               # wfg R7: PostModelSwitch
+               "InstructionsLoaded")                          # g1 R1: the instruction log
 # The newest release of each supported minor, for when pyenv is absent (offline-safe).
 KNOWN_PYTHONS_OF = "2026-09-22"
 KNOWN_PYTHONS = ("3.11.16", "3.12.14", "3.13.15", "3.14.7")
@@ -544,6 +545,13 @@ def _check_follow(env) -> Check | None:
                  warn=True)
 
 
+def _check_instructions(env, cwd, plugins, sections) -> list:
+    """Packet g1 R2 to R4: the files the repo's newest session loaded with their bytes, the
+    warnings and the memory notes. Each row is ok, warn or note: none moves the exit."""
+    return [Check(name, True, detail, note=kind == "note", warn=kind == "warn")
+            for name, detail, kind in instructions.rows(env, cwd, plugins, sections)]
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
     cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
@@ -570,6 +578,8 @@ def run(env=None, cwd=None) -> Report:
     add(_check_mod(env))         # the rows above keep their places
     add(_check_measure(env))     # last (packet M2)
     add(_check_launcher(env, plugins))   # sc3: the rows above keep their places
+    for row in _check_instructions(env, cwd, plugins, sections):
+        add(row)                 # g1: after launcher, so every row of the pin keeps its place
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):
