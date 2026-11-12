@@ -10,13 +10,17 @@
 
 ## Done-ness
 - [x] the packet committed
-- [ ] tests first: `tests/test_g4_folder_gates.py`, red at the pin
-- [ ] R1 to R7 built, the tests green under `.venv` and `.venv-floor`
-- [ ] records: RUNBOOK's edit gates section, README (source and sidecar), plugin alpha.87
+- [x] tests first: `tests/test_g4_folder_gates.py`, red at the pin: 36 failed, 10 passed (7a7244a)
+- [x] R1 to R7 built (41492b0): g4 + g2b 168 passed (3.12); with hooks, doctor, cli, bare_machine 446 passed, 3 skipped (3.9.6)
+- [x] records: RUNBOOK's edit gates section (three layers, the grammar, R8's real-path line), README source 16380 B and README, sidecar by shasum, 3315 tests, plugin alpha.87, `.hygiene-allow` two rows
 - [ ] the gate's `make check`, once, last
 
 ## Handover
-- (none yet)
+- Choices: the walk starts above the checkout (above the member for a worktree), so a list in a folder inside a checkout (a fixture) is neither read nor gated; a checkout at or above home counts as none for the walk; a `~` line in a checkout's list now matches nothing too (R4's one predicate).
+- decide, owner: none.
+
+## Next act
+- The gate queue's `make check` on the branch tip; then the hand-back to the hq coordinator.
 
 ## Exit
 - (open)
