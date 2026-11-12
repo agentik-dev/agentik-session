@@ -186,6 +186,57 @@ def test_t5_unrun_and_cut_are_red(box, monkeypatch):
     assert (row["reason"], f["exit"], f["cut"], f["status"]) == ("acceptance", 124, True, "red")
 
 
+def _got(exit, last="", cut=False, error=False):
+    return {"exit": exit, "last": last, "cut": cut, "error": error}
+
+
+def test_f2_exit_126_127_is_unrun():
+    """Review F2: a line that exits 126 or 127, at the pin or after the child, could not run:
+    `unrun`, an `as main` line too."""
+    (main,) = unattended.acceptance(_table("`nosuchtool --check` as main"))
+    (zero,) = unattended.acceptance(_table("`nosuchtool --check` exits 127"))
+    j = unattended.judge_line
+    for code in (126, 127):
+        assert j(main, _got(code, "not found"), _got(code, "not found")) == "unrun"
+        assert j(main, _got(0, "ok"), _got(code, "not found")) == "unrun"
+        assert j(main, _got(code, "not found"), _got(0, "ok")) == "unrun"
+    assert j(zero, _got(127, "not found"), None) == "unrun"
+    assert j(main, _got(3, "x"), _got(3, "x")) == "same-as-main"
+
+
+def test_f2_an_as_main_line_that_cannot_run_is_red(box):
+    _packet(box, "green-row", "`./no-such-venv/bin/python -c pass` as main")
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"])
+    (row,) = box.kind("row")
+    assert (row["state"], row["reason"]) == ("red", "acceptance")
+    (f,) = row["failing"]
+    assert (f["status"], f["exit"], f["main_exit"]) == ("unrun", 127, 127)
+    assert "`./no-such-venv/bin/python -c pass` could not run (exit 127: " in box.starts[1]["stdin"]
+
+
+def test_f3_a_cut_line_is_red_whatever_it_expects():
+    """Review F3: a line cut at the limit is red, whatever its expectation; an `as main` line
+    cut at the pin and after too."""
+    j = unattended.judge_line
+    for cell in ("`echo 5; sleep 30` reads 5", "`x` reads 5 or more", "`x` under 9",
+                 f"`x` exits {unattended.CUT_EXIT}"):
+        (ln,) = unattended.acceptance(_table(cell))
+        assert j(ln, _got(unattended.CUT_EXIT, "5", cut=True), None) == "red"
+    (main,) = unattended.acceptance(_table("`sleep 30` as main"))
+    cut = _got(unattended.CUT_EXIT, "", cut=True)
+    assert j(main, cut, cut) == "red"
+    assert j(main, _got(0, "ok"), cut) == "unrun"
+
+
+def test_f3_a_cut_line_reading_its_value_is_red(box, monkeypatch):
+    _packet(box, "green-row", "`echo 5; sleep 30` reads 5")
+    monkeypatch.setattr(unattended, "LINE_LIMIT", 0.5)
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"])
+    (row,) = box.kind("row")
+    (f,) = row["failing"]
+    assert (row["reason"], f["last"], f["cut"], f["status"]) == ("acceptance", "5", True, "red")
+
+
 def test_t5_line_env():
     env = unattended.line_env({"PATH": "/bin", "PYTEST_ADDOPTS": "-x", "CLAUDECODE": "1",
                                "RELAY_ROW": "r", "RELAY_DEVICE_VERBS": "none", "HOME": "/live"},

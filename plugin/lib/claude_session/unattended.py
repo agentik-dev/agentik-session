@@ -478,6 +478,7 @@ def dirty(wt: Path) -> bool:
 SH = "/bin/sh"
 LINE_LIMIT = 900.0               # effects.Timeout: an acceptance line's limit
 CUT_EXIT = 124                   # effects.CutExit: the exit at the limit
+UNRUN_EXITS = (126, 127)         # the shell's: not executable, not found (review F2)
 LAST_CAP = 200                   # effects.LastCap
 OUT_CAP = 65536                  # effects.OutputCap: the tail of each stream read
 TEXT_CAP = 400                   # effects.TextCap: a ledger string
@@ -695,14 +696,23 @@ def line_env(environ: dict, home: str, remotes: list) -> dict:
     return push_deny(out, remotes)
 
 
+def _unrun(got: dict | None) -> bool:
+    """It could not run: no start, or the shell's 126 (not executable) or 127 (not found)."""
+    return got is None or bool(got.get("error")) or got.get("exit") in UNRUN_EXITS
+
+
 def judge_line(ln: Line, got: dict, base: dict | None) -> str:
-    """`gate.rerun`: `unrun` when it could not run; an `as main` line `same-as-main` (green at
-    exit 0) when its exit and last line are its baseline's, `unrun` with no baseline, else
-    `red`; every other line `green` when it holds, else `red`."""
-    if got["error"]:
+    """`gate.rerun`, where the loop cannot be sure a line passed it is not a pass: `unrun`
+    when it could not run (review F2: exit 126 or 127 too); `red` when it was cut at the
+    limit, whatever it expects (F3); an `as main` line `unrun` when its baseline could not run
+    or was cut, else `same-as-main` (green at exit 0) when its exit and last line are its
+    baseline's, else `red`; every other line `green` when it holds, else `red`."""
+    if _unrun(got):
         return "unrun"
+    if got.get("cut"):
+        return "red"
     if ln.kind == "as-main":
-        if base is None or base.get("error"):
+        if _unrun(base) or base.get("cut"):
             return "unrun"
         if (got["exit"], got["last"]) == (base["exit"], base["last"]):
             return "green" if got["exit"] == 0 else "same-as-main"
@@ -724,8 +734,11 @@ def run_lines(wt: Path, lines: list, env: dict, pick=None) -> list:
 
 def _said(c: dict) -> str:
     """One failing line for the child: what it returned and what it wants."""
-    if c["status"] == "unrun":
-        got = f"could not run ({c['last']})"
+    if c["status"] == "unrun" and (c["exit"] is None or c["exit"] in UNRUN_EXITS):
+        got = "could not run (" + (f"exit {c['exit']}: " if c["exit"] is not None else "") \
+            + f"{c['last']})"
+    elif c["status"] == "unrun":
+        got = "could not be judged: its run at the pin could not run or was cut"
     else:
         got = f"returned exit {c['exit']}" + (f", cut at {LINE_LIMIT:g} s" if c["cut"] else "") \
             + (f", last line \"{c['last']}\"" if c["last"] else ", no output")
