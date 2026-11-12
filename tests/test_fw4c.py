@@ -5,6 +5,7 @@ tests/test_land_range.py, ported; these pin the verb, the job and its mark. Each
 import ast
 import io
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -218,27 +219,54 @@ def _until(what, seconds=120):
 def test_fw4c_t14_a_writer_the_check_leaves_behind_keeps_the_land_line(repo, monkeypatch,
                                                                         tmp_path):
     # probe r1: the job lands and exits 0; a child of the check writes on after the land line
-    # until the runner, at the shipped poll (gate.POLL, 1 s), closes the job and its group.
-    def serve_at_the_shipped_poll(root, popen=None):
-        if not gate.entries(root):
-            return False
-        gate.serve(root, gate.Fx(idle=0, poll=gate.POLL))
-        return True
-
-    monkeypatch.setattr(gate, "spawn_serve", serve_at_the_shipped_poll)
+    # until the runner, at the shipped poll (gate.POLL, 1 s), closes the job and kills its
+    # group. The rule: what the group writes before that close is kept, after the land line,
+    # which stays once and in place; the close kills the writer, so the gate's exit line is
+    # the log's last and nothing follows it. The verdict is still the land line (fold r1, F1).
+    # The test holds the close's kill until the writer has written past the land line, since
+    # under load the poll could close the job before the writer's next line (n101).
     stop = tmp_path / "stop"
     (repo.path / "Makefile").write_text(
         "check:\n\t@( i=0; while [ ! -e '%s' ] && [ $$i -lt 600 ]; do echo tick >&2; "
         "sleep 0.1; i=$$((i+1)); done ) &\n" % stop)
     git(repo.path, "commit", "-qam", "a check that leaves a writer behind")
     sha = repo.branch("work", {"new.txt": ("new\n", 0o644)})
+    ok = f"land scratch: ok {sha}, main readied"
+    held = []
+
+    def past_the_land(log):
+        lines = log.read_text().splitlines() if log.exists() else []
+        return ok in lines and "tick" in lines[lines.index(ok) + 1:]
+
+    def serve_at_the_shipped_poll(root, popen=None):
+        if not gate.entries(root):
+            return False
+        (e,) = gate.entries(root)
+        log = gate.entry_dir(root, e["id"]) / "log"
+
+        def kill_once_the_writer_is_past_the_land(pgid, sig):
+            if sig == signal.SIGKILL and not held:
+                held.append(pgid)
+                _until(lambda: past_the_land(log))
+            os.killpg(pgid, sig)
+
+        gate.serve(root, gate.Fx(idle=0, poll=gate.POLL,
+                                 killpg=kill_once_the_writer_is_past_the_land))
+        return True
+
+    monkeypatch.setattr(gate, "spawn_serve", serve_at_the_shipped_poll)
     try:
         rc, out, err = run("gate", "land", str(repo.path), "work", sha, str(repo.message))
-        log = Path(err.split("log ")[-1].strip()).read_text().splitlines()
+        path = Path(err.split("log ")[-1].strip())
+        log = path.read_text().splitlines()
+        time.sleep(0.5)                               # a writer left alive would tick on
+        after = path.read_text().splitlines()
     finally:
         stop.write_text("")
-    ok = f"land scratch: ok {sha}, main readied"
-    assert "tick" in log[log.index(ok) + 1:], "no line after the land line"
+    assert held, "the runner killed no group at the close"
+    assert log.count(ok) == 1 and "tick" in log[log.index(ok) + 1:], log
+    assert log[-1].startswith("gate ") and ": exit 0 in " in log[-1], log[-3:]
+    assert after == log, after[len(log):][:3]
     assert (rc, out) == (0, ok + "\n"), err
     assert git(repo.path, "rev-parse", "main^2") == sha
 
