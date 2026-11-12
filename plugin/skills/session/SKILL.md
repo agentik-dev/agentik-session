@@ -87,11 +87,17 @@ The used share, the larger of the two, sets the **zone**:
 | reserve | 92% | the wrap-up reserve: finish, commit, hand off |
 | exhausted | 100% | exit |
 
+The percent line, `session meter: <c>% of context, <t>% of turns; ...`, comes on the
+first prompt and then at most every `session.pacing.meter_line_minutes` (30; `0` is
+every prompt), and on every prompt from the checkpoint on. Below the checkpoint it
+asks nothing of you.
+
 Two lines arrive as hook context; act on them, do not argue with them:
 
 - **`CHECKPOINT: ...`** at the profile's `checkpoint_at` (80% by default), then
   every tenth tool: bring the charter current, commit, and run
-  `agentik-session checkpoint`. The session must be handed off at any moment
+  `agentik-session checkpoint`. Tell the owner you are winding down at the meter's
+  line, with the percent. The session must be handed off at any moment
   from here. Under `agentik session run`, the sitting runs
   `agentik session checkpoint --respawn --charter <file> --state <s>` and ends the turn,
   and the launcher restarts it.
@@ -122,9 +128,11 @@ handoff.
 
 **The spawn rule** (packets wfd, wfg) holds whatever the posture, a helper's call too.
 - No workflows: every `Workflow` call is denied with one line. Spawn helpers with
-  the Agent tool, each naming its model, and do not call Workflow again.
+  the Agent tool: name the model, or use an agent type whose definition names its own.
+  Do not call Workflow again.
 - A Fable helper (`Agent` or `Task` with a Fable `model`) starts only under a Fable
-  session, as both `model.json` and the meter read it; else name `model: 'opus'`.
+  session, as both `model.json` and the meter read it; else name `model: 'opus'`, or
+  use an agent type that names its own model.
   "Not known" (no record yet, or a switch not yet seen) clears after one tool call.
 
 ## The charter

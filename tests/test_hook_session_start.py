@@ -30,7 +30,8 @@ def test_writes_the_resolved_file_and_one_line(tmp_path):
     out = hooks.session_start(payload(), env)
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "\n" not in ctx and "'frontier'" in ctx and "180000 context / 400 turns" in ctx
+    assert "\n" not in ctx and "'frontier'; " + hooks.START_METER in ctx
+    assert "180000" not in ctx and "400 turns" not in ctx        # packet b1 R3
     path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     assert str(path) in ctx
     doc = json.loads(path.read_text())
@@ -142,7 +143,7 @@ def test_no_charter_reminder_when_one_is_open_today(tmp_path):
     (repo / "history" / "sittings" / f"{charter.today()}-1.md").write_text("x")
     p = dict(payload(), cwd=str(repo))
     ctx = hooks.session_start(p, env_for(tmp_path))["hookSpecificOutput"]["additionalContext"]
-    assert "charter" not in ctx.split("resolved config at")[0] and "charter open" not in ctx
+    assert "charter:" not in ctx and "charter open" not in ctx
 
 
 def test_no_charter_reminder_when_not_required(tmp_path):

@@ -408,17 +408,15 @@ def open(dir, goal: str, section: dict, head: str | None,
     suffix = _suffix(row)
     goal = _one_line(goal, 300) or "?"
     repo = _one_line(repo or Path.cwd().name, 60) or "?"
-    c = section.get("ceilings") or {}
-    at = section.get("checkpoint_at")
-    at = f"{float(at):.0%}" if isinstance(at, (int, float)) else "80%"
+    # Packet b1 R4: the budget row names the profile and the meter's line, no figure.
+    profile = re.sub(r"[^A-Za-z0-9_.-]", "", str(section.get("profile") or ""))[:40] or "?"
     text = "\n".join([
         f"# Sitting {date}-{n}: {repo}, {_one_line(goal, 60)}",
         "",
         "| item | value |",
         "|---|---|",
         f"| goal | {goal} |",
-        f"| budget | {c.get('turns', '?')} turns, {_k(c.get('context'))} context; "
-        f"charter current at {at} |",
+        f"| budget | profile {profile}; the meter's CHECKPOINT line ends the sitting |",
         f"| pin | {_one_line(head or 'no commit', 40)} |",
         f"| window | {_k(section.get('window'))} |",
         "| agents | 0 |",

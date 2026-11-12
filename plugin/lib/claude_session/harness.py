@@ -264,3 +264,142 @@ def claude_md_bytes(cwd, env) -> int | None:
         return _walk(cwd, env)
     except Exception:       # noqa: BLE001 - a measure never loses the ledger's row
         return None
+
+
+# Packet b1 R7: the session's effort for its ledger row. The launch line's `--effort` (`flag`),
+# read from the nearest `claude` ancestor's argv; else the settings' `modelSettings[<model>]
+# .effortLevel`, local, project then user, else their top-level `effortLevel` (`settings`);
+# else (None, None). A value outside EFFORTS is no value. A mid-session `/effort` is not seen.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+ANCESTOR_HOPS = 8           # the hook's parents to the claude process: a shell or two
+PS = "/bin/ps"              # by full path: no PATH entry chooses what reads the tree
+PS_WALL = 2.0               # seconds for the whole walk
+
+
+def _ps(pid: int) -> tuple[int, str] | None:
+    """(ppid, args) of one process, None when ps cannot say."""
+    import subprocess
+    try:
+        p = subprocess.run([PS, "-o", "ppid=", "-o", "args=", "-p", str(int(pid))],
+                           capture_output=True, text=True, timeout=PS_WALL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    parts = p.stdout.strip().split(None, 1) if p.returncode == 0 else []
+    if not parts or not parts[0].isdigit():
+        return None
+    return int(parts[0]), parts[1] if len(parts) > 1 else ""
+
+
+def claude_argv(ps=None, pid=None) -> list[str] | None:
+    """The nearest ancestor whose argv[0] is named `claude`, its argv split on whitespace;
+    None past ANCESTOR_HOPS, at pid 1, on a loop, after PS_WALL, or when ps cannot say."""
+    ps = ps or _ps
+    pid = os.getppid() if pid is None else pid
+    seen, began = set(), time.monotonic()
+    for _ in range(ANCESTOR_HOPS):
+        if not isinstance(pid, int) or pid <= 1 or pid in seen:
+            return None
+        if time.monotonic() - began > PS_WALL:
+            return None
+        seen.add(pid)
+        got = ps(pid)
+        if not got:
+            return None
+        ppid, args = got
+        argv = str(args).split()
+        if argv and os.path.basename(argv[0]) == "claude":
+            return argv
+        pid = ppid
+    return None
+
+
+# r1 F2: what claude reads after an option before `--effort` (as chain.py's tables): nothing
+# after a bare one, one word after a valued one, one not starting with `-` after an optional
+# one, every non-option word after a list. ps joins argv with spaces, so a multi-word value or
+# the launch prompt arrives as several words; the first positional word ends the walk.
+_BARE_OPTS = frozenset({
+    "-p", "--print", "-c", "--continue", "--fork-session", "--verbose", "--strict-mcp-config",
+    "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
+    "--include-partial-messages", "--replay-user-messages", "--no-session-persistence",
+    "--ide", "--disable-slash-commands", "--chrome", "--no-chrome", "--mcp-debug",
+    "-v", "--version", "-h", "--help"})
+_VALUED_OPTS = frozenset({
+    "--model", "--fallback-model", "--permission-mode", "--settings", "--setting-sources",
+    "--session-id", "--append-system-prompt", "--append-system-prompt-file", "--system-prompt",
+    "--system-prompt-file", "--system-prompt-snapshot", "--name", "--output-format",
+    "--input-format", "--json-schema", "--max-budget-usd", "--max-turns", "--agent", "--agents",
+    "--permission-prompt-tool", "--plugin-dir"})
+_OPTIONAL_OPTS = frozenset({"-r", "--resume", "-d", "--debug", "-w", "--worktree", "--from-pr"})
+_LIST_OPTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
+                        "--disallowed-tools", "--add-dir", "--mcp-config", "--betas"})
+
+
+def flag_effort(argv) -> str | None:
+    """The last `--effort X` or `--effort=X` among the options of argv (argv[0] the
+    program), before the first positional word, as claude takes it (r2: `launch.build` puts
+    the config's flag first and the caller's after it). None when there is none, when any
+    `--effort` has no level, or where the walk cannot tell an option's words from the prompt's
+    (an option not in the tables above; a second word after a list option), even after a valid
+    one, since a later flag may sit past the point it cannot read."""
+    words = [str(a) for a in (argv or [])[1:]]
+    i, seen, lst = 0, None, False
+    while i < len(words):
+        a = words[i]
+        after_list, lst = lst, False
+        if a == "--effort":
+            if not (i + 1 < len(words) and words[i + 1] in EFFORTS):
+                return None
+            seen, i = words[i + 1], i + 2
+            continue
+        if a.startswith("--effort="):
+            seen = a.split("=", 1)[1]
+            if seen not in EFFORTS:
+                return None
+            i += 1
+            continue
+        if a == "--" or not a.startswith("-") or a == "-":
+            return None if after_list else seen    # positional; a list's second word: no telling
+        if a.startswith("--") and "=" in a:
+            pass                        # its value is its own
+        elif a in _BARE_OPTS:
+            pass
+        elif a in _VALUED_OPTS:
+            i += 1
+        elif a in _OPTIONAL_OPTS:
+            i += 1 if i + 1 < len(words) and not words[i + 1].startswith("-") else 0
+        elif a in _LIST_OPTS:
+            i, lst = i + 1, True        # its first word; a second ends the walk above
+        else:
+            return None                 # an option the walk cannot read
+        i += 1
+    return seen
+
+
+def settings_effort(cwd, env, model) -> str | None:
+    """The settings' effort for `model`, else their top-level one; None when neither is set."""
+    from . import rules
+    here = cwd if isinstance(cwd, str) and os.path.isabs(cwd) else None
+    docs = rules._settings(env, here)
+    names = [m for m in (model, str(model or "").split("[", 1)[0]) if isinstance(m, str) and m]
+    for _, doc in docs:
+        ms = doc.get("modelSettings")
+        for name in names if isinstance(ms, dict) else ():
+            v = ms.get(name).get("effortLevel") if isinstance(ms.get(name), dict) else None
+            if v in EFFORTS:
+                return v
+    for _, doc in docs:
+        if doc.get("effortLevel") in EFFORTS:
+            return doc["effortLevel"]
+    return None
+
+
+def session_effort(cwd, env, model, ps=None) -> tuple[str | None, str | None]:
+    """(effort, effort_from): `flag`, `settings`, or (None, None). Never raises."""
+    try:
+        v = flag_effort(claude_argv(ps))
+        if v:
+            return v, "flag"
+        v = settings_effort(cwd, env, model)
+        return (v, "settings") if v else (None, None)
+    except Exception:       # noqa: BLE001 - a measure never loses the ledger's row
+        return None, None

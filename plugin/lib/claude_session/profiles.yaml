@@ -59,7 +59,7 @@ defaults:
       S2: "blocks the goal: an unmet acceptance criterion of the current goal, a defect in a new user's first run, or a dependency that holds the goal"
       S3: "the build order: the goal's next slice, then the repo's pending list"
       S4: "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its level, taken on an S3 slice's path, or while fill is on; never ahead of S3"
-  pacing: {enabled: true, fallback: 1800, waiting: 3}
+  pacing: {enabled: true, fallback: 1800, waiting: 3, meter_line_minutes: 30}
   respeak: {narrative: tech}
   decisions: {dir: decisions}
   relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
