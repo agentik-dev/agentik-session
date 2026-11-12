@@ -12,8 +12,8 @@
 - [x] packet (2b89c1f)
 - [x] tests first (c32b025): `tests/test_g2_guard.py`; at the pin `1 error` (no module) under 3.12 and 3.9.6
 - [x] R1 to R5 (4720d11): `instructionguard.py`, the hook's call before a helper's call opens, `doctor._check_guard`; alpha.79; the doctor's row order and the readers' table gain the new names
-- [x] R6 (records commit): SKILL, RUNBOOK, README (+9 B, source 16,382 of 16,384), alpha.80, status `3193`; NICE n105 to n114; n31 to n42 (S4) moved to the overflow for recordlint's bound
-- [ ] the gate's `make check`
+- [x] R6 (2aa137f): SKILL, RUNBOOK, README (+9 B, source 16,382 of 16,384), alpha.80, status `3193`; NICE n105 to n114; n31 to n42 (S4) moved to the overflow for recordlint's bound
+- [x] the gate's `make check`: job 20261112-014933-1136, exit 0 in 13 min (3193 passed; floor 3067 passed, 105 skipped); hygiene over main..HEAD 0
 
 ## Handover
 - Choice: the headless test is `harness.claude_argv` (SessionEnd's reader): `-p`, `--print`, `--print=` anywhere in the argv denies; an unread argv denies (R2's "deny where unsure")
@@ -25,6 +25,6 @@
 - decide, owner: none
 
 ## Next act
-the gate's `make check`, then the hand-back
+review, then HELD for the owner's attended test that an `ask` reaches the dialog under `auto`
 
-- exit taken: (open)
+- exit taken: done; every ruling built, the gate green; nothing pushed, no install
