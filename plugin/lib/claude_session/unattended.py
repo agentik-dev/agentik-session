@@ -765,9 +765,31 @@ def pin_baseline(repo: Path, sha: str | None, lines: list, env: dict) -> list:
         return run_lines(tree, lines, env, _as_main)
     finally:
         removed = _git(repo, "worktree", "remove", "--force", str(tree)).returncode == 0
+        mine = os.path.realpath(top) + os.sep
         shutil.rmtree(top, ignore_errors=True)
-        if not removed:                 # an add that failed half-way leaves a stale entry
-            _git(repo, "worktree", "prune")
+        if not removed:                 # never a prune: it drops other sittings' trees (N1)
+            _drop_records(repo, mine)
+
+
+def _drop_records(repo: Path, inside: str) -> None:
+    """Second review N1: the repo's worktree entries whose `gitdir` file points under
+    `inside`, read from each entry, never guessed by name, removed; every other record is
+    left as it is, since the loop never removes or prunes a tree it did not make."""
+    common = _out(repo, "rev-parse", "--git-common-dir")
+    if not common:
+        return
+    d = Path(common) if os.path.isabs(common) else Path(repo) / common
+    try:
+        entries = list((d / "worktrees").iterdir())
+    except OSError:
+        return
+    for e in entries:
+        try:
+            gitdir = (e / "gitdir").read_text(errors="replace").strip()
+        except OSError:
+            continue
+        if gitdir and os.path.realpath(gitdir).startswith(inside):
+            shutil.rmtree(e, ignore_errors=True)
 
 
 def _said(c: dict) -> str:

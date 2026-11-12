@@ -224,6 +224,50 @@ def test_f4_the_pin_tree_goes_on_an_error(box, monkeypatch):
                                                                 "error": False}, got[0]) == "unrun"
 
 
+def _pin_records(repo, top):
+    """The repo's worktree entries whose gitdir file points into `top`."""
+    d = repo / ".git" / "worktrees"
+    top = os.path.realpath(top)
+    return [e.name for e in (d.iterdir() if d.is_dir() else [])
+            if os.path.realpath((e / "gitdir").read_text().strip()).startswith(top + os.sep)]
+
+
+def test_n1_a_failed_pin_tree_never_prunes_another_tree(box, monkeypatch):
+    """Second review N1: the loop never removes or prunes a tree it did not make. Another
+    sitting's tree whose directory is away stays registered and works when it is back; when
+    the pin tree's remove fails, only the entry whose gitdir points into this call's temp
+    directory goes."""
+    other = box.repo / ".claude" / "worktrees" / "other"
+    _git(box.repo, "worktree", "add", "-q", str(other), "-b", "other", "main")
+    away = box.tmp / "away"
+    os.rename(other, away)
+    made = []
+    real = unattended.tempfile.mkdtemp
+    monkeypatch.setattr(unattended.tempfile, "mkdtemp", lambda **kw: made.append(real(**kw)) or made[-1])
+    lines = unattended.acceptance(_table("`true` as main"))
+    got = unattended.pin_baseline(box.repo, "0" * 40, lines, dict(os.environ))
+    assert got[0]["error"] and got[0]["last"].startswith("pin tree: ")
+
+    real_git = unattended._git
+
+    def no_remove(cwd, *args):
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(args, 1, "", "fatal: cannot remove")
+        return real_git(cwd, *args)
+    monkeypatch.setattr(unattended, "_git", no_remove)
+    main = _git(box.repo, "rev-parse", "main")
+    got = unattended.pin_baseline(box.repo, main, lines, dict(os.environ))
+    assert got[0]["exit"] == 0
+    for top in made:
+        assert not os.path.exists(top) and _pin_records(box.repo, top) == []
+    assert f"worktree {os.path.realpath(other)}" in [
+        "worktree " + os.path.realpath(ln.split(" ", 1)[1]) for ln in _trees(box.repo)]
+    assert len(_trees(box.repo)) == 2
+    os.rename(away, other)
+    assert _git(other, "status", "--short") == "" and _git(other, "rev-parse", "--abbrev-ref",
+                                                            "HEAD") == "other"
+
+
 def test_t5_unrun_and_cut_are_red(box, monkeypatch):
     _packet(box, "green-row", "`true` exits 0; `true` as main")
     monkeypatch.setattr(unattended, "SH", str(box.tmp / "no-such-sh"))
