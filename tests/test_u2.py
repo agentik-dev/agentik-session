@@ -161,6 +161,17 @@ def test_t5_unrun_and_cut_are_red(box, monkeypatch):
     assert (row["reason"], f["exit"], f["cut"], f["status"]) == ("acceptance", 124, True, "red")
 
 
+def test_t5_line_env():
+    env = unattended.line_env({"PATH": "/bin", "PYTEST_ADDOPTS": "-x", "CLAUDECODE": "1",
+                               "RELAY_ROW": "r", "RELAY_DEVICE_VERBS": "none", "HOME": "/live"},
+                              "/s", ["origin"])
+    assert (env["HOME"], env["XDG_STATE_HOME"], env["TMPDIR"], env["PYTHONPYCACHEPREFIX"]) == (
+        "/s", "/s/state", "/s/tmp", "/s/pycache")
+    assert env["PYTEST_ADDOPTS"] == "-x -p no:cacheprovider" and env["RELAY_MEASURE_DEPTH"] == "1"
+    assert "CLAUDECODE" not in env and "RELAY_ROW" not in env and env["RELAY_DEVICE_VERBS"] == "none"
+    assert env["GIT_CONFIG_VALUE_1"] == "relay-denies-push"
+
+
 def test_t10_no_cell_refused_before_the_spawn(box):
     (box.repo / "design" / "packets" / "green-row.md").write_text("# Packet green-row\n")
     box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"])

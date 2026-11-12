@@ -13,9 +13,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -469,6 +471,245 @@ def dirty(wt: Path) -> bool:
     return _status(wt) != ""
 
 
+# ---- the acceptance lines (packet u2 R2) ---------------------------------------
+# The cell as agentik-relay internal/packet/packet.go reads it (`table`, `splitRow`,
+# `acceptance`, `expect`), each line judged as night.Holds and gate.rerun judge it.
+
+SH = "/bin/sh"
+LINE_LIMIT = 900.0               # effects.Timeout: an acceptance line's limit
+CUT_EXIT = 124                   # effects.CutExit: the exit at the limit
+LAST_CAP = 200                   # effects.LastCap
+OUT_CAP = 65536                  # effects.OutputCap: the tail of each stream read
+TEXT_CAP = 400                   # effects.TextCap: a ledger string
+PIPE_GRACE = 5.0
+CONTINUATIONS = 2                # packet u2 R3: named continuations a row, at most
+PASSES = ("green", "same-as-main")
+TAIL = ("Continue with the acts that make them hold. If one is blocked, say what blocks it in "
+        "the charter's handover.")
+_OR_MORE = re.compile(r"^reads (\d+) or more\b", re.A)
+_READS = re.compile(r"^reads (`[^`]*`|\S+)", re.A)
+_NUMBER = re.compile(r"^(under|exits) (\d+)\b", re.A)
+_AS_MAIN = re.compile(r"^as main\b", re.A)
+_INT = re.compile(r"^[+-]?\d+\Z", re.A)
+
+
+class AcceptanceError(ValueError):
+    """The packet's acceptance cell cannot be read: the row is refused before its spawn."""
+
+
+@dataclass(frozen=True)
+class Line:
+    """One acceptance item: its shell line and what it must show (`reads`, `reads-or-more`,
+    `under`, `exits`, `as-main`)."""
+    shell: str
+    expect: str
+    kind: str
+    value: str = ""
+    n: int = 0
+
+
+def _split_row(s: str) -> list:
+    """`splitRow`: a table row cut at every `|` not escaped as `\\|`."""
+    s = s.strip()
+    s = s[1:] if s.startswith("|") else s
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    out, start, j = [], 0, 0
+    while j < len(s):
+        if s[j] == "\\":
+            j += 2
+            continue
+        if s[j] == "|":
+            out.append(s[start:j])
+            start = j + 1
+        j += 1
+    return out + [s[start:]]
+
+
+def _unescape(s: str) -> str:
+    return s.replace("\\|", "|")
+
+
+def _expect(shell: str, e: str) -> Line:
+    m = _OR_MORE.match(e)
+    if m:
+        return Line(shell, e, "reads-or-more", m.group(1), int(m.group(1)))
+    m = _READS.match(e)
+    if m:
+        v = _unescape(m.group(1).strip("`"))
+        return Line(shell, e, "reads", v, int(v) if _INT.match(v) else 0)
+    m = _NUMBER.match(e)
+    if m:
+        return Line(shell, e, "under" if m.group(1) == "under" else "exits", m.group(2),
+                    int(m.group(2)))
+    if _AS_MAIN.match(e):
+        return Line(shell, e, "as-main")
+    raise AcceptanceError(f"`{shell[:80]}`: no expectation (want reads, reads <n> or more, "
+                          "under, exits or as main)")
+
+
+def acceptance(text: str) -> list:
+    """The packet's acceptance lines, from its table's `acceptance` row: the cell cut at each
+    `;` outside a code span, each item a span and an expectation; else AcceptanceError."""
+    cell = None
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        if not ln.startswith("|"):
+            continue
+        c = _split_row(ln)
+        if c[0].strip().lower() == "acceptance":
+            if len(c) != 2:
+                raise AcceptanceError(f"{len(c)} cells, want 2: an unescaped | inside a span "
+                                      "splits the row")
+            cell = c[1].strip()
+            break
+    if cell is None:
+        raise AcceptanceError("no acceptance row in the packet's table")
+    items, start, inside = [], 0, False
+    for j, ch in enumerate(cell):
+        if ch == "`":
+            inside = not inside
+        elif ch == ";" and not inside:
+            items.append(cell[start:j])
+            start = j + 1
+    if inside:
+        raise AcceptanceError("unterminated backtick span")
+    out = []
+    for it in items + [cell[start:]]:
+        it = it.strip()
+        if not it:
+            continue
+        if not it.startswith("`"):
+            raise AcceptanceError(f"item {len(out) + 1}: no shell span")
+        end = it.index("`", 1)
+        out.append(_expect(_unescape(it[1:end]), it[end + 1:].strip()))
+    if not out:
+        raise AcceptanceError("no item")
+    return out
+
+
+def line_holds(ln: Line, exit_code, last: str) -> bool:
+    """`night.Holds`: the expectation against an exit and a last line; `as main` holds on main,
+    where a line is its own baseline."""
+    t = (last or "").strip()
+    n = int(t) if _INT.match(t) else None
+    if ln.kind == "reads":
+        return t == ln.value
+    if ln.kind == "reads-or-more":
+        return n is not None and n >= ln.n
+    if ln.kind == "under":
+        return n is not None and n < ln.n
+    if ln.kind == "exits":
+        return exit_code == ln.n
+    return ln.kind == "as-main"
+
+
+def _last_of(data: bytes) -> str:
+    for ln in reversed(data[-OUT_CAP:].decode(errors="replace").split("\n")):
+        if ln.strip():
+            return ln.strip()[:LAST_CAP]
+    return ""
+
+
+def _killpg(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def run_line(cwd: Path, shell: str, env: dict) -> dict:
+    """One line under `/bin/sh -c` in cwd, in its own session, cut at LINE_LIMIT (exit 124,
+    `cut`), its group killed after; `exit` None and `error` when it could not run."""
+    try:
+        proc = subprocess.Popen([SH, "-c", shell], cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
+    except (OSError, ValueError) as e:
+        return {"exit": None, "last": f"{type(e).__name__}: {e}"[:LAST_CAP], "cut": False,
+                "error": True}
+    cut = False
+    try:
+        out, err = proc.communicate(timeout=LINE_LIMIT)
+    except subprocess.TimeoutExpired:
+        cut = True
+        _killpg(proc.pid)
+        try:
+            out, err = proc.communicate(timeout=PIPE_GRACE)
+        except subprocess.TimeoutExpired:       # a process that left the group holds a pipe
+            for fh in (proc.stdout, proc.stderr):
+                fh.close()
+            proc.wait()
+            return {"exit": None, "cut": True, "error": True,
+                    "last": f"orphans: the line's output still held {PIPE_GRACE:g} s after its cut"}
+    _killpg(proc.pid)                           # whatever it left running in its group
+    rc = CUT_EXIT if cut else (proc.returncode if proc.returncode >= 0 else -1)
+    return {"exit": rc, "last": _last_of(out) or _last_of(err), "cut": cut, "error": False}
+
+
+# The relay's scratch home (effects scratchEnv): a line never writes under the live home.
+SCRATCH = (("HOME", ""), ("XDG_CONFIG_HOME", "config"), ("XDG_STATE_HOME", "state"),
+           ("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"), ("GOCACHE", "go-build"),
+           ("GOBIN", "bin"), ("GOMODCACHE", "gomod"), ("PYTHONPYCACHEPREFIX", "pycache"))
+
+
+def line_env(environ: dict, home: str, remotes: list) -> dict:
+    """The child's environment less its profile, under a scratch home and TMPDIR, at depth
+    1, with the push barrier; pytest's cache off, so a line leaves no `.pytest_cache` in a
+    tree that does not ignore it (the dirty-tree check reads the tree after a continuation)."""
+    out = {k: v for k, v in environ.items() if not k.startswith("CLAUDE") and not (
+        k.startswith("RELAY_") and k != "RELAY_DEVICE_VERBS")}
+    out.update({k: os.path.join(home, leaf) if leaf else home for k, leaf in SCRATCH})
+    out.update({"TMPDIR": os.path.join(home, "tmp"), "RELAY_MEASURE_DEPTH": "1",
+                "PYTEST_ADDOPTS": (out.get("PYTEST_ADDOPTS", "") + " -p no:cacheprovider").strip()})
+    return push_deny(out, remotes)
+
+
+def judge_line(ln: Line, got: dict, base: dict | None) -> str:
+    """`gate.rerun`: `unrun` when it could not run; an `as main` line `same-as-main` (green at
+    exit 0) when its exit and last line are its baseline's, `unrun` with no baseline, else
+    `red`; every other line `green` when it holds, else `red`."""
+    if got["error"]:
+        return "unrun"
+    if ln.kind == "as-main":
+        if base is None or base.get("error"):
+            return "unrun"
+        if (got["exit"], got["last"]) == (base["exit"], base["last"]):
+            return "green" if got["exit"] == 0 else "same-as-main"
+        return "red"
+    return "green" if line_holds(ln, got["exit"], got["last"]) else "red"
+
+
+def run_lines(wt: Path, lines: list, env: dict, pick=None) -> list:
+    """Each line (those `pick` keeps) run in wt under one scratch home, removed after; a
+    line left out is None."""
+    home = tempfile.mkdtemp(prefix="unattended-lines-")
+    try:
+        os.mkdir(os.path.join(home, "tmp"))
+        e = line_env(env, home, remotes(wt))
+        return [run_line(wt, ln.shell, e) if pick is None or pick(ln) else None for ln in lines]
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def _said(c: dict) -> str:
+    """One failing line for the child: what it returned and what it wants."""
+    if c["status"] == "unrun":
+        got = f"could not run ({c['last']})"
+    else:
+        got = f"returned exit {c['exit']}" + (f", cut at {LINE_LIMIT:g} s" if c["cut"] else "") \
+            + (f", last line \"{c['last']}\"" if c["last"] else ", no output")
+    want = c["expect"]
+    if c["main_exit"] is not None or c["main_last"] is not None:
+        want += f" (at the pin: exit {c['main_exit']}, last line \"{c['main_last']}\")"
+    return f"`{c['shell']}` {got}; it wants: {want}"
+
+
+def continuation(failing: list) -> str:
+    """Packet u2 R3: the message that names each failing line."""
+    return ("The packet's acceptance lines do not all hold yet; the loop ran them in this tree "
+            "after your turn:\n" + "".join(f"- {_said(c)}\n" for c in failing) + TAIL + "\n")
+
+
 # ---- the spawn (ruling 5) --------------------------------------------------------------
 
 def _usd(v) -> str:
@@ -752,6 +993,25 @@ def verdict(rc, out: str, sha: str) -> tuple:
 
 
 @dataclass
+class _Row:
+    """One row's running tally (packet u2): its acceptance lines and their baseline at the
+    pin, its limits and continuations, and what its parts spent."""
+    lines: list
+    base: list | None = None
+    limits: int = 0
+    continues: int = 0
+    turns: int = 0
+    usd: float = 0.0
+
+
+def _check(i: int, ln: Line, got: dict, base: dict | None, status: str) -> dict:
+    """One line's result, as the ledger keeps it."""
+    return {"line": i, "shell": ln.shell[:TEXT_CAP], "expect": ln.expect[:TEXT_CAP],
+            "exit": got["exit"], "last": got["last"], "cut": got["cut"], "status": status,
+            "main_exit": base and base["exit"], "main_last": base and base["last"]}
+
+
+@dataclass
 class _Run:
     repo: Path
     nid: str
@@ -769,6 +1029,7 @@ class _Run:
     spawned: int = 0
     landed: set = field(default_factory=set)
     effort: dict = field(default_factory=dict)      # row id: the level it ran at
+    cur: _Row | None = None                          # the running row's tally
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -784,10 +1045,10 @@ class _Run:
         self.record("limit", row=rid, limit_kind=lim["kind"], resets_at=lim["resets_at"],
                     source=lim["source"], action=action, **kw)
 
-    def row(self, p, state, reason=None, sha=None, wt=None, sid=None) -> None:
+    def row(self, p, state, reason=None, sha=None, wt=None, sid=None, **more) -> None:
         rec = {"row": p["id"], "state": state, "reason": reason, "sha": sha,
                "worktree": str(wt) if wt else None, "merge": p.get("merge"),
-               "verify": p.get("verify"), "effort": self.effort.get(p["id"])}
+               "verify": p.get("verify"), "effort": self.effort.get(p["id"]), **more}
         if state in ("red", "limit") and wt and sid:
             rec["resume"] = f"cd {wt} && claude --resume {sid}"
         self.record("row", **rec)
@@ -813,8 +1074,11 @@ class _Run:
             reader.join(5.0)
         self.proc = None
         r = part.result or {}
-        cost = r.get("total_cost_usd")
+        cost, spent = r.get("total_cost_usd"), r.get("num_turns")
         self.cost += cost if type(cost) in (int, float) else 0
+        if self.cur is not None:
+            self.cur.usd += cost if type(cost) in (int, float) else 0
+            self.cur.turns += spent if type(spent) is int else 0
         self.record("exit", row=rid, part=n, rc=proc.returncode, subtype=r.get("subtype"),
                     is_error=r.get("is_error"), num_turns=r.get("num_turns"),
                     total_cost_usd=cost, duration_ms=r.get("duration_ms"),
@@ -899,11 +1163,44 @@ class _Run:
         else:
             self.row(p, "red", reason, sha=sha, wt=wt, sid=sid)
 
+    def left(self, p) -> tuple:
+        """A resume's budget: the row's less what every part spent, never under 10 turns or
+        $5."""
+        return (max(10, p["turns"] - self.cur.turns),
+                max(5, round(p["usd"] - self.cur.usd, 2)))
+
+    def baseline(self, p, wt) -> list:
+        """Packet u2 R2: each `as main` line run once in the staged tree, at the pin, before
+        the spawn; a `baseline` line. Another line is None: it is judged on its own."""
+        got = run_lines(wt, self.cur.lines, self.fx.env, lambda ln: ln.kind == "as-main")
+        self.record("baseline", row=p["id"], lines=[
+            {"line": i, "exit": g and g["exit"], "last": g and g["last"], "error": g and g["error"]}
+            for i, g in enumerate(got, 1)])
+        return got
+
+    def accept(self, p, wt, n) -> list:
+        """Packet u2 R2: every line in the row's tree, judged against its baseline; an
+        `accept` line; the checks."""
+        base = self.cur.base or [None] * len(self.cur.lines)
+        got = run_lines(wt, self.cur.lines, self.fx.env)
+        checks = [_check(i, ln, g, b, judge_line(ln, g, b))
+                  for i, (ln, g, b) in enumerate(zip(self.cur.lines, got, base), 1)]
+        self.record("accept", row=p["id"], part=n, lines=checks)
+        return checks
+
     def do_row(self, p) -> str | None:
         """The row, start to end; the run's stop reason, or None to go on."""
+        self.cur = None
         j = judge_row(p, self.repo, self.landed)
         if j:
             self.row(p, *j)
+            return None
+        text = (self.repo / p["packet"]).read_text(errors="replace")
+        try:
+            lines = acceptance(text)
+        except AcceptanceError as e:
+            self.log(f"{p['id']}: acceptance: {e}"[:300])
+            self.row(p, "refused", "acceptance")
             return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
@@ -912,7 +1209,10 @@ class _Run:
             self.log(f"{p['id']}: stage: {head}")
             self.row(p, "red", "stage")
             return None
-        text = prompt((self.repo / p["packet"]).read_text())
+        self.cur = _Row(lines)
+        if any(ln.kind == "as-main" for ln in lines):
+            self.cur.base = self.baseline(p, wt)
+        text = prompt(text)
         sid = str(uuid.uuid4())
         effort = self.effort[p["id"]] = p.get("effort") or builder_effort(self.fx.env)
         argv = spawn_argv(p["model"], p["turns"], p["usd"], sid=sid, effort=effort)
@@ -940,14 +1240,38 @@ class _Run:
             self.row(p, "red", "dirty-tree", sha=sha, wt=wt, sid=sid)
         elif part.result.get("is_error"):
             self.row(p, "red", "stream-error", sha=sha, wt=wt, sid=sid)
-        elif p.get("merge") != "merge-on-green":
-            self.row(p, "built", sha=sha, wt=wt)
-        elif not self.land:
-            self.log(f"{p['id']}: merge-on-green with no land script; it stays on its branch")
-            self.row(p, "built", "no-land", sha=sha, wt=wt)
         else:
-            self.land_row(p, wt, sha, sid)
+            return self.finish(p, wt, head, sha, sid, n)
         return None
+
+    def finish(self, p, wt, head, sha, sid, n) -> str | None:
+        """Packet u2 R2, R3: a commit, a clean tree, a non-error result; then the acceptance
+        lines. All pass: built, or it lands. One fails: a named continuation of the same
+        session, two at most, then red `acceptance` with the failing lines."""
+        rid = p["id"]
+        failing = [c for c in self.accept(p, wt, n) if c["status"] not in PASSES]
+        if not failing:
+            if p.get("merge") != "merge-on-green":
+                self.row(p, "built", sha=sha, wt=wt)
+            elif not self.land:
+                self.log(f"{rid}: merge-on-green with no land script; it stays on its branch")
+                self.row(p, "built", "no-land", sha=sha, wt=wt)
+            else:
+                self.land_row(p, wt, sha, sid)
+            return None
+        stop = "signal" if self.term else "owner-stop" if self.stopped() else None
+        if stop or self.cur.continues >= CONTINUATIONS:
+            self.row(p, "red", "acceptance", sha=sha, wt=wt, sid=sid, failing=failing)
+            return stop
+        self.cur.continues += 1
+        turns, usd = self.left(p)
+        self.record("continue", row=rid, part=n + 1, reason="acceptance",
+                    failing=[c["line"] for c in failing])
+        self.fx.say(f"{rid}: {len(failing)} acceptance line(s) fail; continuation "
+                    f"{self.cur.continues} of {CONTINUATIONS}")
+        argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
+        part2, rc, cut = self.part(p, wt, n + 1, argv, sid, continuation(failing), turns, usd)
+        return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
 
     def limited(self, p, wt, head, part, sid, n) -> str | None:
@@ -956,7 +1280,8 @@ class _Run:
         weekly limit or a second one stops the run `usage-limit`. Never a kill."""
         lim, rid = part.limit, p["id"]
         kind, reset = lim["kind"], lim["resets_at"]
-        if n > 1 or kind.startswith("seven_day"):
+        self.cur.limits += 1                    # counted by limits, not parts (packet u2 R4)
+        if self.cur.limits > 1 or kind.startswith("seven_day"):
             self.limit(rid, lim, "stop")
             self.row(p, "limit", kind, wt=wt, sid=sid)
             return "usage-limit"
@@ -980,10 +1305,7 @@ class _Run:
         if self.term or self.stopped():
             self.row(p, "limit", kind, wt=wt, sid=sid)
             return "signal" if self.term else "owner-stop"
-        r = part.result or {}
-        spent_t, spent_u = r.get("num_turns"), r.get("total_cost_usd")
-        turns = max(10, p["turns"] - (spent_t if type(spent_t) is int else 0))
-        usd = max(5, round(p["usd"] - (spent_u if type(spent_u) in (int, float) else 0), 2))
+        turns, usd = self.left(p)
         argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
         part2, rc, cut = self.part(p, wt, n + 1, argv, sid, CONTINUE + "\n", turns, usd)
         return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
