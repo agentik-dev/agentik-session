@@ -6,7 +6,11 @@ one whose argv cannot be read)."""
 import ast
 import io
 import json
+import os
 import re
+import shlex
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -49,8 +53,13 @@ def box(tmp_path, monkeypatch):
     return b
 
 
-def _main(monkeypatch, argv=("claude", "--model", "opus")):
-    monkeypatch.setattr(harness, "claude_argv", lambda *a, **k: list(argv) if argv else None)
+def _main(monkeypatch, argv=("claude", "--model", "opus"), exact=True):
+    """The nearest claude's argv: read word by word from the kernel (`exact`), or only as `ps`
+    shows it, the words joined with spaces and split again (r2 F4's fallback)."""
+    joined = " ".join(argv).split() if argv else None
+    monkeypatch.setattr(harness, "claude_argv", lambda *a, **k: joined)
+    got = (list(argv), True) if argv and exact else (joined, False)
+    monkeypatch.setattr(instructionguard, "claude_argv", lambda *a, **k: got, raising=False)
 
 
 def _payload(tool, path, sid=SID, cwd=None, **more):
@@ -124,19 +133,32 @@ def test_r2_unknown_run_denies(box, tool):
         assert _decision(_pre(_payload(tool, p), box.env))[0] == "deny", p
 
 
-# r1 F1: only the options before the first prompt word are read, and an option's value is
-# never taken for an option. `ps` joins argv with spaces, so a prompt arrives as many words.
+# r2 F4: the run's kind is read from the nearest claude's argv word by word, as Claude Code's
+# CLI (commander) parses it: options are read past the prompt (only `--` or a subcommand ends
+# them), an option's value is never taken for an option, and a prompt is one word whatever it
+# holds. `-cp` is `-c -p`; `-dp` is a debug filter.
 @pytest.mark.parametrize("argv", [
-    ("claude", "drive.py", "--model", "fable", "Check", "the", "relay", "-p", "children", "and",
-     "fix", "CLAUDE.md"),                                       # the review's observed shapes
-    ("claude", "drive.py", "--name", "-p"),
-    ("claude", "--model", "fable", "Check", "the", "relay", "-p", "children", "and", "fix",
-     "CLAUDE.md"),
-    ("claude", "--append-system-prompt", "never", "use", "--print", "here"),
-    ("claude", "--name", "-p"), ("claude", "-n", "-p", "go"), ("claude", "--name=-p"),
-    ("claude", "--effort", "high", "--model", "opus", "fix", "it", "--print"),
-    ("claude", "-c", "--verbose", "--", "-p"), ("claude", "-dp"), ("claude", "-r", "abc"),
-    ("claude", "--some-new-option", "x", "Fix", "the", "README")])
+    ("claude", "go -p"), ("claude", "go", "--name", "-p"),       # round one's attended shapes
+    ("claude", "drive.py", "--model", "fable", "Check the relay -p children and fix CLAUDE.md"),
+    ("claude", "--model", "fable", "Check the relay -p children and fix CLAUDE.md"),
+    ("claude", "--append-system-prompt", "never use --print here"),
+    ("claude", "--name", "-p"), ("claude", "-n", "-p", "go"), ("claude", "-n-p"),
+    ("claude", "--name=-p", "go"), ("claude", "--name", "my -p job", "go"),
+    ("claude", "--model", "-p", "go"), ("claude", "--fallback-model", "--print", "go"),
+    ("claude", "--session-id", "-p"), ("claude", "--settings", "-p"), ("claude", "--agent", "-p"),
+    ("claude", "--max-turns", "-p"), ("claude", "--effort", "-p", "go"),
+    ("claude", "--plugin-dir", "-p", "go"), ("claude", "--permission-prompt-tool", "-p", "go"),
+    ("claude", "--effort", "high", "--model", "opus", "fix it --print"),
+    ("claude", "--debug=-p", "go"), ("claude", "-d-p", "go"), ("claude", "-dp", "go"),
+    ("claude", "-rp", "abc"), ("claude", "-wp", "go"), ("claude", "-r", "abc"),
+    ("claude", "--", "-p"), ("claude", "go", "--", "-p"), ("claude", "-c", "--verbose", "--", "-p"),
+    ("claude", "--allowedTools", "Bash", "--", "-p"),
+    ("claude", "mcp", "list"), ("claude", "plugin", "list", "-p"), ("claude", "mcp", "serve"),
+    ("claude", "doctor"),
+    ("claude", "--some-new-option", "x", "Fix the README"),
+    ("claude", "--remote-control", "Fix the -happy path"),        # r2 F5: no word reads as -p
+    ("claude", "--fast-mode", "on", "Fix the -up arrow"), ("claude", "--bare", "Check the -p children"),
+    ("claude", "--fast-mode", "on", "Fix the README"), ("claude", "--channels", "a", "b", "Fix it")])
 def test_r2_a_prompt_word_is_not_an_option(box, monkeypatch, argv):
     _main(monkeypatch, argv)
     assert instructionguard.run_kind({}) == "main"
@@ -144,16 +166,172 @@ def test_r2_a_prompt_word_is_not_an_option(box, monkeypatch, argv):
     assert _decision(_pre(_payload("Edit", p), box.env)) == ("ask", REASON.format(p))
 
 
-# Claude Code's CLI (commander) reads `-cp` as `-c -p`: a combined short flag with `p` is one.
 @pytest.mark.parametrize("argv", [
-    ("claude", "-cp", "go"), ("claude", "-pc"), ("claude", "--verbose", "--print", "go"),
-    ("claude", "--model", "opus", "-p"), ("claude", "--add-dir", "a", "b", "-p", "go"),
+    ("claude", "go", "-p"), ("claude", "Fix CLAUDE.md", "--print"),           # r2 F4's shapes
+    ("claude", "--append-system-prompt", "be brief", "-p", "go"),
+    ("claude", "--system-prompt", "You are a reviewer", "--print"),
+    ("claude", "--name", "my job", "-p"), ("claude", "--model", "opus", "Fix CLAUDE.md", "--print"),
+    ("claude", "go", "--model", "opus", "-cp"), ("claude", "go", "--print=json"),
+    ("claude", "-p", "--permission-mode", "auto", "go"),                       # the relay's rows
+    ("claude", "-p", "go"), ("claude", "--print", "go"), ("claude", "-cp", "go"), ("claude", "-pc"),
+    ("claude", "-cvp"), ("claude", "-c", "-p"), ("claude", "--verbose", "--print", "go"),
+    ("claude", "--model", "opus", "-p"), ("claude", "--model=opus", "-p"),
+    ("claude", "--print=x", "go"), ("claude", "--setting-sources", "user,project", "-p"),
+    ("claude", "--add-dir", "a", "b", "-p", "go"), ("claude", "--tools", "Bash", "Edit", "-p"),
     ("claude", "--max-turns", "3", "--print=json", "go"),
-    ("claude", "--some-new-option", "x", "-p", "go")])           # unsure, and a `-p` follows
+    ("claude", "--resume", "-p"), ("claude", "-r", "-p"), ("claude", "--from-pr", "-p"),
+    ("claude", "-w", "-p"), ("claude", "-d", "-p"),
+    ("claude", "--some-new-option", "x", "-p", "go"),
+    ("claude", "--debug-file", "/x/y", "-p", "go"), ("claude", "--fast-mode", "on", "-p", "go"),
+    ("claude", "--thinking", "off", "-p"), ("claude", "--max-thinking-tokens", "9", "--print"),
+    ("claude", "--file", "a", "b", "-p"),
+    ("claude", "--bare", "-p", "go"), ("claude", "--safe-mode", "-p")])  # unsure: its value?
 def test_r2_headless_flag_among_the_options_denies(box, monkeypatch, argv):
     _main(monkeypatch, argv)
     assert instructionguard.run_kind({}) in ("headless", "unknown")
     assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "deny"
+
+
+# r2 F4's fallback: where the argv cannot be read word by word, the `ps` line is walked; a
+# print word after the walk's end (a prompt word or `--`) may be the flag, so the run denies.
+@pytest.mark.parametrize("argv,answer", [
+    (("claude", "--name", "-p"), "ask"), (("claude", "-n", "-p", "go"), "ask"),
+    (("claude", "--model", "opus", "Fix the README"), "ask"), (("claude", "-dp"), "ask"),
+    (("claude", "--remote-control", "Fix the -happy path"), "deny"),
+    (("claude", "go -p"), "deny"), (("claude", "go", "-p"), "deny"),
+    (("claude", "--model", "fable", "Check the relay -p children"), "deny"),
+    (("claude", "--append-system-prompt", "never use --print here"), "deny"),
+    (("claude", "--append-system-prompt", "be brief", "-p", "go"), "deny"),
+    (("claude", "--name", "my job", "-p"), "deny"),
+    (("claude", "--", "-p"), "deny"), (("claude", "go", "--", "-cp"), "deny")])
+def test_r2_the_ps_line_when_the_argv_cannot_be_read(box, monkeypatch, argv, answer):
+    _main(monkeypatch, argv, exact=False)
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == answer
+
+
+def _ps_line(monkeypatch, args):
+    """`ps` shows `args` for the hook's parent; the kernel's argv reader is stubbed."""
+    monkeypatch.setattr(harness, "_ps", lambda pid: (1, args) if pid == os.getppid() else None)
+
+
+@pytest.mark.parametrize("why", ["none", "raises", "not claude"])
+def test_r2_an_unread_argv_falls_back_to_the_ps_line(box, monkeypatch, why):
+    def words(pid):
+        if why == "raises":
+            raise OSError("the kernel says no")
+        return None if why == "none" else ["/x/other", "go"]
+    monkeypatch.setattr(instructionguard, "argv_words", words, raising=False)
+    _ps_line(monkeypatch, "claude go -p")
+    assert instructionguard.claude_argv() == (["claude", "go", "-p"], False)
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "deny"
+    _ps_line(monkeypatch, "claude --name -p")
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "ask"
+
+
+def test_r2_the_kernel_argv_is_read_at_the_claude_ps_found(box, monkeypatch):
+    seen = []
+    monkeypatch.setattr(instructionguard, "argv_words",
+                        lambda pid: seen.append(pid) or ["/x/claude", "go", "-p"], raising=False)
+    _ps_line(monkeypatch, "/x/claude go -p")
+    assert instructionguard.claude_argv() == (["/x/claude", "go", "-p"], True)
+    assert seen == [os.getppid()]
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "deny"
+
+
+# ---- r2 F4: the argv read from the kernel, word by word ---------------------------------
+
+
+_KERNEL = pytest.mark.skipif(sys.platform != "darwin" and not os.path.exists("/proc/self/cmdline"),
+                             reason="no argv reader on this platform")
+_REPORT = ("import json, sys; sys.path.insert(0, {lib!r}); "
+           "from claude_session import harness, instructionguard as g; "
+           "harness.ANCESTOR_HOPS = 1; "            # the parent, the made-up claude, no further
+           "argv, exact = g.claude_argv(); print(json.dumps([argv, exact, g.run_kind({{}})]))")
+
+
+def _under_claude(tmp_path, argv):
+    """The reader, run in a grandchild of a real process whose argv is `argv` with argv[0] a
+    made-up `.../claude`: bash, started under that name, runs the script named by argv[1] (the
+    prompt word) from tmp_path, and the script starts the reader."""
+    code = _REPORT.format(lib=str(ROOT / "plugin" / "lib"))
+    (tmp_path / argv[1]).write_text(f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}\n"
+                                    "exit $?\n")
+    name = str(tmp_path / "made-up" / "claude")
+    p = subprocess.run([name, *argv[1:]], executable="/bin/bash", cwd=str(tmp_path),
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    got, exact, kind = json.loads(p.stdout)
+    assert got == [name, *argv[1:]] and exact is True, (got, exact)   # word by word, unjoined
+    return kind
+
+
+@_KERNEL
+@pytest.mark.skipif(not os.path.exists("/bin/bash"), reason="no /bin/bash")
+@pytest.mark.parametrize("argv,kind", [
+    (("claude", "go", "-p"), "headless"), (("claude", "Fix CLAUDE.md", "--print"), "headless"),
+    (("claude", "go", "--append-system-prompt", "be brief", "-p"), "headless"),
+    (("claude", "go -p"), "main"), (("claude", "Check the relay -p children", "--name", "-p"), "main"),
+    (("claude", "go", "--name", "my -p job"), "main")])
+def test_r2_a_real_process_argv_read_from_the_kernel(tmp_path, argv, kind):
+    assert _under_claude(tmp_path, argv) == kind
+
+
+@_KERNEL
+def test_r2_the_reader_stops_at_argc_and_keeps_no_environment(tmp_path):
+    p = subprocess.Popen(["/bin/sleep", "30", "made up words"], env={"MADEUP_TOKEN": "zz-not-kept"})
+    try:
+        for _ in range(100):                        # until the exec has replaced the fork
+            got = instructionguard.argv_words(p.pid)
+            if got and got[0] == "/bin/sleep":
+                break
+            time.sleep(0.02)
+        assert got == ["/bin/sleep", "30", "made up words"]
+        started = time.perf_counter()
+        for _ in range(100):
+            instructionguard.argv_words(p.pid)
+        assert (time.perf_counter() - started) / 100 < 0.01
+    finally:
+        p.kill()
+        p.wait()
+
+
+@_KERNEL
+def test_r2_an_argv_the_kernel_will_not_give_is_none(tmp_path):
+    if sys.platform == "darwin":
+        assert instructionguard.argv_words(1) is None            # another user's process
+    assert instructionguard.argv_words(99999999) is None         # no such process
+    p = subprocess.Popen(["/bin/sleep", "0"])
+    try:
+        got = []
+        for _ in range(250):                       # a zombie: exited, not yet reaped
+            got = instructionguard.argv_words(p.pid)
+            if got is None:
+                break
+            time.sleep(0.02)
+        assert got is None
+    finally:
+        p.wait()
+
+
+def test_r2_the_reader_never_raises(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise OSError("no libc here")
+    monkeypatch.setattr(instructionguard, "_sysctl", boom, raising=False)
+    monkeypatch.setattr(instructionguard, "_PROC", str(tmp_path / "proc"), raising=False)
+    assert instructionguard.argv_words(os.getpid()) is None
+    for bad in (None, "x", -1, 0, 2 ** 40):
+        assert instructionguard.argv_words(bad) is None
+
+
+def test_r2_the_proc_reader(monkeypatch, tmp_path):
+    proc = tmp_path / "proc"
+    (proc / "4242").mkdir(parents=True)
+    (proc / "4242" / "cmdline").write_bytes(b"/x/claude\0go -p\0\0--name\0")
+    (proc / "4243").mkdir()
+    (proc / "4243" / "cmdline").write_bytes(b"")                  # a zombie's
+    monkeypatch.setattr(instructionguard, "_PROC", str(proc), raising=False)
+    assert instructionguard.argv_words(4242) == ["/x/claude", "go -p", "", "--name"]
+    assert instructionguard.argv_words(4243) is None
 
 
 def test_r2_reason_text(box, monkeypatch):
@@ -330,6 +508,10 @@ def test_r3_the_log_stops_at_its_cap(box, monkeypatch):
 def test_r3_cheap_on_a_path_not_guarded(box, monkeypatch):
     _main(monkeypatch)
     monkeypatch.setattr(harness, "claude_argv", lambda *a, **k: pytest.fail("argv read"))
+    monkeypatch.setattr(instructionguard, "claude_argv", lambda *a, **k: pytest.fail("argv read"),
+                        raising=False)
+    monkeypatch.setattr(instructionguard, "argv_words", lambda *a, **k: pytest.fail("argv read"),
+                        raising=False)
     p = _payload("Edit", box.repo / "plugin" / "lib" / "a.py")
     started = time.perf_counter()
     for _ in range(200):
