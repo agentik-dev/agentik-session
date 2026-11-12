@@ -128,8 +128,8 @@ a gated file, one level of `bash -c`, a literal `cd`, a `python -c` literal or a
 `python3 - <<EOF` body beside `open(` or `write_`, are refused, as is removing a list file
 (`rm`, `unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it). A target with `$`,
 a backquote or a glob, and a line `shlex` cannot split, pass, each with one `open` line in
-`guard.jsonl`. A `cd` inside `( ... )` ends at the `)`, and `popd` returns to its `pushd`'s
-folder; a `cd` or `popd` it cannot read leaves the folder unknown, and a relative target after it
+`guard.jsonl`. A `cd` or `pushd` inside `( ... )` ends at the `)` (a quoted or backslashed paren,
+and a `case` pattern's, is no subshell's edge), and `popd` returns to its `pushd`'s folder; a `cd` or `popd` it cannot read leaves the folder unknown, and a relative target after it
 passes the same way. A path matches by its absolute
 and its real spelling, in any case where the volume folds case.
 

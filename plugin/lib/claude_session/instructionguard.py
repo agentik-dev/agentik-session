@@ -221,7 +221,10 @@ _HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Z
 _PH = "__g3_heredoc_%d__"
 _PH_RE = re.compile(r"__g3_heredoc_(\d+)__\Z")
 _PUNCT = ";&|<>()\n"
-_OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;|\|&|[;&|()\n]")
+_OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|()\n]")
+_MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
+_UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
+_CASE_NEXT = frozenset({";;", ";&", ";;&"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
@@ -262,13 +265,49 @@ def _heredocs(text: str):
     return "\n".join(out), bodies
 
 
+def _mask(text: str) -> str:
+    """The text with each quoted or backslashed paren replaced by a private character, so the
+    lexer never takes it for a subshell's edge (r2 F1); a comment is kept as it stands."""
+    out, i, n, quote, start = [], 0, len(text), None, True
+    while i < n:
+        c = text[i]
+        if quote is None:
+            if c == "\\" and i + 1 < n:
+                out += [c, _MASK.get(text[i + 1], text[i + 1])]
+                i, start = i + 2, False
+                continue
+            if c == "#" and start:
+                j = text.find("\n", i)
+                j = n if j < 0 else j
+                out.append(text[i:j])
+                i = j
+                continue
+            if c in "'\"":
+                quote = c
+            out.append(c)
+            start = c in " \t\n;&|()<>"
+            i += 1
+            continue
+        if quote == '"' and c == "\\" and i + 1 < n:
+            out += [c, _MASK.get(text[i + 1], text[i + 1])]
+            i += 2
+            continue
+        if c == quote:
+            quote = None
+        out.append(_MASK.get(c, c))
+        i += 1
+    return "".join(out)
+
+
 def _commands(text: str):
-    """Simple commands: (words, the words after a write redirection), in order; `(` and `)`
-    as (`(`, None) and (`)`, None)."""
-    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCT)
+    """Simple commands: (words, the words after a write redirection), in order; a subshell's
+    `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
+    one, is no subshell's edge (r2 F2); a quoted or escaped one is a word (r2 F1)."""
+    lex = shlex.shlex(_mask(text), posix=True, punctuation_chars=_PUNCT)
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     words, outs, expect = [], [], None
+    cases: list = []                      # per open `case`: `head`, `pattern` or `body`
     for tok in lex:
         if tok and set(tok) <= set(_PUNCT):
             for op in _OPS.findall(tok):
@@ -276,18 +315,31 @@ def _commands(text: str):
                     if words and words[-1].isdigit():
                         words.pop()               # `2>`: the descriptor, not a word
                     expect = op
-                else:
-                    if words or outs:
-                        yield words, outs
-                    words, outs, expect = [], [], None
-                    if op in "()":
-                        yield op, None            # a subshell's bounds: its folder ends at `)`
+                    continue
+                if words or outs:
+                    yield words, outs
+                words, outs, expect = [], [], None
+                if cases and cases[-1] == "pattern" and op in "()":
+                    if op == ")":
+                        cases[-1] = "body"        # the pattern ends; its paren is no edge
+                    continue
+                if cases and cases[-1] == "body" and op in _CASE_NEXT:
+                    cases[-1] = "pattern"
+                elif op in "()":
+                    yield op, None                # a subshell's bounds: its folder ends at `)`
             continue
+        tok = tok.translate(_UNMASK)
         if expect is not None:
             if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
                 outs.append(tok)
             expect = None
             continue
+        if not words and not outs and tok == "case":
+            cases.append("head")
+        elif not words and not outs and tok == "esac" and cases and cases[-1] != "head":
+            cases.pop()
+        elif tok == "in" and cases and cases[-1] == "head" and words[:1] == ["case"]:
+            cases[-1] = "pattern"
         words.append(tok)
     if words or outs:
         yield words, outs
@@ -369,11 +421,13 @@ def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
     text = text.replace("\\\n", " ")
     found, here, subshells, pushed = [], cwd, [], []
     for words, outs in list(_commands(text)):
-        if outs is None:                  # r1 F1: a subshell's `cd` ends with it
+        if outs is None:                  # r1 F1, r2 F3: a subshell's `cd` and pushd end with it
             if words == "(":
-                subshells.append(here)
+                subshells.append((here, list(pushed)))
             elif subshells:
-                here = subshells.pop()
+                here, pushed = subshells.pop()
+            else:                         # a `)` with no `(`: the folder is unknown
+                here, pushed = None, []
             continue
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
         words = [w for w in words if not _PH_RE.match(w)]

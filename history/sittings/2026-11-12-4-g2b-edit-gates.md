@@ -2,7 +2,7 @@
 
 | item | value |
 |---|---|
-| goal | packet g2b (`design/packets/g2b-edit-gates.md`): the guard rewritten as edit gates (lists, deny in every mode), g3 on Bash, `gates` and `gates write`, the doctor's row; plugin 2.0.0-alpha.85 |
+| goal | packet g2b (`design/packets/g2b-edit-gates.md`): the guard rewritten as edit gates (lists, deny in every mode), g3 on Bash, `gates` and `gates write`, the doctor's row; plugin 2.0.0-alpha.86 |
 | budget | builder: about 90 tool calls |
 | pin | 054cfc5 on `g2-instruction-guard`; worktree `.claude/worktrees/g2b-edit-gates`, `.venv`, `.venv-floor` linked |
 | window | 200k |
@@ -16,6 +16,7 @@
 - [x] the gate: 20261112-095800-1166 exit 2 (README source 16406 B over its ceiling, fixed f67ea6e); 20261112-100428-1168 exit 2 with every test green (3248 passed; floor 3122 passed, 105 skipped) and only plugin-version-check asking a bump for the skill's paragraph: alpha.84 committed, `plugin-version-check` clean, the gate not rerun (the tool-call bound); the next gate runs after me
 
 - [x] review r1 (`REFUTE-2026-11-12-g2b-r1.md`): F1 (a subshell's `cd`, `popd`) and F6 (an unresolved Bash target logs one `open` line) fixed; tests red at f1d4de5 (10 failed), green after (112, 3.12 and 3.9.6); alpha.85; README 3259 tests. Gate 20261112-101647-1169 on f1d4de5 exit 2 (the worktree changed under it: 3248 != 3259); gate 20261112-102746-1170 on 1c101a6, a still worktree: exit 0 in 656 s (3259 passed; floor 3133 passed, 105 skipped)
+- [x] hardening round (`REFUTE-2026-11-12-g2b-r2.md`, three regressions): a quoted or escaped paren is masked before the lexer (F1); a `case` pattern's paren is no edge (F2); `pushd`'s stack saved and restored with the folder at `(` and `)` (F3); an unmatched `)` leaves the folder unknown. Tests red at 80203bd (9 failed), green after (122, 3.12 and 3.9.6); alpha.86, README 3269 tests
 
 ## Handover
 - Choice: `popd` returns to its own `pushd`'s folder when the line holds one, else the folder is unknown (the coordinator's None); so `pushd docs; popd; printf x >> CLAUDE.md` denies
@@ -25,6 +26,6 @@
 - decide, owner: none
 
 ## Next act
-review round 2; the owner's `auto` test held
+the gate on the hardening tip; then the owner's `auto` test (held)
 
 - exit taken: done at the tool-call bound; acceptance 1 to 6 green, the last gate's tests green, its one red (the version check) fixed and not rerun; nothing pushed, no install
