@@ -3,6 +3,7 @@ Every test runs under its own temp HOME and state; the run's kind is read throug
 `harness.claude_argv`, patched here (conftest's `_ps` reads nothing, so an unpatched run is
 one whose argv cannot be read)."""
 
+import ast
 import io
 import json
 import re
@@ -123,6 +124,38 @@ def test_r2_unknown_run_denies(box, tool):
         assert _decision(_pre(_payload(tool, p), box.env))[0] == "deny", p
 
 
+# r1 F1: only the options before the first prompt word are read, and an option's value is
+# never taken for an option. `ps` joins argv with spaces, so a prompt arrives as many words.
+@pytest.mark.parametrize("argv", [
+    ("claude", "drive.py", "--model", "fable", "Check", "the", "relay", "-p", "children", "and",
+     "fix", "CLAUDE.md"),                                       # the review's observed shapes
+    ("claude", "drive.py", "--name", "-p"),
+    ("claude", "--model", "fable", "Check", "the", "relay", "-p", "children", "and", "fix",
+     "CLAUDE.md"),
+    ("claude", "--append-system-prompt", "never", "use", "--print", "here"),
+    ("claude", "--name", "-p"), ("claude", "-n", "-p", "go"), ("claude", "--name=-p"),
+    ("claude", "--effort", "high", "--model", "opus", "fix", "it", "--print"),
+    ("claude", "-c", "--verbose", "--", "-p"), ("claude", "-dp"), ("claude", "-r", "abc"),
+    ("claude", "--some-new-option", "x", "Fix", "the", "README")])
+def test_r2_a_prompt_word_is_not_an_option(box, monkeypatch, argv):
+    _main(monkeypatch, argv)
+    assert instructionguard.run_kind({}) == "main"
+    p = box.repo / "CLAUDE.md"
+    assert _decision(_pre(_payload("Edit", p), box.env)) == ("ask", REASON.format(p))
+
+
+# Claude Code's CLI (commander) reads `-cp` as `-c -p`: a combined short flag with `p` is one.
+@pytest.mark.parametrize("argv", [
+    ("claude", "-cp", "go"), ("claude", "-pc"), ("claude", "--verbose", "--print", "go"),
+    ("claude", "--model", "opus", "-p"), ("claude", "--add-dir", "a", "b", "-p", "go"),
+    ("claude", "--max-turns", "3", "--print=json", "go"),
+    ("claude", "--some-new-option", "x", "-p", "go")])           # unsure, and a `-p` follows
+def test_r2_headless_flag_among_the_options_denies(box, monkeypatch, argv):
+    _main(monkeypatch, argv)
+    assert instructionguard.run_kind({}) in ("headless", "unknown")
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "deny"
+
+
 def test_r2_reason_text(box, monkeypatch):
     _main(monkeypatch)
     p = box.repo / "CLAUDE.md"
@@ -202,6 +235,51 @@ def test_r1_config_dir_moved(box, monkeypatch):
     assert _decision(_pre(_payload("Edit", moved / "hooks" / "x"), env))[0] == "ask"
 
 
+# r1 F2: the file that would be written is matched, not its spelling. On a volume that folds
+# case (this Mac's APFS) `claude.md` is `CLAUDE.md`, whether or not either exists yet.
+def _folds(tmp_path) -> bool:
+    (tmp_path / "CaseProbe").mkdir(exist_ok=True)
+    return (tmp_path / "caseprobe").exists()
+
+
+def _case_variants(b) -> list:
+    c = b.home / ".Claude"
+    return [b.repo / "claude.md", b.repo / ".CLAUDE" / "settings.json", c / "CLAUDE.md",
+            b.home / ".claude" / "Rules" / "a.md", b.home / ".claude" / "Settings.json",
+            b.repo / "Agents.md", b.repo / ".claude" / "RULES" / "r.md", b.tree / "Claude.md",
+            b.wt / "claude.MD"]
+
+
+def test_r1_case_variant_is_the_guarded_file(box, monkeypatch, tmp_path):
+    if not _folds(tmp_path):
+        pytest.skip("the test volume keeps case apart, so a case variant is another file")
+    _main(monkeypatch)
+    (box.repo / "CLAUDE.md").write_text("x\n")                # the review's two cases: exists
+    (box.home / ".claude" / "CLAUDE.md").write_text("x\n")
+    assert (box.repo / "claude.md").exists()
+    for p in _case_variants(box):                             # the rest do not exist yet
+        assert _decision(_pre(_payload("Edit", p), box.env))[0] == "ask", p
+    assert instructionguard.guarded(str(box.repo / "agents.md"), box.env)   # a new file
+    assert not (box.repo / "agents.md").exists()
+    assert _pre(_payload("Edit", box.repo / "Tests" / "claude.md"), box.env) == {}
+
+
+def test_r1_case_variant_on_a_volume_that_keeps_case(box, monkeypatch):
+    _main(monkeypatch)
+    monkeypatch.setattr(instructionguard, "_case_blind", lambda path: False)
+    for p in _case_variants(box):
+        assert _pre(_payload("Edit", p), box.env) == {}, p
+    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), box.env))[0] == "ask"
+
+
+def test_r1_case_variant_on_disk_that_keeps_case(box, monkeypatch, tmp_path):
+    if _folds(tmp_path):
+        pytest.skip("the test volume folds case (APFS default), so no case-variant file exists")
+    _main(monkeypatch)
+    (box.repo / "claude.md").write_text("another file\n")
+    assert _pre(_payload("Edit", box.repo / "claude.md"), box.env) == {}
+
+
 def test_r1_bash_never_read(box, monkeypatch):
     _main(monkeypatch)
     seen = []
@@ -269,18 +347,104 @@ def test_r3_dispatch_prints_the_answer(box, monkeypatch, capsys):
 
 # ---- R4: no knob ------------------------------------------------------------------------
 
-def test_r4_no_knob(box, monkeypatch):
-    _main(monkeypatch)
-    knobs = {"AGENTIK_SESSION_GUARD": "off", "AGENTIK_GUARD": "0", "AGENTIK_INSTRUCT": "on",
-             "AGENTIK_SESSION_INSTRUCT": "on", "CLAUDE_SESSION_CONFIG": "open",
-             "AGENTIK_HOOKS_OFF": "1"}
+# r1 F3: the pin fails on a knob, whatever its name's quotes or the file it sits in. A hostile
+# environment (every off-looking name, and one no one would guess) and a profile, a repo
+# config, a session overlay and a settings file that name the guard leave its answer as is.
+ENV_READ = {"HOME", "CLAUDE_CONFIG_DIR"}       # R4's list; the state root comes by `resolver`
+_STEMS = ("GUARD", "GUARD_OFF", "NO_GUARD", "DISABLE_GUARD", "GUARD_DISABLE", "GUARD_DISABLED",
+          "SKIP_GUARD", "INSTRUCT", "INSTRUCT_GUARD", "INSTRUCTION_GUARD", "INSTRUCTIONS_GUARD",
+          "ALLOW_INSTRUCTION_EDITS", "HOOKS_OFF", "NO_HOOKS", "OPEN", "UNGUARDED",
+          "SESSION_CONFIG")
+_KNOBS = sorted({f"{p}_{s}" if p else s for s in _STEMS
+                 for p in ("AGENTIK", "AGENTIK_SESSION", "CLAUDE_SESSION", "CLAUDE", "SESSION",
+                           "")})
+
+
+def _hostile(box, monkeypatch, value) -> dict:
+    import uuid
+    knobs = {k: value for k in (*_KNOBS, "AGENTIK_" + uuid.uuid4().hex[:10].upper())}
     for k, v in knobs.items():
         monkeypatch.setenv(k, v)
-    env = dict(box.env, **knobs)
-    assert _decision(_pre(_payload("Edit", box.repo / "CLAUDE.md"), env))[0] == "ask"
-    src = (ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py").read_text()
-    assert set(re.findall(r"env\.get\(\"([A-Z_]+)\"", src)) == {"HOME", "CLAUDE_CONFIG_DIR"}
-    assert "os.environ" not in src and "getenv" not in src
+    body = f"guard: {value}\ninstruction_guard: {value}\ninstruct: {value}\n"
+    user = box.home / ".claude" / "agentik"
+    user.mkdir(parents=True, exist_ok=True)
+    (user / "profiles.yaml").write_text("defaults:\n  " + body.replace("\n", "\n  ").rstrip()
+                                        + "\nprofiles:\n  open:\n    guard: off\n")
+    repo = box.repo / ".claude" / "agentik"
+    repo.mkdir(parents=True, exist_ok=True)
+    for name in ("config.yaml", "config.local.yaml"):
+        (repo / name).write_text("profile: open\n" + body)
+    overlays = box.state / "overlays"
+    overlays.mkdir(parents=True, exist_ok=True)
+    (overlays / f"{SID}.json").write_text(json.dumps({"guard": value, "instruct": value}))
+    (box.repo / ".claude" / "settings.local.json").write_text(json.dumps(
+        {"env": knobs, "agentik": {"guard": value}}))
+    return dict(box.env, **knobs)
+
+
+@pytest.mark.parametrize("value", ("1", "0", "off", "false", "no", "open", "disabled", "true",
+                                   "yes", "on", "ask", ""))
+def test_r4_no_knob_opens_it(box, monkeypatch, capsys, value):
+    _main(monkeypatch)
+    env = _hostile(box, monkeypatch, value)
+    for p in (box.repo / "CLAUDE.md", box.home / ".claude" / "settings.json"):
+        assert _decision(_pre(_payload("Edit", p, cwd=box.repo), env)) == \
+            ("ask", REASON.format(p)), p
+        out = _pre(_payload("Write", p, cwd=box.repo, agent_id="a1"), env)
+        assert _decision(out)[0] == "deny", p
+        assert _decision(instructionguard.check(_payload("Edit", p), env))[0] == "ask", p
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(
+        _payload("Edit", box.repo / "CLAUDE.md", cwd=box.repo))))
+    capsys.readouterr()
+    assert hooks.dispatch("PreToolUse") == 0                  # the live entry, os.environ
+    assert _decision(json.loads(capsys.readouterr().out))[0] == "ask"
+
+
+def _envish(node) -> bool:
+    return ((isinstance(node, ast.Name) and "env" in node.id.lower())
+            or (isinstance(node, ast.Attribute) and node.attr in ("environ", "environb")))
+
+
+def _key(node) -> str:
+    node = getattr(node, "value", node) if type(node).__name__ == "Index" else node   # 3.8
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else "?"
+
+
+def _env_reads(tree) -> list:
+    """Each read of an environment in `tree`: a key read from a mapping named like `env` or
+    from `os.environ` (`?` where the key is no literal), and `getenv` by name."""
+    out = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and \
+                n.func.attr in ("get", "pop", "setdefault", "__getitem__", "__contains__") and \
+                _envish(n.func.value):
+            out.append(_key(n.args[0]) if n.args else "?")
+        elif isinstance(n, ast.Subscript) and _envish(n.value):
+            out.append(_key(n.slice))
+        elif isinstance(n, ast.Compare) and any(_envish(c) for c in n.comparators):
+            out.append(_key(n.left))
+        elif isinstance(n, (ast.Name, ast.Attribute)) and \
+                getattr(n, "id", getattr(n, "attr", "")) in ("getenv", "getenvb"):
+            out.append("getenv")
+    return out
+
+
+def test_r4_the_source_reads_no_knob():
+    lib = ROOT / "plugin" / "lib" / "claude_session"
+    src = (lib / "instructionguard.py").read_text()
+    tree = ast.parse(src)
+    assert set(_env_reads(tree)) == ENV_READ
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Attribute)
+                and n.attr in ("environ", "environb")]               # no whole environment
+    caps = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
+            and isinstance(n.value, str) and re.fullmatch(r"[A-Z][A-Z0-9]*(_[A-Z0-9]+)*", n.value)}
+    assert caps <= ENV_READ, caps                         # no knob's name kept in a constant
+    blocks = [n for n in ast.walk(ast.parse((lib / "hooks.py").read_text()))
+              if isinstance(n, ast.If) and any(
+                  isinstance(a, ast.Attribute) and a.attr == "TOOLS"
+                  and getattr(a.value, "id", "") == "instructionguard" for a in ast.walk(n.test))]
+    assert len(blocks) == 1                               # the hook's one call of the guard
+    assert _env_reads(blocks[0]) == []                    # it hands the environment on, whole
     imported = set(re.findall(r"^from \. import (.+)$", src, re.M)[0].split(", "))
     assert imported == {"harness", "resolver"}                # no profile, no session setting
     from claude_session import resolver as r, sessionconfig as s
