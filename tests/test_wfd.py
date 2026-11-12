@@ -15,7 +15,8 @@ from claude_session import config, hooks, sessionconfig
 
 SID = "test-sess-wfd0-1111-2222"
 LINE = ("agentik-session: Workflow denied: this suite runs no workflows. Spawn helpers with "
-        "the Agent tool, each naming its model; do not call Workflow again.")
+        "the Agent tool: name the model, or use an agent type whose definition names its own. "
+        "Do not call Workflow again.")                    # packet b1 R6
 DENY = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                "permissionDecisionReason": LINE}}
 META = "export const meta = { name: 'x', description: 'y' }\n"
@@ -24,10 +25,12 @@ TWO_OPUS = (META + "await parallel([\n"
             "  () => agent('verify the claims', { label: 'b', model: 'opus' }),\n"
             "])\n")
 FABLE_UNDER_OPUS = ("agentik-session: a Fable helper starts only under a Fable session: "
-                    "this one runs opus. Name model: 'opus'.")
+                    "this one runs opus. Name model: 'opus', or use an agent type that names "
+                    "its own model.")
 FABLE_UNKNOWN = ("agentik-session: a Fable helper starts only under a Fable session: "
                  "the session's model is not known (no record yet, or a switch its records "
-                 "have not both seen: retry after one tool call). Name model: 'opus'.")
+                 "have not both seen: retry after one tool call). Name model: 'opus', or use "
+                 "an agent type that names its own model.")
 
 
 @pytest.fixture(autouse=True)

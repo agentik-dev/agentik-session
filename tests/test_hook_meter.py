@@ -103,21 +103,23 @@ def test_turns_ceiling_counts_too(env, tmp_path):
     assert "100.0% turns (400/400)" in ctx(out) and hooks.EXIT_RULE in ctx(out)
 
 
-def test_output_stays_under_400_bytes_with_a_long_charter(env, tmp_path):
+def test_output_stays_under_max_out_with_a_long_charter(env, tmp_path):
+    # S33 ruling 4 set the bound at MAX_OUT (640); b1 R5's clause took this case past 400.
     d = sdir(env)
     d.mkdir(parents=True)
     (d / "resolved.json").write_text(json.dumps(
         {"session": {"posture": "signal", "charter": {"dir": "x" * 300}}}))
     out = tool(env, transcript(tmp_path, 180000))
-    assert "CHECKPOINT" in ctx(out) and len(json.dumps(out)) <= 400
+    assert "CHECKPOINT" in ctx(out) and len(json.dumps(out)) <= hooks.MAX_OUT
 
 
 # --- S33: under a launcher the line names the recorded charter and checkpoint --respawn ---
 
 S33_HEAD = "CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); charter "
+WIND80 = "; tell the owner you are winding down at the meter's line, at 80.0%"   # packet b1 R5
 S33_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
             "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
-            "the launcher restarts this sitting")
+            "the launcher restarts this sitting" + WIND80)
 NONE_FOUND = "<this sitting's charter>"
 
 
@@ -210,7 +212,8 @@ def test_s33_off_a_launcher_the_pins_line(env, tmp_path, chain):
         e[hooks.CHAIN_VAR] = chain
     line = ctx(tool(e, transcript(tmp_path, 144000), cwd=str(tmp_path)))
     assert line == ("CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); "
-                    "charter history/sittings; bring the charter current, commit, then exit")
+                    "charter history/sittings; bring the charter current, commit, then exit"
+                    + WIND80)
 
 
 def test_s33_no_record_names_the_placeholder_beside_todays_charters(env, tmp_path):
@@ -311,7 +314,7 @@ def test_prompt_line_whenever_a_meter_exists(env, tmp_path):
     assert hooks.user_prompt_submit({"session_id": SID}) == {}
     tool(env, FIX / "at-80.jsonl")
     line = ctx(hooks.user_prompt_submit({"session_id": SID})).splitlines()[0]
-    assert line == "session: 80.0% context, 1.0% turns, zone notice"
+    assert line == "session meter: 80% of context, 1% of turns; the checkpoint came at 80%"
 
 
 # --- the ledger ------------------------------------------------------------------
@@ -456,8 +459,11 @@ def test_max_turns_unparsable_nonpositive_or_larger_leaves_the_profile(env, tmp_
     assert m["zone"] == "clear"
 
 
-def test_max_turns_session_start_names_the_source(env, tmp_path):
+def test_max_turns_the_resolved_file_names_the_source_and_the_line_does_not(env, tmp_path):
+    # packet b1 R3: the cap reaches the resolved file and the band, never the model's line
     env["CLAUDE_SESSION_MAX_TURNS"] = "80"
     out = hooks.session_start({"session_id": SID, "cwd": str(tmp_path)}, env)
     line = out["hookSpecificOutput"]["additionalContext"]
-    assert "180000 context / 80 turns (CLAUDE_SESSION_MAX_TURNS)" in line
+    s = json.loads((sdir(env) / "resolved.json").read_text())["session"]
+    assert s["ceilings_source"] == "CLAUDE_SESSION_MAX_TURNS" and s["ceilings"]["turns"] == 80
+    assert "80 turns" not in line and "CLAUDE_SESSION_MAX_TURNS" not in line

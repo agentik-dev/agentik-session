@@ -47,9 +47,12 @@ PRIORITY = {"enabled": True, "levels": {
     "S4": "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with "
           "its level, taken on an S3 slice's path, or while fill is on; never ahead of "
           "S3"}}
-PACING = {"enabled": True, "fallback": 1800, "waiting": 3}
-FIELDS = {"priority": ("enabled", "levels"), "pacing": ("enabled", "fallback", "waiting")}
-BOUNDS = {"fallback": (60, 3600), "waiting": (1, 9)}
+# Packet b1 R1: `meter_line_minutes`, the meter's percent line in the clear zone at most once
+# this often (0: on every prompt, as before b1); it binds whatever `enabled` says.
+PACING = {"enabled": True, "fallback": 1800, "waiting": 3, "meter_line_minutes": 30}
+FIELDS = {"priority": ("enabled", "levels"),
+          "pacing": ("enabled", "fallback", "waiting", "meter_line_minutes")}
+BOUNDS = {"fallback": (60, 3600), "waiting": (1, 9), "meter_line_minutes": (0, 1440)}
 TEXT_MAX = 240
 LABEL_MAX = 24
 BLOCK_MAX = 320
@@ -263,7 +266,7 @@ def render(session, life=None, fill=None) -> str:
         lines.append("priority: off (session.priority.enabled is false)")
     if pa["enabled"]:
         lines.append(f"pacing: on (session.pacing: fallback {pa['fallback']} s, "
-                     f"waiting {pa['waiting']})")
+                     f"waiting {pa['waiting']}, meter line {pa['meter_line_minutes']} min)")
         lines += [f"  {i}. " + p.format(**pa) for i, p in enumerate(PACE, 1)]
         ttl, why = life if isinstance(life, tuple) and len(life) == 2 else (None, UNKNOWN)
         ttl = ttl if ttl in LIFETIME else None

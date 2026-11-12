@@ -105,4 +105,8 @@ def temp_state_roots(tmp_path_factory, monkeypatch):
     for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
         monkeypatch.setenv(k, "test")
     monkeypatch.setattr(config, "STATE_DIR", config.state_dir({"XDG_STATE_HOME": str(xdg)}))
+    # Packet b1 R7: the ledger's effort reads the nearest `claude` ancestor's argv through
+    # `harness._ps`; the suite runs inside sittings, so no test reads the live process tree.
+    from claude_session import harness
+    monkeypatch.setattr(harness, "_ps", lambda pid: None, raising=False)
     return home

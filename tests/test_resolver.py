@@ -284,7 +284,7 @@ def test_s21_local_wins(world):
     world[2]("repo", "session:\n  pacing: {fallback: 2400, waiting: 2}\n")
     world[2]("local", "session:\n  pacing: {fallback: 3000}\n")
     assert run(world).sections["session"]["pacing"] == {"enabled": True, "fallback": 3000,
-                                                        "waiting": 2}
+                                                        "waiting": 2, "meter_line_minutes": 30}
 
 
 def test_s21_not_settable(world):

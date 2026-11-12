@@ -77,7 +77,6 @@ HELPER_CHARTER_DENY = (
     "state home.")
 
 _TOKEN = re.compile(r"[^A-Za-z0-9_.:-]")
-_WSRC = re.compile(r"[^A-Za-z0-9_.:\[\]-]")       # a window's source keeps `[1m]`
 
 
 def _token(text: object, limit: int = 64) -> str:
@@ -155,6 +154,96 @@ def state(session_id=None, env=None):
 
 def _budget_line(zone: str) -> str:
     return f"Sitting budget: '{zone}' zone."
+
+
+# Packet b1 (D13 as amended 2026-11-11): in the clear zone the percent line comes on a
+# schedule, `session.pacing.meter_line_minutes` (30 by default; 0: every prompt), and from the
+# profile's checkpoint_at on every prompt (r1 F1: that share, not the notice zone, whose step is
+# the policy's). The stamp is the session's own: {at, shown}. A tool call
+# that finds none writes `shown: false`, which starts the clock and says nothing; a prompt that
+# finds `shown: false` shows the line, so a session's first prompt with a meter carries it.
+METER_LINE = "meter-line.json"
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _checkpoint_k(m: dict) -> float:
+    """The meter's checkpoint_at, in (0, 1]; 0.8 when it is not."""
+    try:
+        k = float(m.get("checkpoint_at", 0.8))
+    except (TypeError, ValueError, OverflowError):
+        return 0.8
+    return k if 0 < k <= 1 else 0.8
+
+
+def _past_checkpoint(m: dict) -> bool:
+    """r1 F1: is the used share at or past 100 * checkpoint_at? False when it cannot say."""
+    try:
+        used = max(float(m.get("pct_context")), float(m.get("pct_turns")))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return used >= 100.0 * _checkpoint_k(m)
+
+
+def _meter_words(m: dict) -> str:
+    """R2: plain words, whole percentages rounded down, nothing else."""
+    def pct(v) -> int:
+        try:
+            return max(0, int(math.floor(float(v))))
+        except (TypeError, ValueError, OverflowError):
+            return 0
+    k = _checkpoint_k(m)
+    used = max(pct(m.get("pct_context")), pct(m.get("pct_turns")))
+    tense = "came" if used >= round(100 * k) else "comes"
+    return (f"session meter: {pct(m.get('pct_context'))}% of context, "
+            f"{pct(m.get('pct_turns'))}% of turns; the checkpoint {tense} at {round(100 * k)}%")
+
+
+def _meter_minutes(sdir: Path | None) -> int:
+    """The resolved `session.pacing.meter_line_minutes`, its default when unreadable."""
+    s = _load_json(sdir / "resolved.json").get("session") if sdir else None
+    return rules.parts(s if isinstance(s, dict) else {})[1]["meter_line_minutes"]
+
+
+def _meter_due(sdir: Path | None, minutes: int, now: float, prompt: bool) -> bool:
+    """R1, the clear zone: is the line due on this event? A tool call that finds no stamp
+    starts the clock (a `shown: false` stamp) and is not due."""
+    if sdir is None:
+        return False
+    if minutes == 0:
+        return prompt
+    st = _load_json(sdir / METER_LINE)
+    at = _stamp_at(st.get("at"))
+    if at is None:
+        if prompt:
+            return True
+        _meter_stamp(sdir, now, False)
+        return False
+    if prompt and st.get("shown") is not True:
+        return True
+    return now - at >= minutes * 60 or now < at
+
+
+def _stamp_at(v) -> float | None:
+    """r1 F3: the stamp's `at` as a finite float; None (no stamp) for anything else, a bool, a
+    string, NaN, an infinity or an integer past float range, so the next write replaces it."""
+    if not _num(v):
+        return None
+    try:
+        f = float(v)
+    except (OverflowError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _meter_stamp(sdir: Path | None, now: float, shown: bool) -> None:
+    try:
+        if sdir is not None:
+            store._write_private(sdir / METER_LINE, json.dumps({"at": now, "shown": shown}))
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def _wrap_up(zone: str) -> str:
@@ -262,8 +351,11 @@ def _session_family(payload: dict, env) -> str | None:
     return seen.pop() if len(seen) == 1 else None
 
 
+# Packet b1 R6: a call may name its model or use an agent type that names its own (a caller's
+# `model` outranks the agent file); the rule's code already passes a call with none.
 WORKFLOW_DENY = ("agentik-session: Workflow denied: this suite runs no workflows. Spawn helpers "
-                 "with the Agent tool, each naming its model; do not call Workflow again.")
+                 "with the Agent tool: name the model, or use an agent type whose definition "
+                 "names its own. Do not call Workflow again.")
 
 
 def _spawn_rule(payload: dict, env) -> str | None:
@@ -285,7 +377,7 @@ def _spawn_rule(payload: dict, env) -> str | None:
         return None
     return ("agentik-session: a Fable helper starts only under a Fable session: "
             + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
-            + ". Name model: 'opus'.")
+            + ". Name model: 'opus', or use an agent type that names its own model.")
 
 
 def _deny(reason: str, note: str | None) -> dict:
@@ -461,8 +553,12 @@ def user_prompt_submit(payload: dict) -> dict:
 
     m = _meter(sid)
     if m:
-        bits.append(f"session: {m.get('pct_context')}% context, "
-                    f"{m.get('pct_turns')}% turns, zone {zone}")
+        sdir = _session_dir(sid, os.environ)
+        now = _now()
+        if (_past_checkpoint(m)
+                or _meter_due(sdir, _meter_minutes(sdir), now, prompt=True)):
+            bits.append(_meter_words(m))
+            _meter_stamp(sdir, now, True)
 
     if zone in (RESERVE, EXHAUSTED):
         bits.append(_wrap_up(zone))
@@ -583,22 +679,20 @@ def session_start(payload: dict, env=None) -> dict:
         print(f"agentik-session: SessionStart resolved nothing: {e}", file=sys.stderr)
         return _follow_said({}, env)
     s = r.sections["session"]
-    c = s["ceilings"]
-    src = s.get("ceilings_source")
-    capped = f" ({src})" if src and src != "profile" else ""
-    whence = _WSRC.sub('', str(s.get('window_source')))[:64]
-    if not whence.startswith("engine:"):        # before the first measure (window-r1 R6)
-        whence = f"table, {whence}; the engine's first reading replaces this"
-    line = (f"agentik-session: profile '{_token(s['profile'])}', ceilings "
-            f"{c['context']} context / {c['turns']} turns{capped} on a {s['window']} "
-            f"window ({whence}), checkpoint at "
-            f"{s['checkpoint_at']:.0%}; resolved config at {path}")
+    # Packet b1 R3: no ceiling, window or turn cap reaches the model; the band above the
+    # prompt, which only the owner sees, keeps every figure.
+    line = (f"agentik-session: profile '{_token(s['profile'])}'; {START_METER}; "
+            f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                 "additionalContext": line}}, env)
+
+
+START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
+               "when it is time to bring the charter current and hand off")
 
 
 def _charter_reminder(session: dict, cwd) -> str:
@@ -672,6 +766,8 @@ def _signal(m: meter.Meter) -> bool:
 # `charter open` recorded in CHARTER_REC, and the marker's verb.
 CHARTER_REC = "charter.json"
 NO_CHARTER = "<this sitting's charter>"
+# Packet b1 R5: the owner tells an intentional wind-down from an early stop by this.
+WIND_DOWN = "; tell the owner you are winding down at the meter's line, at {pct}%"
 RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
                 "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
                 "the launcher restarts this sitting")
@@ -708,7 +804,7 @@ def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None
     tails = ([f"{f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None else
              [f"{path}; bring the charter current, commit, then exit" for path in (charter, "?")])
     for tail in tails:
-        line = head + tail
+        line = head + tail + WIND_DOWN.format(pct=m.used_pct)
         if m.used_pct >= 100.0:
             line += "\n" + EXIT_RULE
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
@@ -789,7 +885,14 @@ def _post_tool_use(payload: dict, env) -> dict:
     speak = False if off else _signal(m)
     meter.save(sdir, m, st)
     if not speak:
-        return {}
+        if off or m.used_pct >= 100.0 * float(m.checkpoint_at):    # r1 F1: D13's, as _signal
+            return {}
+        now = _now()
+        if not _meter_due(sdir, _meter_minutes(sdir), now, prompt=False):
+            return {}
+        _meter_stamp(sdir, now, True)
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "additionalContext": _meter_words(m.as_dict())}}
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
     return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None)
@@ -855,11 +958,14 @@ def _ledger_line(payload: dict, env) -> None:
     profile = ((resolved.get("provider") or {}).get("profile")
                or (resolved.get("session") or {}).get("profile"))
     limits, limits_at = _measured(lambda: harness.stated_limits(sdir)) or (None, None)
+    effort, effort_from = (_measured(lambda: harness.session_effort(payload.get("cwd"), env,
+                                                                    m.model))
+                           or (None, None))                      # packet b1 R7
     ledger.append(state, ledger.entry_for(
         m.as_dict(), project=Path(tp).parent.name, profile=profile,
         cwd=payload.get("cwd"), exit_reason=payload.get("reason"),
         claude_md_bytes=_measured(lambda: harness.claude_md_bytes(payload.get("cwd"), env)),
-        rate_limits=limits, rate_limits_at=limits_at))
+        rate_limits=limits, rate_limits_at=limits_at, effort=effort, effort_from=effort_from))
 
 
 def _measured(read) -> object:

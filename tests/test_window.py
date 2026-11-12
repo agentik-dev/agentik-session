@@ -528,42 +528,45 @@ def test_a11_the_twin(repo, monkeypatch):
     assert list(after["session"]) == list(before["session"])
     rc, out, err = run("charter", "open", "a goal", "--dir", str(repo / "charters"))
     assert rc == 0, err
-    row = next(l for l in next((repo / "charters").glob("*.md")).read_text().splitlines()
-               if l.startswith("| budget |"))
-    assert "400k context" in row
+    rows = next((repo / "charters").glob("*.md")).read_text().splitlines()
+    # packet b1 R4: the budget row holds no figure; the window row reads the rewound file
+    assert "| budget | profile orchestrator-opus; the meter's CHECKPOINT line ends the sitting |" in rows
+    assert "| window | 1000k |" in rows
     rc, out, err = run("config", "show", "--resolved")
     assert rc == 0, err
     assert yaml_load(out)["session"]["window"] == 1000000
 
 
-# ---- A12: the line ---------------------------------------------------------------------
+# ---- A12: the line (window-r1 R6), since packet b1 R3 without the window ----------------
 
 CLAUSE = "the engine's first reading replaces this"
 
 
-def test_a12_no_reading_names_the_table(repo, monkeypatch):
+def test_a12_no_reading_the_line_names_no_window(repo, monkeypatch):
     monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "orchestrator-opus")
     monkeypatch.setenv("CLAUDE_SESSION_MODEL", OPUS)
     line = said(start(repo))
-    assert f"on a 200000 window (table, session:{OPUS}; {CLAUSE}), checkpoint at 80%" in line
+    assert "'orchestrator-opus'; " + hooks.START_METER in line
+    for word in ("window", "200000", "table", CLAUSE, "checkpoint at"):
+        assert word not in line, word
 
 
-def test_a12_a_reading_names_the_engine(repo, monkeypatch):
+def test_a12_a_reading_the_line_names_no_window(repo, monkeypatch):
     monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "orchestrator-opus")
     monkeypatch.setenv("CLAUDE_SESSION_MODEL", OPUS)
     start(repo)
     assert measured(1000000)[0] == 0
     line = said(start(repo))
-    assert "on a 1000000 window (engine:1000000), checkpoint at 80%" in line
-    assert CLAUSE not in line
+    for word in ("window", "1000000", "engine:", CLAUSE):
+        assert word not in line, word
 
 
-def test_a12_the_clause_sits_outside_the_clip(repo, monkeypatch):
+def test_a12_a_long_model_reaches_no_line(repo, monkeypatch):
     long = "claude-opus-" + "x" * 80
     monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "builder")
     monkeypatch.setenv("CLAUDE_SESSION_MODEL", long)
     line = said(start(repo))
-    assert f"(table, {f'session:{long}'[:64]}; {CLAUSE})" in line
+    assert "xxxxxxxx" not in line and CLAUSE not in line
 
 
 # ---- A14: no module (control); A13 is in plugin/hooks/session.test.ts ------------------

@@ -51,7 +51,8 @@ def test_s21_default_texts_are_the_shipped_ones(tmp_path):
     r = rules()
     assert r.LEVELS == ("S1", "S2", "S3", "S4")
     assert r.PRIORITY == {"enabled": True, "levels": {"S1": S1, "S2": S2, "S3": S3, "S4": S4}}
-    assert r.PACING == {"enabled": True, "fallback": 1800, "waiting": 3}
+    assert r.PACING == {"enabled": True, "fallback": 1800, "waiting": 3,
+                        "meter_line_minutes": 30}           # packet b1 R1
     s = resolved(tmp_path)
     assert s["priority"] == r.PRIORITY and s["pacing"] == r.PACING
 

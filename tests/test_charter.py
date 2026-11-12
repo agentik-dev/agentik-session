@@ -126,7 +126,8 @@ def test_open_then_check_passes(tmp_path):
     assert charter.check(p) == []
     text = p.read_text()
     assert "| pin | abc1234 |" in text and "| agents | 0 |" in text
-    assert "400 turns, 180k context" in text and "| window | 200k |" in text
+    assert "| budget | profile ?; the meter's CHECKPOINT line ends the sitting |" in text  # b1 R4
+    assert "400 turns" not in text and "| window | 200k |" in text
     assert "## Done-ness\n- [x] charter written at open: this file" in text
     assert _doclint().CHARTER_TITLE.match(text.splitlines()[0])
     assert charter.open(tmp_path, "again", SECTION, None, repo="r").name == f"{charter.today()}-2.md"
