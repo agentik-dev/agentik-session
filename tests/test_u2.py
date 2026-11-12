@@ -166,6 +166,62 @@ def test_t4_as_main_moved_is_red(box):
     assert row["failing"][0]["main_exit"] != 0 and row["failing"][0]["exit"] == 0
 
 
+def _trees(repo):
+    return [ln for ln in _git(repo, "worktree", "list", "--porcelain").splitlines()
+            if ln.startswith("worktree ")]
+
+
+def test_f4_the_baseline_is_main_never_a_reused_tree(box):
+    """Review F4: a clean tree an earlier run left on the row's branch, with a commit that
+    breaks the line, cannot supply its own baseline: the `as main` line is measured in a
+    temporary tree at main's sha, removed after."""
+    (box.repo / "check.sh").write_text("echo ok\n")
+    _git(box.repo, "add", "check.sh")
+    _git(box.repo, "commit", "-q", "-m", "a check")
+    main = _git(box.repo, "rev-parse", "main")
+    wt = box.repo / ".claude" / "worktrees" / "green-row"
+    _git(box.repo, "worktree", "add", "-q", str(wt), "-b", "green-row", "main")
+    (wt / "check.sh").write_text("echo BROKEN; exit 3\n")
+    _git(wt, "commit", "-q", "-am", "an earlier part")
+    _packet(box, "green-row", "`sh check.sh` as main")
+    _git(box.repo, "add", "design")
+    _git(box.repo, "commit", "-q", "-m", "the packet")
+    main = _git(box.repo, "rev-parse", "main")
+    before = _trees(box.repo)
+    box.go([{"stream": "green.jsonl", "commit": True}], ["green-row"])
+    (base,) = box.kind("baseline")
+    assert base["pin"] == main and (base["lines"][0]["exit"], base["lines"][0]["last"]) == (0, "ok")
+    (row,) = box.kind("row")
+    assert (row["state"], row["reason"]) == ("red", "acceptance")
+    assert (row["failing"][0]["exit"], row["failing"][0]["main_exit"]) == (3, 0)
+    assert _trees(box.repo) == before
+
+
+def test_f4_the_pin_tree_goes_on_an_error(box, monkeypatch):
+    made = []
+    real = unattended.tempfile.mkdtemp
+    monkeypatch.setattr(unattended.tempfile, "mkdtemp", lambda **kw: made.append(real(**kw)) or made[-1])
+    (box.repo / ".venv").mkdir()
+    seen = []
+
+    def boom(wt, lines, env, pick=None):
+        seen.append((os.path.realpath(wt), os.path.islink(os.path.join(wt, ".venv")),
+                     _git(wt, "rev-parse", "HEAD")))
+        raise RuntimeError("boom")
+    monkeypatch.setattr(unattended, "run_lines", boom)
+    lines = unattended.acceptance(_table("`true` as main"))
+    before = _trees(box.repo)
+    main = _git(box.repo, "rev-parse", "main")
+    with pytest.raises(RuntimeError, match="boom"):
+        unattended.pin_baseline(box.repo, main, lines, dict(os.environ))
+    ((tree, linked, head),) = seen
+    assert linked and head == main and tree.startswith(os.path.realpath(made[0]))
+    assert _trees(box.repo) == before and not os.path.exists(made[0])
+    got = unattended.pin_baseline(box.repo, None, lines, dict(os.environ))
+    assert got[0]["error"] and unattended.judge_line(lines[0], {"exit": 0, "last": "", "cut": False,
+                                                                "error": False}, got[0]) == "unrun"
+
+
 def test_t5_unrun_and_cut_are_red(box, monkeypatch):
     _packet(box, "green-row", "`true` exits 0; `true` as main")
     monkeypatch.setattr(unattended, "SH", str(box.tmp / "no-such-sh"))

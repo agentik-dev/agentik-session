@@ -732,6 +732,38 @@ def run_lines(wt: Path, lines: list, env: dict, pick=None) -> list:
         shutil.rmtree(home, ignore_errors=True)
 
 
+def _as_main(ln: Line) -> bool:
+    return ln.kind == "as-main"
+
+
+def pin_baseline(repo: Path, sha: str | None, lines: list, env: dict) -> list:
+    """Packet u2 R2, review F4: each `as main` line run once in a temporary detached tree at
+    main's sha at the row's pin, never in the staged tree (a reused branch tree would be its
+    own baseline); `<repo>/.venv` linked there as `stage` links it. The tree is removed after,
+    on an error too. A line it cannot measure is an error, so it is `unrun`; another line is
+    None."""
+    def failed(why: str) -> list:
+        return [{"exit": None, "last": why[:LAST_CAP], "cut": False, "error": True}
+                if _as_main(ln) else None for ln in lines]
+    if not sha:
+        return failed("no main sha at the pin")
+    top = tempfile.mkdtemp(prefix="unattended-pin-")
+    tree = Path(top) / "tree"
+    try:
+        r = _git(repo, "worktree", "add", "--detach", str(tree), sha)
+        if r.returncode != 0:
+            return failed("pin tree: " + ((r.stderr.strip().splitlines() or ["git worktree add "
+                                                                             "failed"])[-1]))
+        if (repo / ".venv").exists() and not os.path.lexists(tree / ".venv"):
+            os.symlink(str(repo / ".venv"), str(tree / ".venv"))
+        return run_lines(tree, lines, env, _as_main)
+    finally:
+        removed = _git(repo, "worktree", "remove", "--force", str(tree)).returncode == 0
+        shutil.rmtree(top, ignore_errors=True)
+        if not removed:                 # an add that failed half-way leaves a stale entry
+            _git(repo, "worktree", "prune")
+
+
 def _said(c: dict) -> str:
     """One failing line for the child: what it returned and what it wants."""
     if c["status"] == "unrun" and (c["exit"] is None or c["exit"] in UNRUN_EXITS):
@@ -1213,11 +1245,12 @@ class _Run:
         return (max(10, p["turns"] - self.cur.turns),
                 max(5, round(p["usd"] - self.cur.usd, 2)))
 
-    def baseline(self, p, wt) -> list:
-        """Packet u2 R2: each `as main` line run once in the staged tree, at the pin, before
-        the spawn; a `baseline` line. Another line is None: it is judged on its own."""
-        got = run_lines(wt, self.cur.lines, self.fx.env, lambda ln: ln.kind == "as-main")
-        self.record("baseline", row=p["id"], lines=[
+    def baseline(self, p, pin) -> list:
+        """Packet u2 R2: each `as main` line run once at main's sha at the pin, in a tree of
+        its own (`pin_baseline`, review F4), before the spawn; a `baseline` line. Another line
+        is None: it is judged on its own."""
+        got = pin_baseline(self.repo, pin, self.cur.lines, self.fx.env)
+        self.record("baseline", row=p["id"], pin=pin, lines=[
             {"line": i, "exit": g and g["exit"], "last": g and g["last"], "error": g and g["error"]}
             for i, g in enumerate(got, 1)])
         return got
@@ -1248,14 +1281,15 @@ class _Run:
             return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
+        pin = _out(self.repo, "rev-parse", "--verify", "--quiet", "main^{commit}")
         wt, head = stage(self.repo, p["id"], "main")     # a landed base is on main now
         if wt is None:
             self.log(f"{p['id']}: stage: {head}")
             self.row(p, "red", "stage")
             return None
         self.cur = _Row(lines)
-        if any(ln.kind == "as-main" for ln in lines):
-            self.cur.base = self.baseline(p, wt)
+        if any(_as_main(ln) for ln in lines):
+            self.cur.base = self.baseline(p, pin)
         text = prompt(text)
         sid = str(uuid.uuid4())
         effort = self.effort[p["id"]] = p.get("effort") or builder_effort(self.fx.env)
