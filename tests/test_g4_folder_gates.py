@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import hooks, instructionguard
+from claude_session import hooks, instructionguard, resolver
 from test_g2b_gates import REASON, SID, _bash, _cli, _decision, _hash, _log, _payload
 
 FOLDER_LIST = ("# the edit gates for every repo under this folder\nCLAUDE.md\n*/CLAUDE.md\n"
@@ -35,6 +35,7 @@ def fb(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(b.home))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    b.state = resolver.state_dir(b.env)
     b.code = b.home / "code"
     b.tree = b.code / "tree"
     (b.tree / ".claude").mkdir(parents=True)
