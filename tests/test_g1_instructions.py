@@ -308,14 +308,18 @@ def test_r3_two_places_fires_for_effort_and_model(box):
     assert [k for _, _, k in rows] == ["warn", "warn"]
     effort = [d for _, d, _ in rows if d.startswith("effort")][0]
     assert "profile frontier" in effort and "xhigh" in effort
-    assert f"{p} effortLevel" in effort and "high" in effort
-    assert any(d.startswith("model") and f"{p} model" in d for _, d, _ in rows)
+    assert effort.endswith(f"; {p} says effortLevel high")
+    assert any(d.startswith("model") and d.endswith(f"{p} says model opus") for _, d, _ in rows)
 
 
 def test_r3_two_places_reads_a_per_model_effort(box):
     _settings(box, {"modelSettings": {"opus": {"effortLevel": "high"}}})
     [(_, d, _)] = _rows(box, sections=_sections(), name="two-places")
-    assert "modelSettings.opus.effortLevel" in d
+    assert d.endswith("says modelSettings.opus.effortLevel high")
+    _settings(box, {"modelSettings": {"a": {"effortLevel": "high"}, "b": {"effortLevel": "low"},
+                                      "c": {"effortLevel": "high"}, "d": {"model": "x"}}})
+    [(_, d, _)] = _rows(box, sections=_sections(), name="two-places")
+    assert d.endswith("says modelSettings.<model>.effortLevel for 3 models (high, low)")
 
 
 def test_r3_two_places_quiet_when_the_settings_set_neither(box):

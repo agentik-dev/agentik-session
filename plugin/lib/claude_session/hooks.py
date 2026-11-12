@@ -29,8 +29,8 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import (budget, charter, gate, harness, install, ledger, meter, policystore, resolver, rules,
-               sessionconfig, store, workflowguard)
+from . import (budget, charter, gate, harness, install, instructions, ledger, meter, policystore,
+               resolver, rules, sessionconfig, store, workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
@@ -1016,6 +1016,14 @@ def pre_compact(payload: dict, env=None) -> dict:
     return {}
 
 
+def instructions_loaded(payload: dict, env=None) -> dict:
+    """Packet g1 R1: one line in the session's `instructions.jsonl` for each instruction file
+    Claude Code loads. The event cannot block and its output is discarded; dispatch prints
+    nothing for it (SILENT), and the shim drops the process's streams."""
+    instructions.record(payload, os.environ if env is None else env)
+    return {}
+
+
 HANDLERS = {
     "pre-tool-use": pre_tool_use,
     "post-tool-use": post_tool_use,
@@ -1028,6 +1036,7 @@ HANDLERS = {
     "post-tool-batch": post_tool_batch,
     "pre-compact": pre_compact,
     "post-model-switch": post_model_switch,
+    "instructions-loaded": instructions_loaded,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -1035,10 +1044,12 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "SessionStart": session_start, "SessionEnd": session_end, "Stop": stop,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
-                 "PreCompact": pre_compact, "PostModelSwitch": post_model_switch})
+                 "PreCompact": pre_compact, "PostModelSwitch": post_model_switch,
+                 "InstructionsLoaded": instructions_loaded})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
-                    "post-model-switch", "PostModelSwitch"})   # StopFailure: fire-and-forget
+                    "post-model-switch", "PostModelSwitch",    # StopFailure: fire-and-forget
+                    "instructions-loaded", "InstructionsLoaded"})   # g1 R1: a log, no output
 # A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.

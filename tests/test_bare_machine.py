@@ -506,7 +506,8 @@ SETTINGS = {"model": "opus", "env": {"ANTHROPIC_MODEL": "m"}}
 
 def _modules():
     return {n: importlib.import_module("claude_session." + n) for n in (
-        "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "ledger", "measure",
+        "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "instructions", "ledger",
+        "measure",
         "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state",
         "fill")}
 
@@ -552,6 +553,8 @@ READERS = {
     ("harness", "read_hooks"): ("hooks.jsonl", {"event": "Stop", "ms": 1, "exit": 0},
                                 lambda m, d: m["harness"].read_hooks(d)),
     ("hooks", "_load_json"): ("h.json", {"at": 1.0}, lambda m, d: m["hooks"]._load_json(d / "h.json")),
+    ("instructions", "read_log"): ("instructions.jsonl", {"at": 1.0, "file_path": "/x/CLAUDE.md"},
+                                   lambda m, d: m["instructions"].read_log(d)),     # packet g1
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
     ("ledger", "lines"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},   # packet S54 R4
