@@ -17,6 +17,8 @@ from claude_session import unattended
 
 FIX = Path(__file__).parent / "fixtures" / "unattended"
 QUEUE_IDS = ["green-row", "max-row", "limit-row", "orch-row", "parked-row", "dep-row", "big-row"]
+# Packet u2 R2: a packet the loop runs holds an acceptance row it can read.
+ACCEPT = "\n| item | value |\n|---|---|\n| acceptance | `true` exits 0 |\n"
 
 
 def test_queue_read():
@@ -64,7 +66,7 @@ class Box:
         (self.repo / "relay" / "queue.yaml").write_text((FIX / "queue.yaml").read_text())
         (self.repo / "design" / "packets").mkdir(parents=True)
         for rid in QUEUE_IDS:
-            (self.repo / "design" / "packets" / f"{rid}.md").write_text(f"# Packet {rid}\n")
+            (self.repo / "design" / "packets" / f"{rid}.md").write_text(f"# Packet {rid}\n" + ACCEPT)
         _git(self.repo, "add", ".")
         _git(self.repo, "commit", "-q", "-m", "the queue")
         _git(self.repo, "remote", "add", "origin", str(tmp / "origin.git"))
@@ -128,7 +130,7 @@ def test_green_built(box):
     assert a[4] == "Bash Edit Write MultiEdit NotebookEdit"
     assert a[a.index("--model") + 1] == "claude-opus-5-5" and a[a.index("--max-turns") + 1] == "100"
     assert a[a.index("--max-budget-usd") + 1] == "25" and a[a.index("--session-id") + 1] == spawn["session_id"]
-    assert start["stdin"] == "# The packet; the repo's CLAUDE.md carries the rules\n\n# Packet green-row\n"
+    assert start["stdin"] == unattended.prompt("# Packet green-row\n" + ACCEPT)        # packet u2 R1
     stream = (box.dir / "green-row.jsonl").read_text().splitlines()
     assert len(stream) == 5 and stream[3] == "not a JSON line"       # every line, as it came
     assert oct((box.dir / "ledger.jsonl").stat().st_mode & 0o777) == "0o600"
@@ -204,7 +206,7 @@ def test_rate_limit_resumes_once(box):
     a = two["argv"]
     assert a[:3] == ["-p", "--resume", S2] and "--session-id" not in a
     assert a[a.index("--max-turns") + 1] == "70" and a[a.index("--max-budget-usd") + 1] == "11"
-    assert two["stdin"] == "continue from your charter's act in flight; your commits stand\n"
+    assert two["stdin"] == unattended.CONTINUE + "\n"                                  # packet u2 R4
     assert two["cwd"] == one["cwd"] and two["env"]["CLAUDE_SESSION_PROFILE"] == "builder"
     assert [s["part"] for s in box.kind("spawn")] == [1, 2]
     (row,) = box.kind("row")
@@ -500,7 +502,7 @@ def test_land_ok(box):
     q.write_text(q.read_text().replace("depends_on: [green-row]", "depends_on: [limit-row]\n"
                                        "    base: limit-row"))
     (box.repo / "design" / "packets" / "limit-row.md").write_text(
-        "intro\n## Packet limit-row: the land step\n")
+        "intro\n## Packet limit-row: the land step\n" + ACCEPT)
     (box.repo / "scripts").mkdir()
     land = box.repo / "scripts" / "land"
     land.write_text("#!/bin/sh\nexit 9\n")
