@@ -3,7 +3,7 @@
 | item | value |
 |---|---|
 | from | the management sitting's coordinator, 2026-11-11, brief g1; the design is the management repo's design/09 (§1, §3 "How it is checked" and "What the folder binds", §7.2 "The checks" and the table's last row, §7.3's closing paragraph) |
-| pin | main at `ad8cf3c` (2.0.0-alpha.76). Version 2.0.0-alpha.77. Worktree `.claude/worktrees/g1-instructions-log`, its branch the same name, cut from that sha; `.venv` and `.venv-floor` linked from the main checkout |
+| pin | main at `ad8cf3c` (2.0.0-alpha.76). Version 2.0.0-alpha.78 (the code's commit set alpha.77; the records' commit, which changes the skill's page, sets alpha.78). Worktree `.claude/worktrees/g1-instructions-log`, its branch the same name, cut from that sha; `.venv` and `.venv-floor` linked from the main checkout |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make`; no `claude`; no test reads live state; no relay verb; no PreToolUse behaviour (§7.2's guard is packet g2) |
 | may touch | `plugin/lib/claude_session/{instructions,hooks,doctor}.py` (`instructions.py` new); `plugin/hooks/{hooks.json,run}`; `plugin/.claude-plugin/plugin.json`; `plugin/skills/session/SKILL.md`; `RUNBOOK.md`, `README.md`, `design/readme/{source.md,rendered.sha256}`; `tests/test_g1_instructions.py` (new) and the pins of the hook set in `tests/{test_doctor,test_precompact,test_mod,test_s49,test_wfg,test_bare_machine}.py`; this packet, committed first |
 | verify | the gate queue's `make check`; while building, the files of §3 with pytest directly under `.venv` and `.venv-floor`, `scripts/hygiene --require-private --commits refs/heads/main..HEAD`, `scripts/plugin-version-check` |
@@ -27,7 +27,7 @@ Claude Code's hooks reference (`code.claude.com/docs/en/hooks.md`, fetched 2026-
 - **R3, warnings, one row each, never a failure:** `tree-file` (a checkout in the folder that holds the main checkout has a ledger file whose section `### Every session of the tree` is there, and no `CLAUDE.md` of that folder is in the log; only when a log exists); `plugin-descs` (an enabled plugin whose command, skill and agent descriptions sum past 1,024 B); `memory-index` (the project folder's `MEMORY.md` past 8 KiB); `two-places` (the repo's profile sets `effort` or `model` and `~/.claude/settings.json` sets it too, each place named).
 - **R4, memory notes.** `memory-notes` rows: each `*.md` of the project folder's `memory/` but `MEMORY.md` written after the newest ledger row of this repo that is not the logged session's nor the running one's, by name and first line. Read only.
 - **R5** is not built: the doctor prints bytes and no ceiling.
-- **R6, records.** The skill's page, the RUNBOOK and the README say what the doctor's new rows are; version 2.0.0-alpha.77.
+- **R6, records.** The skill's page, the RUNBOOK and the README say what the doctor's new rows are; version 2.0.0-alpha.78.
 
 ## 3. Interfaces: the acceptance table
 

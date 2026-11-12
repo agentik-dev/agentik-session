@@ -31,15 +31,18 @@ resolves to deny, even though Claude Code still reports success. Read section
    `claude plugin install session@agentik`. The plugin wires its
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
-   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`) through `hooks/run`, which execs
+   `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`,
+   `InstructionsLoaded`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `PostToolUseFailure`, `PostToolBatch`, `PostModelSwitch` and `PreCompact` (keeping
-   PreCompact's stdout, its block), so no turn end, no helper's loop and no
+   on `Stop`, `StopFailure`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
+   `PostModelSwitch` and `PreCompact` (keeping
+   PreCompact's stdout, its block; the others' streams go to `/dev/null`), so no turn end,
+   no helper's loop and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
    fails its `plugin` line and names an event its CLI does not handle.
@@ -47,6 +50,8 @@ resolves to deny, even though Claude Code still reports success. Read section
    (and the newest known release, and the launcher's interpreter), the plugin and its
    dependencies; it warns on a launcher older than the plugin or with no `VERSION=`, and
    fails on a launcher whose tree is gone; a failing check exits 2 and names itself.
+   Its last rows read the instruction files (section "The instruction files a session
+   loaded"), and none of them fails.
 
 Until the hooks fire, `agentik session status` and `budget` have no samples
 and say so.
@@ -70,6 +75,37 @@ it on. While it is on, the doctor warns and SessionStart's `systemMessage` says 
 launcher's code is this version or later. Mixed versions are the cost, as before this plugin
 held its code. It cannot fix the shim itself, nor the mod, whose failure is a debug line. It has
 not yet run under a real session.
+
+### The instruction files a session loaded
+
+Claude Code fires `InstructionsLoaded` for each `CLAUDE.md` or `.claude/rules/*.md` file it
+loads, at session start and when one loads later. The plugin's hook appends one line per event
+to `instructions.jsonl` (0600) in the session's state directory: `at`, `file_path`,
+`load_reason`, `memory_type`, `trigger_file_path`, `parent_file_path`, `globs`, `cwd` and
+`agent_id`. It prints nothing, and the log stops growing at 256 KiB. The payload's fields are
+the hooks reference's; no live event had been seen when the hook was built.
+
+`agentik session doctor`, run in a repo, then adds these rows after `launcher`, and none of
+them fails the doctor:
+
+- `instructions`: the newest session whose log's first line has a `cwd` at or under the repo's
+  main checkout (its worktrees included), each file it logged with its bytes as the file stands
+  now (`gone` for one since deleted) and why it loaded, then the count and the sum. With no such
+  log, one row says so.
+- `tree-file` (warn): a checkout in the folder that holds the main checkout keeps a ledger
+  with a `### Every session of the tree` section, and no `CLAUDE.md` of that folder is in the
+  log. Render the tree's file from that ledger.
+- `plugin-descs` (warn): an enabled plugin whose command, skill and agent descriptions sum
+  past 1,024 B; a skill or command with `disable-model-invocation: true` is not counted.
+- `memory-index` (warn): the repo's `MEMORY.md`, in Claude Code's project folder, past 8 KiB.
+- `two-places` (warn): the repo's profile sets `effort` or `model`, and
+  `~/.claude/settings.json` sets it too (`effortLevel`, `modelSettings.<m>.effortLevel`,
+  `model`); each place is named with its value.
+- `memory-notes` (note): each memory note of the project folder (not `MEMORY.md`) written
+  since the newest ended session of the repo in the ledger, the logged session and the running
+  one aside, by name and first line, for the owner's batch.
+
+The doctor prints bytes and no ceiling: the ceilings of these files are the decisions tool's.
 
 ## 2. Choosing a profile
 
