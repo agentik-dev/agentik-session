@@ -112,14 +112,18 @@ The doctor prints bytes and no ceiling: the ceilings of these files are the deci
 The PreToolUse hook reads `Edit`, `Write`, `MultiEdit` and `NotebookEdit` (no other tool, and
 never a Bash line). When the target is instruction text, it answers `ask` in a main thread, so
 Claude Code's own dialog shows the edit, and `deny` in a helper (`agent_id`), in a `-p` run, and
-where the nearest `claude` ancestor's argv cannot be read. The reason names the path and sends
-the change through the `decisions:instruct` skill. Guarded are, in the user's folder
+where the nearest `claude` ancestor's argv cannot be read. Only that argv's options are read, up
+to its first prompt word and as the CLI reads them (`-cp` is `-c -p`), so a prompt that holds
+`-p` stays a main thread. The reason names the path and sends the change through the
+`decisions:instruct` skill. Guarded are, in the user's folder
 (`CLAUDE_CONFIG_DIR`, and `~/.claude`), `CLAUDE.md`, `settings.json` and the `rules`, `hooks`,
 `agents` and `plugins` folders; a tree folder's `CLAUDE.md` (a folder holding a main checkout);
 and at a checkout's top level, a worktree's wherever it is, `CLAUDE.md`, `CLAUDE.local.md`,
 `.claude/CLAUDE.md`, `AGENTS.md`, `.claude/rules/**`, `DECISIONS.md` and
 `.claude/settings*.json`. A path under `tests/`, `testdata/` or a fixtures folder is never
 guarded, nor is the prompt text in a repo's source (`plugin/skills/*/SKILL.md` and the like).
+Where the volume folds case, as macOS's does by default, a name matches in any case: `claude.md`
+is `CLAUDE.md`, and `~/.Claude` is `~/.claude`.
 
 It has no knob: no profile key, session setting or variable opens a path. It fails open: an
 error or a target it cannot resolve lets the call through and writes a line to the session's
