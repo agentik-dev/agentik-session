@@ -3,12 +3,12 @@
   agentik session gate land <repo> <branch> <sha> <merge-file>      queues this as one gate job
   agentik session gate land --in-job <repo> <branch> <sha> <merge-file>   the job itself
 
-A bare <repo> is a name under ~/code, one with a slash a path; the cwd never decides. <sha> is a
-prefix of the commit, never a ref's name. Runs, in order: `make check` in the branch's worktree,
-`scripts/hygiene` there when present, then `scripts/hygiene --require-private --commits
-refs/heads/main..<sha>` there when its --help names `--commits`, `git merge --no-ff --commit -F
-<merge-file> <sha>` in the repo's main checkout, `git worktree remove`, `git branch -D`. Stdout is
-one line, the verdict, and it comes last:
+A bare <repo> is that checkout in ~/code, else the one a folder below; one with a slash is a
+path; the cwd never decides. <sha> is a prefix of the commit, never a ref's name. Runs, in
+order: `make check` in the branch's worktree, `scripts/hygiene` there when present, then
+`scripts/hygiene --require-private --commits refs/heads/main..<sha>` there when its --help names
+`--commits`, `git merge --no-ff --commit -F <merge-file> <sha>` in the repo's main checkout,
+`git worktree remove`, `git branch -D`. Stdout is one line, the verdict, and it comes last:
 
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
@@ -58,6 +58,7 @@ goes, after those reads pass, before `worktree remove`, which would refuse it. P
 here: that stays with the orchestrator.
 """
 
+import glob
 import os
 import signal
 import subprocess
@@ -406,11 +407,33 @@ def takes_commits(tree, script):
     return p.returncode == 0 and "--commits" in p.stdout
 
 
+def is_checkout(path):
+    """A directory holding a .git entry, a directory or a file (a linked worktree's)."""
+    return os.path.isdir(path) and os.path.exists(os.path.join(path, ".git"))
+
+
 def resolve_repo(arg):
-    """A bare name is a repo under ~/code, a name with a slash is a path; the cwd never decides."""
-    if os.sep not in arg:
-        arg = os.path.join(os.path.expanduser("~/code"), arg)
-    return os.path.realpath(arg)
+    """A bare name is the checkout of that name in ~/code, else the one such checkout a folder
+    below (a repo may sit in a folder under ~/code, even one of its own name); a directory that
+    is no checkout never matches. A name with a slash is a path; the cwd never decides. None
+    found, or more than one (one checkout reached by two paths counts once), is a Red at
+    "repo", as is an empty name, "." or ".."."""
+    if os.sep in arg:
+        return os.path.realpath(arg)
+    if arg in ("", ".", ".."):
+        raise Red("repo", 1, "%r is no repo name" % arg)
+    code = os.path.expanduser("~/code")
+    if is_checkout(os.path.join(code, arg)):
+        return os.path.realpath(os.path.join(code, arg))
+    below = os.path.join(code, "*", arg)
+    found = sorted({os.path.realpath(p) for p in
+                    glob.glob(os.path.join(glob.escape(code), "*", glob.escape(arg)))
+                    if is_checkout(p)})
+    if len(found) == 1:
+        return found[0]
+    raise Red("repo", 1, "more than one checkout at %s: %s" % (below, ", ".join(found)) if found
+              else "no checkout (a directory holding .git) at %s or at %s"
+              % (os.path.join(code, arg), below))
 
 
 def land(repo, branch, sha, message):
@@ -491,6 +514,7 @@ def main(argv):
         if len(argv) != 4:
             raise Red("usage", 2, USAGE)
         at("repo")
+        name = os.path.basename(os.path.normpath(argv[0]))
         repo = resolve_repo(argv[0])
         name = os.path.basename(repo)
         land(repo, argv[1], argv[2], os.path.abspath(argv[3]))

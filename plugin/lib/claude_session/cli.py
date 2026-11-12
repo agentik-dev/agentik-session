@@ -1251,7 +1251,13 @@ def _gate_land(root, args, env) -> int:
         print("land-step: " + land.USAGE, file=sys.stderr)
         print("land ?: red usage exit 2", flush=True)
         return 2
-    repo = land.resolve_repo(args.args[0])
+    try:
+        repo = land.resolve_repo(args.args[0])
+    except land.Red as red:
+        print(f"land-step: {red.note}", file=sys.stderr)
+        print(f"land {os.path.basename(os.path.normpath(args.args[0]))}: red repo exit 1",
+              flush=True)
+        return 1
     name = os.path.basename(repo)
     if not os.path.isdir(repo):
         print(f"land-step: no such directory: {repo}", file=sys.stderr)
@@ -1543,8 +1549,8 @@ def build_parser() -> argparse.ArgumentParser:
     gl = gsub.add_parser("land", help="land a branch as one gate job: check, hygiene, merge "
                                        "--no-ff on main, remove the worktree, delete the branch")
     gl.add_argument("args", nargs="*", metavar="repo branch sha merge-file",
-                    help="the repo (a bare name is under ~/code), the branch, its head's sha, "
-                         "the merge message's file")
+                    help="the repo (a bare name is that checkout in ~/code, else the one "
+                         "a folder below), the branch, its head's sha, the merge message's file")
     gl.add_argument("--session", metavar="SID",
                     help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
     gl.add_argument("--wall", type=_positive_int, metavar="SECONDS",

@@ -1443,7 +1443,7 @@ class TestScript(unittest.TestCase):
     def test_the_module_imports_the_standard_library_alone(self):
         with open(LAND_PY) as fh:
             heads = [ln.split()[1] for ln in fh if ln.startswith(("import ", "from "))]
-        self.assertEqual(sorted(heads), ["os", "signal", "subprocess", "sys"])
+        self.assertEqual(sorted(heads), ["glob", "os", "signal", "subprocess", "sys"])
 
 
 if __name__ == "__main__":
