@@ -33,8 +33,22 @@ POLL = 30.0
 WALL = 4 * 3600
 ALLOWED_TOOLS = "Bash Edit Write MultiEdit NotebookEdit"     # relay DefaultAllowedTools
 DENIED_PUSH_URL = "relay-denies-push"                         # relay DeniedPushURL
-HEADING = "# The packet; the repo's CLAUDE.md carries the rules"
-CONTINUE = "continue from your charter's act in flight; your commits stand"
+# Packet u2 R1: the child's prompt over the packet (the audit's finding C2, verbatim).
+PROMPT = (
+    "# You are one unattended builder; the packet below is your whole task\n\n"
+    "You run headless (`claude -p`): a message with no tool call ends the sitting, and nobody "
+    "reads it until the run is over. Build every act the packet lists, one commit per act, and "
+    "end your turn only when the last act is committed and the tree is clean, or when nothing "
+    "can move; then say why in the charter's handover. An error, a timeout or a failing test is "
+    "work: diagnose it and get past it. A hook's denial and the packet's wall are deliberate: "
+    "leave them and take another way. Do each act yourself in the foreground: no agent, no "
+    "background command, no wait on a notification.")
+# Packet u2 R4: what a limit's resume says, sent after the reset.
+CONTINUE = (
+    "You stopped at the account's usage limit, which has now reset; your commits stand. Read "
+    "your charter's done-ness list, finish each unchecked act of the packet, run the packet's "
+    "acceptance lines, and commit. End only when every acceptance line passes, or say what "
+    "blocks it in the charter's handover.")
 ROW_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}\Z")
 RUN = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)\Z")
 
@@ -499,7 +513,7 @@ def remotes(wt: Path) -> list:
 
 
 def prompt(packet_text: str) -> str:
-    return f"{HEADING}\n\n{packet_text}"
+    return f"{PROMPT}\n\n{packet_text}"
 
 
 def start(argv: list, cwd: Path, env: dict, text: str, stderr_path: Path, fx: Fx):
