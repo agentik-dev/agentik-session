@@ -12,9 +12,11 @@ the matched root (the user's folder, or the nearest top level) exempts the path.
 file it names (r1 F2): where the volume folds case, `claude.md` is `CLAUDE.md`.
 
 R2: `ask` in a main thread; `deny` in a helper (`agent_id`), in a `-p` run, and where the
-nearest `claude` ancestor's argv cannot be read (`harness.claude_argv`, SessionEnd's reader).
-Only its options are read (r1 F1), as `harness.flag_effort` walks them: up to the first prompt
-word, an option's value never taken for an option.
+nearest `claude` ancestor's argv cannot be read (found by `harness.claude_argv`, SessionEnd's
+reader). Only its options are read (r1 F1), as Claude Code's CLI (commander) parses them (r2
+F4): the argv is read word by word from the kernel, options are read past the prompt until `--`
+or a subcommand, and an option's value or a prompt is never taken for an option. Where only the
+`ps` line can be read, a print word after the first prompt word denies.
 R3: an exception or a target that is not a usable string lets the call through, and one line
 goes to the session's `guard.jsonl`, never to the model; each ask and deny is a line there too.
 R4: no knob. The environment is read for `HOME` and `CLAUDE_CONFIG_DIR` (where the user's folder
@@ -57,6 +59,12 @@ _LONG_BARE = frozenset(o for o in harness._BARE_OPTS if o.startswith("--"))
 _LONG_VALUED = frozenset(o for o in harness._VALUED_OPTS if o.startswith("--")) | {"--effort"}
 _LONG_OPTIONAL = frozenset(o for o in harness._OPTIONAL_OPTS if o.startswith("--"))
 _LONG_LIST = frozenset(harness._LIST_OPTS)
+_LONG_TAKES = _LONG_VALUED | _LONG_OPTIONAL      # a value after `=` is theirs
+# r2 F4: root subcommands of Claude Code 2.1.322; root parsing stops at one standing first. A
+# name missing here only reads a later `-p` as the flag (a deny), so the list stays short.
+_SUBCOMMANDS = frozenset({"mcp", "plugin", "doctor", "update", "install"})
+_PROC = "/proc"                           # where a /proc/<pid>/cmdline exists, the reader's
+_CTL_KERN, _KERN_PROCARGS2 = 1, 49        # darwin's sysctl names (sys/sysctl.h)
 _PC_CASE_SENSITIVE = 11                   # darwin's pathconf name; Python's table lacks it
 _SETTINGS = re.compile(r"settings[^/]*\.json\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
@@ -195,28 +203,169 @@ def guarded(path: str, env) -> bool:
 
 # ---- R2: which run ----------------------------------------------------------------------
 
+_SYSCTL = []                              # libc's sysctl, loaded on the first guarded call
+
+
+def _sysctl():
+    if not _SYSCTL:
+        import ctypes
+        f = ctypes.CDLL(None, use_errno=True).sysctl
+        f.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                      ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
+        f.restype = ctypes.c_int
+        _SYSCTL.append(f)
+    return _SYSCTL[0]
+
+
+def _procargs(pid: int) -> list[str] | None:
+    """darwin's KERN_PROCARGS2 holds argc, the exec path, argc words, then the environment. Only
+    the argc words are read, and the buffer is zeroed after: no environment is kept."""
+    import ctypes
+    sysctl = _sysctl()
+    mib = (ctypes.c_int * 3)(_CTL_KERN, _KERN_PROCARGS2, pid)
+    size = ctypes.c_size_t(0)
+    if sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or not 4 < size.value <= 1 << 24:
+        return None
+    buf = ctypes.create_string_buffer(size.value + 1)      # a NUL past the end, whatever comes
+    try:
+        if sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+            return None
+        n, base = min(size.value, len(buf) - 1), ctypes.addressof(buf)
+        argc = ctypes.c_int.from_buffer(buf).value
+        pos = 4 + len(ctypes.string_at(base + 4))          # past the exec path
+        while pos < n and buf[pos] == b"\0":               # and its padding
+            pos += 1
+        words = []
+        for _ in range(argc if 0 < argc <= 1 << 16 else 0):
+            if pos >= n:
+                return None
+            w = ctypes.string_at(base + pos)
+            words.append(os.fsdecode(w))
+            pos += len(w) + 1
+        return words or None
+    finally:
+        ctypes.memset(buf, 0, len(buf))
+
+
+def argv_words(pid) -> list[str] | None:
+    """One process's argv, word by word: `/proc/<pid>/cmdline` where it exists, else darwin's
+    KERN_PROCARGS2. None when the kernel will not say (another user's process, a zombie, no
+    such pid, a sandbox) and on any error: it never raises."""
+    try:
+        if not isinstance(pid, int) or not 0 < pid < 1 << 31:
+            return None
+        proc = os.path.join(_PROC, str(pid), "cmdline")
+        if os.path.exists(proc):
+            with open(proc, "rb") as f:
+                raw = f.read(1 << 24)
+            words = [os.fsdecode(w) for w in raw.split(b"\0")]
+            return words[:-1] if len(words) > 1 and words[-1] == "" else None
+        return _procargs(pid) if sys.platform == "darwin" else None
+    except Exception:                                   # noqa: BLE001 - R3: never into the hook
+        return None
+
+
+def claude_argv(pid=None) -> tuple[list[str] | None, bool]:
+    """The nearest `claude` ancestor's argv and whether it was read word by word (r2 F4). The
+    ancestor is the one `harness.claude_argv` finds by `ps`; its argv is then read from the
+    kernel, and where that fails, or names no `claude`, the `ps` line split on whitespace is
+    returned with False. (None, False) when no ancestor is found."""
+    asked = []
+
+    def ps(p):
+        asked.append(p)
+        return harness._ps(p)
+    joined = harness.claude_argv(ps=ps, pid=pid)
+    if not joined:
+        return None, False
+    try:
+        words = argv_words(asked[-1]) if asked else None
+    except Exception:                                   # noqa: BLE001 - R3: never into the hook
+        words = None
+    if words and os.path.basename(words[0]) == "claude":
+        return words, True
+    return joined, False
+
+
+def _option(w: str) -> bool:
+    return len(w) > 1 and w[0] == "-"     # commander's maybeOption
+
+
 def _maybe_print(w: str) -> bool:
     return w in PRINT or w.startswith("--print=") or (
         w.startswith("-") and not w.startswith("--") and "p" in w[1:])
 
 
-def _unsure(rest) -> bool | None:
-    """Past an option the walk cannot read: None (unsure) when a later word may be the print
-    flag, else False, since no word is."""
-    return None if any(_maybe_print(w) for w in rest) else False
+def _either(a, b):
+    return a if a == b else None
 
 
-def headless(argv) -> bool | None:
-    """True when `-p` or `--print` stands among argv's options (argv[0] the program), False when
-    none does, None where it cannot tell (r1 F1). The walk is `harness.flag_effort`'s: it ends
-    at the first prompt word (`ps` joins argv with spaces, so a prompt is many words), and an
-    option's value is never taken for an option."""
-    words = [str(a) for a in (argv or [])[1:]]
+def _exact(words) -> bool | None:
+    """The walk on argv word by word, as commander's parseOptions reads it: options past the
+    prompt, `--` ends them, a subcommand standing first ends them, a valued option takes the next
+    word whatever it is. An option the tables do not know may take one word or none; where the
+    two readings differ the answer is None. res[i][f]: the answer from word i on, f true while
+    no operand and no unknown option has stood (a subcommand may still come)."""
+    n = len(words)
+    res = [[False, False] for _ in range(n + 2)]
+    for i in range(n - 1, -1, -1):
+        a, nxt = words[i], (words[i + 1] if i + 1 < n else None)
+        for f in (0, 1):
+            if a == "--":
+                r = False
+            elif not _option(a):
+                r = False if f and a in _SUBCOMMANDS else res[i + 1][0]
+            elif a.startswith("--"):
+                name = a.split("=", 1)[0]
+                if name == "--print":
+                    r = True
+                elif "=" in a:
+                    r = res[i + 1][f if name in _LONG_TAKES else 0]
+                elif a in _LONG_BARE:
+                    r = res[i + 1][f]
+                elif a in _LONG_VALUED:
+                    r = res[i + 2][f]
+                elif a in _LONG_OPTIONAL:
+                    r = res[i + 2 if nxt is not None and not _option(nxt) else i + 1][f]
+                elif a in _LONG_LIST:     # a required list: its first word whatever it is,
+                    j = i + 2             # then every word up to the next option
+                    while j < n and not _option(words[j]):
+                        j += 1
+                    k = i + 1
+                    while k < n and not _option(words[k]):
+                        k += 1
+                    r = _either(res[min(j, n)][f], res[k][f])
+                else:
+                    r = _either(res[i + 1][0], res[min(i + 2, n)][0])
+            else:                         # short flags, combined as commander reads them
+                r = res[i + 1][f]
+                for k, ch in enumerate(a[1:], 1):
+                    kind, rest = _SHORT.get(ch), a[k + 1:]
+                    if kind is None:
+                        r = None if "p" in rest else _either(res[i + 1][0], res[min(i + 2, n)][0])
+                        break
+                    if ch == "p":
+                        r = True
+                        break
+                    if kind and rest:
+                        break             # the rest of the word is its value
+                    if kind == 1 or (kind == 2 and nxt is not None and not _option(nxt)):
+                        r = res[i + 2][f]
+                        break
+            res[i][f] = r
+    return res[0][1]
+
+
+def _joined(words) -> bool | None:
+    """The fallback walk on the `ps` line, its words joined with spaces and split again (r1 F1):
+    it ends at the first prompt word or `--`, an option's value is never taken for an option.
+    Since a prompt or a value may be many words, a word past the end that may be the print flag
+    leaves it unsure (None), as one the walk cannot read does."""
     i = 0
     while i < len(words):
         a = words[i]
         if a in ("--", "-") or not a.startswith("-"):
-            return False                  # the first prompt word
+            return _unsure(words[i + 1:])  # the first prompt word
         if a.startswith("--"):
             if a.split("=", 1)[0] == "--print":
                 return True
@@ -247,14 +396,27 @@ def headless(argv) -> bool | None:
     return False
 
 
+def _unsure(rest) -> bool | None:
+    """None (unsure) when a later word may be the print flag, else False, since no word is."""
+    return None if any(_maybe_print(w) for w in rest) else False
+
+
+def headless(argv, exact: bool = True) -> bool | None:
+    """True when `-p` or `--print` stands among argv's options (argv[0] the program), False when
+    none does, None where it cannot tell. `exact`: argv as the kernel holds it, word by word;
+    else the `ps` line split on whitespace."""
+    words = [str(a) for a in (argv or [])[1:]]
+    return _exact(words) if exact else _joined(words)
+
+
 def run_kind(payload: dict) -> str:
     """`helper`, `headless`, `unknown` or `main`."""
     if payload.get("agent_id"):
         return "helper"
-    argv = harness.claude_argv()
+    argv, exact = claude_argv()
     if not argv:
         return "unknown"
-    h = headless(argv)
+    h = headless(argv, exact)
     return "headless" if h else ("unknown" if h is None else "main")
 
 

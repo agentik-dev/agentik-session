@@ -277,15 +277,17 @@ def test_r2_a_real_process_argv_read_from_the_kernel(tmp_path, argv, kind):
 
 
 @_KERNEL
+@pytest.mark.skipif(not os.path.exists("/bin/bash"), reason="no /bin/bash")
 def test_r2_the_reader_stops_at_argc_and_keeps_no_environment(tmp_path):
-    p = subprocess.Popen(["/bin/sleep", "30", "made up words"], env={"MADEUP_TOKEN": "zz-not-kept"})
+    argv = ["/bin/bash", "-c", "sleep 30; exit 0", "made up words"]
+    p = subprocess.Popen(argv, env={"MADEUP_TOKEN": "zz-not-kept"})
     try:
         for _ in range(100):                        # until the exec has replaced the fork
             got = instructionguard.argv_words(p.pid)
-            if got and got[0] == "/bin/sleep":
+            if got and got[0] == "/bin/bash":
                 break
             time.sleep(0.02)
-        assert got == ["/bin/sleep", "30", "made up words"]
+        assert got == argv
         started = time.perf_counter()
         for _ in range(100):
             instructionguard.argv_words(p.pid)

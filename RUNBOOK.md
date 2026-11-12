@@ -112,9 +112,11 @@ The doctor prints bytes and no ceiling: the ceilings of these files are the deci
 The PreToolUse hook reads `Edit`, `Write`, `MultiEdit` and `NotebookEdit` (no other tool, and
 never a Bash line). When the target is instruction text, it answers `ask` in a main thread, so
 Claude Code's own dialog shows the edit, and `deny` in a helper (`agent_id`), in a `-p` run, and
-where the nearest `claude` ancestor's argv cannot be read. Only that argv's options are read, up
-to its first prompt word and as the CLI reads them (`-cp` is `-c -p`), so a prompt that holds
-`-p` stays a main thread. The reason names the path and sends the change through the
+where the nearest `claude` ancestor's argv cannot be read. That argv is read word by word from
+the kernel, and its options as the CLI reads them: past the prompt, up to `--` or a subcommand
+(`-cp` is `-c -p`), so `claude go -p` is a `-p` run while a prompt or an option's value that
+holds `-p` stays a main thread. Where only the `ps` line can be read, a `-p` after the first
+prompt word is refused. The reason names the path and sends the change through the
 `decisions:instruct` skill. Guarded are, in the user's folder
 (`CLAUDE_CONFIG_DIR`, and `~/.claude`), `CLAUDE.md`, `settings.json` and the `rules`, `hooks`,
 `agents` and `plugins` folders; a tree folder's `CLAUDE.md` (a folder holding a main checkout);
