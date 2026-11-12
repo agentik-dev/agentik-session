@@ -368,7 +368,9 @@ def plan(q: dict, keep, log) -> list:
                     "wall": b.get("wall", d.get("wall")), "merge": r.get("merge", d.get("merge")),
                     "verify": r.get("verify", d.get("verify")), "base": r.get("base"),
                     "depends_on": r.get("depends_on"), "parked": r.get("parked"),
-                    "kind": r.get("kind"), "effort": r.get("effort", d.get("effort"))})
+                    "kind": r.get("kind"),
+                    # R5's order, review F9: an empty or null level is no level
+                    "effort": r.get("effort") or d.get("effort") or None})
     if keep:
         unknown = [k for k in keep if k not in {p["id"] for p in out}]
         if unknown:

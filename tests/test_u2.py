@@ -414,6 +414,23 @@ def test_t9_effort_row_defaults_profile(box, monkeypatch):
     assert [_effort(s) for s in box.starts] == ["max", "low"]        # the queue's defaults
 
 
+def test_f9_an_empty_row_effort_takes_the_defaults():
+    """Review F9, R5's order: a row whose `effort` is empty or null takes the defaults' level,
+    then the builder profile's (None here; `do_row` reads the profile)."""
+    rows = ("rows:\n  - id: a\n    packet: a.md\n    effort:\n  - id: b\n    packet: b.md\n"
+            "    effort: null\n  - id: c\n    packet: c.md\n    effort: low\n"
+            "  - id: d\n    packet: d.md\n    effort: \"\"\n")
+    for defaults, want in (("effort: medium", ["medium", "medium", "low", "medium"]),
+                           ("effort:", [None, None, "low", None]),
+                           ("effort: \"\"", [None, None, "low", None]),
+                           ("model: m", [None, None, "low", None])):
+        q = unattended.read_queue(f"version: 1\ndefaults: {{{defaults}}}\n" + rows
+                                  if defaults != "effort:" else "version: 1\ndefaults:\n  effort:\n"
+                                  + rows)
+        got = [p["effort"] for p in unattended.plan(q, None, lambda s: None)]
+        assert got == want, defaults
+
+
 def test_t9_effort_fallback_and_refusal(box, monkeypatch):
     _packet(box, "green-row", "`true` exits 0")
     real = resolver.load_profiles
