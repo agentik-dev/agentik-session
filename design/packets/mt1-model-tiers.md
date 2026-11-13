@@ -22,7 +22,7 @@
 
 R1 `tiers` in a profile, design/13 §3's table shipped in `defaults`; `orchestrator-opus` changes `design` alone, `local-only` all five to `local/default`; `subagents` is read as `tiers.build.model` one release. R2 one table: `sessionconfig`'s folds into `profiles.yaml`; `start` exports `tiers.build`; `_FORCE` never set; the doctor names a differing variable. R3 the user layer's `defaults.profile` sits between the repo's file and `frontier`; a `tiers:` block in the user file overrides a role everywhere, the repo's over the user's; `profile <name>` prints the table. R4 `set tier.<role> <model> [--until]`, `set cap <model> [--until]` (never saved, handed to a `run` successor while ahead); `--save` on a tier writes a layer file; no `configs.json`. R5 no `xhigh`. R6 a `tier: <role>` line in an Agent prompt: a model above the role's warns under `signal`, refused under `deny`; the family rule unchanged. R7 a start with no `--model` passes the profile's `--model` and `--effort`; `run` with no prompt refuses; `start <name>` takes every profile.
 
-## 3. Acceptance (brief mt1; baseline at the pin)
+## 3. Interfaces: the acceptance table (brief mt1; baseline at the pin)
 
 | # | line | at the pin |
 |---|---|---|
@@ -35,10 +35,18 @@ R1 `tiers` in a profile, design/13 §3's table shipped in `defaults`; `orchestra
 | 7 | `start -n orchestrator` and `run` (dry) pass the profile's `--model`, `--effort`; `--model x` alone wins | `start orchestrator` refused |
 | 8 | no shipped profile says `xhigh` | five |
 
-## 4. Decided inside the rulings
+## 4. Findings that name this row: the choices inside the rulings
 
-Kept in the hand-back, one line each, as the builder brief asks.
+- The table's code is `tiers.py`; the resolver writes the layered table (no clock), and each reader (`rules`, SessionStart, the spawn gate) applies the session's `set tier.*` and `set cap` words against the clock, as `fill` is read.
+- The user layer's `tiers:` and the repo's are top-level blocks (the repo's may also sit under `session:`); the user layer is `$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when that file exists, else `~/.claude/agentik/profiles.yaml`, so no file moves.
+- `--save` on a tier writes the user file (`--save repo`: the repo's `config.yaml`) by replacing its `tiers:` block alone, comments kept; `--save` on any other key is refused (exit 2), as are `config new` and `config delete`: no verb writes `configs.json`. A legacy `configs.json` is read only for the hooks' checkpoint cadence (`sessionconfig.stored`), one release.
+- `balanced` keeps sonnet as its build tier (its former `subagents`); `scratch` goes local in five as `local-only`; `lookup` ships as haiku (the local lane is a profile's choice). `lane`, `plugins`, `notes` move into `profiles.yaml` with the fold; the shipped `permission_mode: auto` passes no flag, as the old table passed none.
+- The role check warns under `signal` and `ask`, refuses under `deny`, is silent under `off`; a call with no model and no agent file model passes. `run` passes the profile's flags on the seat lane only. A cap with no `--until` is the session's alone and is not handed on.
 
 ## 5. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, no hq checkout.
+
+## 6. Report
+
+The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the gate job and its exit, the choices made, what was not done.
