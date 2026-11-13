@@ -10,9 +10,9 @@
 
 ## Done-ness
 - [x] Build 1: R1 to R13 built, five commits to 9b2c48c (acceptance 11 red in process; one decide line, since ruled)
-- [x] Fix (a): acceptance 6 narrowed in the packet; with the pin's `_git_paths` put back 0 differ (git fuzz, builder's fuzz, tests, packets, replay); as built 11,611 and 32,574 fuzz lines, each with one of the four
-- [x] Fix (c), E1 (4eda8ac, tests 1ed9caa red: 53 fail): replay class A 151 of 151 and class B 26 of 26 refused; refused 3,037; the 20 make lines and 7 Python bodies read; `runner` (a shell's `-c` text behind a command that is no wrapper) and `data` (a heredoc body not read as a script); a command word's substitutions read as empty for its name
-- [x] Fix (b): three early returns; 0 answers changed against 4eda8ac over tests, packets, replay, 200,000 fuzz; hand lines 4.86 to 4.99 s against the pin's 5.36 (0.91 to 0.93)
+- [x] Fix (a): acceptance 6 narrowed; 0 differ with the pin's `_git_paths` put back
+- [x] Fix (c), E1 (4eda8ac; tests 1ed9caa red): `Unread` kinds `runner` and `data`; class A 151 and B 26 refused; a command word's substitutions read as empty
+- [x] Fix (b): three early returns, 0 answers changed; 0.91 to 0.93 times the pin
 - [x] Fix (d): the three flips kept (packet acceptance 8); E2 into NICE n180; n197 gains `$sh -c`; n204 class C
 - [x] The replay counts and the acceptance table at the head (make rule: replay 3,037 refused, packets 13 and 13; gate flips 0 on the replay; acceptance 2 to 5, 12, 13 green both venvs); the gate job 20261113-112930-1563 queued on this commit
 
@@ -23,15 +23,18 @@
 - [x] F5 built (the rule's word test expands braces, bounded); F6 built (an `alias` value is an `eval` text)
 - [x] N1: a body's refusal says what is true and the way out; a line of data sinks only (`cat` to a file, `tee`, `git commit -F -`) passes its bodies
 - [x] (a) in the tree: test 13 loads the pin's reader from git and finds 0 loose lines differ with its `_git_paths` put back (6,000 fuzz and the hand shapes)
-- [ ] Review 1's fix, left: the reruns (grid, replay, cost, gate flips); the gate once, last F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
+- [x] F1 kept whole (06a225d): build 2's split beside the one with the quotes off (the grid's battery 5 found `["make", "check"]` lost)
+- [x] Reruns: grid 190, 0 refused at the pin and passed here, 19 pass (all `${u}make`, held); replay class A 151 of 151, class B 26 of 26, refused 3,036, gate deny to pass 0; acceptance 2 to 5, 12 green
+- [ ] The gate once, last F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
 
 ## Handover
+- Review 1: a glued parameter (`${u}make check`, any level) passes, as at the pin (n197's class). N1's sink list is closed (`cat` to a file, `tee`, `git commit -F -`): it returns 2 replay lines; a `cd` before a sink keeps the refusal.
 - The make rule's class C (a tool's own option holds the make line, 18 replay lines, NICE n204) and a shell's name in a variable (NICE n197) pass, as at the pin. A Python body that shells out a make is refused now, as `data`.
 - Not rerun this round: acceptance 7 by the brief's classes, 10 (real shells, 20,000 lines), 11's launcher cold runs.
 
 ## Next act
-- Review 1's fix, act by act as listed; then the gate job once, last; phase 2 on the coordinator's word.
+- The gate job once, last; phase 2 on the coordinator's word.
 
 ## Exit
-- Review 1's fix: in flight.
+- Review 1's fix: committed act by act; the gate's job last.
 - Fix of the read committed: (a) to (d), E1, E2 built; the gate's job queued last; phase 2 (merge of main, version) on the coordinator's word.
