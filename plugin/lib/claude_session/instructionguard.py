@@ -372,7 +372,7 @@ _PH = "__g3_heredoc_%d__"
 _PH_RE = re.compile(r"__g3_heredoc_(\d+)__\Z")
 _PUNCT = ";&|<>()\n"
 _OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|()\n]")
-_MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
+_MASK = {"(": "", ")": "", "`": ""}    # a quoted or escaped paren, never an operator
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
 _KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\\\n|\Z)")    # r3 F5: `\`-NL
@@ -417,7 +417,7 @@ def _heredocs(text: str):
     return "\n".join(out), bodies
 
 
-def _mask(text: str, bash3: bool = False) -> str:
+def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
     """The text with each quoted or backslashed paren replaced by a private character, so the
     lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
     outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
@@ -426,7 +426,8 @@ def _mask(text: str, bash3: bool = False) -> str:
     quotes (g5 r1).
     A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
     a backtick in a `${` is a bracket of its own, in which a paren is a command's (g5 r3);
-    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(` and counts no `case`."""
+    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(` and counts no `case`;
+    `ticks`: a pattern's `)` in backticks is masked into a word (r3 F1, R8: both are read)."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
     cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
@@ -473,8 +474,8 @@ def _mask(text: str, bash3: bool = False) -> str:
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
                 if cases[-1] or opened[-1:] in ([], ["`"]):    # r2 F2: nor a pattern's `)`
                     start = True
-                    if cases[-1] and tick:     # in backticks a word's; bash3's reading,
-                        out[-1] = _MASK[c]     # which counts no `case`, reads it (r3 F1, R8)
+                    if cases[-1] and tick and ticks:
+                        out[-1] = _MASK[c]
                 else:
                     cases.pop()
                     start = opened.pop() != "$("
@@ -506,12 +507,12 @@ def _mask(text: str, bash3: bool = False) -> str:
     return "".join(out)
 
 
-def _commands(text: str, bash3: bool = False):
+def _commands(text: str, bash3: bool = False, ticks: bool = True):
     """Simple commands: (words, the words after a write redirection), in order; a subshell's
     `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
     one, is no subshell's edge (r2 F2), in backticks too (r3 F1); a quoted or escaped one is a
-    word (r2 F1)."""
-    lex = shlex.shlex(_mask(text, bash3), posix=True, punctuation_chars=_PUNCT)
+    word (r2 F1), and a quoted or escaped backtick opens nothing (r3 F1)."""
+    lex = shlex.shlex(_mask(text, bash3, ticks), posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -537,16 +538,16 @@ def _commands(text: str, bash3: bool = False):
                 elif op in "()":
                     yield op, None                # a subshell's bounds: its folder ends at `)`
             continue
-        tok = tok.translate(_UNMASK)
+        raw, tok = tok, tok.translate(_UNMASK)    # in `raw` a backtick is a real one
         if expect is not None:
             if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
                 outs.append(tok)
             expect = None
             continue
         if not outs and (tok == "case" and all(w in _LEAD for w in words) or
-                         tok.endswith("`case") and tok[:-4].count("`") % 2):
+                         raw.endswith("`case") and raw[:-4].count("`") % 2):
             cases.append("head")          # r3 F1: a `case` glued to its opening backtick too
-        elif (not words and not outs and (tok == "esac" or tok.startswith("esac`"))
+        elif (not words and not outs and (tok == "esac" or raw.startswith("esac`"))
               and cases and cases[-1] != "head"):
             cases.pop()
         elif tok == "in" and cases and cases[-1] == "head" and words[-2:-1] and (
@@ -626,21 +627,25 @@ def _git(args: list, cwd, env, found: list) -> None:
         found.append(("remove", _resolve(p, gcwd, env)))
 
 
-def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False) -> list:
+def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
+                 ticks: bool = True) -> list:
     """[(`write` or `remove`, a path or None)] in the line's order, then (`split`, None) where
     `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3).
-    Where bash 3.2's reading masks the line otherwise, its targets follow (g5 r2, r3)."""
+    Where bash 3.2's reading, or the one that masks no pattern's `)` in backticks, masks the
+    line otherwise, its targets follow (g5 r2, r3)."""
     text, bodies = _heredocs(command)
     found, here, subshells, pushed, read = [], cwd, [], [], []
-    other = not bash3 and _mask(text, True) != _mask(text)     # r3 F3: a `case` too
+    first = ticks and not bash3
+    m0 = _mask(text) if first else ""
+    other = [r for r in ((True, True), (False, False)) if first and _mask(text, *r) != m0]
     try:
-        for c in _commands(text, bash3):
+        for c in _commands(text, bash3, ticks):
             read.append(c)
     except ValueError:
         if all(outs is None for _, outs in read):
-            if not other:
+            if not _others(command, cwd, env, depth, other, found):
                 raise
-            return bash_targets(command, cwd, env, depth, True) + [("split", None)]
+            return found + [("split", None)]
         read.append(("split", "split"))
     for words, outs in read:
         if words == "split":
@@ -697,12 +702,20 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False) ->
                 codes.append(args[args.index("-c") + 1])
             for code in codes:
                 found += [("write", _resolve(s, here, env)) for s in _py_literals(code) if s]
-    if other:                             # the two readings' targets, each once
+    _others(command, cwd, env, depth, other, found)    # the readings' targets, each once
+    return found
+
+
+def _others(command: str, cwd, env, depth: int, other: list, found: list) -> int:
+    """Adds to `found` each other reading's targets it lacks; how many readings read the line."""
+    read = 0
+    for r in other:
         try:
-            found += [f for f in bash_targets(command, cwd, env, depth, True) if f not in found]
+            found += [f for f in bash_targets(command, cwd, env, depth, *r) if f not in found]
+            read += 1
         except ValueError:
             pass
-    return found
+    return read
 
 
 def _bash_gated(payload: dict, env) -> str | None:
