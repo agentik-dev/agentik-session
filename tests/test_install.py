@@ -520,7 +520,7 @@ def test_sc3_run_reaches_its_first_spawn_at_3_9_and_ps_reads_the_form(box, tmp_p
     out.mkdir()
     _stub_claude(tmp_path / "stubs", out)
     env = _bare(home, PATH="%s:%s" % (tmp_path / "stubs", BARE))
-    code, said = _pty_run([str(tool), "run", "--chain", "x"], env, home)
+    code, said = _pty_run([str(tool), "run", "--chain", "x", "--", "go"], env, home)
     assert (out / "parent").exists(), (code, said)
     line = (out / "parent").read_text().strip()
     words = line.split()
@@ -543,7 +543,7 @@ def test_sc3_a_chain_under_the_new_form_keeps_its_tree_through_installs(tmp_path
     runner = _share(home) / first / "agentik-session"
     # The tree's real runner, as a launcher runs it, sat in `gate serve`'s place: stdin holds it.
     live = subprocess.Popen(["/usr/bin/python3", "-I", "-X", "pycache_prefix=%s" % (tmp_path / "c"),
-                             "-c", "import sys; sys.stdin.read()", str(runner), "run", "--chain", "x"],
+                             "-c", "import sys; sys.stdin.read()", str(runner), "run", "--chain", "x", "--", "go"],
                             stdin=subprocess.PIPE)
     try:
         for n in range(2, 7):
@@ -763,7 +763,7 @@ def test_sc3_a_launchers_claude_sees_what_its_parent_had(box, tmp_path, parent, 
     out.mkdir()
     _stub_claude(tmp_path / "stubs", out)
     env = _bare(home, PATH="%s:%s" % (tmp_path / "stubs", BARE), **parent)
-    code, said = _pty_run([str(tool), "run", "--chain", "x"], env, home)
+    code, said = _pty_run([str(tool), "run", "--chain", "x", "--", "go"], env, home)
     assert (out / "env").exists(), (code, said)
     seen = _env_file(out / "env")
     assert {k: seen.get(k) for k in FIVE} == {k: parent.get(k) for k in FIVE}
