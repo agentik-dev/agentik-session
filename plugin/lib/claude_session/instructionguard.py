@@ -375,7 +375,7 @@ _OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|
 _MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
-_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\Z)")
+_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\\\n|\Z)")    # r3 F5: `\`-NL
 _LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
