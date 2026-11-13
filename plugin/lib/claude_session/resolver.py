@@ -446,6 +446,18 @@ def user_profile(env) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+def known(names, env) -> str:
+    """An error's list of profile names (row ss4 R5): the shipped names in full, then how many
+    more the user file defines and which file, never their names, which are its text."""
+    try:
+        shipped = set(_read_shipped([]).get("profiles") or {})
+    except ResolveError:
+        shipped = set()
+    more = [n for n in names if n not in shipped]
+    out = ", ".join(n for n in names if n in shipped)
+    return out + (f" and {len(more)} more from {_user_file(env)}" if more else "")
+
+
 def load_profiles(env) -> tuple[dict, dict]:
     """(defaults, profiles) from the shipped and the user's files; for doctor and `profile`."""
     inputs: list = []
@@ -637,7 +649,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
         # argument) prints as it did (R1-F3)
         said = repr(profile) if profile else "(withheld)"
-        raise ResolveError(f"unknown profile {said}; known: {', '.join(profiles)}")
+        raise ResolveError(f"unknown profile {said}; known: {known(profiles, env)}")
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}

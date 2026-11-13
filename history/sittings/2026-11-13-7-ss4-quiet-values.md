@@ -14,12 +14,12 @@
 - [x] R2 the reconciler's `tree` and `record` name the kind
 - [x] R3 the overlay's key withheld where `yamlsubset.dump` raises (no caller needs it)
 - [x] R4 the gate's log withholds its value
-- [ ] R5 the unknown profile's list: shipped names, then `and N more from <file>`
+- [x] R5 the unknown profile's list: shipped names, then `and N more from <file>`
 - [ ] R6 the sweep, NICE rows, the stamp `2.0.0-alpha.110`
 - [ ] the gate, once, at the end; the commit scan
 
 ## Handover
-Next act: R5, the unknown profile's list.
+Next act: R6, the sweep (windows key, checkpoint zone, config show), NICE rows, stamp.
 
 ## Exit
 (open)
