@@ -460,8 +460,6 @@ def _mask(text: str, bash3: bool = False) -> str:
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
                 if cases[-1] or not opened:    # r2 F2: a `case` pattern's `)` closes nothing
                     start = True
-                    if cases[-1] and tick:     # nor is it a subshell's edge in backticks
-                        out[-1] = _MASK[c]
                 else:
                     cases.pop()
                     start = opened.pop() != "$("
@@ -495,7 +493,8 @@ def _mask(text: str, bash3: bool = False) -> str:
 def _commands(text: str, bash3: bool = False):
     """Simple commands: (words, the words after a write redirection), in order; a subshell's
     `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
-    one, is no subshell's edge (r2 F2); a quoted or escaped one is a word (r2 F1)."""
+    one, is no subshell's edge (r2 F2), in backticks too (r3 F1); a quoted or escaped one is a
+    word (r2 F1)."""
     lex = shlex.shlex(_mask(text, bash3), posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
@@ -528,11 +527,14 @@ def _commands(text: str, bash3: bool = False):
                 outs.append(tok)
             expect = None
             continue
-        if not outs and tok == "case" and all(w in _LEAD for w in words):
-            cases.append("head")
-        elif not words and not outs and tok == "esac" and cases and cases[-1] != "head":
+        if not outs and (tok == "case" and all(w in _LEAD for w in words) or
+                         tok.endswith("`case") and tok[:-4].count("`") % 2):
+            cases.append("head")          # r3 F1: a `case` glued to its opening backtick too
+        elif (not words and not outs and (tok == "esac" or tok.startswith("esac`"))
+              and cases and cases[-1] != "head"):
             cases.pop()
-        elif tok == "in" and cases and cases[-1] == "head" and words[-2:-1] == ["case"]:
+        elif tok == "in" and cases and cases[-1] == "head" and words[-2:-1] and (
+                words[-2] == "case" or words[-2].endswith("`case")):
             cases[-1] = "pattern"
         words.append(tok)
     if words or outs:
