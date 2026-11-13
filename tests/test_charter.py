@@ -336,7 +336,8 @@ def test_close_appends_one_line(tmp_path):
     # S21 (the observer's ruling N6): SECTION names no priority key, so priority is on and
     # `open` seeds the Handover's open-by-level line above the exit line
     assert ("## Handover\n- open by level: none yet\n- exit taken: goal met; about 61k context, "
-            "15 turns\n\n## While waiting\n- none\n\n## Next act") in text
+            "15 turns\n\n## Waits on the owner\n- none\n\n## While waiting\n- none\n\n"
+            "## Next act") in text                                       # in2 R3
     assert charter.check(p) == []
     charter.close(p, "again", None)
     assert p.read_text().splitlines().count("- exit taken: again; meter unknown") == 1
@@ -434,7 +435,8 @@ def _s21_charter(tmp_path, handover=S21_LISTED, next_act="the next act", waiting
 
 def test_s21_open_seeds_the_handover_line(tmp_path):
     p = charter.open(tmp_path, "g", SECTION, "h", repo="r")          # N6: no key is on
-    assert "## Handover\n- open by level: none yet\n\n## While waiting" in p.read_text()
+    assert ("## Handover\n- open by level: none yet\n\n## Waits on the owner\n- none\n\n"
+            "## While waiting") in p.read_text()                         # in2 R3
     assert charter.check(p) == [] and charter.warnings(p.read_bytes(), SECTION) == []
 
 
@@ -442,7 +444,8 @@ def test_s21_open_seeds_nothing_with_priority_off(tmp_path):
     on = charter.open(tmp_path, "g", {**SECTION, "priority": {"enabled": True}}, "h", repo="r")
     assert "## Handover\n- open by level: none yet\n" in on.read_text()     # the control
     p = charter.open(tmp_path, "g", {**SECTION, "priority": {"enabled": False}}, "h", repo="r")
-    assert "## Handover\n\n## While waiting" in p.read_text() and "open by level" not in p.read_text()
+    assert ("## Handover\n\n## Waits on the owner\n- none\n\n## While waiting" in p.read_text()
+            and "open by level" not in p.read_text())                    # in2 R3
 
 
 @pytest.mark.parametrize("handover,next_act,config,want", [
@@ -748,7 +751,8 @@ S40_OLD = "no While waiting section (opened before alpha.24): add it with - none
 def test_s40_open_writes_the_section(tmp_path):
     p = charter.open(tmp_path, "g", SECTION, "abc1234", repo="r")
     text = p.read_text()
-    assert "## Handover\n- open by level: none yet\n\n## While waiting\n- none\n\n## Next act\n" in text
+    assert ("## Handover\n- open by level: none yet\n\n## Waits on the owner\n- none\n\n"
+            "## While waiting\n- none\n\n## Next act\n") in text           # in2 R3
     assert charter.WHILE_WAITING == "## While waiting" and charter.RED == "WAITING while ready"
     assert (5, charter.WHILE_WAITING) in charter.PARTS
     assert [h for _, h in charter.PARTS].index(charter.WHILE_WAITING) == 2
@@ -756,7 +760,8 @@ def test_s40_open_writes_the_section(tmp_path):
     assert charter.check_text(raw) == [] and charter.warnings(raw, SECTION) == []
     assert charter.while_waiting(raw) == ["- none"]
     off = charter.open(tmp_path, "g", {**SECTION, "priority": {"enabled": False}}, "h", repo="r")
-    assert "## Handover\n\n## While waiting\n- none\n\n## Next act" in off.read_text()
+    assert ("## Handover\n\n## Waits on the owner\n- none\n\n## While waiting\n- none\n\n"
+            "## Next act") in off.read_text()                            # in2 R3
 
 
 def test_s40_while_waiting_reads_the_section():

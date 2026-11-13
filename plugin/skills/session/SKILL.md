@@ -154,6 +154,7 @@ agentik-session charter open --continue "<goal>"  # adopts today's newest of the
 agentik-session charter open --replace "<goal>"   # takes this sitting's record off a charter still open here; never in a helper
 agentik-session charter check <file>...        # exit 2 names the part that fails, 1 the red
 agentik-session charter close --exit "<text>"  # appends the exit line to this sitting's own charter; name the file when another sitting's is the newest, or two of its suffix stand with no record
+agentik-session charter show [REPO...] [--json]  # each repo's newest charter: Next act, what waits on the owner, form; writes nothing; a helper may run it
 ```
 
 The shape, and nothing else:
@@ -167,7 +168,11 @@ The shape, and nothing else:
    `- ready: <row> (<repo>, S<n>)` lines, off-path rows built without a gate,
    and `- owed: <item>; <what it needs>` lines, owed items that need no gate
    (a runsheet, a refuter round, a draft);
-6. `## Next act`, one line.
+6. `## Next act`, one line;
+7. `## Waits on the owner`, optional, anywhere among the parts: `open` writes
+   `- none` before While waiting; else one ``- hand: <what>; `<command>` ``
+   line for each step on the owner's hand, ending in its command's code span.
+   `check` and `close` warn on another shape, never refuse.
 
 A wait is legal when no S1 to S3 row is ready and nothing is owed: with a
 ready row of S1 to S3 or an owed item there, the Next act is that item, and,
