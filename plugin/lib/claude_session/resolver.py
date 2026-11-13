@@ -620,8 +620,11 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
             or (ud.get("profile") if isinstance(ud.get("profile"), str) else None)
             or DEFAULT_PROFILE)
     if name not in profiles:
-        # row ss2: the name may be a layer file's text (session.profile), so it is withheld
-        raise ResolveError(f"unknown profile (withheld); known: {', '.join(profiles)}")
+        # row ss2: a name read from a layer file (session.profile) is its text, so it is
+        # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
+        # argument) prints as it did (R1-F3)
+        said = repr(profile) if profile else "(withheld)"
+        raise ResolveError(f"unknown profile {said}; known: {', '.join(profiles)}")
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}
