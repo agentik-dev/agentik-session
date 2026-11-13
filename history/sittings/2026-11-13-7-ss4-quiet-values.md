@@ -1,4 +1,4 @@
-# Sitting 2026-11-13-7: ss4-quiet-values (builder)
+# Sitting 2026-11-13-7: agentik-session, ss4 five more places stop printing a layer file's value or key
 
 | item | value |
 |---|---|
@@ -7,8 +7,10 @@
 | pin | `ss2-quiet-errors` at `5792e6e` |
 | branch | `ss4-quiet-values`, worktree `.claude/worktrees/ss4-quiet-values`, the two venvs linked |
 | level | S1, a small change: no packet |
+| window | 200k |
+| agents | 0 |
 
-## Done-ness per act
+## Done-ness
 - [x] tests first, red at the pin (acceptance 1 to 6): 32 of 43 red at 5792e6e
 - [x] R1 the window note withholds its value
 - [x] R2 the reconciler's `tree` and `record` name the kind
@@ -16,11 +18,14 @@
 - [x] R4 the gate's log withholds its value
 - [x] R5 the unknown profile's list: shipped names, then `and N more from <file>`
 - [x] R6 the sweep: `windows` key, checkpoint zone, `config show`'s list; n225, n226, n229 closed; n232 to n234 new
-- [ ] the stamp `2.0.0-alpha.110`
+- [x] the stamp `2.0.0-alpha.110` (4231 tests)
 - [ ] the gate, once, at the end; the commit scan
 
 ## Handover
-Next act: the full suite under both venvs, the stamp, the gate.
+Tests in `tests/test_ss4_quiet_values.py`; matrix exits at pin and head compared by hand (744, equal).
+
+## Next act
+The gate (`make check`), queued once; the commit scan; the record.
 
 ## Exit
 (open)
