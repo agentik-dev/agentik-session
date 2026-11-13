@@ -800,7 +800,7 @@ def user_prompt_submit(payload: dict) -> dict:
     bits: list[str] = []
 
     m = _meter(sid)
-    if m:
+    if m and m.get("turns") != 0:      # ss1 review 1 F1: SessionStart's zero meter says nothing
         sdir = _session_dir(sid, os.environ)
         now = _now()
         if (_past_checkpoint(m)

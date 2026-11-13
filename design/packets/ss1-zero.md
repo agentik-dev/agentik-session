@@ -5,7 +5,7 @@
 | from | the hq coordinator, 2026-11-13, brief ss1 (a mend, level S2) |
 | pin | `3490c08` on main (2.0.0-alpha.104). Worktree `.claude/worktrees/ss1-zero`, branch `ss1-zero`; `.venv`, `.venv-floor` linked from the main checkout |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make` (the gate queue only, once, last); no `claude`; no test reads live state (temp HOME, temp repo, a made-up session id); no relay verb |
-| may touch | `plugin/lib/claude_session/hooks.py` (`session_start` and one new helper beside it); `tests/test_ss1_zero.py` (new); this packet; `history/sittings/2026-11-13-5-ss1-zero.md`; in the last commit alone, `plugin/.claude-plugin/plugin.json`, `README.md`'s and `design/readme/source.md`'s Status lines, `design/readme/rendered.sha256` |
+| may touch | `plugin/lib/claude_session/hooks.py` (`session_start` and one new helper beside it; review 1, `user_prompt_submit`'s meter line); review 1, `plugin/lib/claude_session/doctor.py` (`_check_meter`), `plugin/lib/claude_session/measure.py` (`drift`), `tests/test_mod.py` (the module's band over the meter written); `tests/test_ss1_zero.py` (new); this packet; `history/sittings/2026-11-13-5-ss1-zero.md`; in the last commit alone, `plugin/.claude-plugin/plugin.json`, `README.md`'s and `design/readme/source.md`'s Status lines, `design/readme/rendered.sha256` |
 | verify | `make check` through the gate queue, once, last |
 | acceptance | §3; `.venv/bin/python -m pytest -q tests/test_ss1_zero.py` green, and under `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
@@ -46,6 +46,7 @@ Besides: a meter on disk survives a resume whose transcript is gone (R1); `statu
 ## 4. Findings that name this row
 
 - None at the cut.
+- Review 1 (the coordinator's ruling; tests `test_review1_*`, each red at `c62445c`): F1, SessionStart's zero meter made the first prompt send the meter line the pin never sent; no meter line on a prompt while the meter's `turns` is 0 (R2 holds). F2, only a regular file is parsed, so a FIFO cannot hang the hook. F3 (R3 amended), doctor's `meter` check passes a zero-turn meter whose transcript is absent or not yet metered. F4 (R3 amended), `drift` is not comparable while `turns` is 0. The band's line moves to `tests/test_mod.py`, the one reader of the module's files.
 
 ## 5. Forbidden reads
 

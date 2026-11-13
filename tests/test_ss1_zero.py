@@ -239,3 +239,34 @@ def test_r4_an_early_return_writes_no_meter(env, repo, tmp_path, monkeypatch):
     root = resolver.state_dir(env)
     assert not root.exists() or not list(root.rglob(meter.METER))
 
+
+
+# ---- review 1: each finding's reproduction ---------------------------------------------------
+
+def _prompt(sid=SID):
+    return hooks.user_prompt_submit({"session_id": sid, "hook_event_name": "UserPromptSubmit",
+                                     "prompt": "<placeholder>"})
+
+
+def test_review1_f1_no_meter_line_on_a_prompt_before_the_first_tool_call(env, repo, tmp_path,
+                                                                          monkeypatch):
+    """R2 holds: the first prompt's output is the pin's, byte for byte (no meter line while the
+    meter's turns is 0), and so is the first prompt after a tool call."""
+    tp = tmp_path / "later.jsonl"
+    runs = []
+    for writer in (lambda *a, **k: None, hooks._first_meter):
+        root = resolver.state_dir(env)
+        shutil.rmtree(root, ignore_errors=True)
+        if tp.exists():
+            tp.unlink()
+        with monkeypatch.context() as mp:
+            mp.setattr(hooks, "_first_meter", writer)
+            start(env, repo, tp)
+            first = _prompt()
+            transcript(tmp_path, 4, name=tp.name)
+            hooks.post_tool_use({"session_id": SID, "transcript_path": str(tp),
+                                 "tool_name": "Read"}, env)
+            runs.append((json.dumps(first), json.dumps(_prompt())))
+    pin, now = runs
+    assert now[0].encode() == pin[0].encode() and "session meter" not in now[0], now[0]
+    assert now[1].encode() == pin[1].encode() and "session meter" in now[1], now[1]
