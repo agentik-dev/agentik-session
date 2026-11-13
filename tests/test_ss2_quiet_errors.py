@@ -151,10 +151,14 @@ def test_the_respoken_summaries():
 
 # ---- review 1, R1-F1: `set ... --save` over a broken file, in each of the five it writes ------
 
+def _old(name):                     # the old folder, as the resolver names it
+    from claude_session.resolver import OLD_REPO_DIR
+    return str(OLD_REPO_DIR / name)
+
+
 SAVE_FILES = {"user": ".claude/agentik/profiles.yaml", "ccd": "ccd/agentik/profiles.yaml",
-              "old-user": ".claude/claude-code-session/profiles.yaml",
-              "repo": ".claude/agentik/config.yaml",
-              "old-repo": ".claude/claude-code-session/config.yaml"}
+              "old-user": _old("profiles.yaml"), "repo": ".claude/agentik/config.yaml",
+              "old-repo": _old("config.yaml")}
 
 
 def _save_box(tmp_path, n, where, raw: bytes):
