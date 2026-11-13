@@ -145,11 +145,20 @@ def _top(p: str, itself: bool = False) -> str | None:
 
 
 def _segments(name: list, pat: list) -> bool:
-    if not pat:
-        return not name
-    if pat[0] == "**":                    # any depth, none included
-        return any(_segments(name[i:], pat[1:]) for i in range(len(name) + 1))
-    return bool(name) and fnmatch.fnmatchcase(name[0], pat[0]) and _segments(name[1:], pat[1:])
+    memo: dict = {}                       # r1 F2: each (segment, part) answered once
+
+    def at(i: int, j: int) -> bool:
+        if (i, j) not in memo:
+            if j == len(pat):
+                r = i == len(name)
+            elif pat[j] == "**":          # any depth, none included
+                r = any(at(k, j + 1) for k in range(i, len(name) + 1))
+            else:
+                r = (i < len(name) and fnmatch.fnmatchcase(name[i], pat[j])
+                     and at(i + 1, j + 1))
+            memo[(i, j)] = r
+        return memo[(i, j)]
+    return at(0, 0)
 
 
 def _match(name: str, pat: str, fold: bool) -> bool:
@@ -231,6 +240,20 @@ def _folder_list_at(p: str, env, fold: bool) -> str | None:
             return None
         e = os.path.dirname(e)
     return d
+
+
+def _folder_list_of(path: str, env) -> str | None:
+    """r1 F1: the folder whose list `path` names, by every spelling `gated()` reads: the
+    absolute spelling and the real path, each folded where the volume folds case."""
+    forms = list(dict.fromkeys((os.path.abspath(path), os.path.realpath(path))))
+    for fold in (False, True):
+        for p in forms:
+            if fold and not _case_blind(p):
+                continue
+            d = _folder_list_at(p, env, fold)
+            if d is not None:
+                return d
+    return None
 
 
 def _gated_form(p: str, env, cache: dict, fold: bool) -> bool:
@@ -756,7 +779,7 @@ def gates_write(file: str, draft: str, expect, env, cwd: str, out, err) -> int:
     except OSError as e:
         err.write(f"{say}the draft cannot be read ({e.strerror}); nothing written\n")
         return 1
-    d_list = _folder_list_at(t, env, False)
+    d_list = _folder_list_of(t, env)
     if d_list is not None and not os.path.lexists(os.path.join(d_list, ".git")):
         for s in _lines_of(new[:LIST_CAP]):       # g4 R4: a folder list's refused line
             if _relative(s) is None:
