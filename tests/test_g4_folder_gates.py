@@ -264,6 +264,60 @@ def test_7_a_checkout_list_keeps_todays_lane(fb, capsys, monkeypatch):
     assert code == 0, err
 
 
+def _refused_by_every_mode(b, capsys, spelling):
+    b.draft.write_text("CLAUDE.md\n/abs.md\n")
+    before = b.flist.read_bytes()
+    h = instructionguard.lane_hash(before, b.draft.read_bytes())
+    for extra in (["--preview"], ["--expect", h]):
+        code, out, err = _cli(capsys, "gates", "write", str(spelling), "--from", str(b.draft),
+                              *extra)
+        assert code != 0 and "`/abs.md`" in err and "nothing written" in err, (extra, out, err)
+        assert "hash:" not in out, out
+    assert b.flist.read_bytes() == before
+
+
+def test_7_r1_f1_a_case_variant_of_the_folder_list_is_refused(flane, capsys):
+    """Round 1 F1: the hook gates a case variant where the volume folds case, so the lane
+    refuses its draft's refused line as it does the canonical spelling's."""
+    if not instructionguard._case_blind(str(flane.tree)):
+        pytest.skip("this volume does not fold case")
+    for spelling in (flane.tree / ".claude" / "EDIT-GATES", flane.code / "TREE" / ".Claude" /
+                     "edit-gates"):
+        assert instructionguard.gated(str(spelling), flane.env), spelling
+        _refused_by_every_mode(flane, capsys, spelling)
+
+
+def test_7_r1_f1_a_link_outside_home_to_the_folder_is_refused(flane, capsys):
+    """Round 1 F1: a link outside the home folder that points at the code folder names the
+    folder list by its real path, so the lane refuses the draft through it."""
+    link = flane.tmp / "outlink"
+    link.symlink_to(flane.code)
+    spelling = link / "tree" / ".claude" / "edit-gates"
+    assert instructionguard.gated(str(spelling), flane.env)
+    _refused_by_every_mode(flane, capsys, spelling)
+
+
+def test_5_r1_f2_many_double_stars_answer_at_once():
+    """Round 1 F2: twelve `**` segments against a 40-segment path answer in well under a
+    second (the backtrack once took exponential time); an alarm fails a regression fast."""
+    import signal
+    import time
+
+    def late(*_):
+        raise TimeoutError("the matcher backtracked past 5 s")
+    old = signal.signal(signal.SIGALRM, late)
+    signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        start = time.monotonic()
+        name = "/".join(["a"] * 40)
+        assert not instructionguard._match(name, "/".join(["**"] * 12) + "/zz", False)
+        assert instructionguard._match(name, "/".join(["**"] * 12) + "/a", False)
+        assert time.monotonic() - start < 0.5
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+
+
 # ---- 8: `gates` and the doctor's row read three layers -----------------------------------
 
 def test_8_gates_prints_three_layers_in_order(fb, capsys, monkeypatch):
