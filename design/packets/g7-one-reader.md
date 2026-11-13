@@ -50,9 +50,12 @@ The pin's tree is `42e8a7c`'s; the numbers in brackets were measured there by th
 14. No NICE row names `design/20's g7`; `scripts/recordlint` exits 0.
 15. The diff from the pin names only this row's files; the manifest, the hooks and `hooks.py` untouched.
 
-## 4. The lines where the readers differ (the new test's table, at the pin)
+The lines where the readers differ, the new test's table at the pin: M is `make x > CLAUDE.md`. Strict is `bash_targets` in a made-up folder, loose `loose_targets` (it lists `CLAUDE.md` on every line), make `unbounded`. Strict reads and make refuses: `M` bare, behind `bash -c`, `bash -o pipefail -c`, `/bin/bash -c`, `x=1 env`, `sudo`, `time -p`, `if true; then`, `( )`, `{ }`, `echo $(M)`; and `echo make > CLAUDE.md`, `git log -- make > CLAUDE.md`. Strict reads nothing and make refuses: `bash -lc`, `bash -c -e`, `BASH -c`, `bash -c "bash -c '...'"`, `echo "$(M)"`, a heredoc's body to `sh` or `cat`. Strict reads and make passes: ``echo `M` ``, `./make.sh > CLAUDE.md`. Neither: `ksh -c`, `eval`, `echo 'M' | sh`, `echo 'M'`, `git commit -m "M"`, `echo ok # M`, u3 review 2's two `$(case ...)` and `${y:-a)}` lines. Make cannot split what strict reads: `n="$(grep -c ')' f.txt)"; echo "$n" > CLAUDE.md`. Strict raises `ValueError` and make cannot split: `echo "it's" 'x > CLAUDE.md`. The next row changes each knowingly.
 
-M is `make x > CLAUDE.md`. Strict is `bash_targets` in a made-up folder, loose `loose_targets` (it lists `CLAUDE.md` on every line), make `unbounded`. Strict reads and make refuses: `M` bare, behind `bash -c`, `bash -o pipefail -c`, `/bin/bash -c`, `x=1 env`, `sudo`, `time -p`, `if true; then`, `( )`, `{ }`, `echo $(M)`; and `echo make > CLAUDE.md`, `git log -- make > CLAUDE.md`. Strict reads nothing and make refuses: `bash -lc`, `bash -c -e`, `BASH -c`, `bash -c "bash -c '...'"`, `echo "$(M)"`, a heredoc's body to `sh` or `cat`. Strict reads and make passes: ``echo `M` ``, `./make.sh > CLAUDE.md`. Neither: `ksh -c`, `eval`, `echo 'M' | sh`, `echo 'M'`, `git commit -m "M"`, `echo ok # M`, u3 review 2's two `$(case ...)` and `${y:-a)}` lines. Make cannot split what strict reads: `n="$(grep -c ')' f.txt)"; echo "$n" > CLAUDE.md`. Strict raises `ValueError` and make cannot split: `echo "it's" 'x > CLAUDE.md`. The next row changes each knowingly.
+## 4. Findings that name this row
+
+- NICE n176, n177, n179, n180, n181 and n186 to n190 named design/20's g7: they stay, ending `left by g7, a move`; the area of n174 to n178 and n180 to n188 is the module, n179, n189 and n190 keep the guard's; n186's and n190's line numbers are the new files'. No row is added and none leaves.
+- u3 review 2's two findings on `_substituted` (R2-F1, R2-F2: its paren count knows no quote, `case` pattern or `${`) stay as they read: the table above pins both. They enter NICE with in2's phase 2; their area is the module.
 
 ## 5. Forbidden reads
 
