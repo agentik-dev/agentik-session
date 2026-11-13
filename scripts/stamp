@@ -50,7 +50,9 @@ one stderr line each: `stamp: red count: ...`, `stamp: red sidecar: <file> ...`,
 Exit codes: 0 stamped, or nothing to write; 1 a red; 2 usage, DIR no work tree, HEAD
 or REF no commit, a file above absent or misshapen, a version that cannot be ordered
 or bumped (STAMP_VERSION named), or a collection that gave no count: one stderr line,
-`stamp: <what>`.
+`stamp: <what>`. The writes are staged as temp files beside their targets and replaced
+only once all are staged; a write that fails is exit 2, `stamp: <file>: <error>`, the
+temps unlinked and every file as it was.
 
 The Makefile's `stamp` target calls it with --base "$(STAMP_BASE)" (default main) and
 --version "$(STAMP_VERSION)" where that is set. `make check` never calls it. Stdlib
@@ -455,7 +457,7 @@ def plan(repo, base, forced):
         moves = None
     if moves:
         new[NICE], new[OVERFLOW], ids = moves
-        files[OVERFLOW] = None
+        files[OVERFLOW] = read(repo, OVERFLOW)
 
     if version != current:
         lines.append("stamp: version %s -> %s" % (current, version))
@@ -467,24 +469,41 @@ def plan(repo, base, forced):
     if sidecar != files[SIDECAR]:
         lines.append("stamp: sidecar written")
     order = (MANIFEST, SOURCE, README, NICE, OVERFLOW, SIDECAR)
-    writes = [(p, new[p]) for p in order if p in new and new[p] != files.get(p)]
+    writes = [(p, new[p], files[p]) for p in order if p in new and new[p] != files[p]]
     lines.append("stamp: ok: plugin %s, %d tests%s"
                  % (version, collected, "" if writes else "; nothing to write"))
     return repo, writes, lines, reds, notes
 
 
-def write(repo, path, data):
-    dest = os.path.join(repo, path)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".stamp-")
+def write_all(repo, writes):
+    """Stage every new file as a temp file beside its target, then replace them all. An
+    OSError at any point unlinks every temp, puts back the bytes of a target already
+    replaced, and is Stop naming the file: every target as it was."""
+    staged, done, path = [], [], None
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        shutil.copymode(dest, tmp)
-        os.replace(tmp, dest)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+        for path, data, _old in writes:
+            dest = os.path.join(repo, path)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".stamp-")
+            staged.append(tmp)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+            shutil.copymode(dest, tmp)
+        for (path, _data, old), tmp in zip(writes, staged):
+            os.replace(tmp, os.path.join(repo, path))
+            done.append((path, old))
+    except OSError as exc:
+        for tmp in staged:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        for done_path, old in done:
+            try:
+                with open(os.path.join(repo, done_path), "wb") as fh:
+                    fh.write(old)
+            except OSError:
+                pass
+        raise Stop("%s: %s" % (path, exc.strerror or exc))
 
 
 def main(argv):
@@ -494,16 +513,15 @@ def main(argv):
             print(__doc__.strip())
             return 0
         repo, writes, lines, reds, notes = plan(opts["--repo"], opts["--base"], opts["--version"])
+        for note in notes:
+            sys.stderr.write(note + "\n")
+        if reds:
+            sys.stderr.write("".join(r + "\n" for r in reds))
+            return 1
+        write_all(repo, writes)
     except Stop as exc:
         sys.stderr.write("stamp: %s\n" % one_line(exc))
         return 2
-    for note in notes:
-        sys.stderr.write(note + "\n")
-    if reds:
-        sys.stderr.write("".join(r + "\n" for r in reds))
-        return 1
-    for path, data in writes:
-        write(repo, path, data)
     print("\n".join(lines))
     return 0
 
