@@ -22,15 +22,16 @@
 - [x] phase 2 act 1: main bf2e112 (alpha.96) merged at f229854; README, source, sidecar and overflow take main's
 - [x] phase 2 act 2: NICE n170 to n172 (were n160 to n162); n111 and n112 moved to the overflow (NICE 24,555 B)
 - [x] phase 2 act 3: the version commit: plugin.json 2.0.0-alpha.97; README and source say alpha.97 and 3538 tests (source 16366 B); the sidecar by shasum
-- [ ] phase 2 act 4: this record closed
+- [x] phase 2 act 4: at 3ac56f8 the eight named test files 407 passed under each venv; recordlint, doclint, hygiene, vendored.sha256 and plugin-version-check exit 0; this record closed
 
 ## Handover
-- Phase 2 (bump, gate job, merge) waits on the coordinator's word.
+- Phase 2 done; the landing's check is the one full check, the coordinator's.
 - Acceptance 5's fork ruled as built (review 1): the line with the mix off reads as with it on, less `resets <n>`.
 - The mod's tests (`claude plugin test plugin`) did not run here; `session.ts` was loaded under node 26 and drew all 78 fixture lines equal.
 
 ## Next act
-- Phase 2 act 4: the step 5 runs, then this record closed.
+- None for this builder: the landing is the coordinator's.
 
 ## Exit
 - Phase 1 built: R1 to R7 in five acts and the count's act; both venvs green by chunks (.venv 3447 collected; floor 3319 passed, 105 skipped plus the fixed readme pair); handed back to the coordinator.
+- Phase 2 done: main bf2e112 merged, NICE n170 to n172, plugin 2.0.0-alpha.97; no gate job, no push, no landing.
