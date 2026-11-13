@@ -40,6 +40,8 @@
 
 ## 4. Findings that name this row: ledger, NICE, forks
 
+- R3's question, answered by the round-1 refuter: the gate lists in use when this packet was cut hold no glob, so no line of a list that exists today changes meaning under the one grammar.
+- Round 1 (plugin 2.0.0-alpha.89): F1, `gates write` decides a folder's list as `gated()` does (the absolute spelling and the real path, folded where the volume folds case), so a case variant or a link outside home is refused too; F2, the matcher answers each (segment, part) pair once, so many `**` segments no longer take exponential time.
 - NICE n135 (F7) and n136 (F8) close with this packet. agentik-decisions' `list_gate` learning the layer is its own change (design/12 §3.5), not this packet's.
 
 ## 5. Forbidden reads
