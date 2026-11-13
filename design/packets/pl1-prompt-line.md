@@ -10,7 +10,14 @@
 | acceptance | §3; `tests/test_pl1_prompt_line.py` green under both venvs (red at the pin) |
 | budget | about 90 tool calls, `claude-opus-5-5` |
 
-## 1. The owner's words
+## 1. What the source says: the code at the pin
+
+- One function draws the usage line, `admission.band_line` (with `_line_none`, `_mix_part`, `_line_end`); the UserPromptSubmit hook adds it to its context (`hooks._admission_line`), and the mod's `admissionLine` in `plugin/hooks/session.ts` is its twin, both pinned by the one-line fixtures in `session.test.ts` that the Python tests read.
+- The zone's word the owner saw is the mod's first line (`bandLine`: `session: … · ctx c% · turns t% · <zone>`). The prompt hook already says no zone in `clear` or `unknown`; SessionStart says none.
+- `status` prints the band (`band_status`) on a `none` login only; nothing prints the mix or the mode. `rules.MIX_ITEM` points at "the band line's `next`".
+- The RUNBOOK and the skill show the line with `observe` and the band; the README source does not show or describe the line.
+
+### The owner's words
 
 "I think we need to clean this UX up on the claude code screen:
 
@@ -42,3 +49,20 @@ Asked which to keep: "I don't think we need any of those we called out so let's 
 | 6 | every other test green, changed only where it pinned a word that left | |
 
 The interfaces: `admission.band_line(b, now=None, columns=0)` unchanged in shape; `admission._mix_part` draws only the line's mix parts (`reset now`, `resets N by Ddd HH:MM`); a new `admission.mix_status(mx, now=None)` draws `status`'s `mix:` line; `admissionLine`, `mixPart` in `session.ts` twin them. `status --json` gains one top-level key, `admission`: `{"mode": ..., "mix": <band.json's mix object>}`, each present only when band.json has it.
+
+## 4. Findings that name this row: the choices inside the rulings
+
+- `reset now` stays on the line: it is not one of R1's four groups (it takes `next`'s place when a Fable reset is due, and `rules.MIX_ITEM` names it as the owner's step).
+- `mix no reading` leaves with the shares; with no points the line adds nothing for the mix.
+- The mod's line changes with the hook's, the twins kept equal: the owner's screen is the mod's two lines.
+- Acceptance 5 is read with R1: the mix's resets count stays on the line, so the line with the mix off equals the line with it on less `resets <n>`; with no resets count the two are equal.
+- `status` says `mix: …` and `admission mode: …` after the band's line; `--json` adds `admission: {mode, mix}`, band.json's own objects.
+- The README source does not show the line, so it is unchanged and not re-rendered.
+
+## 5. Forbidden reads
+
+No transcript, no live state root, no file under `~/.claude`, no hq checkout.
+
+## 6. Report
+
+The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the choices made, what was not done; phase 2 on the coordinator's word.
