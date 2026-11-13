@@ -22,7 +22,8 @@
 - [x] F7: a here-string's word is `data` unless a shell reads it as its script (`piped`); a pipe into a runner's shell is `piped`
 - [x] F5 built (the rule's word test expands braces, bounded); F6 built (an `alias` value is an `eval` text)
 - [x] N1: a body's refusal says what is true and the way out; a line of data sinks only (`cat` to a file, `tee`, `git commit -F -`) passes its bodies
-- [ ] Review 1's fix, left: F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
+- [x] (a) in the tree: test 13 loads the pin's reader from git and finds 0 loose lines differ with its `_git_paths` put back (6,000 fuzz and the hand shapes)
+- [ ] Review 1's fix, left: the reruns (grid, replay, cost, gate flips); the gate once, last F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
 
 ## Handover
 - The make rule's class C (a tool's own option holds the make line, 18 replay lines, NICE n204) and a shell's name in a variable (NICE n197) pass, as at the pin. A Python body that shells out a make is refused now, as `data`.

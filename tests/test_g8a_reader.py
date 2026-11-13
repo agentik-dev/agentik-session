@@ -496,3 +496,53 @@ def test_12_the_body_refusal_says_what_is_true():
     assert "editor tool" in why and "keep the word out of the line" in why, why
     assert unattended.unbounded("timeout 5 sh -c 'm\\ake check'").startswith(
         "it runs `make` in a text the reader does not read (runner)")
+
+
+# ---- 13: acceptance 6, narrowed by (a): the loose reading is the pin's, its `_git_paths` aside --
+
+PIN = "b92e4e0"
+PIECES = ["git add -A", "rm x", "make x", "cp a CLAUDE.md", "echo a", "cd /p8/x", "$(", ")", "`",
+          "\\`", "\"", "'", "bash -c ", "sh -c ", "sudo -u bob ", "env -i X=1 ", "<<EOF\n",
+          "\nEOF\n", "<<'EOF'\n", " | sh", " | ", " && ", "; ", "\n", "( ", " )", "{ ", "; }",
+          "${x:-", "}", "case a in a) ", ";; esac", "eval ", " # ", "\\", " ", " > CLAUDE.md",
+          "x=", "$((1+2))", " -e ", "git -C /p8/x rm y", "git -c a=b rm y", "git --git-dir g rm y",
+          "git rm -- y", "git checkout -- y", "git restore y", "xargs ", "<<< ", "tee CLAUDE.md",
+          "git --namespace n rm y", "git --super-prefix p rm y", "git --config-env a=B rm y",
+          "git --attr-source t rm y"]
+NEW_OPTS = ("--namespace", "--super-prefix", "--config-env", "--attr-source")
+
+
+def _pin_reader():
+    try:
+        src = subprocess.run(["git", "show", PIN + ":plugin/lib/claude_session/shellreader.py"],
+                             cwd=str(ROOT), capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        src = None
+    if src is None or src.returncode:
+        pytest.skip("the pin is not in this clone's history")
+    import types
+    mod = types.ModuleType("g8a_pin_shellreader")
+    exec(compile(src.stdout, "pin/shellreader.py", "exec"), mod.__dict__)
+    return mod
+
+
+def _loose_reading(r, line):
+    out = []
+    for f in (r._loose, r.loose_targets, r._heredocs):
+        try:
+            out.append(f(line))
+        except Exception as e:            # noqa: BLE001 - an error is an answer too
+            out.append(("raise", type(e).__name__))
+    return out
+
+
+def test_13_the_loose_reading_is_the_pins(monkeypatch):
+    import random
+    pin = _pin_reader()
+    rnd = random.Random(20261113)
+    lines = ["".join(rnd.choice(PIECES) for _ in range(rnd.randint(2, 10))) for _ in range(6000)]
+    lines += [s.format(G=G) for s in T1 + T2 + T3] + [s for s, _ in T4] + RUNNERS + BODIES
+    differ = [ln for ln in lines if _loose_reading(pin, ln) != _loose_reading(shellreader, ln)]
+    assert differ and all(any(o in ln for o in NEW_OPTS) for ln in differ), differ[:3]
+    monkeypatch.setattr(shellreader, "_git_paths", pin._git_paths)
+    assert [ln for ln in lines if _loose_reading(pin, ln) != _loose_reading(shellreader, ln)] == []
