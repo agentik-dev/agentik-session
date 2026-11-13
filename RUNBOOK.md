@@ -710,7 +710,16 @@ agentik session gate status                       # running, queued, the last fi
   lines go to stderr, and the exit is the job's; a log with no land line reads
   `red gate`. Inside a gate job the queue form refuses, since it would wait on
   its own repo until the wall: the job itself is `gate land --in-job`, which
-  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark.
+  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark. Four refusals
+  keep work and the check (packet land2), each read before the check and again
+  before the merge, main untouched: `red worktree` when another worktree sits
+  under the branch's, clean or dirty, named with its status lines, since
+  `worktree remove` would take it; `red sha` when main holds commits the
+  branch lacks, so the merge's tree is not the one checked (merge main into
+  the branch, land its new head); `red merge-file` when line 1 is not `Merge
+  <branch>: <text>` or line 2 is not blank; and `red merge-file` with
+  hygiene's code when `scripts/hygiene --commits` refuses the merge commit's
+  message, made as a dangling commit and scanned as `<sha>..<commit>`.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.

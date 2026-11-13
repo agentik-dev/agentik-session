@@ -148,8 +148,8 @@ Six parts, under 4,096 bytes: title; table (goal, budget, pin, window, agents); 
 Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`.
 
 - `gate run <repo> [--lock PATH]... -- <command>` prints `queued <id>`, then `est <m> min` on stderr (the key's last 3 to 5 greens' median; none under 3); an existing lock path, or a running gate's, holds it.
-- Wake on `gate wait <id>` in a background Bash or the hook's line; successors re-arm `## Gates`.
-- `wait` exits 0, 2 for no such id, 1 on timeout; `gate wait <id> --strict` exits the job's code; its stdout line says so. 124 is the wall's cut, 125 a dead runner, 126 a lock held past it. Results keep `head`, `key`.
+- Wake on a background `gate wait <id>` or the hook's line; successors re-arm `## Gates`. It exits 0, 2 no such id, 1 timeout; `gate wait <id> --strict`, the job's: 124 the wall, 125 a dead runner, 126 a lock past it. Results keep `head`.
+- `gate land` reds a nested worktree, a branch behind main, a bad merge file.
 
 ## The unattended loop
 
