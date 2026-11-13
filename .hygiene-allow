@@ -118,3 +118,5 @@ design/packets/g4-folder-gates.md: sibling
 tests/test_g4_folder_gates.py: sibling
 # mt1: the packet cites the owner's decisions by the ledger tool's word.
 design/packets/mt1-model-tiers.md: sibling
+# in2: the packet's first commit names the ledger file a sibling plugin reads.
+design/packets/in2-charter-show.md: sibling
