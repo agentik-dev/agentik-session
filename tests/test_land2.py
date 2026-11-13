@@ -239,3 +239,84 @@ class TestAfterTheCheck(Land2Case):
                 self.git("worktree", "remove", "--force", self.worktree("work"))
                 self.git("branch", "-D", "work")
                 os.unlink(self.order)
+
+
+class TestRound1(Land2Case):
+    """Round 1's findings: F1 a case-variant spelling, F2 main moving during the last scan, F3 a
+    newline in a worktree's path, F5 the scan's exit named, F6 commit-tree's own reason."""
+
+    def nested_wip(self, path):
+        self.git("worktree", "add", "-q", "-b", "inner", path, "main")
+        return self.write(path, "wip.txt", "WIP\n")
+
+    def test_f1_a_nested_worktree_under_a_case_variant_path_is_red_and_kept(self):
+        upper = os.path.join(os.path.dirname(self.repo), "SCRATCH")
+        if not os.path.isdir(upper):
+            self.skipTest("this volume does not fold case, so no case variant reaches the repo")
+        sha = self.branch("work", {"a.txt": "a\n"})
+        rel = os.path.relpath(self.worktree("work"), self.repo)
+        wip = self.nested_wip(os.path.join(upper, rel, ".claude", "worktrees", "inner"))
+        before = self.main_sha()
+        p = self.land("work", sha)
+        self.assertRed(p, "worktree", 1)
+        self.assertEqual(self.ran(), [])
+        self.assertEqual(self.main_sha(), before)
+        self.assertTrue(os.path.exists(wip))
+        self.assertIn("?? wip.txt", p.stderr)
+
+    def test_f1_a_sibling_worktree_never_counts(self):
+        sha = self.branch("work", {"a.txt": "a\n"})
+        self.git("worktree", "add", "-q", "-b", "sib", self.worktree("work") + "-2", "main")
+        p = self.land("work", sha)
+        self.assertEqual(p.stdout, "land scratch: ok %s, main readied\n" % sha, p.stderr)
+
+    def test_f2_main_moving_during_the_last_scan_is_red_sha_and_not_buried(self):
+        hy = ("#!/bin/sh\ncase $1 in --help) echo '--commits'; exit 0 ;; esac\n"
+              "[ \"$1\" = --require-private ] && shift\n"
+              "case \"$2\" in refs/heads/main..*|'') exit 0 ;; esac\n"
+              "if [ -e \"$LAND_ORDER.checked\" ]; then cd \"%s\" && echo x > raced.txt && "
+              "git add raced.txt && git commit -qm raced; fi\nexit 0\n" % self.repo)
+        make = "check:\n\t@touch \"$$LAND_ORDER.checked\"\n"
+        sha = self.branch("work", {"scripts/hygiene": hy, "Makefile": make})
+        p = self.land("work", sha)
+        self.assertRed(p, "sha", 1)
+        self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "raced")
+        self.assertEqual(len(self.git("rev-list", "--parents", "-n1", "main").split()), 2)
+        self.assertIn("raced", p.stderr)
+        self.assertTrue(os.path.isdir(self.worktree("work")))
+
+    def test_f3_a_nested_worktree_with_a_newline_in_its_path_is_red_and_kept(self):
+        sha = self.branch("work", {"a.txt": "a\n"})
+        wip = self.nested_wip(os.path.join(self.worktree("work"), ".claude", "worktrees",
+                                           "in\nner"))
+        p = self.land("work", sha)
+        self.assertRed(p, "worktree", 1)
+        self.assertTrue(os.path.exists(wip))
+
+    def test_f5_the_message_scans_exit_is_named_and_its_stderr_pointed_at(self):
+        hy = ("#!/bin/sh\ncase $1 in --help) echo '--commits'; exit 0 ;; esac\n"
+              "[ \"$1\" = --require-private ] && shift\n"
+              "case \"$2\" in refs/heads/main..*|'') exit 0 ;; esac\n"
+              "echo 'hygiene: no private list' >&2\nexit 2\n")
+        sha = self.branch("work", {"scripts/hygiene": hy})
+        p = self.land("work", sha)
+        self.assertRed(p, "merge-file", 2)
+        self.assertIn("scripts/hygiene exit 2 on the merge message; see its stderr", p.stderr)
+        self.assertIn("hygiene: no private list", p.stderr)
+
+    def test_f6_commit_trees_own_reason_reaches_the_log(self):
+        sha = self.branch("work", {"scripts/hygiene": STUB})
+        nul = os.path.join(self.tmp, "mf-nul")
+        with open(nul, "wb") as fh:
+            fh.write(b"Merge work: x\x00y\n")
+        p = self.land("work", sha, message=nul)
+        self.assertRed(p, "merge-file", 1)
+        self.assertIn("NUL", p.stderr)
+        with open(self.env["GIT_CONFIG_GLOBAL"], "w") as fh:
+            fh.write("[init]\n\tdefaultBranch = main\n[user]\n\tuseConfigOnly = true\n")
+        env = {k: v for k, v in self.env.items()
+               if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_")) and k != "EMAIL"}
+        p = self.land("work", sha, env=env)
+        self.assertRed(p, "merge-file", 1)
+        self.assertIn("fatal:", p.stderr)
+        self.assertEqual(self.ran(), [])
