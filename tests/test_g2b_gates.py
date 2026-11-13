@@ -20,6 +20,9 @@ from claude_session import cli, doctor, hooks, instructionguard, instructions, r
 from test_doctor import machine  # noqa: F401  (the fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
+# g7: the gate's code is the guard and the reader it imports; each source scan reads both
+GUARD_SRC = [ROOT / "plugin" / "lib" / "claude_session" / f
+             for f in ("instructionguard.py", "shellreader.py")]
 SKILL = "decision" "s:instruct"            # spelled in two pieces for the hygiene scan
 SID = "g2b-sess-0001"
 TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -118,7 +121,7 @@ def test_1_each_edit_tool_on_a_listed_path_denies(box, tool, agent):
 
 
 def test_1_no_answer_is_ask(box):
-    src = (ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py").read_text()
+    src = "".join(p.read_text() for p in GUARD_SRC)
     assert '"ask"' not in src and "'ask'" not in src
     for p in _listed(box) + [box.repo / "notes.md", "relative", ""]:
         for tool in (*TOOLS, "Bash"):
@@ -283,8 +286,8 @@ def test_4_no_call_spawns_or_reads_argv(box, monkeypatch):
     assert _decision(instructionguard.check(_bash("echo >> CLAUDE.md", box.repo),
                                             box.env))[0] == "deny"
     assert instructionguard.check(_payload("Edit", box.repo / "x.py"), box.env) == {}
-    tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py")
-                     .read_text())
+    tree = ast.Module(body=[n for p in GUARD_SRC for n in ast.parse(p.read_text()).body],
+                      type_ignores=[])
     names = {getattr(n, "id", getattr(n, "attr", None)) for n in ast.walk(tree)}
     mods = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
             for a in n.names} | {n.module for n in ast.walk(tree)
@@ -352,8 +355,8 @@ def test_5_no_knob(box, monkeypatch):
     env = dict(box.env, AGENTIK_EDIT_GATES="0", AGENTIK_GUARD="off")
     assert _decision(instructionguard.check(_payload("Edit", box.repo / "CLAUDE.md"),
                                             env))[0] == "deny"
-    tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py")
-                     .read_text())
+    tree = ast.Module(body=[n for p in GUARD_SRC for n in ast.parse(p.read_text()).body],
+                      type_ignores=[])
     caps = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
             and isinstance(n.value, str) and re.fullmatch(r"[A-Z][A-Z0-9]*(_[A-Z0-9]+)*", n.value)}
     assert caps <= {"HOME", "CLAUDE_CONFIG_DIR"}, caps
