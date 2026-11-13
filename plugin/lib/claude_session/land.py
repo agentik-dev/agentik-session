@@ -247,7 +247,8 @@ def require_no_overlap(repo, full, branch):
     code, ours = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
     if code != 0:
         raise Red("main", note="cannot read " + MAIN)
-    code, tree, conflicted = merge_result(repo, MAIN, full)
+    # Every read below is of that commit, never the ref's name: one main, whatever the ref does.
+    code, tree, conflicted = merge_result(repo, ours, full)
     if code == 1:
         raise Red("merge", 1, "the merge would conflict, nothing begun:\n" + "\n".join(conflicted))
     if code != 0 or not tree:
@@ -256,11 +257,11 @@ def require_no_overlap(repo, full, branch):
     # The check runs on <sha>'s tree: a merge making any other tree lands what no check ran on.
     own_code, own = read(repo, "rev-parse", "--verify", "-q", full + "^{tree}")
     if own_code != 0 or tree != own:
-        _, log = read(repo, "log", "--oneline", "%s..%s" % (full, MAIN))
+        _, log = read(repo, "log", "--oneline", "%s..%s" % (full, ours))
         raise Red("sha", note="main holds what %s does not, so the check would not run on the tree "
                   "main would hold:\n%s\nmerge main into %s, land its new head"
                   % (full, log, branch))
-    code, touched = read_z(repo, "diff", "--name-only", "-z", "--no-renames", MAIN, tree)
+    code, touched = read_z(repo, "diff", "--name-only", "-z", "--no-renames", ours, tree)
     if code != 0:
         raise Red("main", note="cannot read the paths the merge touches")
     hit = sorted({d for d in dirty_paths(repo) if any(overlaps(d, t) for t in touched)})
@@ -268,8 +269,8 @@ def require_no_overlap(repo, full, branch):
         raise Red("main", note="dirty on main and touched by the merge:\n" + "\n".join(hit))
     # Status never lists an ignored file, and the merge would overwrite it.
     code, written = read_z(repo, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d",
-                           MAIN, tree)
-    tree_code, tracked = read_z(repo, "ls-tree", "-r", "-z", "--name-only", MAIN)
+                           ours, tree)
+    tree_code, tracked = read_z(repo, "ls-tree", "-r", "-z", "--name-only", ours)
     if code != 0 or tree_code != 0:
         raise Red("main", note="cannot read the paths the merge writes")
     tracked = set(tracked)

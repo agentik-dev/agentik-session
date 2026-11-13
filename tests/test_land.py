@@ -1128,10 +1128,14 @@ class TestAmendment3(LandCase):
         sha = self.branch("work", {"shared.txt": "the branch\n"})
         self.write(self.repo, "shared.txt", "main\n")
         self.git("commit", "-qam", "main")
-        # land2 R2: the clean read gives the branch's own tree, as a merge main is under does.
+        # land2 R2: the clean read gives the branch's own tree, as a merge main is under does;
+        # land2 R2-F2: merge-tree is given main's commit, so the reads before git merge are
+        # wrapped, not those naming refs/heads/main.
         tree = self.git("rev-parse", sha + "^{tree}")
-        env = self.git_wrapped('"merge-tree --write-tree") case "$*" in *refs/heads/main*) '
-                               'printf "%%s\\0" %s; exit 0;; esac;;' % tree)
+        merging = os.path.join(self.tmp, "merging")
+        env = self.git_wrapped('"merge --no-ff") touch "%s";; "merge-tree --write-tree") '
+                               '[ -e "%s" ] || { printf "%%s\\0" %s; exit 0; };;'
+                               % (merging, merging, tree))
         before = self.main_sha()
         p = self.land("work", sha, env=env)
         self.assertRed(p, "merge", 1)
