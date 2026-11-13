@@ -186,6 +186,50 @@ def test_config_ceilings_and_gate(box):
     assert s["value"] == 900 and s["source"] == {"layer": "user", "path": str(u), "line": 2}
 
 
+# ---- review 1, R1-F1: a secret's text is in no output of any read the plug adds --------------
+
+SECRET = "s3cr3t-topic-xyz"
+SECRET_FILES = {
+    "block": f"gate:\n  ntfy_topic: {SECRET}\n",
+    "padded": f"gate:\n  ntfy_url: https://ntfy.example.test\n  ntfy_topic: \"  {SECRET}  \"\n",
+    "flow": f"gate: {{ntfy_topic: {SECRET}, wall: 900}}\n",
+    "profile": f"profiles:\n  frontier:\n    effort: low\ngate:\n  ntfy_topic: '{SECRET}'\n",
+    "misplaced": f"defaults:\n  effort: low\n  gate:\n    ntfy_topic: {SECRET}\n",
+    "bad-line": f"gate:\n  ntfy_topic {SECRET}\n",
+    "bad-flow": f"gate: {{wall: 900, ntfy_topic {SECRET}}}\n",
+}
+SECRET_READS = (("describe", "--json"), ("describe", "config", "--json"),
+                ("describe", "config", "--json", "gate.ntfy_topic"),
+                ("describe", "config", "--json", "GATE.NTFY_TOPIC"), ("describe",),
+                ("doctor", "--json"), ("status", "--json"), ("gate", "status", "--json"),
+                ("unattended", "status", "--json"))
+
+
+@pytest.mark.parametrize("form", sorted(SECRET_FILES))
+def test_a_secret_is_in_no_output(box, form):
+    home, _ = box
+    u = user_file(home, SECRET_FILES[form])
+    for extra in ({}, {"CLAUDE_CODE_SESSION_ID": SID}):
+        for argv in SECRET_READS:
+            rc, out, err = sh(box, *argv, **extra)
+            for part in (SECRET, "s3cr3t"):
+                assert part not in out and part not in err, (form, argv, extra, out, err)
+    rc, d = config(box, "gate.ntfy_topic")
+    if form.startswith("bad-"):
+        line = 2 if form == "bad-line" else 1      # the file and the line still named
+        assert rc == 2 and d["error"]["code"] == "bad_file", d
+        assert d["error"]["message"].startswith(f"{u}: line {line}: "), d
+        return
+    s = d["settings"][0]
+    assert s["type"] == "secret" and s["key"] == "gate.ntfy_topic"
+    if form == "misplaced":
+        assert s["value"] is None and s["change"]["block"] == "gate:\n  ntfy_topic: null"
+        return
+    assert s["value"] == "(set)" and s["source"]["layer"] == "user"
+    assert [v["value"] for v in s["values"]] == [None, "(set)"]
+    assert s["change"]["block"] == 'gate:\n  ntfy_topic: "(set)"', s["change"]
+
+
 # ---- line 7: the session overlay ------------------------------------------------------------
 
 def test_config_session_posture(box):

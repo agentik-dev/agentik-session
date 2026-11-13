@@ -108,11 +108,13 @@ class Report:
     def as_dict(self) -> dict:
         """The plug's doctor read (packet ak5 R8): `ok` says the read ran; `failed` and `warned`
         count the statuses, so "no check failed" is `failed` 0. The exit stays `ok`'s."""
+        from .plug import withheld     # plug imports this module; a secret's text stays out
         st = [c.status for c in self.checks]
         return {"schema": "agentik.doctor/1", "ok": True, "tool": "session",
                 "failed": st.count("fail"), "warned": st.count("warn"),
-                "checks": [{"name": c.name, "ok": c.ok, "status": c.status, "detail": c.detail,
-                            "remedy": c.remedy} for c in self.checks]}
+                "checks": [{"name": c.name, "ok": c.ok, "status": c.status,
+                            "detail": withheld(c.detail), "remedy": c.remedy}
+                           for c in self.checks]}
 
 
 # --- the npm-style range matcher -------------------------------------------------

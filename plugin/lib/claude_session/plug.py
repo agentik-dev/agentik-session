@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -464,7 +465,7 @@ def _setting(f, key, path, value, default, rows, src_path) -> dict:
         source = {"layer": layer, "path": p, "line": line}
     else:
         layer, source = "default", {"layer": "default", "path": src_path, "line": None}
-    change, live = _change(f, key, path, layer, value)
+    change, live = _change(f, key, path, layer, shown(value))      # a secret's block: (set)
     return {"key": key.lower(), "value": shown(value), "default": shown(default),
             "type": _type(key, value, default), "choices": _choices(key, f),
             "summary": summary(key.lower()), "source": source, "change": change, "live": live,
@@ -552,8 +553,28 @@ def _sid(env) -> str | None:
     return sid if sid and len(sid) >= 8 and resolver._SID.match(sid) else None
 
 
+_AT_LINE = re.compile(r"(\S+): line (\d+): ")
+_QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
+
+
+def withheld(msg: str) -> str:
+    """The parser quotes the text of the line it refuses: withheld when that line holds a
+    secret's key (its value is on it), or when the line cannot be read again to tell. The
+    config read's error and the doctor read's details pass through it (review 1, R1-F1)."""
+    m = _AT_LINE.search(msg) if isinstance(msg, str) else None
+    if not m:
+        return msg
+    try:
+        text = Path(m.group(1)).read_text(errors="replace").splitlines()[int(m.group(2)) - 1]
+    except (OSError, IndexError, ValueError):
+        text = None
+    if text is not None and not any(k.rsplit(".", 1)[-1] in text for k in SECRETS):
+        return msg
+    return msg[:m.end()] + _QUOTED.sub("(withheld)", msg[m.end():])
+
+
 def _error(e, files) -> dict:
-    msg = " ".join(str(e).split()).replace("\x1b", "")
+    msg = withheld(" ".join(str(e).split()).replace("\x1b", ""))
     named = any(p and p in msg for p in files) or \
         msg.split(":", 1)[0] in ("config.yaml", "config.local.yaml", "profiles.yaml")
     return {"schema": "agentik.config/1", "ok": False, "tool": TOOL,
