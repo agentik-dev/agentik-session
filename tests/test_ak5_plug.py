@@ -1,0 +1,338 @@
+"""Packet ak5: `describe --json`, the config read, and the doctor and status reads in the plug's
+envelope (the suite's `agentik config`, `doctor` and `status` read these). Every line runs in a
+temp HOME with its XDG_* under it, a temp cwd, and no CLAUDE_* variable but those it names."""
+import io
+import json
+import os
+import subprocess
+import time
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+import pytest
+
+from claude_session import cli, gate, hooks, install, resolver
+
+ROOT = Path(__file__).resolve().parents[1]
+S = ROOT / "plugin" / "bin" / "agentik-session"
+SHIPPED = str(ROOT / "plugin" / "lib" / "claude_session" / "profiles.yaml")
+SID = "ak5-sess-0000-1111"
+SETTING_KEYS = {"key", "value", "default", "type", "choices", "summary", "source", "change",
+                "live", "values"}
+DESCRIBE_KEYS = {"schema", "ok", "tool", "version", "summary", "repo", "plugin", "needs",
+                 "verbs", "reads"}
+
+
+@pytest.fixture
+def box(tmp_path):
+    home, cwd = tmp_path / "home", tmp_path / "cwd"
+    home.mkdir()
+    cwd.mkdir()
+    return home, cwd
+
+
+def _env(home, **extra):
+    env = {"HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache"),
+           "XDG_STATE_HOME": str(home / ".local" / "state"),
+           "XDG_CONFIG_HOME": str(home / ".config"),
+           "XDG_DATA_HOME": str(home / ".local" / "share"),
+           "PATH": "/usr/bin:/bin", "TERM": "dumb"}
+    env.update(extra)
+    return env
+
+
+def sh(box, *argv, **extra):
+    home, cwd = box
+    p = subprocess.run([str(S), *argv], cwd=str(cwd), env=_env(home, **extra),
+                       capture_output=True, timeout=60)
+    return p.returncode, p.stdout.decode(), p.stderr.decode()
+
+
+def user_file(home, text):
+    p = home / ".claude" / "agentik" / "profiles.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    return p
+
+
+def repo_file(cwd, text):
+    p = cwd / ".claude" / "agentik" / "config.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    return p
+
+
+def config(box, *words, **extra):
+    rc, out, err = sh(box, "describe", "config", "--json", *words, **extra)
+    return rc, json.loads(out)
+
+
+def one(box, key, **extra):
+    rc, d = config(box, key, **extra)
+    assert rc == 0 and d["ok"] is True, d
+    assert len(d["settings"]) == 1, d["settings"]
+    return d["settings"][0]
+
+
+# ---- line 1: describe --json ---------------------------------------------------------------
+
+def test_describe_json(box):
+    t0 = time.monotonic()
+    rc, out, _ = sh(box, "describe", "--json")
+    took = time.monotonic() - t0
+    assert rc == 0 and "\x1b" not in out and out.endswith("}\n")
+    d = json.loads(out)
+    assert DESCRIBE_KEYS <= set(d)
+    assert d["schema"] == "agentik.describe/1" and d["ok"] is True and d["tool"] == "session"
+    assert len(d["summary"]) < 80 and d["plugin"] == "session@agentik"
+    assert [r["name"] for r in d["reads"]] == ["config", "doctor", "meter", "gate", "unattended"]
+    assert [r["kind"] for r in d["reads"]] == ["config", "doctor", "status", "status", "status"]
+    assert d["reads"][0]["argv"] == ["describe", "config", "--json"]
+    assert d["reads"][1]["argv"] == ["doctor", "--json"]
+    assert all(v["top"] is False for v in d["verbs"])
+    names = [v["name"] for v in d["verbs"]]
+    assert "hook" not in names and names[:3] == ["start", "config", "doctor"]
+    assert "describe" in names
+    assert {"claude", "git"} <= {n["name"] for n in d["needs"] if n["kind"] == "program"}
+    assert {n["name"] for n in d["needs"] if n["kind"] == "plugin"} == \
+        {"decisions@agentik", "respeak@agentik", "relay@agentik"}
+    assert took < 1.0
+
+
+def test_describe_refusals(box):
+    assert sh(box, "describe")[0] == 2
+    assert "describe --json" in sh(box, "describe")[2]
+    assert sh(box, "describe", "nosuch", "--json")[0] == 2
+
+
+# ---- line 2: an empty HOME ------------------------------------------------------------------
+
+def test_config_empty_home(box):
+    home, _ = box
+    rc, d = config(box)
+    assert rc == 0 and d["schema"] == "agentik.config/1" and d["ok"] is True
+    layers = [x["name"] for x in d["layers"]]
+    assert layers[:6] == ["default", "user-defaults", "profile", "user", "repo", "local"]
+    keys = [s["key"] for s in d["settings"]]
+    assert len(keys) == len(set(keys))
+    for s in d["settings"]:
+        assert set(s) == SETTING_KEYS, s["key"]
+        assert set(s["change"]) == {"kind", "command", "path", "block", "note"}
+        assert s["value"] == s["default"], s["key"]
+        assert not str(s["source"]["path"] or "").startswith(str(home)), s["key"]
+        assert s["source"]["layer"] in layers and all(v["layer"] in layers for v in s["values"])
+        assert len(s["summary"]) < 100 and not s["summary"].startswith("This setting")
+    eff = next(s for s in d["settings"] if s["key"] == "effort")
+    assert eff["value"] == "high"
+    assert eff["source"] == {"layer": "profile", "path": SHIPPED, "line": 86}
+    assert [v["layer"] for v in eff["values"]] == ["default", "profile"]
+    assert {"tiers.build.model", "gate.wall", "ceilings.context", "posture"} <= set(keys)
+    assert not {"description", "subagents", "window", "models"} & set(keys)
+
+
+# ---- line 3: a repo file --------------------------------------------------------------------
+
+def test_config_repo_effort(box):
+    home, cwd = box
+    f = repo_file(cwd, "# a made-up repo\nsession:\n  effort: medium\n")
+    s = one(box, "effort")
+    assert s["value"] == "medium" and s["default"] == "high"
+    assert s["source"] == {"layer": "repo", "path": str(f), "line": 3}
+    assert s["change"]["kind"] == "edit" and s["change"]["path"] == str(f)
+    assert s["change"]["block"] == "session:\n  effort: medium"
+    assert s["live"] is False
+    f.unlink()
+    s = one(box, "effort")
+    assert s["source"] == {"layer": "profile", "path": SHIPPED, "line": 86}
+    assert s["change"]["path"] == str(home / ".claude" / "agentik" / "profiles.yaml")
+
+
+# ---- line 4: a user file --------------------------------------------------------------------
+
+def test_config_user_effort(box):
+    home, _ = box
+    f = user_file(home, "defaults:\n  effort: max\nprofiles:\n  frontier:\n    effort: low\n")
+    s = one(box, "effort")
+    assert s["value"] == "low"
+    assert s["source"] == {"layer": "user", "path": str(f), "line": 5}
+    assert [v["layer"] for v in s["values"]] == ["default", "user-defaults", "profile", "user"]
+
+
+# ---- line 5: a user tier --------------------------------------------------------------------
+
+def test_config_user_tier(box):
+    home, _ = box
+    f = user_file(home, "tiers:\n  build: {model: sonnet}\n")
+    s = one(box, "tiers.build.model")
+    assert s["value"] == "sonnet"
+    assert s["source"] == {"layer": "user", "path": str(f), "line": 2}
+    assert s["change"]["kind"] == "command"
+    assert s["change"]["command"] == "agentik session set tier.build VALUE --save"
+
+
+# ---- line 6: a flow map, and the gate -------------------------------------------------------
+
+def test_config_ceilings_and_gate(box):
+    home, cwd = box
+    f = repo_file(cwd, "session:\n  ceilings: {context: 150000, turns: 300}\n")
+    s = one(box, "ceilings.context")
+    assert s["value"] == 150000 and s["source"] == {"layer": "repo", "path": str(f), "line": 2}
+    u = user_file(home, "gate:\n  wall: 900\n")
+    s = one(box, "gate.wall")
+    assert s["value"] == 900 and s["source"] == {"layer": "user", "path": str(u), "line": 2}
+
+
+# ---- line 7: the session overlay ------------------------------------------------------------
+
+def test_config_session_posture(box):
+    home, _ = box
+    env = _env(home, CLAUDE_CODE_SESSION_ID=SID)
+    ov = resolver.state_dir(env) / "overlays" / f"{SID}.json"
+    ov.parent.mkdir(parents=True)
+    ov.write_text(json.dumps({"posture": "deny"}))
+    s = one(box, "posture", CLAUDE_CODE_SESSION_ID=SID)
+    assert s["value"] == "deny"
+    assert s["source"] == {"layer": "session", "path": str(ov), "line": None}
+    assert s["change"]["command"] == "agentik session set posture VALUE"
+    assert s["live"] is True
+
+
+# ---- line 8: every value is resolve's -------------------------------------------------------
+
+def _leaf(d, key):
+    for seg in key.split("."):
+        assert isinstance(d, dict), key
+        d = d[next(k for k in d if k.lower() == seg)] if any(k.lower() == seg for k in d) \
+            else None
+    return d
+
+
+@pytest.mark.parametrize("fixture", ["empty", "files", "scratch"])
+def test_values_are_resolves(box, fixture):
+    from claude_session import plug
+    home, cwd = box
+    extra = {}
+    if fixture == "files":
+        repo_file(cwd, "session:\n  effort: medium\n  ceilings: {context: 150000, turns: 300}\n")
+        user_file(home, "defaults:\n  effort: max\nprofiles:\n  frontier:\n    effort: low\n"
+                        "tiers:\n  build: {model: sonnet}\ngate:\n  wall: 900\n")
+    if fixture == "scratch":
+        extra["CLAUDE_SESSION_PROFILE"] = "scratch"
+    env = _env(home, **extra)
+    d, rc = plug.config_read(str(cwd), env)
+    assert rc == 0 and d["settings"]
+    r = resolver.resolve(cwd, "unsaved", env, profile=hooks.launch_profile(env))
+    g = resolver.gate_config(env)
+    for s in d["settings"]:
+        if s["key"].startswith("gate."):
+            want = g.get(s["key"][5:])
+            if s["type"] == "secret":
+                want = None if want is None else "(set)"
+        else:
+            want = _leaf(r.sections["session"], s["key"])
+        assert s["value"] == want, s["key"]
+
+
+# ---- line 9: an unknown key, an unknown word, a bad file ------------------------------------
+
+def test_config_unknowns_and_bad_file(box):
+    home, cwd = box
+    rc, d = config(box, "nosuch")
+    assert rc == 0 and d["ok"] is True and d["settings"] == []
+    f = repo_file(cwd, "session:\n  efort: low\n")
+    rc, d = config(box)
+    assert rc == 0 and len(d["warnings"]) == 1
+    w = d["warnings"][0]
+    assert w["reason"] == "unknown" and w["path"] == str(f) and w["line"] == 2
+    f.unlink()
+    u = user_file(home, "defaults:\n\teffort: low\n")
+    rc, d = config(box)
+    assert rc == 2 and d["ok"] is False and d["error"]["code"] == "bad_file"
+    assert str(u) in d["error"]["message"] and "\n" not in d["error"]["message"]
+
+
+# ---- line 11: doctor --json -----------------------------------------------------------------
+
+def test_doctor_json(box):
+    home, _ = box
+    rc, out, _ = sh(box, "doctor", "--json")
+    d = json.loads(out)
+    assert d["schema"] == "agentik.doctor/1" and d["ok"] is True and d["tool"] == "session"
+    st = [c["status"] for c in d["checks"]]
+    assert d["failed"] == st.count("fail") and d["warned"] == st.count("warn")
+    for c in d["checks"]:
+        assert {"name", "status", "detail", "remedy", "ok"} <= set(c)
+        assert c["status"] in ("ok", "note", "warn", "fail")
+        assert (c["status"] == "fail") == (not c["ok"])
+    by = {c["name"]: c for c in d["checks"]}
+    assert by["resolved"]["status"] == "note" and by["meter"]["status"] == "note"
+    rc_text = sh(box, "doctor")[0]
+    assert rc == rc_text
+    path = Path(install.launcher_path(_env(home)))
+    path.parent.mkdir(parents=True)
+    path.write_text(f"#!/bin/sh\nVERSION=2.0.0\nTREE={home / 'gone-tree'}\n")
+    d = json.loads(sh(box, "doctor", "--json")[1])
+    lau = next(c for c in d["checks"] if c["name"] == "launcher")
+    assert lau["status"] == "fail" and lau["remedy"] == "/session:install-cli"
+
+
+# ---- line 12: the status reads --------------------------------------------------------------
+
+def run(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            rc = cli.main(list(argv))
+        except SystemExit as e:
+            rc = e.code if isinstance(e.code, int) else 1
+    return rc, out.getvalue(), err.getvalue()
+
+
+def test_status_meter(box, monkeypatch):
+    home, _ = box
+    rc, out, err = sh(box, "status", "--json")
+    assert rc == 2 and out == "" and err.startswith("no meter for this session")
+    env = _env(home, CLAUDE_CODE_SESSION_ID=SID)
+    sdir = resolver.session_dir(resolver.state_dir(env), SID)
+    sdir.mkdir(parents=True)
+    (sdir / "meter.json").write_text(json.dumps({"context": 12, "turns": 3, "zone": "clear"}))
+    rc, out, _ = sh(box, "status", "--json", CLAUDE_CODE_SESSION_ID=SID)
+    d = json.loads(out)
+    assert rc == 0 and list(d)[:2] == ["schema", "ok"]
+    assert d["schema"] == "agentik.session.meter/1" and d["ok"] is True
+    assert {"context": 12, "turns": 3, "zone": "clear"}.items() <= d.items()
+
+
+def test_status_gate_and_unattended(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    rc, out, _ = run("gate", "status", "--json")          # the temp state root (conftest)
+    d = json.loads(out)
+    assert rc == 0 and list(d)[:2] == ["schema", "ok"]
+    assert d["schema"] == "agentik.session.gate/1" and "est" in d
+    rc, out, _ = run("unattended", "status", "--json")
+    assert rc == 0 and out.strip() == "null"
+
+
+# ---- line 13: nothing written under HOME but the cache -------------------------------------
+
+def _tree(home: Path) -> dict:
+    out = {}
+    for p in sorted(home.rglob("*")):
+        rel = p.relative_to(home)
+        if rel.parts[:2] == (".cache", "agentik") or rel.parts == (".cache",):
+            continue
+        out[str(rel)] = p.read_bytes() if p.is_file() and not p.is_symlink() else None
+    return out
+
+
+def test_reads_write_nothing(box):
+    home, cwd = box
+    user_file(home, "defaults:\n  effort: max\ntiers:\n  build: {model: sonnet}\n")
+    repo_file(cwd, "session:\n  efort: low\n")
+    before = _tree(home)
+    for argv in (("describe", "--json"), ("describe", "config", "--json"),
+                 ("describe", "config", "--json", "effort"),
+                 ("describe", "config", "--json", "nosuch"), ("describe",)):
+        sh(box, *argv)
+    sh(box, "describe", "config", "--json", CLAUDE_CODE_SESSION_ID=SID)
+    assert _tree(home) == before
