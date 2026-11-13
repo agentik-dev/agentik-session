@@ -16,14 +16,15 @@
 - [x] R3 (cli.py `cmd_checkpoint`, the parser's `paths`); test_cli changed for R3: `test_checkpoint_help_names_tracked_only` and `test_checkpoint_commit_stages_tracked_only` (renamed for the paths), and four respawn tests that ran `-c` with no path (s19's helper refusal and its control, s22's tracked and untracked charter) now name their paths
 - [x] R4 (commit.py `_gate_check` writes the mark in a `finally`, the signals held; gate.py `cancel`, `cancel_path`, `_step` closes a marked entry unrun, `_reap` cuts a marked child as the wall does, `_finish` and `_sweep_marks` drop marks); test_gate, test_fw2, test_fw4c, test_fw4d, test_s47 green (240)
 - [x] R5 (cli.py `cmd_gate`, `_own_entry`): `gate run --wait` of the job's own key and `gate wait` of a queued id of that key exit 2; the six named test files green under `.venv-floor` (175)
-- [ ] docs (README, RUNBOOK, SKILL.md, the checkpoint command, help) and the four NICE rows out
+- [x] docs (README and source, sidecar by `shasum`, RUNBOOK §checkpoint and §6, SKILL.md, the checkpoint command, help) and n71, n78, n81, n84 out of NICE; doclint and recordlint pass; the README's test count (3455, now 3473 collected) left for phase 2
+- [ ] phase 2: main merged, the version, the gate's `make check` once
 
 ## Handover
 - Choice: a modified tracked charter passes `--respawn` with `--commit` only when the line names it (or a directory over it); before, `-c` took it by its sweep.
 - decide, owner: none.
 
 ## Next act
-- The docs (README and its source, RUNBOOK, SKILL.md, the checkpoint command) and the four NICE rows out.
+- Phase 1 is done. One review, then phase 2 in the landing order: main merged, the README's test count, the version alone last under `plugin/`, the gate's `make check` once.
 
 ## Exit
-- (open)
+- Phase 1 at the commits: R1 to R5 built and the docs, the six named test files green under `.venv` and `.venv-floor`; no gate job, no version bump (the brief's amendments).

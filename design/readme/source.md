@@ -30,7 +30,7 @@ Each command wraps one CLI verb.
 | `/session:status` | `/session:status --json` | this session's meter: context, turns, zone |
 | `/session:profile` | `/session:profile builder` | list the profiles, or show one resolved for this repo |
 | `/session:set` | `/session:set posture ask` | change one setting for this session |
-| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only |
+| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit a.md` | mark a handoff-ready point; `--commit` takes the named paths alone |
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
 | `/session:gate` | `/session:gate --json` | the gate queue: running, queued, the last five done |
