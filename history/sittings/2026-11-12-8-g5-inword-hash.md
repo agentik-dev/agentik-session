@@ -1,26 +1,22 @@
-# Sitting 2026-11-12-8: agentik-session, g5 an in-word `#` no longer hides a write from the guard
+# Sitting 2026-11-12-8: agentik-session, g5 an in-word `#` no longer hides a write; g6 its loose second reading
 
 | item | value |
 |---|---|
-| goal | brief g5, S1: R1 to R3, phase 1; 1b: round 1's F1 to F4; 1c: round 2's R2-F1 to F4; 1d: round 3's R3-F1 to F7 (rulings R1 to R11); packet `design/packets/g5-inword-hash.md` |
-| budget | builder: about 90 tool calls per phase |
-| pin | 8153e52 on main (alpha.91); phase 1d from f1f012e; worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
+| goal | brief g5, S1, phases 1 to 1d (round 3's R3-F1 to F7); build 2: brief g6 R1 to R8 with the coordinator's amendments; packet `design/packets/g5-inword-hash.md` (§3c, §3d) |
+| budget | builder: about 90 tool calls per build |
+| pin | 8153e52 on main (alpha.91); phase 1d from f1f012e; g6 from a0055da; worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
 | window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [x] phases 1 to 1c, at f1f012e: `_mask` alone decides a comment; round 1's F1 to F4 (cc4a20a), F5 NICE n161; round 2's four and bash 3.2's reading of `${` in `$(` (faf70cb); the packet's §3a, §3b
-- [x] phase 1d measurement: g6's loose prototype lists `CLAUDE.md` on every R3-F line and lead; its accounting passes F1b, F1c (round 3's b, c) and leads 2, 4, where the strict reading read the word in another folder or none
-- [x] 1d R1 (R3-F1): `_commands` reads a `case` glued to its opening backtick and (a choice) an `esac` glued to its closing one; R8: the unmasked `)` as proposed passed a line f1f012e denied and zsh writes (a `cd` in a case body in backticks), so the first reading masks it again (c4f6d7d); then, as bash3 left a write in a `${` in a `$(` unread, a third reading that masks no pattern `)` in backticks joins the union, and an escaped or quoted backtick is masked so `_commands` takes no `\`case` for a glued one
-- [x] 1d R2 (R3-F2): a backtick opened in a `${` goes on `opened` till it closes (a `)` there pops nothing); fuzz 40k: no line head denied and a shell writes passes
-- [x] 1d R3 (R3-F3): the bash3 reading counts no `case`, taken whenever its mask differs
-- [x] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not, read again from the backslashes before it, where it stands inside an escaped pair; else at the first unescaped one (R8: as proposed it read `# \`x\` don't` as code, round 2's L5); F4 without `; echo b`: `[]` at f1f012e, `[(write, None)]` after R4
-- [x] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
-- [x] 1d R6 (R3-F6 a): backticks stripped from the ends of a command's words and its redirects' (an empty one dropped), but a word that would become `cd`, `pushd` or `popd` keeps them (R8: `\`cd docs\`` moves no folder); F4 without `; echo b`: the write after R6
-- [x] 1d R7 (R3-F7): a comment's backtick searched to its newline only; 60 KB in one backtick pair 0.012 s (.venv), 0.017 s (floor); f1f012e 3.6 s
-- [x] 1d R8 for R2, R6: a `)` closing nothing in a `${`'s backtick masked; only a trailing lone backtick dropped
-- [x] 1d: packet §3c, this record; three guard files 341 passed under `.venv` and `.venv-floor`; fuzz 2 x 100k vs four commits: no line f1f012e denied passes where a shell writes
-- [ ] phase 2, on the coordinator's word, after g6's loose reading on this branch
+- [x] phases 1 to 1d, at a0055da: `_mask` alone decides a comment; rounds 1 to 3 fixed (packet §3a to §3c); 341 guard tests green under both venvs; fuzz 2 x 100k vs four commits clean
+- [x] g6 packet §3d with a0055da's baseline (a556120)
+- [x] g6 R4 to R6 (018e702): `_WRITE_WORD` on the joined text; reserved words skipped as a wrapper; an inner `-c` that cannot be split gives the `split` mark
+- [x] g6 R1 to R3: `loose_targets` (pure), `_strict` names each target's word and folder, `_loose_gated` accounts by path, the loose folder moves only on a plain prefix; its own reason, `why` in `guard.jsonl`; 441 guard tests green under both venvs; round 3's 27 lines and g6's 41 at six commits: every write denied, REGRESS 0
+- [x] tests moved: nine lines a0055da passed with an `open` line (an open quote, `cd $X`, `popd`, `cd -`, a stray `)`, a trailing `\`, `echo '>> CLAUDE.md'`) are now the loose reading's; with it off they pass as at a0055da (a test)
+- [ ] g6 R8 records: head comment, RUNBOOK, NICE (n131, n132, n138, n161 close; one S3, one S4 row)
+- [ ] g6 checks: round 3's command, 2 x 100k fuzz vs five commits, the replay
+- [ ] phase 2, on the coordinator's word
 
 ## Handover
 - The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write.
@@ -28,7 +24,7 @@
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
-- g6's loose reading on this branch from a0055da, ordered by the coordinator, not started: this builder passed its tool-call bound at phase 1d's end. A fresh builder takes it: the g6 brief's R1 to R8 with the coordinator's amendments (pin a0055da; R2 accounts a strict word only where it resolved to the loose path in the call's folder, else tries the call's folder; each round 3 line and lead a test; rerun round 3's command and 2 x 100k fuzz vs the five commits).
+- g6 R1 to R3 on this branch, then R8's records and the checks.
 
 ## Exit
-Phase 1d landed: R3-F1 to F7 denied but F6 b (left to g6); waits on the coordinator.
+Open: g6 build 2 in flight.

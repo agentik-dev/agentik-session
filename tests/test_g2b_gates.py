@@ -245,12 +245,12 @@ def test_3_a_list_files_removal_denies(box, command):
 
 
 PASSED = ["echo x >> $X", "echo x >> \"$HOME/CLAUDE.md\"", "echo x >> CLAUDE.m*",
-          "echo x >> `pwd`/CLAUDE.md", "echo 'x >> CLAUDE.md", "echo x >> notes.md",
+          "echo x >> `pwd`/CLAUDE.md", "echo x >> notes.md",
           "agentik decisions render --into CLAUDE.md",
           "agentik session gates write CLAUDE.md --from /tmp/d.md --expect 0123abcd",
           "cat CLAUDE.md", "grep x CLAUDE.md > /tmp/out.txt", "git status",
           "git checkout -- CLAUDE.md.orig", "cp CLAUDE.md /tmp/x", "mv /tmp/a /tmp/b",
-          "echo '>> CLAUDE.md'", "python3 -c \"print('CLAUDE.md')\"", "rm notes.md",
+          "python3 -c \"print('CLAUDE.md')\"", "rm notes.md",
           "sed 's/a/b/' CLAUDE.md > /tmp/y", "ls 2>&1 | head", "echo x >&2"]
 
 
@@ -513,8 +513,7 @@ def test_f1_a_subshells_or_a_popds_folder_does_not_outlive_it(box, command):
 
 
 @pytest.mark.parametrize("command", [
-    "popd; printf x >> CLAUDE.md", "cd $X; printf x >> CLAUDE.md", "cd - && echo x > CLAUDE.md",
-    "echo x >> $X", "echo x >> CLAUDE.m*", "echo 'x >> CLAUDE.md",
+    "echo x >> $X", "echo x >> CLAUDE.m*", "cd $X; printf x >> $Y",
 ])
 def test_f6_an_unresolved_bash_target_passes_with_one_open_line(box, command):
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
@@ -551,7 +550,8 @@ def test_r2_each_repro_denies(box, where, command):
 
 
 def test_r2_an_unmatched_paren_leaves_the_folder_unknown(box):
-    command = "cd docs; ) ; printf x >> ../CLAUDE.md"
+    command = "cd sub; ) ; printf x >> ../notes.md"
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == [("write", None)]
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
     assert [r["decision"] for r in _log(box)] == ["open"]
 
@@ -615,7 +615,7 @@ def test_g5_r1_the_commands_before_a_split_failure_are_judged(box, command):
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
 
 
-@pytest.mark.parametrize("command", ["cp a CLAUDE.md \\", "echo 'a; cp a CLAUDE.md",
+@pytest.mark.parametrize("command", ["cp a notes.md \\", "echo 'a; cp a notes.md",
                                      "cp a notes.md; echo x\\"])
 def test_g5_r1_a_line_that_cannot_be_judged_still_passes_with_one_open_line(box, command):
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
@@ -777,3 +777,147 @@ def test_g6_r6_an_unread_inner_line_marks_the_split(box):
     found = instructionguard.bash_targets("bash -c \"echo 'x\"; echo y > a.txt", str(box.repo),
                                           box.env)
     assert found == [("split", None), ("write", str(box.repo / "a.txt"))]
+
+
+# ---- g6 R1 to R3: the loose second reading (packet §3d) -----------------------------------
+
+LOOSE_REASON = ("agentik-session: `{}` is gated, and this Bash line may write it: the line was "
+                "not read with confidence. To change the file use the `" + SKILL + "` skill, "
+                "which writes it through `agentik session gates write` on the owner's yes. A "
+                "line that only carries such text as data keeps the text in a file and names "
+                "the file.")
+
+
+@pytest.fixture
+def strict_only(monkeypatch):
+    monkeypatch.setattr(instructionguard, "_loose_gated", lambda *a, **k: None)
+
+
+def _denied(box, command, where=""):
+    out = instructionguard.check(_bash(command, box.repo / where if where else box.repo),
+                                 box.env)
+    return _decision(out)[0] == "deny", out
+
+
+# g6's 19 lines (a write a shell runs), n131's and n138's: acceptance 1
+G6_A1 = [
+    "cp a CLAUDE.md \\", "if true; then cp a CLAUDE.md; fi", "for i in 1; do cp a CLAUDE.md; done",
+    "if false; then :; else cp a CLAUDE.md; fi", "{ cp a CLAUDE.md; }", "! cp a CLAUDE.md",
+    "cat <(echo a)#c" + W, "cat >(echo a)#c" + W, "a=(1 2)#c" + W,
+    "echo $(case x in x) echo a;; esac)#c" + W, "cp a CLAUDE.md; bash -c \"echo 'x\"",
+    "bash -c \"echo 'x\"" + W, "c\\\np a CLAUDE.md", "cat <<EOF \\\n| cp a CLAUDE.md\nbody\nEOF",
+    "echo ${x:-`echo a # don't`}" + W, "echo x # <<EOF" + N, "cat <<EOF#c" + N,
+    "echo $'\\' #'" + N, "x=$((1<<2))\nprintf x >> CLAUDE.md",                     # n161, n132
+    "bash -lc 'printf x >> CLAUDE.md'", "{ cd sub; printf x >> ../CLAUDE.md; }"]    # n131, n138
+G6_A2 = ["cat CLAUDE.md; cat <(echo a)#c" + W,
+         "sed -i '' 's/the CLAUDE.md file/x/' notes.md; cat <(echo a)#c" + W,
+         "cat <(echo a)#c; cp a CLAUDE.md # note"]
+# round 3's lines that a0055da still passed: F6 b and leads 2 to 5
+G6_R3 = ["}$(echo a)echo #\\\n{# don't\ncp a CLAUDE.md;}", "(cd sub; case x in esac)" + W,
+         "echo $(case x in (case) echo;; esac)#c" + W,
+         "echo $(case x\nin x)#don't\necho a;; esac)" + W, "echo a; {# don't\ncp a CLAUDE.md;}"]
+
+
+@pytest.mark.parametrize("command", G6_A1 + G6_A2 + G6_R3)
+def test_g6_a1_a2_round3_each_line_is_denied_by_one_reading(box, command):
+    (box.repo / "sub").mkdir()
+    denied, out = _denied(box, command)
+    assert denied, command
+    assert _decision(out)[1] in (REASON.format(box.repo / "CLAUDE.md"),
+                                 LOOSE_REASON.format(box.repo / "CLAUDE.md"))
+
+
+G6_A3 = ["git add CLAUDE.md", "cp CLAUDE.md /tmp/x # a backup of CLAUDE.md",
+         "git diff CLAUDE.md > /tmp/d", "wc -c CLAUDE.md | tee /tmp/n",
+         "git commit -m 'render -> CLAUDE.md'", "git commit -m 'the list at <folder>/CLAUDE.md'",
+         "cd /tmp/box && cp a CLAUDE.md", "grep -n 'a\\|install b' CLAUDE.md",
+         "sed -i '' 's/the CLAUDE.md file/x/' notes.md",
+         "if test -f CLAUDE.md; then head -3 CLAUDE.md; fi",
+         "cd /tmp/box && mv CLAUDE.md CLAUDE.md", "cd /tmp/box; cp a CLAUDE.md 2>&1 | tail -1"]
+
+
+@pytest.mark.parametrize("command", G6_A3)
+def test_g6_a3_ordinary_lines_still_pass(box, command):
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+
+
+# The price: text that holds a write, refused by the loose reading (acceptance 4), and the lines
+# a0055da passed with an `open` line that the loose reading now refuses (R2: a raise, and a word
+# the strict reading resolved to nothing, stand for no loose target).
+G6_PRICE = [
+    "cat > /tmp/fix.sh <<'EOF'\ncd \"$T\" && printf x > CLAUDE.md\nEOF",
+    "for c in 'printf x >> CLAUDE.md' 'echo ok'; do try \"$c\"; done",
+    "git commit -F - <<'EOF'\ncp a CLAUDE.md\nEOF", "echo 'to restore: cd repo; mv /tmp/old CLAUDE.md'",
+    "cat > /tmp/cases.txt <<'EOF'\nrm .claude/edit-gates\nEOF", "grep -E 'a|tee' CLAUDE.md",
+    "git commit -m 'a; tee b' -- CLAUDE.md"]
+G6_WAS_OPEN = ["echo 'x >> CLAUDE.md", "echo '>> CLAUDE.md'", "popd; printf x >> CLAUDE.md",
+               "cd $X; printf x >> CLAUDE.md", "cd - && echo x > CLAUDE.md",
+               "cd sub; ) ; printf x >> ../CLAUDE.md", "cp a CLAUDE.md \\",
+               "echo 'a; cp a CLAUDE.md"]
+
+
+@pytest.mark.parametrize("command", G6_PRICE + G6_WAS_OPEN)
+def test_g6_a4_the_loose_reading_refuses_with_its_own_reason(box, command):
+    (box.repo / "sub").mkdir()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    path = box.repo / (".claude/edit-gates" if "edit-gates" in command else "CLAUDE.md")
+    path = box.tree / "CLAUDE.md" if ") ;" in command else path     # `../` from the call's folder
+    assert _decision(out) == ("deny", LOOSE_REASON.format(path)), command
+    assert [(r["decision"], r["why"]) for r in _log(box)] == [("deny", "the loose reading")]
+
+
+@pytest.mark.parametrize("command", G6_WAS_OPEN)
+def test_g6_with_the_loose_reading_off_the_strict_reading_passes_as_at_a0055da(
+        box, strict_only, command):
+    (box.repo / "sub").mkdir()
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+    assert [r["decision"] for r in _log(box)] == ([] if command.startswith("echo '>>") else
+                                                  ["open"])
+
+
+@pytest.mark.parametrize("command", G6_A1[1:6] + G6_A1[10:13] + G6_A1[-1:])
+def test_g6_with_the_loose_reading_off_r4_to_r6_still_deny(box, strict_only, command):
+    (box.repo / "sub").mkdir()
+    assert _denied(box, command)[0], command
+
+
+def test_g6_a_strict_deny_logs_its_reading(box):
+    instructionguard.check(_bash("cp a CLAUDE.md", box.repo), box.env)
+    assert [(r["decision"], r["why"]) for r in _log(box)] == [("deny", "the strict reading")]
+
+
+@pytest.mark.parametrize("command", [
+    "if false; then cd /tmp/box; fi; cp a CLAUDE.md",     # R5 reads the `cd`; it may not run
+    "while false; do cd /tmp/box; done" + W, "(cd /tmp/box; case x in esac)" + W,
+    "cd /tmp/box # here\ncp a CLAUDE.md", "cd /tmp/box\\ ; cp a CLAUDE.md",
+    "cd sub; echo $(case x in esac); cp a ../CLAUDE.md", "cd /tmp/box && cp a CLAUDE.md & cd -" + W,
+])
+def test_g6_a_cd_the_loose_reading_does_not_follow_leaves_the_call_folder(box, command):
+    (box.repo / "sub").mkdir()
+    assert _denied(box, command)[0], command
+
+
+@pytest.mark.parametrize("command,targets", [
+    ("cp a b; echo x > c", [("write", "b"), ("write", "c")]),
+    ("echo '>> CLAUDE.md' # x > y", [("write", "CLAUDE.md"), ("write", "y")]),
+    ("bash -lc 'cp a b'", [("write", "b")]),
+    ("x=1 sudo tee -a f g", [("write", "f"), ("write", "g")]),
+    ("mv a b c/", [("write", "c/"), ("remove", "a"), ("remove", "b")]),
+    ("cp -t d a b", [("write", "d/a"), ("write", "d/b")]),
+    ("git -C sub rm -q x; git checkout HEAD -- y", [("remove", "sub/x"), ("remove", "y")]),
+    ("echo a->b=>c >&2 2>&1", []), ("grep 'a\\|tee b' f", []), ("rm -rf a #b", [("remove", "a")]),
+    ("c\\\np a b", [("write", "b")]), ("eval 'rm x'", [("remove", "x")]),
+])
+def test_g6_r1_loose_targets_is_pure(monkeypatch, command, targets):
+    def boom(*a, **k):
+        raise AssertionError("the loose reading opened a file")
+    monkeypatch.setattr(os.path, "isdir", boom)
+    monkeypatch.setattr(os, "stat", boom)
+    assert instructionguard.loose_targets(command) == targets
+
+
+def test_g6_a_100kb_line_is_read_in_time(box):
+    for command in ("echo x > a.txt; " * 6000, "cp a b; mv c d; " * 6000):
+        began = time.monotonic()
+        assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+        assert time.monotonic() - began < 2.0
