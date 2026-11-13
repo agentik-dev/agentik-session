@@ -1,8 +1,9 @@
 """install-cli (design/04 §2, §3, §5; packet sc3): the launcher on PATH, with no checkout or venv.
 
 It freezes the code this module runs from, whichever plugin or frozen tree that is, under
-<prefix>/share/agentik-session/<content hash>/, writes <prefix>/bin/agentik-session, its link and
-the `agentik` door, each by a temp file and a rename, and prunes. Stdlib, 3.9, and light at import:
+<prefix>/share/agentik-session/<content hash>/, writes <prefix>/bin/agentik-session, its link and,
+where none or an older one is there, the `agentik` door, each by a temp file and a rename, and
+prunes. Stdlib, 3.9, and light at import:
 every hook imports it for `restore_parent_env`.
 """
 import os
@@ -228,6 +229,30 @@ def _write_door(path, door):
     _replace(path, write)
 
 
+def _door(path, door):
+    """The shared `agentik` door moves forward only, as the canonical module's `_door` (packet
+    dw1s): absent or older, it is written; equal or newer, it stays byte for byte; a link, or a
+    VERSION line here or there that does not read as a version, leaves it alone. None, or the
+    line that says why it stayed. This module's own readers: `agentik_install` is not always
+    beside a package installed by pip. What is not a regular file there (a FIFO, a directory) is
+    never opened: it has no version. The line's values are escaped to ASCII, so any byte prints."""
+    if not os.path.lexists(path):
+        _write_door(path, door)
+        return None
+    if os.path.islink(path):
+        return "the door %s is a link; left alone" % path
+    theirs = (read_launcher(path) or {}).get("version") if os.path.isfile(path) else None
+    ours = (read_launcher(door) or {}).get("version")
+    a, b = order(theirs), order(ours)
+    if a is None or b is None:
+        shown = [v and v.encode("utf-8", "surrogateescape").decode("ascii", "backslashreplace")
+                 for v in (theirs, ours)]
+        return "the door %s has no version to compare (%s there, %s here); left alone" % (path, shown[0], shown[1])
+    if b > a:
+        _write_door(path, door)
+    return None
+
+
 def _clear_marker(env):
     state = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME", ""), ".local", "state")
     from . import config
@@ -272,7 +297,7 @@ def _locked_install(prefix, share, env, ps_timeout=60):
     tree = _freeze(share, lib, manifest, door)
     code = os.path.join(share, tree)
     launcher = os.path.join(bin_dir, NAME)
-    _write_door(os.path.join(bin_dir, DOOR), door)
+    note = _door(os.path.join(bin_dir, DOOR), door)
     _replace(os.path.join(bin_dir, OLD_NAME), lambda temp: os.symlink(NAME, temp))
     _write_launcher(launcher, launcher_text(code, version))    # last: what a retry reads
     try:
@@ -281,6 +306,8 @@ def _locked_install(prefix, share, env, ps_timeout=60):
         pruned, lines = 1, ["prune-trees: %s" % e]
     if pruned:
         lines.append("the prune failed; every old tree kept")
+    if note:
+        lines.insert(0, note)
     _clear_marker(env)
     return {"launcher": launcher, "tree": code, "version": version, "door": os.path.join(bin_dir, DOOR),
             "link": os.path.join(bin_dir, OLD_NAME), "pruned": lines}

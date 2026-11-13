@@ -17,7 +17,9 @@ resolves to deny, even though Claude Code still reports success. Read section
    `~/.local/share/agentik-session/<hash>/` (`<hash>` is of their names and contents, so a
    version bump alone is a new tree; an older copy is pruned unless a running
    process names it, on its command line or in its environment, or it is among the newest
-   three) and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
+   three), writes `~/.local/bin/agentik` where none or an older door is there (a newer or
+   equal door stays byte for byte; a link, or a door with no `VERSION=` to compare, is left
+   alone with one line), and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
    runs that copy under `/usr/bin/python3` with `-I`, so
    neither the directory a command runs in nor a checkout can change it, with no clone or
    venv. `AGENTIK_PYTHON` names another interpreter; `python3` on PATH is the fallback. What
@@ -397,6 +399,22 @@ above the role's (fable, opus, sonnet, haiku, local, highest first), the spawn
 gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
 naming no role meets the family rule alone: a Fable helper starts only under a
 Fable session, in every posture.
+
+The type's model counts. A call that names no `model` is judged, by the family
+rule and the role check alike, on the `model:` in its agent type's frontmatter.
+A type is found as Claude Code names it: by the file's frontmatter `name:`,
+else the file's name. A type `<name>` is looked up in the `.claude/agents`
+folders of the working directory and each ancestor up to the repo's root (the
+folder holding `.git`), then `$CLAUDE_PROJECT_DIR`'s, the nearest folder that
+defines it winning, else the user's (`$CLAUDE_CONFIG_DIR`, else `~/.claude`,
+then `agents/`). A plugin's type `<plugin>[:<folder>...]:<name>` is looked up in
+`<installPath>/agents` (its subfolders the type's namespace) of each install of
+`<plugin>@<marketplace>` in that folder's `plugins/installed_plugins.json`. Where
+two files claim one type, the highest family counts. Only regular files are
+read, the frontmatter to 256 KB. A refusal names the type and its model; name
+`model: 'opus'` on the call, which outranks the file. A type with no file, no
+`model:` line or `model: inherit`, and a built-in type, meet no rule;
+`CLAUDE_CODE_SUBAGENT_MODEL` is not read.
 
 The start applies the profile. `start <profile>` takes every profile
 `profile` lists. A start, and each start of `run`, whose claude arguments name
@@ -802,7 +820,16 @@ agentik session gate status                       # running, queued, the last fi
   lines go to stderr, and the exit is the job's; a log with no land line reads
   `red gate`. Inside a gate job the queue form refuses, since it would wait on
   its own repo until the wall: the job itself is `gate land --in-job`, which
-  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark.
+  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark. Four refusals
+  keep work and the check (packet land2), each read before the check and again
+  before the merge, main untouched: `red worktree` when another worktree sits
+  under the branch's, clean or dirty, named with its status lines, since
+  `worktree remove` would take it; `red sha` when main holds commits the
+  branch lacks, so the merge's tree is not the one checked (merge main into
+  the branch, land its new head); `red merge-file` when line 1 is not `Merge
+  <branch>: <text>` or line 2 is not blank; and `red merge-file` with
+  hygiene's code when `scripts/hygiene --commits` refuses the merge commit's
+  message, made as a dangling commit and scanned as `<sha>..<commit>`.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.

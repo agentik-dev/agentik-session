@@ -5,7 +5,8 @@
 
 A bare <repo> is that checkout in ~/code, else the one a folder below; one with a slash is a
 path; the cwd never decides. <sha> is a prefix of the commit, never a ref's name. Runs, in
-order: `make check` in the branch's worktree, `scripts/hygiene` there when present, then
+order: the merge message's scan (below), `make check` in the branch's worktree, `scripts/hygiene`
+there when present, then
 `scripts/hygiene --require-private --commits refs/heads/main..<sha>` there when its --help names
 `--commits`, `git merge --no-ff --commit -F <merge-file> <sha>` in the repo's main checkout,
 `git worktree remove`, `git branch -D`. Stdout is one line, the verdict, and it comes last:
@@ -20,16 +21,28 @@ own output and these notes go to stderr. In the job both streams reach the job's
 verdict is the job's last line before the gate's own; `gate land` prints that line on its stdout
 and exits the job's code (`gate wait --strict`'s). A job's cwd is its repo.
 
-The steps: usage, repo (not the top of a main checkout), merge-file (not readable), main (not
-checked out; a merge, cherry-pick, revert or rebase under way there; any staged path, a `git add
--N` too; a dirty path the merge touches; a file the merge would write that main does not track,
-ignored or not, or a directory there holding one), worktree (the branch has none of its own, or
-it is locked, or dirty so a check there would not prove the sha, or its .venv is neither a link
-nor absent), sha (not the branch's head, or already on main), check, hygiene, merge (a conflict,
-read before the check, and read again after it; or git merge's own red), remove, branch (its sha
-is not on main, or it has moved), cut. Usage reports 2; a refusal of this script's own reports 1;
-a step that ran reports that step's code; any other error reports 1 at the step reached, its
-reason on stderr.
+The steps: usage, repo (not the top of a main checkout), merge-file (not readable; line 1 not
+`Merge <branch>: ` then a non-space character, or a line 2 that is not blank), main (not checked
+out; a merge, cherry-pick, revert or rebase under way there; any staged path, a `git add -N` too; a
+dirty path the merge touches; a file the merge would write that main does not track, ignored or
+not, or a directory there holding one), worktree (the branch has none of its own, or it is locked,
+or another worktree git lists, the main checkout included, sits under it, a parent of its directory
+being this worktree by device and inode, clean or dirty, which `worktree remove` would take, or
+dirty so a check there would not prove the sha, or its .venv is neither a link nor absent), sha
+(not the branch's head, or already on main, or behind main: the merge would make a tree other than
+<sha>'s, so the check would not run on what main would hold; merge main into the branch and land
+its new head), merge-file again (when `scripts/hygiene --help` names --commits, the merge commit is
+made as a dangling object, `git commit-tree <tree> -p <main as read> -p <sha> -F <merge-file>`, its
+stderr to the log, and `scripts/hygiene --require-private --commits <sha>..<it>` scans its message
+in the worktree, a non-zero exit red merge-file with hygiene's code; no ref is written), check,
+hygiene, merge (a conflict, read before the check, and read again after it; or git merge's own
+red), remove, branch (its sha is not on main, or it has moved), cut. After the check, before the
+merge, the nested worktrees, main's lead and the merge file's text and scan are read again with
+main and the worktree, since the check takes minutes; then main is read once more, and one that
+moved since the commit every merged-tree read was given is red sha, so nothing that takes time runs
+between the last read of main and the merge. Usage reports 2; a refusal of this script's own
+reports 1; a step that ran reports that step's code; any other error reports 1 at the step reached,
+its reason on stderr.
 
 A red before the merge leaves main unchanged. A `merge` red almost always does too: `git
 merge-tree` reads a conflict before the merge begins, one only git merge finds is aborted, never
@@ -144,15 +157,22 @@ def worktrees(repo):
     """`git worktree list`'s blocks as dicts, the main checkout first; Red when repo is not it."""
     if not os.path.isdir(repo):
         raise Red("repo", note="no such directory: " + repo)
-    code, out = read(repo, "worktree", "list", "--porcelain")
-    if code != 0:
+    # -z: each line ends in a NUL and a block in an empty one, so a newline in a path is a path's.
+    p = subprocess.run(("git", "worktree", "list", "--porcelain", "-z"), cwd=repo, stdin=DEVNULL,
+                       stdout=subprocess.PIPE, stderr=DEVNULL)
+    if p.returncode != 0:
         raise Red("repo", note="not a git repo: " + repo)
-    blocks = []
-    for block in out.split("\n\n"):
-        fields = dict((line.split(" ", 1) + [""])[:2] for line in block.splitlines())
-        blocks.append(fields)
-    if "bare" in blocks[0] or os.path.realpath(blocks[0]["worktree"]) != os.path.realpath(repo):
-        raise Red("repo", note="the main checkout is %s, not %s" % (blocks[0]["worktree"], repo))
+    blocks, fields = [], {}
+    for line in [os.fsdecode(f) for f in p.stdout.split(b"\0")] + [""]:
+        if line:
+            key, _, value = line.partition(" ")
+            fields[key] = value
+        elif fields:
+            blocks.append(fields)
+            fields = {}
+    top = blocks[0].get("worktree", "") if blocks else ""
+    if not top or "bare" in blocks[0] or os.path.realpath(top) != os.path.realpath(repo):
+        raise Red("repo", note="the main checkout is %s, not %s" % (top or "unknown", repo))
     return blocks
 
 
@@ -219,18 +239,30 @@ def merge_result(repo, ours, full):
     return code, (fields[0] if fields else ""), fields[1:]
 
 
-def require_no_overlap(repo, full):
-    """A merge that would not conflict, whose paths hold no dirty path and no untracked file on
-    the main checkout, or Red with nothing changed. The paths are the difference from main to the
-    merge's own tree, so a directory-rename target counts; --no-renames lists a rename as its
-    delete and its add, so both its paths do."""
-    code, tree, conflicted = merge_result(repo, MAIN, full)
+def require_no_overlap(repo, full, branch):
+    """(main, the merged tree), main read first: a merge that would not conflict, that makes
+    <sha>'s own tree, whose paths
+    hold no dirty path and no untracked file on the main checkout, or Red with nothing changed.
+    The paths are the difference from main to the merge's own tree, so a directory-rename target
+    counts; --no-renames lists a rename as its delete and its add, so both its paths do."""
+    code, ours = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if code != 0:
+        raise Red("main", note="cannot read " + MAIN)
+    # Every read below is of that commit, never the ref's name: one main, whatever the ref does.
+    code, tree, conflicted = merge_result(repo, ours, full)
     if code == 1:
         raise Red("merge", 1, "the merge would conflict, nothing begun:\n" + "\n".join(conflicted))
     if code != 0 or not tree:
         raise Red("merge", code or 1, "git merge-tree exit %d: it reads no merge (git 2.38 or later "
                   "is needed; unrelated histories refuse here as in git merge)" % code)
-    code, touched = read_z(repo, "diff", "--name-only", "-z", "--no-renames", MAIN, tree)
+    # The check runs on <sha>'s tree: a merge making any other tree lands what no check ran on.
+    own_code, own = read(repo, "rev-parse", "--verify", "-q", full + "^{tree}")
+    if own_code != 0 or tree != own:
+        _, log = read(repo, "log", "--oneline", "%s..%s" % (full, ours))
+        raise Red("sha", note="main holds what %s does not, so the check would not run on the tree "
+                  "main would hold:\n%s\nmerge main into %s, land its new head"
+                  % (full, log, branch))
+    code, touched = read_z(repo, "diff", "--name-only", "-z", "--no-renames", ours, tree)
     if code != 0:
         raise Red("main", note="cannot read the paths the merge touches")
     hit = sorted({d for d in dirty_paths(repo) if any(overlaps(d, t) for t in touched)})
@@ -238,14 +270,26 @@ def require_no_overlap(repo, full):
         raise Red("main", note="dirty on main and touched by the merge:\n" + "\n".join(hit))
     # Status never lists an ignored file, and the merge would overwrite it.
     code, written = read_z(repo, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=d",
-                           MAIN, tree)
-    tree_code, tracked = read_z(repo, "ls-tree", "-r", "-z", "--name-only", MAIN)
+                           ours, tree)
+    tree_code, tracked = read_z(repo, "ls-tree", "-r", "-z", "--name-only", ours)
     if code != 0 or tree_code != 0:
         raise Red("main", note="cannot read the paths the merge writes")
     tracked = set(tracked)
     hit = sorted(path for path in written if stands_untracked(repo, path, tracked))
     if hit:
         raise Red("main", note="on main, untracked, and written by the merge:\n" + "\n".join(hit))
+    return ours, tree
+
+
+def require_main_unmoved(repo, ours, full, branch):
+    """Main is still the commit the last merged-tree read began from: anything that took time
+    since, the message's scan above all, cannot have slipped a commit under the merge."""
+    _, now = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if now != ours:
+        _, log = read(repo, "log", "--oneline", "%s..%s" % (ours, MAIN))
+        raise Red("sha", note="main moved from %s to %s during the last reads, so the merge would "
+                  "hold what no check ran on:\n%s\nmerge main into %s, land its new head"
+                  % (ours, now or "nothing", log, branch))
 
 
 def stands_untracked(repo, path, tracked):
@@ -284,6 +328,10 @@ def require_worktree(blocks, branch):
             tree = block["worktree"]
             if "locked" in block:
                 raise Red("worktree", note="%s is locked" % tree)
+            inside = nested(blocks, block, tree)
+            if inside:
+                raise Red("worktree", note="%s holds other worktrees, which `worktree remove` "
+                          "would take with it:\n%s" % (tree, "\n".join(inside)))
             venv = os.path.join(tree, ".venv")
             if os.path.lexists(venv) and not os.path.islink(venv):
                 raise Red("worktree", note="%s is neither a link nor absent" % venv)
@@ -292,6 +340,83 @@ def require_worktree(blocks, branch):
                 raise Red("worktree", note="%s is not clean:\n%s" % (tree, "\n".join(dirt)))
             return tree
     raise Red("worktree", note="no linked worktree has %s checked out" % branch)
+
+
+def under(path, tree):
+    """A parent of `path` is the directory `tree`, by device and inode: a case variant or a link
+    in either spelling is the same directory, and a sibling such as `<tree>-2` is not."""
+    parent, here = os.path.dirname(os.path.realpath(path)), None
+    while parent != here:
+        try:
+            if os.path.samefile(parent, tree):
+                return True
+        except OSError:
+            pass
+        parent, here = os.path.dirname(parent), parent
+    return False
+
+
+def nested(blocks, own, tree):
+    """Each other worktree git lists, the main checkout included, whose directory is under `tree`,
+    its status lines below it or `clean`: `worktree remove` would take it, and a main checkout's
+    files with it. A sibling never counts; a clone git does not list is not read."""
+    found = []
+    for block in blocks:
+        path = block.get("worktree", "")
+        if block is own or not path or not os.path.isdir(path) or not under(path, tree):
+            continue
+        p = subprocess.run(("git",) + STATUS, cwd=path, stdin=DEVNULL, stdout=subprocess.PIPE,
+                           stderr=DEVNULL, universal_newlines=True, errors="replace")
+        lines = p.stdout.splitlines()
+        if p.returncode != 0:
+            found.append("%s: its status cannot be read" % path)
+        else:
+            held = "\n".join(["holds"] + ["  " + line for line in lines])
+            found.append("%s: %s" % (path, held if lines else "clean"))
+    return found
+
+
+def require_merge_text(message, branch):
+    """Line 1 is `Merge <branch>: ` then a non-space character; line 2, when there is one, is
+    blank. Read again after the check, since the file can change while it runs."""
+    try:
+        with open(message, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as err:
+        raise Red("merge-file", note="cannot read %s: %s" % (message, err))
+    if not text.strip():
+        raise Red("merge-file", note="%s is blank" % message)
+    lines = text.split("\n")
+    head = "Merge %s: " % branch
+    if not lines[0].startswith(head) or not lines[0][len(head):][:1].strip():
+        raise Red("merge-file", note="line 1 of %s is not `%s` and its text: %s"
+                  % (message, head, lines[0]))
+    if len(lines) > 1 and lines[1].strip():
+        raise Red("merge-file", note="line 2 of %s is not blank: %s" % (message, lines[1]))
+
+
+def scan_message(repo, tree, full, ours, merged, message):
+    """The merge's message through the worktree's hygiene, when its --help names --commits: the
+    merge commit made as a dangling object, scanned as the range <sha>..<that commit>. It writes
+    one object and no ref, and touches neither main's index nor its files."""
+    script = os.path.join(tree, "scripts", "hygiene")
+    if not os.path.lexists(script) or not takes_commits(tree, script):
+        return
+    # Its stderr goes to the log: an unset identity or a NUL in the file reads its own reason.
+    sys.stderr.flush()
+    p = subprocess.run(("git", "commit-tree", merged, "-p", ours, "-p", full, "-F", message),
+                       cwd=repo, stdin=DEVNULL, stdout=subprocess.PIPE, stderr=sys.stderr,
+                       universal_newlines=True)
+    code, commit = p.returncode, p.stdout.strip()
+    if code != 0 or not commit:
+        raise Red("merge-file", note="git commit-tree exit %d: no merge commit to scan; its "
+                  "reason is above" % code)
+    span = "%s..%s" % (full, commit)
+    note("merge-file: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
+    code = run(tree, script, "--require-private", "--commits", span)
+    if code != 0:
+        raise Red("merge-file", code, "scripts/hygiene exit %d on the merge message; see its "
+                  "stderr above (%s)" % (code, message))
 
 
 def require_sha(repo, branch, sha):
@@ -443,6 +568,7 @@ def land(repo, branch, sha, message):
     at("merge-file")
     if not (os.path.isfile(message) and os.access(message, os.R_OK)):
         raise Red("merge-file", note="cannot read " + message)
+    require_merge_text(message, branch)
     at("main")
     require_main(repo)
     at("worktree")
@@ -450,7 +576,9 @@ def land(repo, branch, sha, message):
     at("sha")
     full = require_sha(repo, branch, sha)
     at("main")
-    require_no_overlap(repo, full)
+    ours, merged = require_no_overlap(repo, full, branch)
+    at("merge-file")
+    scan_message(repo, tree, full, ours, merged, message)
 
     at("check")
     note("check: make check in " + tree)
@@ -479,9 +607,14 @@ def land(repo, branch, sha, message):
     require_sha(repo, branch, sha)
     at("main")
     require_main(repo)
-    require_no_overlap(repo, full)
+    ours, merged = require_no_overlap(repo, full, branch)
     at("worktree")
     tree = require_worktree(worktrees(repo), branch)
+    at("merge-file")
+    require_merge_text(message, branch)
+    scan_message(repo, tree, full, ours, merged, message)
+    at("sha")
+    require_main_unmoved(repo, ours, full, branch)
     at("merge")
     note("merge: %s into main in %s" % (full, repo))
     merge(repo, full, message)
