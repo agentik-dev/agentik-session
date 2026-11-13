@@ -554,3 +554,35 @@ def test_r2_an_unmatched_paren_leaves_the_folder_unknown(box):
     command = "cd docs; ) ; printf x >> ../CLAUDE.md"
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
     assert [r["decision"] for r in _log(box)] == ["open"]
+
+
+# ---- g5: a `#` inside a word is no comment's start (u3's review, round 1, R1-F2) ----------
+
+G5_INWORD = ["echo x#y; cp a CLAUDE.md", "v=${TAG#v}; cp a CLAUDE.md", "echo $#; cp a CLAUDE.md",
+             "echo ${#a[@]}; cp a CLAUDE.md", "echo a\\#b; cp a CLAUDE.md",
+             "echo x #c\ncp a CLAUDE.md", "echo \"x #y\"; cp a CLAUDE.md",
+             "echo 'a#b'; cp a CLAUDE.md"]
+
+
+@pytest.mark.parametrize("command", G5_INWORD)
+def test_g5_an_inword_or_quoted_hash_hides_no_write(box, command):
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
+        [("write", str(box.repo / "CLAUDE.md"))], command
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+@pytest.mark.parametrize("command", ["echo x #y; cp a CLAUDE.md", "# cp a CLAUDE.md",
+                                     "echo x;#y\ncd docs; cp a CLAUDE.md\n#z"])
+def test_g5_a_comment_stays_one(box, command):
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert found == ([("write", str(box.repo / "docs" / "CLAUDE.md"))] if "docs" in command
+                     else []), command
+
+
+@pytest.mark.parametrize("command,words", [
+    ("echo x#y", ["echo", "x#y"]), ("echo a\\#b", ["echo", "a#b"]),
+    ("echo ${#a[@]} $# x", ["echo", "${#a[@]}", "$#", "x"]),
+    ("echo \"x #y\" 'a#b' z", ["echo", "x #y", "a#b", "z"]), ("echo x #y z", ["echo", "x"])])
+def test_g5_the_words_read_back_whole(command, words):
+    assert [w for w, _ in instructionguard._commands(command)] == [words]

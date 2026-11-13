@@ -417,7 +417,8 @@ def _heredocs(text: str):
 
 def _mask(text: str) -> str:
     """The text with each quoted or backslashed paren replaced by a private character, so the
-    lexer never takes it for a subshell's edge (r2 F1); a comment is kept as it stands."""
+    lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
+    outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5)."""
     out, i, n, quote, start = [], 0, len(text), None, True
     while i < n:
         c = text[i]
@@ -428,9 +429,7 @@ def _mask(text: str) -> str:
                 continue
             if c == "#" and start:
                 j = text.find("\n", i)
-                j = n if j < 0 else j
-                out.append(text[i:j])
-                i = j
+                i = n if j < 0 else j
                 continue
             if c in "'\"":
                 quote = c
@@ -454,6 +453,7 @@ def _commands(text: str):
     `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
     one, is no subshell's edge (r2 F2); a quoted or escaped one is a word (r2 F1)."""
     lex = shlex.shlex(_mask(text), posix=True, punctuation_chars=_PUNCT)
+    lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     words, outs, expect = [], [], None
