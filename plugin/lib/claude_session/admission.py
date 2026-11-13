@@ -1683,8 +1683,9 @@ def _weekday(v: str) -> str:
 
 
 def _line_end(b: dict, now: datetime) -> list:
-    """The line's last parts in either mode: `observe`, then the age past STALE_S."""
-    parts = ["observe"] if b.get("mode") == "observe" else []
+    """The line's last part: the age past STALE_S. No mode's word (packet pl1 R1): `status`
+    says the mode."""
+    parts = []
     a = _wall(b.get("at"))
     age = math.floor((now - a[2]).total_seconds()) if a is not None else None
     if age is not None and age > STALE_S:
@@ -1735,32 +1736,51 @@ def band_status(b, now: datetime | None = None):
     return f"band: {to}" + (f"; next {', '.join(items)}" if items else "")
 
 
-def _mix_part(mx, now: datetime | None = None) -> list:
-    """The mix's parts after the 7d part (packet S53 ruling 6): `mix fable 31/50`, a part a
-    family of the shares, then `next opus` (or `reset now`), then `resets 2` with ` by Ddd
-    HH:MM` when `until` is set; `mix no reading` with no points; [] with no mix (mix off)."""
+def mix_status(mx, now: datetime | None = None) -> str | None:
+    """`status`'s mix line (packet pl1 R3): `mix: fable 31/50 · opus 10/50 · next opus ·
+    resets 2 by Ddd HH:MM`, a part a family of the shares, then `next <family>` (or `reset
+    now`), then the resets with ` by Ddd HH:MM` while `until` is ahead; `mix: no reading`
+    with no points; None with no mix (mix off). The words the prompt line drew until pl1."""
     if not isinstance(mx, dict):
-        return []
+        return None
     pts, bud = mx.get("points"), mx.get("budgets")
     if not isinstance(pts, dict) or not isinstance(bud, dict):
-        return ["mix no reading"]
+        return "mix: no reading"
     out = [f"{f} {_pct(_real(pts.get(f)) or 0.0)}/{_pct(_real(bud.get(f)))}"
            for f in MIX_ORDER if _real(bud.get(f)) is not None]
     nxt = mx.get("next")
     out.append("reset now" if mx.get("reset") is True
                else f"next {nxt if isinstance(nxt, str) and nxt in MIX_ORDER else 'none'}")
+    tail = _mix_resets(mx, now)
+    return "mix: " + " · ".join(out + ([tail] if tail else []))
+
+
+def _mix_resets(mx: dict, now: datetime | None) -> str:
+    """`resets 2` with ` by Ddd HH:MM` while `until` is ahead; "" with neither."""
     left, u = _real(mx.get("resets_left")), _wall(mx.get("until"))
     tail = f"resets {_pct(left)}" if left is not None else ""
     if u is not None and (now is None or u[2] > now):
         tail = f"{tail} by {_weekday(mx['until'])} {u[0]}:{u[1]}".strip()
-    out += [tail] if tail else []
-    return ["mix " + out[0]] + out[1:]
+    return tail
+
+
+def _mix_part(mx, now: datetime | None = None) -> list:
+    """The mix's parts on the line, after the 7d part (packet S53 ruling 6, as pl1 R1 left
+    it): `reset now` while the mix says so, then `resets 2` with ` by Ddd HH:MM` while
+    `until` is ahead; [] with no mix (mix off) or no points. The shares, `next <family>` and
+    `mix no reading` left the line for `status` (`mix_status`)."""
+    if not isinstance(mx, dict):
+        return []
+    if not isinstance(mx.get("points"), dict) or not isinstance(mx.get("budgets"), dict):
+        return []
+    tail = _mix_resets(mx, now)
+    return (["reset now"] if mx.get("reset") is True else []) + ([tail] if tail else [])
 
 
 def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
-    """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · week resets Ddd HH:MM ·
-    band avoid to 11:00 · n helpers`, each left out with no figure; `until` first, else
-    `resetsAt`, both the week's; the band's from `demand` (packet S44). No countdown,
+    """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · resets N · week resets
+    Ddd HH:MM · n helpers`, each left out with no figure; `until` first, else `resetsAt`,
+    both the week's; the band (packet S44) is `status`'s since pl1. No countdown,
     ceiling, room or deferred. `head` is `5h no reading` on a five-hour login's week
     (packet S51)."""
     parts = [head]
@@ -1773,17 +1793,15 @@ def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
         if w is not None:
             parts.append(f"week resets {_weekday(v)} {w[0]}:{w[1]}")
             break
-    to = _band_to(b, now)
-    if to is not None:
-        parts.append(f"band {to}")
-    if running is not None:
+    if running is not None:                     # the band's word left (pl1 R1): `status`
         parts.append(_count(running, "helper", "helpers"))
     return parts + _line_end(b, now)
 
 
 def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
     """§3.5's line from band.json: `5h P% → peak% · ceiling c · resets HH:MM (h:mm) ·
-    n helpers, room for r · d deferred · 7d P7%`, then `observe` and the age past 120 s; a
+    n helpers, room for r · d deferred · 7d P7%`, then the age past 120 s (no mode's word
+    since pl1); a
     part with no figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` when the
     seven-day reset bounds the background term (`until`). An entry whose `window` is the
     string `none` draws `_line_none` instead, as does a `five_hour` one with no five-hour

@@ -1,0 +1,135 @@
+"""Packet pl1: the line the plugin prints at each prompt, tidied. The owner's state draws the
+owner's tidied line through the prompt hook (R1); no zone word for `clear` (R2); the facts
+that left are `status`'s (R3); the pacing text points there (R4); the mix off reads as on (R5).
+Every state here is made up, under the per-test temp HOME conftest gives."""
+import json
+import os
+import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from claude_session import admission, budget, hooks, rules
+
+UTC = timezone.utc
+SID = "test-sess-0000-1111-2222"
+TS = Path(__file__).resolve().parent.parent / "plugin" / "hooks" / ("session.test." + "ts")
+OWNER_LINE = "no 5h window · 7d 61% · resets 1 · week resets Fri 13:00 · 14 helpers"
+
+
+def _friday_after(now: datetime) -> str:
+    d = (now + timedelta(days=1)).date()
+    while d.weekday() != 4:
+        d += timedelta(days=1)
+    return f"{d.isoformat()}T13:00:00+00:00"
+
+
+def owner_state(now: datetime | None = None, mix: bool = True) -> dict:
+    """The owner's state: no 5h window, 7d 61, the mix 33/50 and 27/50 with next fable and one
+    reset, the week's reset on a Friday at 13:00, the band best to two hours on, 14 helpers,
+    the mode observe."""
+    now = now or datetime.now(UTC)
+    b = {"window": "none", "P7": 61, "until": _friday_after(now), "bound": "seven_day",
+         "running": 14, "mode": "observe", "at": now.isoformat(timespec="seconds"),
+         "demand": {"band": "best", "until": (now + timedelta(hours=2)).isoformat(timespec="seconds")}}
+    if mix:
+        b["mix"] = {"points": {"fable": 33, "opus": 27}, "budgets": {"fable": 50, "opus": 50},
+                    "next": "fable", "reset": False, "resets_left": 1, "until": None}
+    return b
+
+
+def write_band(b: dict) -> None:
+    d = admission.directory(os.environ)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (d / "band.json").write_text(json.dumps(b))
+
+
+def prompt_bits() -> list:
+    out = hooks.user_prompt_submit({"session_id": SID})
+    return out["hookSpecificOutput"]["additionalContext"].split("\n\n") if out else []
+
+
+def _band_bit(bits: list) -> str:
+    [line] = [x for x in bits if x.startswith("no 5h window")]
+    return line
+
+
+# ---- acceptance 1: the owner's state, through the prompt hook ----
+
+def test_pl1_1_the_owner_s_state_draws_the_owner_s_tidied_line(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 10.0)
+    write_band(owner_state())
+    line = _band_bit(prompt_bits())
+    assert line == OWNER_LINE
+    for word in ("mix", "fable", "opus", "next", "band", "best", "observe"):
+        assert word not in line.split(), word
+
+
+def test_pl1_1_the_module_s_fixture_is_the_same_line():
+    """The mod's twin draws PL1_OWNER as PL1_OWNER_LINE; Python draws the same text."""
+    if not TS.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    text = TS.read_text()
+
+    def get(name):
+        return re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1)
+    now = datetime.fromisoformat(re.search(r"^const NOW = Date\.parse\('(.*)'\)$", text, re.M).group(1))
+    assert get("PL1_OWNER_LINE") == OWNER_LINE
+    assert admission.band_line(json.loads(get("PL1_OWNER")), now) == OWNER_LINE
+
+
+# ---- acceptance 2: no zone word for `clear`; every other zone as at the pin ----
+
+@pytest.mark.parametrize("zone,said", [
+    (budget.CLEAR, None),
+    (budget.UNKNOWN, None),                       # not said at the pin either
+    (budget.NOTICE, "Sitting budget: 'notice' zone."),
+    (budget.WINDDOWN, "Sitting budget: 'wind-down' zone."),
+    (budget.RESERVE, "Sitting budget: 'reserve' zone. The remainder is the wrap-up reserve."),
+    (budget.EXHAUSTED, "Sitting budget: 'exhausted' zone. The remainder is the wrap-up reserve."),
+])
+def test_pl1_2_the_prompt_says_the_zone_unless_clear(monkeypatch, zone, said):
+    monkeypatch.setattr(hooks.budget, "zone_for", lambda *a, **k: zone)
+    write_band(owner_state())
+    text = "\n\n".join(prompt_bits())
+    assert "clear" not in text
+    if said is None:
+        assert "Sitting budget" not in text
+    else:
+        assert said in text
+
+
+def test_pl1_2_the_module_s_session_line_drops_clear_alone():
+    """The mod's session line: its tests pin each zone; `clear` says no word there."""
+    if not TS.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    text = TS.read_text()
+    rest = re.search(r"^const REST = '(.*)'$", text, re.M).group(1)
+    assert rest == "ctx 64% · turns 6% · 207s old"
+    for zone in ("notice", "wind-down", "reserve", "exhausted", "unknown"):
+        assert f"['{zone}', ' · {zone}']" in text
+    assert "['clear', '']" in text
+
+
+# ---- acceptance 5: the mix off reads as on (less the resets count R1 keeps) ----
+
+def test_pl1_5_the_mix_off_reads_as_on(monkeypatch):
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 10.0)
+    now = datetime.now(UTC)
+    on = owner_state(now)
+    write_band(owner_state(now, mix=False))
+    off_line = _band_bit(prompt_bits())
+    assert off_line == OWNER_LINE.replace(" · resets 1", "")
+    write_band(on)
+    assert _band_bit(prompt_bits()) == OWNER_LINE
+    on["mix"]["resets_left"] = None               # a mix with no resets count: the same line
+    write_band(on)
+    assert _band_bit(prompt_bits()) == off_line
+
+
+def test_pl1_5_the_mix_still_counts_and_advises():
+    """R5: the mix is computed as before; only its words left the line."""
+    m = owner_state()["mix"]
+    assert admission.mix_status(m) == "mix: fable 33/50 · opus 27/50 · next fable · resets 1"
+    assert "spend mix" in rules.render({"admission": {"mix": {"shares": {"opus": 1}}}})
