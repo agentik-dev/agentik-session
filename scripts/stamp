@@ -44,7 +44,9 @@ No flag overrides it.
 
 Everything is read and decided first: a red or an exit 2 writes nothing. Output on
 stdout, one line per thing written, in this order: `stamp: version <old> -> <new>`,
-`stamp: count <old> -> <new>` (old: the source's), `stamp: moved <ids> to
+`stamp: status version <old> -> <new>` (the Status lines' version, where the line
+before does not name its move: plugin.json stays, or the lines held another version),
+`stamp: count <old> -> <new>` (old: the source's for both), `stamp: moved <ids> to
 history/NICE-overflow.md`, `stamp: sidecar written`; last, always, `stamp: ok: plugin
 <version>, <count> tests`, ending `; nothing to write` when no file changed. A red is
 one stderr line each: `stamp: red count: ...`, `stamp: red sidecar: <file> ...`,
@@ -482,6 +484,11 @@ def plan(repo, base, forced):
 
     if version != current:
         lines.append("stamp: version %s -> %s" % (current, version))
+    # review 1's L2: a Status lines' version move the version line does not already name
+    old_versions = [matches[p].group(1) for p in (SOURCE, README)]
+    named = version != current and all(v == current for v in old_versions)
+    if any(v != version for v in old_versions) and not named:
+        lines.append("stamp: status version %s -> %s" % (old_versions[0], version))
     old_counts = [matches[p].group(3) for p in (SOURCE, README)]
     if any(c != str(collected) for c in old_counts):
         lines.append("stamp: count %s -> %d" % (old_counts[0], collected))
