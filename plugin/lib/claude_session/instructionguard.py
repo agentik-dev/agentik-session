@@ -703,7 +703,8 @@ def _parse(command: str, bash3: bool, ticks: bool) -> tuple:
 def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set,
             paid: _Paid | None = None) -> list:
     """`bash_targets` with each target's word and the folder it was read in (g6 R2):
-    [(kind, path, word, folder)]; each folder the reading stood in goes in `stood`. Past
+    [(kind, path, word, folder)], `word` None where a folder state other than the followed
+    one judged it again (r2 R4); each folder the reading stood in goes in `stood`. Past
     `_STRICT_READS` judgements or `_STRICT_BOUND` distinct paths on the line it raises
     `_Bound`, counted as it reads (r2 R1)."""
     paid = _Paid() if paid is None else paid
@@ -752,6 +753,8 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
             if not _PH_RE.match(o) and o.strip("`"):
                 for h in heres:
                     add("write", o.strip("`"), h)
+                    if h != heres[0]:     # r2 R4: one credit a word and command (see below)
+                        found[-1] = found[-1][:2] + (None,) + found[-1][3:]
         lead, run, i = False, True, 0     # g6 R5: `then cd` is read (n138); r1 R2: a reserved
         while i < len(words):             # word only in the command's first run of them, which
             w = words[i]                  # r2 R2: `time`'s options stand inside
@@ -773,7 +776,11 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
             st, fa = _states(st + moved, len(st) + fa) if lead else _states(moved, fa)
             continue
         for h in heres:
+            n = len(found)
             _judge(name, args, plain, h, mine, env, depth, stood, add, found, paid)
+            if h != heres[0]:             # r2 R4: a word judged in several folder states is one
+                found[n:] = [(k, p, None, a) for k, p, _, a in found[n:]]  # credit, the followed
+                                          # state's, as db19d51 judged it: never one per state
     _others(command, cwd, env, depth, other, found, stood, paid)  # each reading's targets once
     return found
 

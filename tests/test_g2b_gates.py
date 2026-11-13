@@ -1228,3 +1228,44 @@ def test_r2_r3_f2_an_escaped_redirect_sign_does_not_hold_the_ampersand(box, comm
     decision, reason = _decision(out)
     assert decision == "deny", command
     assert f"`{_gated_path(box, command)}`" in reason, command
+
+
+# ---- review 2, R4 (F3): a strict word is one credit however many folder states judged it ----
+# A word with an absolute path judged in two states was two credits, and the spare cancelled a
+# later loose target in the checkout. Called from a folder outside it (`{x}`); each line was
+# denied at db19d51 and passed at 6aed3c5; shells write.
+
+R4_F3 = [
+    ("if false; then cd sub; fi; : > {x}/CLAUDE.md; cd {r} && bash -lc 'cp a CLAUDE.md'", "x"),
+    ("if [ -d build ]; then cd build; fi; cp a {x}/CLAUDE.md; cd {r} && bash -lc 'cp a CLAUDE.md'",
+     "x"),
+    ("if false; then cd sub; fi; bash -c ': > {x}/CLAUDE.md'; cd {r} && bash -lc 'cp a CLAUDE.md'",
+     "x"),
+    ("if false; then cd sub; fi; : > {x}/CLAUDE.md; cd {r}; eval 'cp a CLAUDE.md'", "x"),
+    ("if false; then cd sub; fi; rm -f {x}/.claude/edit-gates; cd {r} && "
+     "bash -lc 'rm -f .claude/edit-gates'", "x"),
+    ("if false; then cd sub; fi; echo x > {x}/CLAUDE.md; cd {r}; cat <(echo a)#c; cp a CLAUDE.md",
+     "x"),
+    ("false && {{ cd sub; }}; echo x > {x}/CLAUDE.md; cd {r}; cat <(echo a)#c; cp a CLAUDE.md", "x"),
+    ("if false; then cd sub; fi; echo x > {x}/notes/CLAUDE.md; cd {r}; cat <(echo a)#c; "
+     "cp a CLAUDE.md", "x/notes")]
+R4_F3_CONTROLS = [(": > {x}/CLAUDE.md; cd {r} && bash -lc 'cp a CLAUDE.md'", "x"),
+                  ("cd {r} && bash -lc 'cp a CLAUDE.md'", "x")]
+
+
+@pytest.mark.parametrize("line,where", R4_F3 + R4_F3_CONTROLS)
+def test_r2_r4_f3_a_word_judged_in_two_states_is_one_credit(box, line, where):
+    x = box.tmp / "x"
+    (x / "notes").mkdir(parents=True)
+    command = line.format(x=x, r=box.repo)
+    out = instructionguard.check(_bash(command, box.tmp / where), box.env)
+    decision, reason = _decision(out)
+    assert decision == "deny", command
+    assert f"`{_gated_path(box, command)}`" in reason, command
+
+
+def test_r2_r4_one_credit_a_word_and_command(box):
+    command = f"if false; then cd sub; fi; : > {box.tmp}/CLAUDE.md"
+    found = instructionguard._strict(command, str(box.repo), box.env, 0, False, True, set())
+    assert [(k, p) for k, p, _, _ in found] == [("write", str(box.tmp / "CLAUDE.md"))] * 2
+    assert [w for _, _, w, _ in found].count(None) == 1      # the second state's: no credit
