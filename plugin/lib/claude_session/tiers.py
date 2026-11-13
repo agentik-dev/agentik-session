@@ -63,17 +63,14 @@ def merge(base: dict, over) -> dict:
 
 
 def check(table) -> None:
-    """Raises ValueError unless every role has a model of a known family and a known
-    effort."""
+    """Raises ValueError unless every role has a model string and a known effort (a
+    layer's model with no family is dropped by the resolver, never raised: mt1 R2-F1)."""
     if not isinstance(table, dict):
         raise ValueError("tiers must be a mapping of design, build, words, mend, lookup")
     for r in ROLES:
         v = table.get(r)
         if not isinstance(v, dict) or not isinstance(v.get("model"), str) or not v["model"]:
             raise ValueError(f"tiers.{r} needs a model")
-        if family(v["model"]) is None:                  # round 1 F10
-            raise ValueError(f"tiers.{r}.model {v['model'][:40]!r} names no model family "
-                             f"({', '.join(ORDER)})")
         if v.get("effort") is not None and v["effort"] not in EFFORTS:
             raise ValueError(f"tiers.{r}.effort must be one of {', '.join(EFFORTS)}")
 

@@ -344,11 +344,27 @@ def _tier_layers(shipped, user, name, repo_s, local_s, launch, ov_sub, where) ->
     return out
 
 
-def _tiers(layers) -> tuple[dict, dict]:
-    """(the table, {role: the origin of its model}) from _tier_layers' list."""
+def _bad_key(origin: str, role: str) -> str:
+    if origin.endswith(": tiers"):
+        return f"{origin}.{role}.model"
+    return origin if origin.endswith("session.subagents") else f"{origin}.tiers.{role}.model"
+
+
+def _tiers(layers, unknown: list) -> tuple[dict, dict]:
+    """(the table, {role: the origin of its model}) from _tier_layers' list. A layer's model
+    that names no family is dropped, the role keeping the lower layer's, and its key joins
+    `unknown` (mt1 R2-F1: a typo never fails resolution)."""
     table: dict = {}
     origins: dict = {}
     for origin, layer in layers:
+        layer = dict(layer)
+        for r, v in list(layer.items()):
+            m = v if isinstance(v, str) else v.get("model") if isinstance(v, dict) else None
+            if r in tiermod.ROLES and m is not None and tiermod.family(m) is None:
+                if _bad_key(origin, r) not in unknown:
+                    unknown.append(_bad_key(origin, r))
+                layer[r] = ({k: x for k, x in v.items() if k != "model"}
+                            if isinstance(v, dict) else None)
         table = tiermod.merge(table, layer)
         for r, v in layer.items():
             if isinstance(v, str) or isinstance(v, dict) and v.get("model") is not None:
@@ -585,7 +601,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
              "local": str(rdir / "config.local.yaml")}
     merged["tiers"], origins = _tiers(_tier_layers(shipped, user, name, repo_s, local_s,
                                                    bool(profile), ov_session.get("subagents"),
-                                                   where))
+                                                   where), unknown)
     merged["subagents"] = merged["tiers"]["build"]["model"]       # mt1 R1's read alias
     _validate(merged)
     per = _window_ceilings(shipped, user, name, [
