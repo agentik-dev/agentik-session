@@ -357,8 +357,10 @@ local whatever a repo says. A profile named on the start line re-applies the
 tiers its body states above every file, as it does every other field, and
 `set tier.*` sits above it; frontier, packets, builder, orchestrator and
 orchestrator-opus state `build: opus`, so under their start a file's build tier
-loses. A layer's model that names no family is skipped (the role keeps the
-layer below it), and the doctor's config row names `<layer>: tiers.<role>.model`.
+loses. A layer's model that names no family or is null, and its effort that is
+not one of low, medium, high, xhigh and max or is null, is skipped (the role keeps
+the layer below it), and the doctor's config row names
+`<layer>: tiers.<role>.model` or `.effort`.
 
 ```yaml
 defaults:
