@@ -516,12 +516,13 @@ def gate_config(env, log=None) -> dict:
     if isinstance(c, (int, float)) and not isinstance(c, bool) and 0 < c < float("inf"):
         out["load_ceiling"] = c
     elif "load_ceiling" in g and log:
-        log(f"gate: load_ceiling {c!r} is no positive number; the default stands")
+        # ss4 R4: the value is the file's text, and `ntfy_topic` sits beside this key
+        log("gate: load_ceiling is no positive number; the default stands")
     m = g.get("max_running")
     if isinstance(m, int) and not isinstance(m, bool) and m > 0:
         out["max_running"] = m
     elif "max_running" in g and log:
-        log(f"gate: max_running {m!r} is no positive whole number; the default stands")
+        log("gate: max_running is no positive whole number; the default stands")
     return out
 
 
