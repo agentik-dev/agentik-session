@@ -23,7 +23,10 @@ ORDER = ("fable", "opus", "sonnet", "haiku", "local")
 KEY, CAP = "tiers", "cap"                # the overlay's keys
 RECORD = "cap.json"                      # the chain home's copy of the cap: {session, cap}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-_ROLE_LINE = re.compile(r"^[ \t]*tier:[ \t]*([a-z]+)[ \t]*$", re.M)
+# Round 1 F8: any case, a trailing \r or full stop; the first line naming a known role.
+_ROLE_LINE = re.compile(r"^[ \t]*tier:[ \t]*([a-z]+)\.?[ \t]*\r?$", re.M | re.I)
+# Round 1 F7: a model word a verb takes, and the one shape `--save` writes quoted.
+MODEL_WORD = re.compile(r"[A-Za-z0-9._/\[\]-]+")
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
@@ -60,13 +63,17 @@ def merge(base: dict, over) -> dict:
 
 
 def check(table) -> None:
-    """Raises ValueError unless every role has a model string and a known effort."""
+    """Raises ValueError unless every role has a model of a known family and a known
+    effort."""
     if not isinstance(table, dict):
         raise ValueError("tiers must be a mapping of design, build, words, mend, lookup")
     for r in ROLES:
         v = table.get(r)
         if not isinstance(v, dict) or not isinstance(v.get("model"), str) or not v["model"]:
             raise ValueError(f"tiers.{r} needs a model")
+        if family(v["model"]) is None:                  # round 1 F10
+            raise ValueError(f"tiers.{r}.model {v['model'][:40]!r} names no model family "
+                             f"({', '.join(ORDER)})")
         if v.get("effort") is not None and v["effort"] not in EFFORTS:
             raise ValueError(f"tiers.{r}.effort must be one of {', '.join(EFFORTS)}")
 
@@ -153,8 +160,10 @@ def role(prompt) -> str | None:
     """The role a spawn's prompt names by a line `tier: <role>`, else None."""
     if not isinstance(prompt, str):
         return None
-    m = _ROLE_LINE.search(prompt[:65536])
-    return m.group(1) if m and m.group(1) in ROLES else None
+    for m in _ROLE_LINE.finditer(prompt[:65536]):
+        if m.group(1).lower() in ROLES:
+            return m.group(1).lower()
+    return None
 
 
 # ---- the cap's hand to a `run` successor, as fill's (fill.keep, fill.hand) ----------------

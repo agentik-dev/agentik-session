@@ -763,8 +763,11 @@ def _until(raw):
 
 
 def _family_or_die(value: str) -> None:
-    if tiers.family(value) is None:
-        _die(f"{value[:40]!r} names no model family ({', '.join(tiers.ORDER)})", 2)
+    """Round 1 F7: a model word is letters, digits and `._/[]-` alone, and names a family;
+    refused before any write."""
+    if not tiers.MODEL_WORD.fullmatch(value) or tiers.family(value) is None:
+        _die(f"{value[:40]!r} names no model: a model word is letters, digits and . _ / [ ] - "
+             f"and names a family ({', '.join(tiers.ORDER)})", 2)
 
 
 def _layer_file(where: str) -> Path:
@@ -787,7 +790,8 @@ def _save_tier(path: Path, role: str, model: str) -> None:
         else {}
     table = tiers.merge(cur, {role: {"model": model}})
     block = ["tiers:"] + [
-        f"  {r}: {{" + ", ".join(f"{k}: {v}" for k, v in table[r].items()) + "}"
+        f"  {r}: {{" + ", ".join(f'{k}: "{v}"' if k == "model" else f"{k}: {v}"
+                                 for k, v in table[r].items()) + "}"
         for r in tiers.ROLES if r in table]
     lines, out, skip = text.splitlines(), [], False
     for ln in lines:
@@ -824,6 +828,17 @@ def _set_tier(args, key: str) -> int:
         _family_or_die(args.value)
         path = _layer_file(args.save)
         _save_tier(path, role, args.value)
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        try:                                # round 1 F3: as the next session resolves
+            r = resolver.resolve(cwd, "save-check", os.environ,
+                                 profile=hooks.launch_profile(os.environ), overlay={})
+        except resolver.ResolveError as e:
+            _die(f"tiers: {role} {args.value} saved in {path}, but the next session here "
+                 f"resolves nothing: {e}")
+        got = ((r.sections["session"].get("tiers") or {}).get(role) or {}).get("model")
+        if got != args.value:
+            _die(f"tiers: {role} {args.value} saved in {path}, but the next session's {role} "
+                 f"is {got}, from {r.tier_origins.get(role, 'a layer above it')}: change it there")
         print(f"tiers: {role} {args.value} (saved in {path}; the next session reads it)")
         return 0
     sid = sessionconfig.session_id()
@@ -915,6 +930,8 @@ def cmd_set(args) -> int:
              "change always applies to the session you are in "
              f"(currently '{sessionconfig.get_active() or 'balanced'}').")
 
+    keep = (f"To keep it, set it under `profiles: {target}:` in "      # round 1 F5
+            f"{resolver._user_file(os.environ)}.")
     if args.save:                           # mt1 R4: no configs.json is written
         _die(f"--save keeps a tier alone (set tier.<role> <model> --save); {key} is a "
              f"profile's field: change it under `profiles: {target}:` in "
@@ -928,10 +945,8 @@ def cmd_set(args) -> int:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):
             _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is "
-                 "unset), so there is no session to scope this to. Use --save to "
-                 "change the stored configuration instead.")
-        print(f"{key} = {_fmt_value(value)}  (this session only; "
-              f"add --save to keep it in '{target}')")
+                 f"unset), so there is no session to scope this to. {keep}")
+        print(f"{key} = {_fmt_value(value)}  (this session only; {keep})")
         _rewrite_resolved(model_set=key == "model" and value is not None)
 
     if key in LAUNCH_ONLY and not args.save:
@@ -944,7 +959,8 @@ def cmd_set(args) -> int:
         print(f"note: {key} is a launch-time setting. This session-only record "
               "is informational -- it will NOT be applied by the next `start`, "
               f"because the overlay ends with this session.{now_hint} "
-              f"To change what `start {target}` launches, add --save.")
+              f"To change what `start {target}` launches, set it under `profiles: "
+              f"{target}:` in {resolver._user_file(os.environ)}.")
     return 0
 
 
