@@ -1202,3 +1202,29 @@ def test_r2_r2_f1_a_reserved_word_in_an_inner_line_or_after_time_p(box, command)
     assert f"`{_gated_path(box, command)}`" in reason, command
     if command in R2_F1_TIME:                     # the strict reading reads it
         assert reason == REASON.format(_gated_path(box, command)), command
+
+
+# ---- review 2, R3 (F2): the loose reading splits at an `&` whose `<` or `>` is escaped ------
+# There `&` is the shell's background operator and the next word starts a command. Each line
+# was denied at db19d51 (which split at every `&`) and passed at 6aed3c5; shells write.
+
+R3_F2_LINES = [
+    "bash -lc 'echo \\>& cp a CLAUDE.md'", "bash -lc 'echo \\>\\>& cp a CLAUDE.md'",
+    "bash -lc 'echo a\\<&cp a CLAUDE.md'", "eval 'echo \\<& cp a CLAUDE.md'",
+    "eval \"echo \\\\>& cp a CLAUDE.md\"", "sh -ec 'echo \\<& rm -f .claude/edit-gates'",
+    "cat <(echo a)#c; echo \\>& cp a CLAUDE.md", "cat <(echo a)#c; echo \\<& cp a CLAUDE.md",
+    "cat <(echo a)#c\\>& cp a CLAUDE.md"]
+R3_F2_CONTROLS = [
+    "bash -lc 'echo & cp a CLAUDE.md'", "bash -lc 'echo \\>&& cp a CLAUDE.md'",
+    "bash -lc 'echo \"a>\"& cp a CLAUDE.md'", "bash -lc 'echo x >&2& cp a CLAUDE.md'",
+    "echo \\>& cp a CLAUDE.md",
+    "bash -lc 'cp a >&2 CLAUDE.md'",              # 6aed3c5 denied it: `>&2` is no split
+    "bash -lc 'echo x >&CLAUDE.md'"]              # review 1's R5 word
+
+
+@pytest.mark.parametrize("command", R3_F2_LINES + R3_F2_CONTROLS)
+def test_r2_r3_f2_an_escaped_redirect_sign_does_not_hold_the_ampersand(box, command):
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    decision, reason = _decision(out)
+    assert decision == "deny", command
+    assert f"`{_gated_path(box, command)}`" in reason, command

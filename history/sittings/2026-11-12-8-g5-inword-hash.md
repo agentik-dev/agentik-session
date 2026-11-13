@@ -20,7 +20,8 @@
 - [x] build 3 checks vs the six commits: sweeps, hand lines, round 3's and g6's lines REGRESS 0; fuzz 2 x 100k (seeds 80611, 80612) REGRESS 0; loose off vs a0055da 80k lines: 0 deny to pass; replay 72 newly refused, the same 72; NICE n164 to n166
 - [x] build 4 R1 (F5, cf603ae): strict bound 65,536 judgements, 4,096 paths; a `-c` line split once
 - [x] build 4 R2 (F1): loose skips a reserved word anywhere (db19d51); strict lets `time -p` in the run
-- [ ] build 4 R3 to R5 (F2 to F4): each mend back to db19d51's reading
+- [x] build 4 R3 (F2): loose splits at an `&` whose `<` or `>` is escaped (the second form)
+- [ ] build 4 R4, R5 (F3, F4): each mend back to db19d51's reading
 - [ ] build 4 records: packet §3f, NICE rows for review 2's leads and F6
 - [ ] phase 2, on the coordinator's word
 
