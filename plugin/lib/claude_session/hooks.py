@@ -824,7 +824,7 @@ def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None
 def _load_json(path: Path) -> dict:
     try:
         d = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):     # too deep to parse: no parse (n99)
         return {}
     return d if isinstance(d, dict) else {}
 
