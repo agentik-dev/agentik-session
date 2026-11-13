@@ -20,7 +20,7 @@
 - decide, owner: none.
 
 ## Next act
-- The gate queue's `make check` on the branch tip; then the hand-back to the hq coordinator.
+- None for this builder: the coordinator reviews and lands `g4-folder-gates`.
 
 ## Exit
-- (open)
+- Done: every ruling built, gate 1214 green on 7329338; the hand-back sent to the hq coordinator.
