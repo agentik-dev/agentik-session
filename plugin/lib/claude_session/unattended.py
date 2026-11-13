@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
-from .shellreader import _SHELLS, _commands, _substituted  # packet u3 R5: the hook's reader
+from .shellreader import _Bound, commands  # packet g8a R9: the reader's one walk
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -666,49 +666,33 @@ def acceptance(text: str) -> list:
 # Packet u3 R5: a line that runs make is refused before the row's stage (design/07 §2
 # item 4): a make runs only through the gate queue, and the land step runs the check.
 MAKES = ("make", "gmake", "gnumake")   # by basename, case-blind (round 1 F5)
-SHELL_DEPTH = 3                  # the shells' `-c` texts read, nested
 LINE_SHOWN = 80                  # R6: the line in the log, cut
-_DASH_C = re.compile(r"^-[A-Za-z]*c[A-Za-z]*\Z")
 WHY_MAKE = "a make runs only through the gate queue, and the land step runs the check"
+_WORDS = re.compile(r"[\s;&|()<>'\"`$]+")
 
 
-def unbounded(shell: str, depth: int = 0) -> str:
-    """Why the line may not run, "" when it may: read with the hook's reader
-    (`instructionguard._commands`), it is refused when the reader cannot split it, when a
-    word of a simple command, by basename and case-blind, is `make`, `gmake` or `gnumake`
-    (round 1 F5; a shell's name is compared case-blind too), or when a shell's `-c` text is,
-    to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
-    every later word of that command is a text, whatever flags sit around it (round 1 F1); a
-    word's `$(` text is one too, on the same depth count (F3)."""
+def unbounded(shell: str) -> str:
+    """Why the line may not run, "" when it may: read through the reader's one walk
+    (`shellreader.commands`, packet g8a R9), it is refused when the reader cannot split it (or
+    reads past its bound), when a word of a command at any level, by basename and case-blind,
+    is `make`, `gmake` or `gnumake` (round 1 F5), or when a text the reader does not read (an
+    `eval`'s, a shell's below the first level, one piped into a shell) holds one as a word."""
     try:
-        cmds = list(_commands(shell))
-    except ValueError as e:
-        return f"the hook's reader cannot split it ({e}), so it may run a make; {WHY_MAKE}"
-    for words, outs in cmds:
-        if outs is None:                  # a subshell's edge
-            continue
-        shell_seen = texts = False
-        for w in words:
-            name = os.path.basename(w).lower()
-            if name in MAKES:
+        cmds, unread = commands(shell, None, {})
+    except _Bound:
+        return f"the hook's reader cannot split it (past its bound), so it may run a make; {WHY_MAKE}"
+    for u in unread:
+        if u.why == "split":
+            return f"the hook's reader cannot split it, so it may run a make; {WHY_MAKE}"
+    for c in cmds:
+        for w in c.pre + [c.name] + c.args:
+            if os.path.basename(w).lower() in MAKES:
                 return f"it runs `{os.path.basename(w)}`; {WHY_MAKE}"
-            if depth >= SHELL_DEPTH:
-                continue
-            if texts:
-                why = unbounded(w, depth + 1)
-                if why:
-                    return why
-            elif shell_seen and _DASH_C.match(w):
-                texts = True
-            elif name in _SHELLS:
-                shell_seen = True
-        if depth >= SHELL_DEPTH:
-            continue
-        for w in words + outs:            # round 1 F3: a quoted `$(`, a text on the same count
-            for text in _substituted(w):
-                why = unbounded(text, depth + 1)
-                if why:
-                    return why
+    for u in unread:
+        for w in _WORDS.split(u.text):
+            if os.path.basename(w).lower() in MAKES:
+                return (f"it runs `{os.path.basename(w)}` in a text the reader does not read "
+                        f"({u.why}); {WHY_MAKE}")
     return ""
 
 

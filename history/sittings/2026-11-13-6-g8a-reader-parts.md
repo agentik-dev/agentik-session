@@ -13,14 +13,14 @@
 - [x] Packet committed
 - [x] `tests/test_g8a_reader.py`, red at the pin (its import fails)
 - [x] The reader (R2 to R8, R10's strict column) with g7's table: `_walk`, `commands`, `git_words`; only test 9's make half and test 10 red, the make rule's
-- [ ] The make rule (R9)
+- [x] The make rule (R9): `unbounded` through `commands`; `_substituted`, `SHELL_DEPTH`, `_DASH_C` gone; acceptance 2 (77 passed) and 3 (761 passed) under both venvs
 - [ ] NICE rows (R12) and this record
 
 ## Handover
 - none yet
 
 ## Next act
-- The make rule: `unbounded` through `commands`; `_substituted` out.
+- The probes (acceptance 6 to 11), then the NICE rows and this record.
 
 ## Exit
 - open

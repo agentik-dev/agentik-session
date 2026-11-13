@@ -1086,18 +1086,3 @@ def loose_targets(text: str) -> list:
     heredocs finds (g6 R1). Pure: no list, no folder, no file."""
     return [(k, w) for k, w, _, _ in _loose(text)]
 
-
-# ---- u3: a quoted `$(`'s text -----------------------------------------------------------
-
-def _substituted(word: str) -> list:
-    """Round 1 F3: the texts of a word's `$(...)`, which the reader keeps inside one word when
-    it is quoted, each to its closing paren by count; an unclosed one runs to the word's end."""
-    out, i = [], word.find("$(")
-    while i >= 0:
-        k, n = i + 2, 1
-        while k < len(word) and n:
-            n += {"(": 1, ")": -1}.get(word[k], 0)
-            k += 1
-        out.append(word[i + 2:k - 1] if n == 0 else word[i + 2:])
-        i = word.find("$(", k)
-    return out
