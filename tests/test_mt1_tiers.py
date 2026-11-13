@@ -363,12 +363,12 @@ def test_r1_f2_the_layer_order(world):
     user_file("defaults:\n  subagents: sonnet\nprofiles:\n  frontier:\n    subagents: haiku\n")
     assert resolved(world, "frontier")["tiers"]["build"]["model"] == "haiku"
     assert resolved(world)["tiers"]["build"]["model"] == "haiku"
-    user_file("defaults:\n  tiers:\n    design: {model: sonnet}\n    build: {model: sonnet}\n"
+    user_file("defaults:\n  tiers:\n    design: {model: sonnet}\n    lookup: {model: sonnet}\n"
               "profiles:\n  frontier:\n    tiers:\n      build: {model: haiku}\n"
               "tiers:\n  words: {model: haiku}\n")
     t = resolved(world, "orchestrator-opus")["tiers"]
     assert t["design"]["model"] == "opus"        # the shipped profile over the user's defaults
-    assert t["build"]["model"] == "sonnet"       # the user's defaults over the shipped ones
+    assert t["lookup"]["model"] == "sonnet"      # the user's defaults over the shipped ones
     assert t["words"]["model"] == "haiku"        # the user's top-level tiers over both
     assert resolved(world, "frontier")["tiers"]["build"]["model"] == "haiku"
 
@@ -487,7 +487,65 @@ def test_r1_f9_the_session_start_line_carries_the_words(world):
     assert re.search(r"; tiers: build sonnet to \w{3} \d\d:\d\d; cap: opus this session", ctx)
 
 
-def test_r1_f10_a_layer_s_model_names_a_family(world):
-    user_file("tiers:\n  build: {model: gpt5}\n")
-    with pytest.raises(resolver.ResolveError, match="family"):
-        resolved(world)
+# ---- round 2 (the refuter's R2-F1 to R2-F4, as the coordinator ruled) -------------------
+
+@pytest.mark.parametrize("where", ["user", "repo"])
+def test_r2_f1_a_model_with_no_family_never_fails_resolution(world, where):
+    typo = "tiers:\n  words: {model: sonet}\n"
+    if where == "user":
+        user_file(typo)
+        repo_file(world, "session:\n  posture: deny\n")
+    else:
+        repo_file(world, typo + "session:\n  posture: deny\n")
+    s = resolved(world)
+    assert s["tiers"]["words"]["model"] == "sonnet" and s["posture"] == "deny"
+    out = hooks.session_start({"session_id": SID, "cwd": str(world), "source": "startup",
+                               "model": "claude-opus-4-5"}, os.environ)
+    assert "profile 'frontier'" in out["hookSpecificOutput"]["additionalContext"]
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
+    assert (sdir / "resolved.json").exists()
+    assert denied(spawn("tier: mend\nfix it", "opus"))
+    for argv in (("rules",), ("profile", "frontier"), ("start", "-n", "frontier", "--", "hi")):
+        rc, _, err = run(*argv)
+        assert rc == 0, (argv, err)
+    from claude_session import doctor
+    rows = {c.name: c for c in doctor.run(cwd=world).checks}
+    assert "tiers.words.model" in rows["config"].detail, rows["config"].detail
+    assert run("set", "tier.words", "sonet")[0] == 2               # the verb's own check
+
+
+@pytest.mark.parametrize("name", ["frontier", "packets", "builder", "orchestrator",
+                                  "orchestrator-opus"])
+def test_r2_f2_the_five_state_their_build_tier_as_at_the_pin(world, name):
+    user_file("defaults:\n  subagents: haiku\n")
+    assert resolved(world, name)["tiers"]["build"]["model"] == "opus"
+    user_file("defaults:\n  subagents: sonnet\n")
+    assert resolved(world, name)["tiers"]["build"]["model"] == "opus"
+    user_file("")
+    (world / ".claude" / "agentik" / "config.local.yaml").parent.mkdir(parents=True,
+                                                                       exist_ok=True)
+    (world / ".claude" / "agentik" / "config.local.yaml").write_text(
+        "session:\n  subagents: sonnet\n")
+    assert resolved(world, name)["tiers"]["build"]["model"] == "opus"   # launched: the body
+    assert resolved(world)["tiers"]["build"]["model"] == "sonnet"       # not launched: the file
+
+
+def test_r2_f2_start_n_frontier_exports_opus_over_a_user_default():
+    user_file("defaults:\n  subagents: haiku\n")
+    rc, out, _ = run("start", "-n", "frontier")
+    assert rc == 0 and "CLAUDE_CODE_SUBAGENT_MODEL=opus " in out
+    _, out, _ = run("profile", "orchestrator")
+    user_file("")
+    assert table_of(run("profile", "orchestrator")[1]) == TABLE
+
+
+def test_r2_f3_config_without_save_names_the_block():
+    rc, _, err = run("set", "posture", "deny", "--config", "balanced")
+    assert rc != 0 and "profiles: balanced:" in err and "--save" not in err, err
+
+
+def test_r2_f4_a_shipped_launch_body_points_at_the_user_s_body(world, monkeypatch):
+    monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "local-only")
+    rc, _, err = run("set", "tier.build", "opus", "--save", "repo")
+    uf = resolver._user_file(os.environ)
+    assert rc == 1 and f"profiles.local-only.tiers in {uf}" in err, err
