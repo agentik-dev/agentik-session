@@ -216,3 +216,33 @@ def test_no_hook_prints_the_new_shapes(box, case):
     for event in EVENTS:
         rc, out, err = _hook(box, event)
         assert MARK not in out + err and "Traceback" not in err, (case, event, out, err)
+
+
+# ---- R6: the sweep's places -------------------------------------------------------------------
+
+def test_a_windows_key_from_a_file_is_withheld_and_a_slot_prints(box):
+    user_file(box[0], f"defaults:\n  admission:\n    windows:\n      {TOPIC}: auto\n"
+                      "      Wed-1500Z: maybe\n")
+    rc, out, err = _run(box, "admission", "admit", "--session", SID, stdin=ADMIT,
+                        CLAUDE_CODE_SESSION_ID=SID)
+    assert MARK not in out + err, (out, err)
+    notes = json.loads(out)["notes"]
+    assert "session.admission.windows: a key (withheld) is not a slot like Wed-1500Z with " \
+           "auto, five_hour or none; ignored" in notes, notes
+    assert "session.admission.windows: 'Wed-1500Z' is not a slot like Wed-1500Z with " \
+           "auto, five_hour or none; ignored" in notes, notes
+
+
+def test_a_checkpoint_zone_from_a_file_is_withheld(box):
+    from claude_session import sessionconfig
+    with pytest.raises(ValueError) as e:
+        sessionconfig.SessionConfig(name="x", checkpoint={TOPIC: 1}).validate()
+    assert MARK not in str(e.value) and str(e.value).startswith(
+        "checkpoint: a key (withheld) is not a zone; zones are "), e.value
+
+
+def test_config_show_of_an_unknown_name_counts_the_file_names(box):
+    u = user_file(box[0], f"profiles:\n  {TOPIC}:\n    lane: seat\n")
+    rc, out, err = _run(box, "config", "show", "zz-typed")
+    assert rc != 0 and MARK not in out + err, (out, err)
+    assert "'zz-typed'" in err and f" and 1 more from {u}" in err, err

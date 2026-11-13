@@ -682,8 +682,8 @@ def cmd_config(args) -> int:
         name = args.name or active
         cfg = configs.get(name)
         if not cfg:
-            _die(f"unknown configuration {name!r}. Known: "
-                 f"{', '.join(sorted(configs))}")
+            _die(f"unknown configuration {name!r}. Known: "         # ss4 R6, as R5
+                 f"{resolver.known(sorted(configs), os.environ)}")
         ov = {} if args.stored else (
             sessionconfig.load_overlay() if name == active else {})
         eff = cfg.merged(ov)

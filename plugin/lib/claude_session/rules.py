@@ -471,8 +471,12 @@ def _window_override(ad: dict, notes: list | None) -> dict:
                 and isinstance(v, str) and v in WINDOW_MODES}
         if good:
             out["windows"] = good
-        bad += [f"session.admission.windows: {k!r:.40} is not a slot like Wed-1500Z with auto, "
-                "five_hour or none; ignored" for k in by if k not in good]
+        # ss4 R6: a key is the file's text, so only one shaped as a slot (which cannot hold
+        # a secret) is named
+        bad += ["session.admission.windows: "
+                + (repr(k) if isinstance(k, str) and _SLOT.match(k) else "a key (withheld)")
+                + " is not a slot like Wed-1500Z with auto, five_hour or none; ignored"
+                for k in by if k not in good]
     elif by is not None:
         bad.append("session.admission.windows: not a mapping; ignored")
     if notes is not None:

@@ -121,7 +121,7 @@ class SessionConfig:
                     "~/.claude/settings.json and every PreToolUse guard in it")
         for zone, n in (self.checkpoint or {}).items():
             if zone not in CHECKPOINT_ZONES:
-                raise ValueError(f"checkpoint: unknown zone {zone!r}; "
+                raise ValueError("checkpoint: a key (withheld) is not a zone; "   # ss4 R6
                                  f"zones are {', '.join(CHECKPOINT_ZONES)}")
             if not isinstance(n, int) or n < 0:
                 raise ValueError(f"checkpoint.{zone} must be a non-negative integer")
