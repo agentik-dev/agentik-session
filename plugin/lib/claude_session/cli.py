@@ -545,7 +545,9 @@ def _charter_show(args) -> int:
                                        ).sections["session"]
         except Exception:                                   # noqa: BLE001
             return charter.DEFAULT_DIR
-        return _charter_dir(section) if isinstance(section, dict) else charter.DEFAULT_DIR
+        # Review 1's F2: a charter.dir that is not a non-empty string reads as the default.
+        d = _charter_dir(section) if isinstance(section, dict) else None
+        return d if isinstance(d, str) and d else charter.DEFAULT_DIR
 
     doc = charter.show(repos, dir_of)
     if args.json:
