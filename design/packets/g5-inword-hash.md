@@ -142,3 +142,30 @@ denies: a test of 392 lines built from parts; 80,000 fresh generator lines, 0 fr
   same 72 lines as `db19d51`'s (none a read, a `git add` or a commit); R1's reads add none.
 - Leads: 1 and 3 are n164 and n165 (design/20's g7), 4 is n166; 5 landed with R1 (0 lines).
   Lead 6's list is empty: rounds 1 and 2's probed-clean lines hold no `cd` behind a reserved word.
+
+## 3f. Review 2's fixes (brief g5-g6 build 4, R1 to R10)
+
+No new rule of reading: F1 to F4 each go back to what `db19d51` read at that point, keeping
+the one thing review 1 needed; F5 is a bound.
+
+- F5: one `-c` line was read again in each folder state, 256 paths a target. Now the strict
+  reading counts as it reads, over the whole line: past 65,536 judgements or 4,096 distinct
+  paths it is denied, never passed unread; a `-c` line read in many folders is split once.
+  F5's lines: 7 to 17 s at `6aed3c5`, 0.02 to 0.22 s now, each denied. The tests' largest
+  counts are 18,000 and 16; the replay's, 347 and 212.
+- F1: the loose reading skips a reserved word wherever its loop meets it, as `db19d51` did;
+  review 1's R2 stays in the strict reading, where `time -p` now stands in the run.
+- F2: the loose reading splits at an `&` whose `<` or `>` is escaped. Splitting at every `&`
+  as `db19d51` did would pass `bash -lc 'cp a >&2 CLAUDE.md'`, which `6aed3c5` denied.
+- F3: a word judged in several folder states is one credit, the followed state's entry.
+- F4: a run of loose pieces stands for a word with a blank only where its folder resolves
+  the run to the path the strict reading judged.
+- Checks against the seven commits and `6aed3c5`: review 2's hand lines (k1, k4, k5), review
+  1's (c1, c2, c3) and the sweep (k2a, k2b, 1,148 lines) REGRESS 0; fuzz 100,000 token and
+  100,000 valid lines (seeds 93111, 93112), four shells: REGRESS 0; with the loose reading off
+  against `a0055da`, 80,000 lines (seeds 93121, 93122): 0 from deny to pass.
+- The price: of review 2's 63 ordinary lines, 14 are refused that `db19d51` passed, the same 14
+  as at `6aed3c5` (review 1's R3 nine and the `sed` script, R5's two `>&`, R1's two `if cd`).
+  The replay: 72 newly refused against `a0055da`, the same 72 lines as `db19d51`'s.
+- Left: lead 5 (n171) is 6.9 s with a `cp` after it; F4's root in one folder
+  (`echo x > "a CLAUDE.md"; bash -lc 'tee a CLAUDE.md'`) passes at every commit.
