@@ -582,7 +582,7 @@ READERS = {
     ("resolver", "rewindow"): ("resolved.json", RESOLVED, lambda m, d: m["resolver"].rewindow(d, 200000)),
     ("rules", "_settings"): ("home/.claude/settings.json", SETTINGS,
                              lambda m, d: m["rules"]._settings(_state_env(d), d)),
-    ("sessionconfig", "load_configs"): ("configs.json", {"mine": {"name": "mine"}}, None),
+    ("sessionconfig", "stored"): ("configs.json", {"mine": {"name": "mine"}}, None),
     ("sessionconfig", "load_overlay"): ("o.json", {"a": 1}, None),
     ("sessionconfig", "last_started"): ("l.json", {"name": "mine"}, None),
     ("state", "hand"): ("state.json", {"from_session": "p", "at": 1.0},
@@ -636,7 +636,7 @@ def test_each_reader_ignores_a_key_it_does_not_know(key, tmp_path):
 @pytest.mark.parametrize("name,rel,doc,call", [
     ("POLICY_FILE", "policy", {"reserve_pct": 7.0}, lambda m: m["policystore"].load_policy().reserve_pct),
     ("CONFIGS_FILE", "configs", {"mine": {"description": "d"}},
-     lambda m: repr(m["sessionconfig"].load_configs()["mine"])),
+     lambda m: repr(m["sessionconfig"].stored()["mine"])),
 ])
 def test_the_stores_ignore_a_key_they_do_not_know(name, rel, doc, call, tmp_path, monkeypatch):
     m = _modules()

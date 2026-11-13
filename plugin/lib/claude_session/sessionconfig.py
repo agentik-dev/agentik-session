@@ -17,7 +17,6 @@ your settings.json. A session started this way leaves no trace behind it.
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import time
@@ -128,79 +127,60 @@ class SessionConfig:
                 raise ValueError(f"checkpoint.{zone} must be a non-negative integer")
 
 
-DEFAULTS: list[SessionConfig] = [
-    SessionConfig(
-        name="frontier",
-        description="Everything on the seat, full effort. For work that matters.",
-        lane="seat", model="opus", effort="xhigh", subagent_model="opus",
-        plugins=["respeak"], posture="signal",
-        checkpoint={"clear": 25, "notice": 12, "wind-down": 6, "reserve": 3, "exhausted": 1},
-        notes="Frontier resources. Spend them on judgement, not bulk retrieval.",
-    ),
-    SessionConfig(
-        name="balanced",
-        description="Opus main thread, Sonnet subagents. The everyday default.",
-        lane="seat", model="opus", effort="high", subagent_model="sonnet",
-        plugins=["respeak"], posture="signal",
-    ),
-    SessionConfig(
-        name="local",
-        description="Seat main thread, local subagents (serialised) via `agentik-agents local`.",
-        # subagent_model is deliberately unset: the local lane already picks the
-        # measured default (sonnet for the broad-tool built-ins, local for
-        # Explore). Forcing local/default here would re-introduce the exact
-        # case that was measured at ~3 minutes of prefill per turn.
-        lane="local", effort="high", posture="signal",
-        notes=("Subagent routing is the local lane's: Explore runs on the local "
-               "27B, broad-tool agents stay on the seat. The local backend runs "
-               "at concurrency 1, so local subagents are SERIALISED -- fanning "
-               "out ten of them is ten sequential runs, not a parallel sweep. "
-               "Send a small number of small-tool-list agents down for bulk "
-               "retrieval and summarisation; keep judgement and any real "
-               "parallelism on the seat."),
-    ),
-    SessionConfig(
-        name="local-only",
-        description="Main thread AND subagents on the local model. Zero seat spend.",
-        lane="local-only", model="local/default", effort="medium",
-        subagent_model="local/default", posture="off",
-        notes=("Everything is running on the local model, including agents "
-               "with broad tool lists that are known to be slow there -- that "
-               "is the point of this configuration, not an oversight. Nothing "
-               "touches the claude.ai seat, so the usage window is not the "
-               "constraint; local latency is. The backend is concurrency 1, "
-               "so subagents run one at a time. Prefer short turns and small "
-               "tool lists, and expect effort to be capped at medium."),
-    ),
-    SessionConfig(
-        name="scratch",
-        description="A fun test project. Local, low ceremony, nothing enforced.",
-        lane="local-only", model="local/default", effort="low",
-        subagent_model="local/default", posture="off",
-        checkpoint={"clear": 0, "notice": 0, "wind-down": 0, "reserve": 0, "exhausted": 0},
-    ),
-    SessionConfig(
-        name="review",
-        description="Read-only review posture. Investigates, never edits.",
-        lane="seat", model="opus", effort="xhigh", subagent_model="opus",
-        tools="Read,Glob,Grep", permission_mode="plan", plugins=["respeak"],
-        posture="signal",
-        notes="Read-only. Produce findings and a plan; do not edit files.",
-    ),
-]
+# The configurations are the profiles (packet mt1 R2): `profiles.yaml` is the one table, read
+# through the resolver, so the user's and the repo's layers reach `start` as they reach the
+# hooks. The fields `start` needs map one to one; `subagent_model` is `tiers.build`'s model
+# (none on the `local` lane, whose dispatcher picks the measured default), and the shipped
+# `permission_mode: auto` passes no flag, as the former table's configs passed none.
+PASS_NO_FLAG = {"permission_mode": "auto"}
 
-
-# --- persistence -------------------------------------------------------------
 
 def _path(name: str) -> Path:
     return cfgmod.STATE_DIR / name
 
 
-def load_configs() -> dict[str, SessionConfig]:
-    # deepcopy, not replace(): a shallow copy shares checkpoint/plugins/env
-    # dicts with the module-level DEFAULTS, so one in-place edit would leak
-    # into every config for the rest of the process.
-    out = {c.name: copy.deepcopy(c) for c in DEFAULTS}
+def from_profile(name: str, cwd=None, env=None) -> SessionConfig:
+    """The launch configuration of profile `name` as resolved at `cwd`. Raises
+    resolver.ResolveError (an unknown profile among them)."""
+    from . import resolver
+    env = os.environ if env is None else env
+    r = resolver.resolve(cwd or os.getcwd(), "start", env, profile=name, overlay={})
+    s = r.sections["session"]
+    lane = s.get("lane") or "seat"
+    tools = s.get("tools")
+    tools = ",".join(str(t) for t in tools) if isinstance(tools, list) else tools
+    pm = s.get("permission_mode")
+    return SessionConfig(
+        name=name, description=s.get("description") or "", lane=lane,
+        model=s.get("model"), effort=s.get("effort"),
+        subagent_model=None if lane == "local" else s["tiers"]["build"]["model"],
+        tools=tools, permission_mode=None if pm == PASS_NO_FLAG["permission_mode"] else pm,
+        plugins=list(s.get("plugins") or []), posture=s.get("posture") or "signal",
+        notes=s.get("notes") or "")
+
+
+def load_configs(cwd=None, env=None) -> dict[str, SessionConfig]:
+    """Every profile `agentik session profile` lists, as `start` launches it here. A
+    profile that does not resolve is left out."""
+    from . import resolver
+    env = os.environ if env is None else env
+    try:
+        _, profiles = resolver.load_profiles(env)
+    except resolver.ResolveError:
+        return {}
+    out = {}
+    for name in profiles:
+        try:
+            out[name] = from_profile(name, cwd, env)
+        except resolver.ResolveError:
+            continue
+    return out
+
+
+def stored() -> dict[str, SessionConfig]:
+    """`configs.json`, which no verb writes since packet mt1 (R4): a file an earlier release
+    wrote is read for the hooks' checkpoint cadence alone (`effective`), one release more."""
+    out: dict[str, SessionConfig] = {}
     p = _path(CONFIGS_FILE)
     if p.exists():
         try:
@@ -209,12 +189,13 @@ def load_configs() -> dict[str, SessionConfig]:
                 d = {k: v for k, v in (d or {}).items() if k in known}
                 d["name"] = name
                 out[name] = SessionConfig(**d)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
             pass
     return out
 
 
 def save_configs(configs: dict[str, SessionConfig]) -> None:
+    """The legacy file's writer, for the tests' fixtures: no verb calls it (mt1 R4)."""
     cfgmod.ensure_dirs()
     store._write_private(
         _path(CONFIGS_FILE),
@@ -321,9 +302,10 @@ def get_active() -> str | None:
 
 
 def effective(name: str | None = None) -> tuple[SessionConfig, dict]:
-    """The config in force for this session, plus the overlay applied to it."""
-    configs = load_configs()
+    """The hooks' policy for this session (posture, reserve, checkpoint cadence), plus the
+    overlay applied to it; the resolved file outranks its posture (hooks._policy). No
+    profile is resolved here, so a hook never pays for one."""
     name = name or get_active() or "balanced"
-    base = configs.get(name) or SessionConfig(name=name)
+    base = stored().get(name) or SessionConfig(name=name)
     ov = load_overlay()
     return base.merged(ov), ov

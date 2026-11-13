@@ -12,8 +12,16 @@ Layers, lowest first (D7):
 
 The invocation flag sits above all of them and belongs to whoever reads the
 file. The profile *name* is taken from the highest layer that names one
-(launch, then local, then repo), else `frontier`; its values form the base, and
-a named launch profile re-applies its own fields above the repo files.
+(launch, then local, then repo, then the user file's `defaults.profile`: packet mt1 R3),
+else `frontier`; its values form the base, and a named launch profile re-applies its own
+fields above the repo files.
+
+`tiers` (packet mt1) is layered apart, role by role: the shipped `defaults`, the profile
+(shipped, then the user's body of it), the user file's `tiers:` (and its `defaults.tiers`),
+the repo's (`config.yaml`, then `config.local.yaml`, each top-level `tiers:` or
+`session.tiers`). A layer's old `subagents` is read as its `tiers.build` model. The
+session's own words (`set tier.*`, `set cap`) are read against the clock by each reader
+(tiers.effective), never written here; `subagents` is written as `tiers.build`'s model.
 
 The engine's measured window, else the model, decides the window, and the role
 the ceilings within it (models.py): the window is the engine's last reading for this
@@ -53,13 +61,13 @@ from pathlib import Path
 
 from . import SEMVER
 from . import config as cfgmod
-from . import models, rules
+from . import models, rules, tiers as tiermod
 from .yamlsubset import dump, load
 
 PLUGIN = "session"
 # S38 ruling 4: `gate` (ntfy_url, ntfy_topic, wall) is a section; the runner reads its user
 # layer alone (gate_config), since it serves every repo.
-SECTIONS = ("session", "respeak", "decisions", "relay", "gate")
+SECTIONS = ("session", "respeak", "decisions", "relay", "gate", "tiers")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
 DEPENDENT = ("respeak", "decisions", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
@@ -70,7 +78,7 @@ OLD_RELAY = "agent-relay"
 SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools",
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
                 "builders", "push", "device", "charter", "verify", "respawn", "priority",
-                "pacing", "admission", "reconcile")
+                "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes")
 # `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
@@ -220,6 +228,9 @@ def _repo_sections(doc: dict, layer: str, unknown: list) -> dict:
             continue
         if not isinstance(v, dict):
             raise ResolveError(f"{layer}: section {k} must be a mapping")
+        if k == "tiers":                  # mt1 R3: a repo's top-level block
+            out[k] = v
+            continue
         if k == "session":
             for sk in v:
                 if sk not in SESSION_KEYS:
@@ -290,6 +301,57 @@ def _window_ceilings(shipped: dict, user: dict, name: str, explicit: list) -> di
     return out
 
 
+def _tier_layer(body) -> dict:
+    """One layer's tiers: its `tiers`, with an old `subagents` as the build model when the
+    layer names no build model itself (mt1 R1's read alias)."""
+    body = body if isinstance(body, dict) else {}
+    t = body.get("tiers")
+    if t is not None and not isinstance(t, dict):
+        raise ResolveError("tiers must be a mapping of design, build, words, mend, lookup")
+    t = dict(t or {})
+    sub = body.get("subagents")
+    b = t.get("build")
+    if isinstance(sub, str) and sub and not (isinstance(b, dict) and b.get("model")
+                                             or isinstance(b, str)):
+        t["build"] = {**(b if isinstance(b, dict) else {}), "model": sub}
+    return t
+
+
+def _tiers(shipped, user, name, repo_s, local_s, ov_sub=None) -> dict:
+    """The table for profile `name`, lowest first: the shipped defaults, the profile (the
+    shipped body, then the user's), the user's `defaults.tiers` and top-level `tiers:`, then
+    the repo's and the local file's (top-level `tiers:`, then `session.tiers`)."""
+    sp = (shipped.get("profiles") or {}).get(name)
+    up = (user.get("profiles") or {}).get(name) if isinstance(user.get("profiles"), dict) \
+        else None
+    ud = user.get("defaults") if isinstance(user.get("defaults"), dict) else {}
+    layers = [(shipped.get("defaults") or {}).get("tiers") or {}, _tier_layer(sp),
+              _tier_layer(up), _tier_layer(ud), _tier_layer({"tiers": user.get("tiers")})]
+    for secs in (repo_s, local_s):
+        layers.append(_tier_layer({"tiers": secs.get("tiers")}))
+        layers.append(_tier_layer(secs.get("session")))
+    layers.append(_tier_layer({"subagents": ov_sub}))     # an overlay's old subagent_model
+    table: dict = {}
+    for layer in layers:
+        table = tiermod.merge(table, layer)
+    try:
+        tiermod.check(table)
+    except ValueError as e:
+        raise ResolveError(str(e)) from None
+    return table
+
+
+def user_profile(env) -> str | None:
+    """The user file's `defaults.profile` (mt1 R3), else None; never raises."""
+    try:
+        doc = _read(_user_file(env), [])
+    except (ResolveError, OSError, RecursionError):
+        return None
+    d = doc.get("defaults") if isinstance(doc, dict) else None
+    v = d.get("profile") if isinstance(d, dict) else None
+    return v if isinstance(v, str) and v else None
+
+
 def load_profiles(env) -> tuple[dict, dict]:
     """(defaults, profiles) from the shipped and the user's files; for doctor and `profile`."""
     inputs: list = []
@@ -298,7 +360,12 @@ def load_profiles(env) -> tuple[dict, dict]:
 
 
 def _user_file(env) -> Path:
+    """The user layer: `$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when that file exists
+    (packet mt1 R3), else `~/.claude/agentik/profiles.yaml` (c5: else the old folder's)."""
     home = Path(env.get("HOME") or Path.home())
+    ccd = env.get("CLAUDE_CONFIG_DIR")
+    if ccd and (Path(ccd) / "agentik" / "profiles.yaml").is_file():
+        return Path(ccd) / "agentik" / "profiles.yaml"
     return cfgmod.pick(home / ".claude" / "agentik" / "profiles.yaml",
                        home / OLD_REPO_DIR / "profiles.yaml")
 
@@ -463,8 +530,11 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     repo_s = _repo_sections(repo, "config.yaml", unknown)
     local_s = _repo_sections(local, "config.local.yaml", unknown)
 
+    ud = user.get("defaults") if isinstance(user.get("defaults"), dict) else {}
     name = (profile or (local_s.get("session") or {}).get("profile")
-            or (repo_s.get("session") or {}).get("profile") or DEFAULT_PROFILE)
+            or (repo_s.get("session") or {}).get("profile")
+            or (ud.get("profile") if isinstance(ud.get("profile"), str) else None)
+            or DEFAULT_PROFILE)
     if name not in profiles:
         raise ResolveError(f"unknown profile {name!r}; known: {', '.join(profiles)}")
     own = profiles[name] or {}
@@ -490,7 +560,10 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     ov_session = _normalized(ov_session, unknown, "overlay")
     sections["session"] = _merge(sections["session"], ov_session)
     sections["session"]["profile"] = name
+    sections.pop("tiers", None)
     merged = {k: sections["session"].get(k) for k in SESSION_KEYS}
+    merged["tiers"] = _tiers(shipped, user, name, repo_s, local_s, ov_session.get("subagents"))
+    merged["subagents"] = merged["tiers"]["build"]["model"]       # mt1 R1's read alias
     _validate(merged)
     per = _window_ceilings(shipped, user, name, [
         ("config.yaml", repo_s.get("session") or {}),

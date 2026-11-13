@@ -6,6 +6,11 @@
 # windows and wins over the role (models.py, resolver.py).
 # `defaults` carries every field; a profile names only what it changes, except
 # frontier, which states every field so the whole shape is readable in one place.
+# `tiers` (packet mt1, hq design/13 §3) maps the five roles to {model, effort}: the
+# shipped table is in `defaults`; a profile names only the roles it changes. `subagents`
+# is read as `tiers.build`'s model one release more, and `start` exports that model as
+# CLAUDE_CODE_SUBAGENT_MODEL. `lane`, `plugins` and `notes` are `start`'s (the former
+# sessionconfig table, folded here).
 # Strict YAML subset (D12): mappings, scalars, flat lists, one-level flow maps.
 
 # The window each model family runs on. A model string names its family
@@ -35,8 +40,16 @@ models:
 defaults:
   description: ""
   model: opus
-  effort: xhigh
-  subagents: opus
+  effort: high
+  tiers:
+    design: {model: fable, effort: high}
+    build: {model: opus, effort: high}
+    words: {model: sonnet, effort: medium}
+    mend: {model: sonnet, effort: high}
+    lookup: {model: haiku, effort: low}
+  lane: seat
+  plugins: []
+  notes: ""
   tools: null
   permission_mode: auto
   posture: signal
@@ -68,8 +81,7 @@ profiles:
   frontier:
     description: Everything on the seat, full effort. For work that matters.
     model: opus
-    effort: xhigh
-    subagents: opus
+    effort: high
     tools: null
     permission_mode: auto
     posture: signal
@@ -84,48 +96,65 @@ profiles:
     respeak: {narrative: tech}
     decisions: {dir: decisions}
     relay: {enabled: auto}
+    plugins: [respeak]
+    notes: "Frontier resources. Spend them on judgement, not bulk retrieval."
   balanced:
     description: Opus main thread, Sonnet subagents. The everyday default.
     effort: high
-    subagents: sonnet
+    tiers:
+      build: {model: sonnet}
+    plugins: [respeak]
   local:
     description: Seat main thread, local subagents (serialised) via `agentik-agents local`.
     effort: high
-    subagents: null
+    lane: local
+    notes: "Subagent routing is the local lane's: Explore runs on the local 27B, broad-tool agents stay on the seat. The local backend runs at concurrency 1, so local subagents are SERIALISED; fanning out ten of them is ten sequential runs, not a parallel sweep. Send a small number of small-tool-list agents down for bulk retrieval and summarisation; keep judgement and any real parallelism on the seat."
   local-only:
     description: Main thread and subagents on the local model. Zero seat spend.
     model: local/default
     effort: medium
-    subagents: local/default
+    tiers:
+      design: {model: local/default}
+      build: {model: local/default}
+      words: {model: local/default}
+      mend: {model: local/default}
+      lookup: {model: local/default}
+    lane: local-only
     posture: "off"
+    notes: "Everything is running on the local model, including agents with broad tool lists that are known to be slow there; that is the point of this configuration, not an oversight. Nothing touches the claude.ai seat, so the usage window is not the constraint; local latency is. The backend is concurrency 1, so subagents run one at a time. Prefer short turns and small tool lists, and expect effort to be capped at medium."
   scratch:
     description: A test project. Local, low ceremony, nothing enforced.
     model: local/default
     effort: low
-    subagents: local/default
+    tiers:
+      design: {model: local/default}
+      build: {model: local/default}
+      words: {model: local/default}
+      mend: {model: local/default}
+      lookup: {model: local/default}
+    lane: local-only
     posture: "off"
     charter: {required: false}
   review:
     description: Read-only review posture. Investigates, never edits.
     tools: [Read, Glob, Grep]
     permission_mode: plan
+    plugins: [respeak]
+    notes: "Read-only. Produce findings and a plan; do not edit files."
   packets:
     description: Writes packets and designs, never builds.
     model: fable
-    effort: xhigh
-    subagents: opus
+    effort: high
     posture: signal
   builder:
     description: What the relay spawns.
     model: opus
     effort: high
-    subagents: opus
     posture: deny
   orchestrator:
     description: The orchestrator for large, complex work, Fable 5.1 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: fable
-    effort: xhigh
-    subagents: opus
+    effort: high
     builders: {model: opus, max_concurrent: 3}
     posture: signal
     charter: {required: true}
@@ -134,8 +163,9 @@ profiles:
   orchestrator-opus:
     description: The orchestrator for small and medium projects, Opus 5.5 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: opus[1m]
-    effort: xhigh
-    subagents: opus
+    effort: high
+    tiers:
+      design: {model: opus}
     builders: {model: opus, max_concurrent: 3}
     posture: signal
     charter: {required: true}
