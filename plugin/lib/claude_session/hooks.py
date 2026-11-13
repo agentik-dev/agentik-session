@@ -388,65 +388,163 @@ def _spawn_rule(payload: dict, env) -> str | None:
             + runs + ". Name model: 'opus', or use an agent type that names its own model.")
 
 
-_TYPE_PART = r"[A-Za-z0-9._-]{1,64}"
+_TYPE_PART = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_FM_BOUND = 262144                  # review 1 R4: the whole frontmatter, to 256 KB
+_LIST_BOUND = 4096                  # entries listed per agents folder, and its depth
+_FM_OPEN = re.compile(r"---[ \t\r]*\n")
+_FM_CLOSE = re.compile(r"^---[ \t\r]*$", re.M)
+_FM_KEY = re.compile(r"(name|model)[ \t]*:[ \t]*(.*)")
 
 
-def _file_model(path: Path) -> tuple:
-    """(read, model) for an agent file: read False when it cannot be opened or decoded;
-    model the frontmatter's `model:` word, else None. Reads at most 8 KB; never raises."""
+def _front(path: str, want: str | None = None) -> tuple:
+    """(name, model) of an agent file's frontmatter, None for either it does not state
+    (review 1 R4): a byte-order mark, blanks after the opening `---` and before a key's
+    colon, a byte that is not UTF-8 (replaced); the block up to its closing line, read to
+    256 KB, past which it is what was read. The caller opens only a regular file (R3), and
+    without blocking, so a FIFO put in its place since answers at once; a file that
+    cannot be read gives (None, None), and so does one whose bytes hold no `want` (it cannot
+    name that type), unparsed. Never raises."""
     try:
-        with open(path, encoding="utf-8") as f:
-            head = f.read(8192)
-    except (OSError, ValueError):                       # a decode error, a NUL in the path
-        return False, None
-    m = re.match(r"---\n(.*?)\n---", head, re.S)
-    got = re.search(r"^model:[ \t]*['\"]?([^'\"\s]+)", m.group(1), re.M) if m else None
-    return True, (got.group(1) if got else None)
-
-
-def _plugin_model(plugin: str, name: str, user: Path) -> str | None:
-    """h5 R2: the `model:` of `<installPath>/agents/<name>.md` over every install of
-    `<plugin>@<marketplace>` in `installed_plugins.json`, the family ranking highest in
-    `tiers.ORDER` first and a model naming no family last (the hook cannot tell which
-    install this session loaded, so it takes the worst); None when none is found."""
-    from . import tiers
-    plugins = _load_json(user / "plugins" / "installed_plugins.json").get("plugins")
-    found = []
-    for key, recs in (plugins.items() if isinstance(plugins, dict) else ()):
-        if not isinstance(key, str) or "@" not in key or key.partition("@")[0] != plugin:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return None, None
+    try:
+        raw = os.read(fd, 65536)                        # one read for a common file
+        if len(raw) == 65536:
+            while len(raw) < _FM_BOUND:
+                got = os.read(fd, _FM_BOUND - len(raw))
+                if not got:
+                    break
+                raw += got
+    except OSError:
+        return None, None
+    finally:
+        os.close(fd)
+    if want is not None and want.encode() not in raw:
+        return None, None
+    text = raw.decode("utf-8", "replace")
+    text = text[1:] if text.startswith("﻿") else text
+    m = _FM_OPEN.match(text)
+    if not m:
+        return None, None
+    body = text[m.end():]
+    end = _FM_CLOSE.search(body)
+    if end is None and len(raw) < _FM_BOUND:
+        return None, None                               # no closing line: no frontmatter
+    name = model = None
+    for line in body[:end.start() if end else len(body)].splitlines():
+        k = _FM_KEY.fullmatch(line.rstrip())
+        if k is None:
             continue
-        for rec in (recs if isinstance(recs, list) else ()):
-            where = rec.get("installPath") if isinstance(rec, dict) else None
-            if isinstance(where, str) and where:
-                model = _file_model(Path(where) / "agents" / f"{name}.md")[1]
-                if model:
-                    found.append(model)
+        if k.group(1) == "model" and model is None:     # the first that states one
+            got = re.match(r"['\"]?([^'\"\s]+)", k.group(2))
+            model = got.group(1) if got else None
+        elif k.group(1) == "name" and name is None:
+            v = k.group(2).strip()
+            v = v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else \
+                re.sub(r"\s+#.*$", "", v)
+            name = v or None
+    return name, model
 
-    def rank(m):
-        f = tiers.family(m)
-        return tiers.ORDER.index(f) if f in tiers.ORDER else len(tiers.ORDER)
-    return min(found, key=rank) if found else None
+
+def _scan(folder: Path, nested: bool, want: str) -> list:
+    """[(type, stem, model)] for each regular `*.md` in an agents folder: the type its
+    frontmatter `name:`, else the file's stem, a plugin's subfolders its namespace
+    (`team:drafter`, review 1 R1); at most `_LIST_BOUND` entries and that depth. A file
+    whose stem is not `want` is parsed only when its bytes hold `want`."""
+    out, todo, seen = [], [(str(folder), ())], 0
+    while todo:
+        where, ns = todo.pop()
+        try:
+            with os.scandir(where) as it:
+                entries = [e for _, e in zip(range(_LIST_BOUND - seen), it)]
+        except (OSError, ValueError):
+            continue
+        seen += len(entries)
+        for e in entries:
+            try:
+                if e.is_dir():
+                    if nested and len(ns) < 8 and seen < _LIST_BOUND:
+                        todo.append((e.path, ns + (e.name,)))
+                    continue
+                if not e.name.endswith(".md") or not e.is_file():     # R3: no FIFO, no device
+                    continue
+            except OSError:
+                continue
+            stem = e.name[:-3]
+            name, model = _front(e.path, None if stem.casefold() == want.casefold() else want)
+            out.append((":".join(ns + (name or stem,)), ":".join(ns + (stem,)), model))
+    return out
+
+
+def _rank(model) -> int:
+    from . import tiers
+    f = tiers.family(model)
+    return tiers.ORDER.index(f) if f in tiers.ORDER else len(tiers.ORDER)
+
+
+def _project_folders(payload: dict, env) -> list:
+    """Review 1 R2: the agents folders of the working directory and each ancestor up to the
+    repo's root (the folder holding `.git`, else the top), nearest first, then
+    `CLAUDE_PROJECT_DIR`'s."""
+    out = []
+    try:
+        cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR")
+        if isinstance(cwd, str) and cwd:
+            d = Path(cwd)
+            for _ in range(256):
+                out.append(d / ".claude" / "agents")
+                if os.path.lexists(d / ".git") or d.parent == d:
+                    break
+                d = d.parent
+        pd = env.get("CLAUDE_PROJECT_DIR")
+        if isinstance(pd, str) and pd and Path(pd) / ".claude" / "agents" not in out:
+            out.append(Path(pd) / ".claude" / "agents")
+    except (OSError, ValueError):
+        pass
+    return out
 
 
 def _agent_model(ti: dict, payload: dict, env) -> str | None:
-    """The `model:` of the agent file the call's `subagent_type` names: the project's
-    `.claude/agents/<type>.md`, else the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
-    for a plugin's type (`<plugin>:<name>`), its installs' (h5 R2). None for a missing
-    file, no frontmatter or no `model:` line; never raises on a read."""
+    """The `model:` of the agent type the call's `subagent_type` names, found as Claude Code
+    names it (review 1 R1): by its file's frontmatter `name:`, else the file's name. A
+    type `<name>`: the nearest of the project's agents folders (R2) that defines it, else
+    the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`). A plugin's type
+    `<plugin>[:<folder>...]:<name>`: every install of `<plugin>@<marketplace>` in
+    `plugins/installed_plugins.json` (h5 R2). Two files claiming one type: the model whose
+    family ranks highest in `tiers.ORDER` (the reading that refuses), one naming no family
+    last. When no file claims it, a file of its name that claims another counts (a call
+    for such a type fails in Claude Code, so refusing it costs nothing). None when none
+    is found or it names no model; never raises on a read."""
     name = ti.get("subagent_type")
     if not isinstance(name, str):
         return None
-    cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR")
-    user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
-    plug = re.fullmatch(f"({_TYPE_PART}):({_TYPE_PART})", name)
-    if plug:
-        return _plugin_model(plug.group(1), plug.group(2), user)
-    if not re.fullmatch(_TYPE_PART, name):
+    parts = name.split(":")
+    if len(parts) > 10 or not all(_TYPE_PART.fullmatch(p) for p in parts):
         return None
-    for base in ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else []) + [user]:
-        read, model = _file_model(base / "agents" / f"{name}.md")
-        if read:
-            return model
+    user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    if len(parts) > 1:
+        plugins = _load_json(user / "plugins" / "installed_plugins.json").get("plugins")
+        group = []
+        for key, recs in (plugins.items() if isinstance(plugins, dict) else ()):
+            if not isinstance(key, str) or "@" not in key or key.partition("@")[0] != parts[0]:
+                continue
+            for rec in (recs if isinstance(recs, list) else ()):
+                where = rec.get("installPath") if isinstance(rec, dict) else None
+                if isinstance(where, str) and where:
+                    group += _scan(Path(where) / "agents", True, parts[-1])
+        groups, want = [group], ":".join(parts[1:])
+    else:
+        groups = [_scan(f, False, name) for f in _project_folders(payload, env)
+                  + [user / "agents"]]
+        want = name
+    for col in (0, 1):                                  # by the type's name, then the file's
+        for group in groups:
+            hits = [g for g in group if (g[0] == want if col == 0 else
+                                         g[1].casefold() == want.casefold())]
+            if hits:
+                models = [g[2] for g in hits if g[2]]
+                return min(models, key=_rank) if models else None
     return None
 
 

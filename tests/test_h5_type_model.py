@@ -292,7 +292,7 @@ def test_r1_a_plugin_type_is_found_by_its_name_field(world):
 def test_r1_a_plugin_s_subfolder_is_its_type_s_namespace(world):
     parent(OPUS)
     root = world.tmp / "inst"
-    agent(root / "agents", "team/drafter", fmn("drafter", "fable"))
+    agent(root, "team/drafter", fmn("drafter", "fable"))
     install(world, "plug@market", raw=json.dumps(
         {"plugins": {"plug@market": [{"installPath": str(root)}]}}))
     assert "plug:team:drafter names fable" in reason(
