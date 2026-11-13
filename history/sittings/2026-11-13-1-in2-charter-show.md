@@ -16,6 +16,7 @@
 - [x] act 5: R9: the hook's read and the denial's sentence; acceptance 9 green; `test_n33.py`'s `VERB_FIRST` takes the new sentence
 - [x] act 6: R10: the docstring, the parser's help, the skill's "The charter", the RUNBOOK's charter paragraphs and helper sentence, NICE n191 (24,532 B); recordlint, doclint (the packet trimmed to 9,179 B of 9,216) and hygiene exit 0; the built `check` passes this charter, exit 0
 - [x] acceptance 11: the five files 296 passed under `.venv` and under `.venv-floor`; the tests that read the skill, the RUNBOOK or the charter (753) green under both but the docs case, fixed after
+- [x] review 1's fix (build 2): tests c0c8bf6 (9 red at f99ec37; the hook's five chained payloads already denied); F1 e84c814, L2 5f8e07d, F2 85c8930, each green after; NICE n192 to n195, with n130, n133 and n134 moved to the overflow for recordlint's cap; the five files 313 passed under each venv
 
 ## Handover
 - open by level: none yet

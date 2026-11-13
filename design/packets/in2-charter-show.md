@@ -46,10 +46,10 @@ Each a case of `tests/test_in2_charter_show.py`, through `cli.main`, in temp rep
 
 | # | line | at the pin |
 |---|---|---|
-| 1 | `charter show pear --json`: R7's object for `2026-11-13-1` (title, seven parts, no refusal, Next act's first line, two `waits`: a hand line split, a prose line whole with `command` null), exit 0 | exit 2, `invalid choice: 'show'`, nothing on stdout |
+| 1 | `show pear --json`: R7's object, two `waits` (a hand line split, a prose line whole), exit 0 | exit 2, `invalid choice: 'show'` |
 | 2 | the text view of line 1: the `==`, `next` and two `hand` lines | as line 1 |
 | 3 | `2026-11-13-10.md` is newer than `-9.md` and `-2-row.md`; `--dir notes` reads `pear/notes` | as line 1 |
-| 4 | `quince`'s prose file: its refusals, `parts` `[]`, `next_act` and `waits` null, `form` lines; `pear quince nowhere bare`: two repos, two skipped, exit 0; no REPO from inside `pear`: `pear`'s top | as line 1 |
+| 4 | `quince`'s prose: refusals, `form` lines; `pear quince nowhere bare`: two repos, two skipped; no REPO: `pear`'s top | as line 1 |
 | 5 | ``- hand: ask twice; then wait; `a; b | c` ``: `what` `ask twice; then wait`, `command` `a; b | c` | as line 1 |
 | 6 | `check` and `close` print R4's four warnings for their cases, the exit kept; no part, `- none` or hand lines alone: no new warning | `check` prints nothing for the prose line, exit 0 |
 | 7 | `open` writes the part and `- none` before `## While waiting`; `check` passes it silent; `show` says `0 for the owner's hand` | four `##` parts, no Waits part |
@@ -65,8 +65,8 @@ Each a case of `tests/test_in2_charter_show.py`, through `cli.main`, in temp rep
 - "Newest" picks by name among every entry, so one that cannot be read (a folder) is `unreadable`; a folder missing or unlistable is `no charter`.
 - `skipped[].repo` is the real path; the text view names folders, the `skipped` lines a last block, names joined by `, `. `--json` is indented 2.
 - A REPO's folder resolves as `check`'s rules do (the session id or `unsaved`, the launch profile); an absolute `--dir` is taken as is.
-- Old tests changed: `test_charter.py`'s `test_close_appends_one_line`, `test_s21_open_seeds_the_handover_line`, `test_s21_open_seeds_nothing_with_priority_off`, `test_s40_open_writes_the_section` (`open`'s text); `test_n33.py`'s `VERB_FIRST` (the denial).
-- NICE n191 (S4): the README names neither the part nor `show`.
+- Old tests changed: four of `test_charter.py` (`open`'s text), `test_n33.py`'s `VERB_FIRST` (the denial). NICE n191: the README.
+- Review 1 (fix): F1, `show` reads a regular file of at most 64 KiB opened `O_NONBLOCK`, else `unreadable`; F2, a `charter.dir` not a non-empty string is the default; L2, every Waits part is read, a second warns. The hook denies a writer chained after `show`. L1, L5, L6, L8: NICE n192 to n195.
 
 ## 5. Forbidden reads
 
