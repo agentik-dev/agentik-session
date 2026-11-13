@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] phases 1 to 1c, at f1f012e: `_mask` alone decides a comment; round 1's F1 to F4 (cc4a20a), F5 NICE n161; round 2's four and bash 3.2's reading of `${` in `$(` (faf70cb); the packet's §3a, §3b
 - [x] phase 1d measurement: g6's loose prototype lists `CLAUDE.md` on every R3-F line and lead; its accounting passes F1b, F1c (round 3's b, c) and leads 2, 4, where the strict reading read the word in another folder or none
-- [x] 1d R1 (R3-F1): no pattern `)` masked in backticks; `_commands` reads a `case` glued to its opening backtick, and (a choice) an `esac` glued to a closing one
+- [x] 1d R1 (R3-F1): `_commands` reads a `case` glued to its opening backtick and (a choice) an `esac` glued to its closing one; R8: the unmasked `)` as proposed passed a line f1f012e denied and zsh writes (a `cd` in a case body in backticks), so the first reading masks it again and bash3's reading, which counts no `case` (R3), reads it
 - [x] 1d R2 (R3-F2): a backtick opened in a `${` goes on `opened` till it closes (a `)` there pops nothing); fuzz 40k: no line head denied and a shell writes passes
 - [x] 1d R3 (R3-F3): the bash3 reading counts no `case`, taken whenever its mask differs
 - [ ] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not

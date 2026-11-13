@@ -468,6 +468,8 @@ def _mask(text: str, bash3: bool = False) -> str:
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
                 if cases[-1] or opened[-1:] in ([], ["`"]):    # r2 F2: nor a pattern's `)`
                     start = True
+                    if cases[-1] and tick:     # in backticks a word's; bash3's reading,
+                        out[-1] = _MASK[c]     # which counts no `case`, reads it (r3 F1, R8)
                 else:
                     cases.pop()
                     start = opened.pop() != "$("
