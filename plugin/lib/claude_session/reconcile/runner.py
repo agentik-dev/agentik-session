@@ -158,8 +158,9 @@ def check(cwd, env, value=None) -> dict:
                 if k not in THRESHOLDS:
                     bad.append(f"{_PATH}.thresholds: a key (withheld) is not a detector "
                                f"({', '.join(sorted(THRESHOLDS))})")
-                elif not _num(v) or v < 0:
-                    bad.append(f"{_PATH}.thresholds.{k} is {v!r}; a threshold is a number, "
+                elif not _num(v) or v < 0:          # ss2 N1: the reason, never the value
+                    why = "is not a number" if not _num(v) else "is below 0"
+                    bad.append(f"{_PATH}.thresholds.{k} {why}; a threshold is a number, "
                                "0 or more")
     rd = out.get("read")
     if rd is not None and not isinstance(rd, dict):

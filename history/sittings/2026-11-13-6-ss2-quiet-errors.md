@@ -22,7 +22,7 @@
 - [x] R1-F1: `_save_tier` reads the file inside its `try` as UTF-8 and passes both parse errors through `resolver.withheld`; VERBS hold every `--save` form
 - [x] R1-F2: a key's name read from a file withheld: `models` and `respawn` name the file and the section (the parser keeps no line for a key), and the reconciler's three key-name lines; four tests' pins moved (test_resolver, test_models, test_r2 twice)
 - [x] R1-F3: a profile name from the environment or a caller prints as at the pin; only a name read from a file is withheld
-- [ ] N1: a threshold's value never printed
+- [x] N1: a threshold's error says `is not a number` or `is below 0`, never the value
 - [ ] NICE rows for N2 to N8; the restamp at alpha.108; the gate
 
 ## Handover
