@@ -45,6 +45,17 @@
 - Beyond the review's lines: `cp a CLAUDE.md; echo x\` (F3's control, passed at the pin) is now denied, by F3's rule; `cp a CLAU\` newline `DE.md` (g6's lead 3) now reads `CLAUDE.md`, by F4's drop.
 - F5 is NICE n161. Leads 1 and 2 stay as at the pin, for g6.
 
+## 3b. Round 2's fixes, phase 1c (brief g5-r2-fixes R1 to R7)
+
+The rule: a line the shell runs as a write of a gated file, which `d2f89d9` or the pin denied, must not pass at the head.
+
+- R2-F1: a bare `(` in `${...}` left the `${` open, and `$${` opened one; now a bare paren in `${` is a word's and `$$` before `{` is the pid.
+- R2-F2: a `case` pattern's `)` in `$(` closed the `$(`; now `_mask` counts each bracket's open `case`s, read at a command's start, and a pattern's `)` closes nothing.
+- R2-F3: a backslash-escaped backtick ended a comment inside backticks; now it does not.
+- R2-F4: a bare `)` in `${...}` was a subshell's edge to `_commands`, so the folder went unknown; now it is masked, as R2-F1's `(` is.
+- Beyond the four, by fuzzing pin, 40aee95 and the head against sh, bash, zsh and dash: bash 3.2 opens no `${` inside a `$(`, so `bash_targets` adds that reading's targets where its mask differs; a `case` pattern's `)` in backticks is no subshell's edge.
+- Newly over-refused (read as a write, no shell runs it): a line with an unclosed `${` or backtick before the write, as `${v)` newline `cp a CLAUDE.md`; on sh and bash 3.2 alone, R2-F2's lines, which zsh and dash run.
+
 ## 4. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, nothing written in the reviewer's folder.

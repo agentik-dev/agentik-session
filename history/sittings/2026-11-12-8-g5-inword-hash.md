@@ -2,7 +2,7 @@
 
 | item | value |
 |---|---|
-| goal | brief g5, S1: R1 to R3 built, R4 phase 1; phase 1b: round 1's F1 to F4 fixed, F5 a NICE row; packet `design/packets/g5-inword-hash.md` |
+| goal | brief g5, S1: R1 to R3 built, R4 phase 1; phase 1b: round 1's F1 to F4 fixed, F5 a NICE row; phase 1c: round 2's R2-F1 to F4; packet `design/packets/g5-inword-hash.md` |
 | budget | builder: about 90 tool calls |
 | pin | 8153e52 on main (alpha.91); worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
 | window | 200k |
@@ -20,7 +20,7 @@
 - [x] phase 1c R3 (R2-F2): a `case` pattern's `)` closes no bracket: `_mask` counts each bracket's open `case`s at a command's start (after `;`, `&`, `|`, `(`, a newline or a lead word); `_commands` reads a `case` after a lead word too
 - [x] phase 1c R4 (R2-F3): an escaped backtick does not end a comment in backticks
 - [x] phase 1c beyond the four, found by fuzzing pin, 40aee95 and the head against sh, bash, zsh, dash: bash 3.2 opens no `${` inside a `$(`, so `bash_targets` adds that reading's targets where it differs; a `case` pattern's `)` in backticks is no subshell's edge
-- [ ] phase 1c R6: the packet's §3b, this record
+- [x] phase 1c R6: the packet's §3b, this record; guard files 315 passed under `.venv` and `.venv-floor`; the review's repro: every R2-F line denied, no line denied at 40aee95 or d2f89d9 passes
 - [ ] phase 2, on the coordinator's word: merge main after mt1, the next alpha, README and sidecar, the gate once
 
 ## Handover
@@ -29,7 +29,7 @@
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
-- Phase 2 on the coordinator's word.
+- The hardening review of phase 1c, then phase 2 on the coordinator's word.
 
 ## Exit
-Phase 1b landed; waits on the coordinator for phase 2.
+Phase 1c landed; waits on the coordinator for the hardening review and phase 2.
