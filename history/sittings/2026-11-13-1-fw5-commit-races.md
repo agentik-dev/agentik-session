@@ -19,7 +19,7 @@
 - [x] docs (README and source, sidecar by `shasum`, RUNBOOK §checkpoint and §6, SKILL.md, the checkpoint command, help) and n71, n78, n81, n84 out of NICE; doclint and recordlint pass; the README's test count (3455, now 3473 collected) left for phase 2
 - [x] review 1's fix, tests first: F1 (the `add -N` span), the moved line asserted, git's reason on stdout; red at 2a9fa14 (4 failed)
 - [x] review 1's fix: `_take` (index.lock, out of `_put_back`), `_intent`, `_unadd` and `_tell_moved` (commit.py), git's stdout reason on stderr; the seven named test files 328 green under `.venv` and `.venv-floor`
-- [ ] review 1's records: the packet's section 7, NICE rows for the other leads
+- [x] review 1's records: the packet's section 7 (F1, the ruling, the `checkout --` sentence); NICE n169 to n173 for leads 1 to 3, 5 to 7 and 10 (4, 9 and 11 built; 8 needs no change)
 - [ ] phase 2: main merged, the version, the gate's `make check` once
 
 ## Handover
@@ -27,7 +27,8 @@
 - decide, owner: none.
 
 ## Next act
-- Phase 1 is done. One review, then phase 2 in the landing order: main merged, the README's test count, the version alone last under `plugin/`, the gate's `make check` once.
+- Phase 1 and review 1's fix are done. Review 2 (the coordinator's read), then phase 2 in the landing order: main merged, the README's test count, the version alone last under `plugin/`, the gate's `make check` once.
 
 ## Exit
+- Review 1's fix at the commits: F1 built, four tests (red at 2a9fa14), the seven named test files 328 green under both venvs; no gate job, no version bump.
 - Phase 1 at the commits: R1 to R5 built and the docs, the six named test files green under `.venv` and `.venv-floor`; no gate job, no version bump (the brief's amendments).
