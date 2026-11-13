@@ -701,3 +701,39 @@ G5_R2_CLEAN = [(c + W, t) for c, t in [
 def test_g5_r1_the_probed_clean_lines_keep_their_result(box, command, targets):
     want = [("write", t if t.startswith("/") else str(box.repo / t)) for t in targets]
     assert instructionguard.bash_targets(command, str(box.repo), box.env) == want, command
+
+
+# ---- g5 round 3: R3-F1 to F7, the strict reader's six regressions and its timing ----------
+
+B = "`"
+G5_R3_WRITES = [
+    "echo `true; case a in a) cp a CLAUDE.md;; esac`",                               # F1 a
+    "x=`\ncase a in\na)cp a CLAUDE.md;;\nesac\n`", "x=`x=$(case a in a) cp a CLAUDE.md;; esac)`",
+    "echo `true; case $y in a) (cd sub; echo);; esac`" + W,                          # F1 b
+    "x=`(cd sub; [[ $y =~ ^(case|if)$ ]])`" + W,                                    # F1 c
+    "x=`case a in a) cp a CLAUDE.md;; esac`",                                         # lead 1
+    "echo ${x:-`(cp a CLAUDE.md)`}", "echo ${x:-`case a in (a) cp a CLAUDE.md;; esac`}",  # F2
+    "echo `(cp a CLAUDE.md)`",
+    "echo $(case x in x)#c" + W, "x=$(case x in esac)#c && cp a CLAUDE.md",          # F3
+    "echo $(a=(case); echo x)#c" + W, "echo $(case x in x)#c" + N,
+    "x=$(case x in esac)#c" + N, "echo $(a=(case); echo x)#c" + N,
+    "echo `echo \\`echo a # c\\`; cp a CLAUDE.md; echo b`",                          # F4
+    "echo $(case\\\n x in x)#don't\necho a;; esac)" + W,                             # F5
+    "v=$(case\\\n x in\n x)# don't\n echo a;;\nesac)" + N,
+    "echo `true;cp a CLAUDE.md #c`"]                                                 # F6 a
+
+
+@pytest.mark.parametrize("command", G5_R3_WRITES)
+def test_g5_r3_a_write_in_backticks_a_brace_or_a_pattern_is_read(box, command):
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert ("write", str(box.repo / "CLAUDE.md")) in found, (command, found)
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+def test_g5_r3_a_comment_in_one_backtick_pair_is_masked_in_linear_time(box):
+    command = "x=" + B + "\n" + "# a comment\n" * (60 * 1024 // 12) + B + "; echo x > out.txt"
+    began = time.monotonic()
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert time.monotonic() - began < 1.0
+    assert found == [("write", str(box.repo / "out.txt"))]

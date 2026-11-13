@@ -2,34 +2,32 @@
 
 | item | value |
 |---|---|
-| goal | brief g5, S1: R1 to R3 built, R4 phase 1; phase 1b: round 1's F1 to F4 fixed, F5 a NICE row; phase 1c: round 2's R2-F1 to F4; packet `design/packets/g5-inword-hash.md` |
-| budget | builder: about 90 tool calls |
-| pin | 8153e52 on main (alpha.91); worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
+| goal | brief g5, S1: R1 to R3, phase 1; 1b: round 1's F1 to F4; 1c: round 2's R2-F1 to F4; 1d: round 3's R3-F1 to F7 (rulings R1 to R11); packet `design/packets/g5-inword-hash.md` |
+| budget | builder: about 90 tool calls per phase |
+| pin | 8153e52 on main (alpha.91); phase 1d from f1f012e; worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
 | window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [x] tests first: 7 of 16 g5 cases red at the pin (`tests/test_g2b_gates.py`, section g5)
-- [x] R1, R2: `_mask` drops a comment (a `#` at a word's start, outside quotes) up to its newline; `_commands` sets `commenters = ""`, so `shlex` never decides a comment
-- [x] R3 survey: `shlex.split` in `commit.py`, `install.py`, `agentik_install.py` splits with `comments=False` (no commenter) and refuses no shell line: no other site shares the cause
-- [x] phase 1: `test_g2b_gates.py` and `test_g4_folder_gates.py` green under `.venv` and `.venv-floor`; a small change (under 50 changed lines), no packet
-- [x] phase 1 at d2f89d9
-- [x] phase 1b: the packet (ca56886); F1, F2, F4 in `_mask`, F3 in `bash_targets` and `_bash_gated`, the probed-clean table (cc4a20a, 10 cases red at d2f89d9); F5 NICE n161 (c7130e9); guard files 234 passed under both venvs; whole suite under `.venv` 3396 passed, the README count deselected
-- [x] phase 1c tests first: 12 of 14 round-2 lines red at 40aee95 (`test_g5_r2_*`), the two controls green
-- [x] phase 1c R1, R2 (R2-F1, R2-F4): a bare paren in `${` is masked; `$${` opens no `${`
-- [x] phase 1c R3 (R2-F2): a `case` pattern's `)` closes no bracket: `_mask` counts each bracket's open `case`s at a command's start (after `;`, `&`, `|`, `(`, a newline or a lead word); `_commands` reads a `case` after a lead word too
-- [x] phase 1c R4 (R2-F3): an escaped backtick does not end a comment in backticks
-- [x] phase 1c beyond the four, found by fuzzing pin, 40aee95 and the head against sh, bash, zsh, dash: bash 3.2 opens no `${` inside a `$(`, so `bash_targets` adds that reading's targets where it differs; a `case` pattern's `)` in backticks is no subshell's edge
-- [x] phase 1c R6: the packet's §3b, this record; guard files 315 passed under `.venv` and `.venv-floor`; the review's repro: every R2-F line denied, no line denied at 40aee95 or d2f89d9 passes
-- [ ] phase 2, on the coordinator's word: merge main after mt1, the next alpha, README and sidecar, the gate once
+- [x] phases 1 to 1c, at f1f012e: `_mask` alone decides a comment; round 1's F1 to F4 (cc4a20a), F5 NICE n161; round 2's four and bash 3.2's reading of `${` in `$(` (faf70cb); the packet's §3a, §3b
+- [x] phase 1d measurement: g6's loose prototype lists `CLAUDE.md` on every R3-F line and lead; its accounting passes F1b, F1c (round 3's b, c) and leads 2, 4, where the strict reading read the word in another folder or none
+- [ ] 1d R1 (R3-F1): no pattern `)` masked in backticks; a `case` glued to its backtick read
+- [ ] 1d R2 (R3-F2): a backtick in `${` goes on `opened`
+- [ ] 1d R3 (R3-F3): bash3 counts no `case`; taken whenever its mask differs
+- [ ] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not
+- [ ] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
+- [ ] 1d R6 (R3-F6 a): backticks stripped from a target word's ends
+- [ ] 1d R7 (R3-F7): a comment's end searched to its newline only
+- [ ] 1d: packet §3c, this record; three guard files green under `.venv`, `.venv-floor`
+- [ ] phase 2, on the coordinator's word, after g6's loose reading on this branch
 
 ## Handover
-- The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write; `echo x #c` then a newline then `cp a CLAUDE.md` gave `[]` (the comment's `readline` ate the newline, so `cp` joined `echo`'s words), now the write.
+- The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write.
 - NICE id n161: main holds n148, land2 n150, mt1 n159, u3 n160; renumber at merge if one passes it.
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
-- The hardening review of phase 1c, then phase 2 on the coordinator's word.
+- Phase 1d's rulings in order R1 to R7, each with its tests; then §3c.
 
 ## Exit
-Phase 1c landed; waits on the coordinator for the hardening review and phase 2.
+(open)
