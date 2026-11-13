@@ -355,10 +355,11 @@ def under(path, tree):
 
 
 def nested(blocks, own, tree):
-    """Each other linked worktree whose directory is under `tree`, its status lines below it or
-    `clean`. The main checkout never counts; a clone git does not list is not read."""
+    """Each other worktree git lists, the main checkout included, whose directory is under `tree`,
+    its status lines below it or `clean`: `worktree remove` would take it, and a main checkout's
+    files with it. A sibling never counts; a clone git does not list is not read."""
     found = []
-    for block in blocks[1:]:
+    for block in blocks:
         path = block.get("worktree", "")
         if block is own or not path or not os.path.isdir(path) or not under(path, tree):
             continue
