@@ -426,7 +426,7 @@ def _mask(text: str, bash3: bool = False) -> str:
     ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1).
     A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
     a backtick in a `${` is a bracket of its own, in which a paren is a command's (g5 r3);
-    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(`."""
+    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(` and counts no `case`."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
     cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
@@ -478,7 +478,8 @@ def _mask(text: str, bash3: bool = False) -> str:
                 elif start and c not in " \t\n;&|(<>":    # a word starts: a command's first?
                     m = _KEY.match(text, i) if cmd else None
                     w = m.group() if m else ""
-                    cases[-1] += (w == "case") - (w == "esac" and cases[-1] > 0)
+                    if not bash3:              # r3 F3: bash 3.2 ends a `$(` at any `)`
+                        cases[-1] += (w == "case") - (w == "esac" and cases[-1] > 0)
                     cmd = w in _LEAD
                 elif c in ";&|(<>\n":
                     cmd = c not in "<>"
@@ -621,11 +622,10 @@ def _git(args: list, cwd, env, found: list) -> None:
 def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False) -> list:
     """[(`write` or `remove`, a path or None)] in the line's order, then (`split`, None) where
     `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3).
-    Where bash 3.2 reads a `${` inside a `$(` otherwise, its reading's targets follow (g5 r2)."""
+    Where bash 3.2's reading masks the line otherwise, its targets follow (g5 r2, r3)."""
     text, bodies = _heredocs(command)
     found, here, subshells, pushed, read = [], cwd, [], [], []
-    other = (not bash3 and "${" in text and "$(" in text and
-             _mask(text, True) != _mask(text))
+    other = not bash3 and _mask(text, True) != _mask(text)     # r3 F3: a `case` too
     try:
         for c in _commands(text, bash3):
             read.append(c)

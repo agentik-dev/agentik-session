@@ -13,7 +13,7 @@
 - [x] phase 1d measurement: g6's loose prototype lists `CLAUDE.md` on every R3-F line and lead; its accounting passes F1b, F1c (round 3's b, c) and leads 2, 4, where the strict reading read the word in another folder or none
 - [x] 1d R1 (R3-F1): no pattern `)` masked in backticks; `_commands` reads a `case` glued to its opening backtick, and (a choice) an `esac` glued to a closing one
 - [x] 1d R2 (R3-F2): a backtick opened in a `${` goes on `opened` till it closes (a `)` there pops nothing); fuzz 40k: no line head denied and a shell writes passes
-- [ ] 1d R3 (R3-F3): bash3 counts no `case`; taken whenever its mask differs
+- [x] 1d R3 (R3-F3): the bash3 reading counts no `case`, taken whenever its mask differs
 - [ ] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not
 - [ ] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
 - [ ] 1d R6 (R3-F6 a): backticks stripped from a target word's ends
