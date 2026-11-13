@@ -462,7 +462,9 @@ def _window_override(ad: dict, notes: list | None) -> dict:
         if w != "auto":
             out["window"] = w
     elif w is not None:
-        bad.append(f"session.admission.window: {w!r:.40} is not auto, five_hour or none; read as auto")
+        # ss4 R1: the value is a layer file's text (a mis-indented `ntfy_topic` line among
+        # them), so the note says what the key takes and never what it holds
+        bad.append("session.admission.window: is not auto, five_hour or none; read as auto")
     by = ad.get("windows")
     if isinstance(by, dict):
         good = {k: v for k, v in by.items() if isinstance(k, str) and _SLOT.match(k)
