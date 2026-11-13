@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
+from .instructionguard import _SHELLS, _commands     # packet u3 R5: the hook's reader
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -392,6 +393,14 @@ def _num(v) -> bool:
     return type(v) in (int, float) and v > 0
 
 
+def _packet_file(repo: Path, pk) -> str | None:
+    """The packet's real path: relative, inside the repo, a file; else None."""
+    if not isinstance(pk, str) or not pk or os.path.isabs(pk):
+        return None
+    real, top = os.path.realpath(repo / pk), os.path.realpath(repo)
+    return real if real.startswith(top + os.sep) and os.path.isfile(real) else None
+
+
 def judge_row(p: dict, repo: Path, landed=frozenset()):
     """(state, reason) for a row that does not run, else None: `refused` or `skip`. A `base`
     or a `depends_on` id is good when it landed earlier in this run (`landed`)."""
@@ -404,11 +413,7 @@ def judge_row(p: dict, repo: Path, landed=frozenset()):
         return "refused", "kind"
     if type(p["context"]) is int and p["context"] > CONTEXT_CEILING:
         return "refused", "context"
-    pk = p["packet"]
-    if not isinstance(pk, str) or not pk or os.path.isabs(pk):
-        return "refused", "packet"
-    real, top = os.path.realpath(repo / pk), os.path.realpath(repo)
-    if not real.startswith(top + os.sep) or not os.path.isfile(real):
+    if _packet_file(repo, p["packet"]) is None:
         return "refused", "packet"
     if p["base"] not in (None, "main") and not (isinstance(p["base"], str) and p["base"] in landed):
         return "refused", "base"
@@ -458,11 +463,39 @@ def _status(wt: Path) -> str | None:
     return None if out is None else "\n".join(ln for ln in out.splitlines() if ln != "?? .venv")
 
 
-def stage(repo: Path, rid: str, base: str) -> tuple[Path | None, str | None]:
+def _git_why(r: subprocess.CompletedProcess, what: str) -> str:
+    """Git's last line on stderr, else `<what> failed`."""
+    return (r.stderr.strip().splitlines() or [f"{what} failed"])[-1][:200]
+
+
+def link_venvs(repo: Path, tree: Path, note: Callable | None = None) -> None:
+    """Packet u3 R2: each directory at the top of the main checkout whose name starts with
+    `.venv` linked into the tree, absolute, when the tree has nothing by that name. `.venv`
+    always (design/07 §9 risk 4: `_status` leaves its link out); another name only when
+    `git check-ignore -q` says the tree ignores it, read as the link will stand (a file, not
+    a directory), else `note(name)` and no link, so the tree stays clean."""
+    try:
+        names = sorted(os.listdir(repo))
+    except OSError:
+        return
+    for name in names:
+        src = os.path.abspath(os.path.join(repo, name))
+        if not name.startswith(".venv") or not os.path.isdir(src) \
+                or os.path.lexists(os.path.join(tree, name)):
+            continue
+        if name != ".venv" and _git(tree, "check-ignore", "-q", name).returncode != 0:
+            if note is not None:
+                note(name)
+            continue
+        os.symlink(src, os.path.join(tree, name))
+
+
+def stage(repo: Path, rid: str, base: str, note: Callable | None = None
+          ) -> tuple[Path | None, str | None]:
     """`git -C <repo> worktree add .claude/worktrees/<id> -b <id> <base>`, the hq
     convention; a tree already there is reused only on branch `<id>` and clean, untracked
-    files counted. When `<repo>/.venv` exists and the tree has none, it is linked there,
-    absolute. (worktree, head) or (None, why)."""
+    files counted. The main checkout's `.venv*` directories linked there (`link_venvs`).
+    (worktree, head) or (None, why)."""
     wt = repo / ".claude" / "worktrees" / rid
     if wt.exists():
         if _out(wt, "rev-parse", "--abbrev-ref", "HEAD") != rid:
@@ -472,9 +505,8 @@ def stage(repo: Path, rid: str, base: str) -> tuple[Path | None, str | None]:
     else:
         r = _git(repo, "worktree", "add", str(Path(".claude") / "worktrees" / rid), "-b", rid, base)
         if r.returncode != 0:
-            return None, (r.stderr.strip().splitlines() or ["git worktree add failed"])[-1][:200]
-    if (repo / ".venv").exists() and not os.path.lexists(wt / ".venv"):
-        os.symlink(str(repo / ".venv"), str(wt / ".venv"))
+            return None, _git_why(r, "git worktree add")
+    link_venvs(repo, wt, note)
     head = _out(wt, "rev-parse", "HEAD")
     return (wt, head) if head else (None, "no HEAD in the worktree")
 
@@ -631,6 +663,95 @@ def acceptance(text: str) -> list:
     return out
 
 
+# Packet u3 R5: a line that runs make is refused before the row's stage (design/07 §2
+# item 4): a make runs only through the gate queue, and the land step runs the check.
+MAKES = ("make", "gmake", "gnumake")   # by basename, case-blind (round 1 F5)
+SHELL_DEPTH = 3                  # the shells' `-c` texts read, nested
+LINE_SHOWN = 80                  # R6: the line in the log, cut
+_DASH_C = re.compile(r"^-[A-Za-z]*c[A-Za-z]*\Z")
+WHY_MAKE = "a make runs only through the gate queue, and the land step runs the check"
+
+
+def unbounded(shell: str, depth: int = 0) -> str:
+    """Why the line may not run, "" when it may: read with the hook's reader
+    (`instructionguard._commands`), it is refused when the reader cannot split it, when a
+    word of a simple command, by basename and case-blind, is `make`, `gmake` or `gnumake`
+    (round 1 F5; a shell's name is compared case-blind too), or when a shell's `-c` text is,
+    to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
+    every later word of that command is a text, whatever flags sit around it (round 1 F1); a
+    word's `$(` text is one too, on the same depth count (F3)."""
+    try:
+        cmds = list(_commands(shell))
+    except ValueError as e:
+        return f"the hook's reader cannot split it ({e}), so it may run a make; {WHY_MAKE}"
+    for words, outs in cmds:
+        if outs is None:                  # a subshell's edge
+            continue
+        shell_seen = texts = False
+        for w in words:
+            name = os.path.basename(w).lower()
+            if name in MAKES:
+                return f"it runs `{os.path.basename(w)}`; {WHY_MAKE}"
+            if depth >= SHELL_DEPTH:
+                continue
+            if texts:
+                why = unbounded(w, depth + 1)
+                if why:
+                    return why
+            elif shell_seen and _DASH_C.match(w):
+                texts = True
+            elif name in _SHELLS:
+                shell_seen = True
+        if depth >= SHELL_DEPTH:
+            continue
+        for w in words + outs:            # round 1 F3: a quoted `$(`, a text on the same count
+            for text in _substituted(w):
+                why = unbounded(text, depth + 1)
+                if why:
+                    return why
+    return ""
+
+
+def _substituted(word: str) -> list:
+    """Round 1 F3: the texts of a word's `$(...)`, which the reader keeps inside one word when
+    it is quoted, each to its closing paren by count; an unclosed one runs to the word's end."""
+    out, i = [], word.find("$(")
+    while i >= 0:
+        k, n = i + 2, 1
+        while k < len(word) and n:
+            n += {"(": 1, ")": -1}.get(word[k], 0)
+            k += 1
+        out.append(word[i + 2:k - 1] if n == 0 else word[i + 2:])
+        i = word.find("$(", k)
+    return out
+
+
+def unbounded_item(lines: list) -> str | None:
+    """Packet u3 R6: the first unbounded line as the log says it, its item, the line cut at
+    LINE_SHOWN and why; else None."""
+    for i, ln in enumerate(lines, 1):
+        why = unbounded(ln.shell)
+        if why:
+            return f"item {i} `{ln.shell[:LINE_SHOWN]}`: {why}"
+    return None
+
+
+def early_word(p: dict, repo: Path) -> str | None:
+    """Packet u3 R7: why the row's turn will refuse it for its acceptance cell, else None;
+    a packet the row's turn refuses for its path is left to that turn."""
+    real = _packet_file(repo, p["packet"])
+    if real is None:
+        return None
+    try:
+        lines = acceptance(Path(real).read_text(errors="replace"))
+    except OSError:
+        return None
+    except AcceptanceError as e:
+        return f"acceptance: {e}"
+    why = unbounded_item(lines)
+    return f"unbounded: {why}" if why else None
+
+
 def line_holds(ln: Line, exit_code, last: str) -> bool:
     """`night.Holds`: the expectation against an exit and a last line; `as main` holds on main,
     where a line is its own baseline."""
@@ -751,33 +872,41 @@ def _as_main(ln: Line) -> bool:
     return ln.kind == "as-main"
 
 
-def pin_baseline(repo: Path, sha: str | None, lines: list, env: dict) -> list:
-    """Packet u2 R2, review F4: each `as main` line run once in a temporary detached tree at
-    main's sha at the row's pin, never in the staged tree (a reused branch tree would be its
-    own baseline); `<repo>/.venv` linked there as `stage` links it. The tree is removed after,
-    on an error too. A line it cannot measure is an error, so it is `unrun`; another line is
-    None."""
-    def failed(why: str) -> list:
-        return [{"exit": None, "last": why[:LAST_CAP], "cut": False, "error": True}
-                if _as_main(ln) else None for ln in lines]
-    if not sha:
-        return failed("no main sha at the pin")
-    top = tempfile.mkdtemp(prefix="unattended-pin-")
+def sha_lines(repo: Path, sha: str, lines: list, env: dict, pick=None,
+              note: Callable | None = None, prefix: str = "unattended-sha-") -> tuple:
+    """Packet u3 R1: the lines (those `pick` keeps) run in a temporary detached tree at `sha`,
+    the main checkout's `.venv*` linked there (`link_venvs`); the tree removed after, on an
+    error too, never by a prune. (results, None), or (None, git's last line) when the tree
+    cannot be made."""
+    top = tempfile.mkdtemp(prefix=prefix)
     tree = Path(top) / "tree"
     try:
         r = _git(repo, "worktree", "add", "--detach", str(tree), sha)
         if r.returncode != 0:
-            return failed("pin tree: " + ((r.stderr.strip().splitlines() or ["git worktree add "
-                                                                             "failed"])[-1]))
-        if (repo / ".venv").exists() and not os.path.lexists(tree / ".venv"):
-            os.symlink(str(repo / ".venv"), str(tree / ".venv"))
-        return run_lines(tree, lines, env, _as_main)
+            return None, _git_why(r, "git worktree add")
+        link_venvs(repo, tree, note)
+        return run_lines(tree, lines, env, pick), None
     finally:
         removed = _git(repo, "worktree", "remove", "--force", str(tree)).returncode == 0
         mine = os.path.realpath(top) + os.sep
         shutil.rmtree(top, ignore_errors=True)
         if not removed:                 # never a prune: it drops other sittings' trees (N1)
             _drop_records(repo, mine)
+
+
+def pin_baseline(repo: Path, sha: str | None, lines: list, env: dict,
+                 note: Callable | None = None) -> list:
+    """Packet u2 R2, review F4: each `as main` line run once in a temporary detached tree at
+    main's sha at the row's pin (`sha_lines`), never in the staged tree (a reused branch tree
+    would be its own baseline). A line it cannot measure is an error, so it is `unrun`;
+    another line is None."""
+    def failed(why: str) -> list:
+        return [{"exit": None, "last": why[:LAST_CAP], "cut": False, "error": True}
+                if _as_main(ln) else None for ln in lines]
+    if not sha:
+        return failed("no main sha at the pin")
+    got, why = sha_lines(repo, sha, lines, env, _as_main, note, "unattended-pin-")
+    return failed("pin tree: " + why) if got is None else got
 
 
 def _drop_records(repo: Path, inside: str) -> None:
@@ -817,10 +946,11 @@ def _said(c: dict) -> str:
     return f"`{c['shell']}` {got}; it wants: {want}"
 
 
-def continuation(failing: list) -> str:
-    """Packet u2 R3: the message that names each failing line."""
-    return ("The packet's acceptance lines do not all hold yet; the loop ran them in this tree "
-            "after your turn:\n" + "".join(f"- {_said(c)}\n" for c in failing) + TAIL + "\n")
+def continuation(failing: list, sha: str) -> str:
+    """Packet u2 R3, u3 R4: the message that names each failing line and where they ran."""
+    return ("The packet's acceptance lines do not all hold yet; the loop ran them in a fresh "
+            f"tree at {sha} after your turn, where a file left ignored or uncommitted is not "
+            "there:\n" + "".join(f"- {_said(c)}\n" for c in failing) + TAIL + "\n")
 
 
 # ---- the spawn (ruling 5) --------------------------------------------------------------
@@ -1143,6 +1273,14 @@ class _Run:
     landed: set = field(default_factory=set)
     effort: dict = field(default_factory=dict)      # row id: the level it ran at
     cur: _Row | None = None                          # the running row's tally
+    noted: set = field(default_factory=set)          # u3 R2: the row's unlinked names
+    rid: str | None = None
+
+    def unlinked(self, name: str) -> None:
+        """Packet u3 R2: a `.venv*` directory a tree does not ignore; one log line a row."""
+        if name not in self.noted:
+            self.noted.add(name)
+            self.log(f"{self.rid}: {name} is not ignored by the tree; not linked")
 
     def log(self, line: str) -> None:
         _append(self.dir / "log", f"{_iso(self.fx.now())} {line}\n")
@@ -1286,25 +1424,29 @@ class _Run:
         """Packet u2 R2: each `as main` line run once at main's sha at the pin, in a tree of
         its own (`pin_baseline`, review F4), before the spawn; a `baseline` line. Another line
         is None: it is judged on its own."""
-        got = pin_baseline(self.repo, pin, self.cur.lines, self.fx.env)
+        got = pin_baseline(self.repo, pin, self.cur.lines, self.fx.env, self.unlinked)
         self.record("baseline", row=p["id"], pin=pin, lines=[
             {"line": i, "exit": g and g["exit"], "last": g and g["last"], "error": g and g["error"]}
             for i, g in enumerate(got, 1)])
         return got
 
-    def accept(self, p, wt, n) -> list:
-        """Packet u2 R2: every line in the row's tree, judged against its baseline; an
-        `accept` line; the checks."""
+    def accept(self, p, n, sha: str) -> list | None:
+        """Packet u2 R2, u3 R1: every line in a fresh tree at the row's head sha
+        (`sha_lines`), judged against its baseline; an `accept` line; the checks. None, and
+        git's last line in the log, when that tree cannot be made (u3 R3)."""
         base = self.cur.base or [None] * len(self.cur.lines)
-        got = run_lines(wt, self.cur.lines, self.fx.env)
+        got, why = sha_lines(self.repo, sha, self.cur.lines, self.fx.env, note=self.unlinked)
+        if got is None:
+            self.log(f"{p['id']}: stage: {why}")
+            return None
         checks = [_check(i, ln, g, b, judge_line(ln, g, b))
                   for i, (ln, g, b) in enumerate(zip(self.cur.lines, got, base), 1)]
-        self.record("accept", row=p["id"], part=n, lines=checks)
+        self.record("accept", row=p["id"], part=n, sha=sha, lines=checks)
         return checks
 
     def do_row(self, p) -> str | None:
         """The row, start to end; the run's stop reason, or None to go on."""
-        self.cur = None
+        self.cur, self.rid, self.noted = None, p["id"], set()
         j = judge_row(p, self.repo, self.landed)
         if j:
             self.row(p, *j)
@@ -1316,10 +1458,15 @@ class _Run:
             self.log(f"{p['id']}: acceptance: {e}"[:300])
             self.row(p, "refused", "acceptance")
             return None
+        why = unbounded_item(lines)
+        if why:                                          # packet u3 R6
+            self.log(f"{p['id']}: unbounded: {why}")
+            self.row(p, "refused", "unbounded")
+            return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
         pin = _out(self.repo, "rev-parse", "--verify", "--quiet", "main^{commit}")
-        wt, head = stage(self.repo, p["id"], "main")     # a landed base is on main now
+        wt, head = stage(self.repo, p["id"], "main", self.unlinked)   # a landed base is on main
         if wt is None:
             self.log(f"{p['id']}: stage: {head}")
             self.row(p, "red", "stage")
@@ -1364,7 +1511,11 @@ class _Run:
         lines. All pass: built, or it lands. One fails: a named continuation of the same
         session, two at most, then red `acceptance` with the failing lines."""
         rid = p["id"]
-        failing = [c for c in self.accept(p, wt, n) if c["status"] not in PASSES]
+        checks = self.accept(p, n, sha)
+        if checks is None:                               # packet u3 R3: no continuation
+            self.row(p, "red", "stage", sha=sha, wt=wt, sid=sid)
+            return None
+        failing = [c for c in checks if c["status"] not in PASSES]
         if not failing:
             if p.get("merge") != "merge-on-green":
                 self.row(p, "built", sha=sha, wt=wt)
@@ -1385,7 +1536,8 @@ class _Run:
         self.fx.say(f"{rid}: {len(failing)} acceptance line(s) fail; continuation "
                     f"{self.cur.continues} of {CONTINUATIONS}")
         argv = spawn_argv(p["model"], turns, usd, resume=sid, effort=self.effort.get(rid))
-        part2, rc, cut = self.part(p, wt, n + 1, argv, sid, continuation(failing), turns, usd)
+        part2, rc, cut = self.part(p, wt, n + 1, argv, sid, continuation(failing, sha), turns,
+                                   usd)
         return self.end(p, wt, head, part2, rc, cut, sid, n + 1)
 
 
@@ -1455,6 +1607,10 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     for line in pending:
         N.log(line)
     fx.say(f"{nid}: {len(rows)} rows from {repo / QUEUE}; ledger {d / 'ledger.jsonl'}")
+    for p in rows:                                       # packet u3 R7: the early word
+        why = None if p["parked"] else early_word(p, repo)
+        if why:
+            fx.say(f"{p['id']}: its turn refuses it, {why}")
 
     def on_term(_sig, _frame):
         N.term = True
