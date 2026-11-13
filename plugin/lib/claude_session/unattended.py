@@ -707,10 +707,12 @@ def _make_in(text: str, depth: int) -> str | None:
     """g8a r1 F1: the make word of a text the reader does not read, or None. The text is read
     as a shell spells it: walked by the reader's own walk, every word of every command and every
     text it does not read in turn (to `_NEST` texts deep; past it, `_Bound`); and, where the walk
-    cannot split it or wherever a word hides in a comment or a longer one, split after `\\`-NL,
-    `\\` and quotes come off and a substitution's output is read as empty."""
-    found = _make_word(_WORDS.split(_UNQUOTE.sub("", text.replace(_SUB_OUT, ""))))
-    if found:
+    cannot split it or wherever a word hides in a comment or a longer one, split as build 2
+    split it and again after `\\`-NL, `\\` and quotes come off (`["make", "x"]` is held by the
+    first, `m\\ake` by the second); a substitution's output is read as empty."""
+    bare = text.replace(_SUB_OUT, "")
+    found = _make_word(_WORDS.split(bare)) or _make_word(_WORDS.split(_UNQUOTE.sub("", bare)))
+    if found:                             # build 2's split, and the one with the quotes off
         return found
     if depth > _NEST:
         raise _Bound(text[:80])

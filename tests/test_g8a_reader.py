@@ -379,7 +379,8 @@ SINKS = ["cat > notes.md <<'EOF'\nRun make check before landing.\nEOF",
 NOT_SINKS = ["cat <<'EOF'\nmake x\nEOF", "cat > x.sh <<'EOF'\nmake check\nEOF\nsh x.sh",
              "cd d && cat > f.md <<'EOF'\nmake x\nEOF", "cat > f <<EOF\n$(make check)\nEOF",
              "python3 - <<'EOF'\nprint('we make it')\nEOF", "tee >(sh) <<'EOF'\nmake check\nEOF",
-             "cat > f <<'EOF' | sh\nmake check\nEOF", "sudo cat > f <<'EOF'\nmake x\nEOF"]
+             "cat > f <<'EOF' | sh\nmake check\nEOF", "sudo cat > f <<'EOF'\nmake x\nEOF",
+             "python3 - <<'EOF'\nimport subprocess\nsubprocess.run([\"make\", \"check\"])\nEOF"]
 
 
 def _box12(tmp_path):
