@@ -63,3 +63,16 @@ No transcript, no live state root, no file under `~/.claude`, nothing written in
 ## 5. Report
 
 The hand-back to the hq coordinator: the head sha, each finding at `d2f89d9` and now, the changed-line count, the choices made.
+
+## 3c. Round 3's fixes, phase 1d (brief g5-g6 R1 to R11)
+
+The rule: a line a shell runs as a write of a gated file, denied at the pin, `d2f89d9`, `40aee95` or `f1f012e`, must not pass at the head.
+
+- R3-F1: a write in a `case` body in backticks; now `_commands` reads a `case` glued to its opening backtick (real backticks counted, an escaped or quoted one masked), and a third reading that masks no pattern's `)` in backticks joins the union (R8: unmasked in the first reading, a `cd` in the body moved the folder).
+- R3-F2: a paren in backticks in a `${` was the brace's; now such a backtick is a bracket of its own; a `)` that closes nothing there stays masked (R8).
+- R3-F3: a `)#` sh and bash 3.2 read as the end of a `$(`; now bash 3.2's reading counts no `case` and joins whenever its mask differs.
+- R3-F4: a comment in nested escaped backticks; now it ends at an escaped backtick inside an escaped pair, else at the first unescaped one (R8: as proposed, round 2's L5 passed).
+- R3-F5: `case` then a backslash-newline went uncounted; now `_KEY` reads it.
+- R3-F6 a: a comment's closing backtick was the copy's destination; now a lone closing backtick is dropped and one at a word's end stripped, never into a `cd`. F6 b is the loose reading's.
+- R3-F7: the comment's backtick is searched on its own line: 60 KB in one pair 0.012 s (3.6 s at `f1f012e`).
+- Left, each passing at `f1f012e` too: R3-F6 b; `cd docs#c` (the guard trusts a `cd`); a comment at the third escaped level; a few token-fuzz lines with a `#` comment or a `${` paren in backticks. All for the loose reading.

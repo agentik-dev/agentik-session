@@ -18,7 +18,8 @@
 - [x] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
 - [x] 1d R6 (R3-F6 a): backticks stripped from the ends of a command's words and its redirects' (an empty one dropped), but a word that would become `cd`, `pushd` or `popd` keeps them (R8: `\`cd docs\`` moves no folder); F4 without `; echo b`: the write after R6
 - [x] 1d R7 (R3-F7): a comment's backtick searched to its newline only; 60 KB in one backtick pair 0.012 s (.venv), 0.017 s (floor); f1f012e 3.6 s
-- [ ] 1d: packet §3c, this record; three guard files green under `.venv`, `.venv-floor`
+- [x] 1d R8 for R2, R6: a `)` closing nothing in a `${`'s backtick masked; only a trailing lone backtick dropped
+- [x] 1d: packet §3c, this record; three guard files 341 passed under `.venv` and `.venv-floor`; fuzz 2 x 100k vs four commits: no line f1f012e denied passes where a shell writes
 - [ ] phase 2, on the coordinator's word, after g6's loose reading on this branch
 
 ## Handover
@@ -27,7 +28,7 @@
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
-- Phase 1d's rulings in order R1 to R7, each with its tests; then §3c.
+- g6's loose reading on this branch (brief-2), on the coordinator's word; then one review, pin to head.
 
 ## Exit
-(open)
+Phase 1d landed: R3-F1 to F7 denied but F6 b (left to g6); waits on the coordinator.
