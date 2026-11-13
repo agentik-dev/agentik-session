@@ -737,3 +737,14 @@ def test_g5_r3_a_comment_in_one_backtick_pair_is_masked_in_linear_time(box):
     found = instructionguard.bash_targets(command, str(box.repo), box.env)
     assert time.monotonic() - began < 1.0
     assert found == [("write", str(box.repo / "out.txt"))]
+
+
+# R8: the lines the fixes as proposed let pass, which f1f012e denied and the shells write.
+G5_R3_R8 = ["x=`case x in x)cd sub;; esac`" + W, "(cd sub;\\`case x in esaccase $x in a)  ;" + W[2:],
+            "(cd sub;`echo a`case x in x)" + N + ";", "echo `echo a # \\`x\\` don't`" + W]
+
+
+@pytest.mark.parametrize("command", G5_R3_R8)
+def test_g5_r3_the_lines_the_fixes_as_proposed_passed_stay_denied(box, command):
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
