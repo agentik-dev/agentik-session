@@ -837,8 +837,12 @@ def _set_tier(args, key: str) -> int:
                  f"resolves nothing: {e}")
         got = ((r.sections["session"].get("tiers") or {}).get(role) or {}).get("model")
         if got != args.value:
+            origin = r.tier_origins.get(role, "a layer above it")
+            prof = r.sections["session"].get("profile")
+            there = (f"change it under profiles.{prof}.tiers in {resolver._user_file(os.environ)}"
+                     if origin.startswith("the launch profile") else "change it there")
             _die(f"tiers: {role} {args.value} saved in {path}, but the next session's {role} "
-                 f"is {got}, from {r.tier_origins.get(role, 'a layer above it')}: change it there")
+                 f"is {got}, from {origin}: {there}")                   # mt1 R2-F4
         print(f"tiers: {role} {args.value} (saved in {path}; the next session reads it)")
         return 0
     sid = sessionconfig.session_id()
@@ -926,9 +930,11 @@ def cmd_set(args) -> int:
     if args.config and not args.save:
         # An overlay is keyed to THIS session, not to a config name. Writing a
         # session-only change "for" another config silently applies it here.
-        _die(f"--config {args.config} only makes sense with --save. A session-only "
-             "change always applies to the session you are in "
-             f"(currently '{sessionconfig.get_active() or 'balanced'}').")
+        _die(f"--config {args.config} names no session: a session-only change always "
+             "applies to the session you are in "
+             f"(currently '{sessionconfig.get_active() or 'balanced'}'). To change "
+             f"{args.config}, set it under `profiles: {args.config}:` in "
+             f"{resolver._user_file(os.environ)}.")          # mt1 R2-F3
 
     keep = (f"To keep it, set it under `profiles: {target}:` in "      # round 1 F5
             f"{resolver._user_file(os.environ)}.")
