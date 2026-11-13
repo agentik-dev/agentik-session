@@ -398,6 +398,17 @@ gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
 naming no role meets the family rule alone: a Fable helper starts only under a
 Fable session, in every posture.
 
+The type's model counts. A call that names no `model` is judged, by the family
+rule and the role check alike, on the `model:` in its agent type's frontmatter:
+for a type `<name>`, the project's `.claude/agents/<name>.md`, else the user's
+(`$CLAUDE_CONFIG_DIR`, else `~/.claude`, then `agents/<name>.md`); for a
+plugin's type `<plugin>:<name>`, `<installPath>/agents/<name>.md` of each
+install of `<plugin>@<marketplace>` in that folder's
+`plugins/installed_plugins.json`, the highest family of them counting. A refusal
+then names the type and its model; name `model: 'opus'` on the call, which
+outranks the file. A type with no file, no `model:` line or `model: inherit`,
+and a built-in type, meet no rule; `CLAUDE_CODE_SUBAGENT_MODEL` is not read.
+
 The start applies the profile. `start <profile>` takes every profile
 `profile` lists. A start, and each start of `run`, whose claude arguments name
 no `--model` passes the profile's `--model` and `--effort`; a `--model` on the

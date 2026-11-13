@@ -10,7 +10,12 @@
 | acceptance | §3; `tests/test_wfg.py` and `tests/test_mt1_tiers.py` unedited and green |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
 
-## 1. The owner's words
+## 1. What the source says: the code at the pin
+
+- `_spawn_rule` (hooks.py:361) reads the call's `model` alone: with no `model` and a type whose file says `model: fable`, an Opus session's spawn passes (`{}`), the project's, the user's and a plugin's type alike.
+- `_agent_model` (hooks.py:383, mt1's) reads the project's and the user's file for the role check alone and returns None for a plugin's type (`plugin:name`); every agent type installed on the cutting Mac is a plugin's.
+
+The owner's words:
 
 - Entry 2: "The plugin checks each spawn: a helper never runs above its parent's model family, refused in every posture; the role check warns under signal and refuses under deny."
 - Entry 20: "each call naming its model or using an agent type whose definition names one, so the spawn rule and the spend mix see every helper."
