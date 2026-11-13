@@ -973,6 +973,8 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
                 why, wtext, script = "below", script, None
         elif name == "eval":
             why, wtext = "eval", " ".join(args)
+        elif name == "alias" and any("=" in a for a in args):    # r1 F6: a text run later
+            why, wtext = "eval", "\n".join(a.partition("=")[2] for a in args if "=" in a)
         elif name is not None:            # fix A: a shell's `-c` text behind a runner (R4 stands)
             j = next((j for j, a in enumerate(args) if os.path.basename(a).lower() in _SHELLS5),
                      None)

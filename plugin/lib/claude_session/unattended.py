@@ -674,11 +674,32 @@ _WORDS = re.compile(r"[\s;&|()<>'\"`$]+")
 _UNQUOTE = re.compile(r"\\\n|[\\'\"]")     # g8a r1 F1: as a shell spells a word
 
 
+_BRACE = re.compile(r"\{([^{}]*,[^{}]*)\}")
+
+
+def _braces(w: str) -> list:
+    """g8a r1 F5: a word's brace expansions (`{ma,}ke` is `make` and `ke`), innermost first,
+    at most 256 words and 1024 steps."""
+    todo, out = [w], []
+    for _ in range(1024):
+        if not todo or len(out) >= 256:
+            break
+        x = todo.pop()
+        m = _BRACE.search(x)
+        if m:
+            todo += [x[:m.start()] + a + x[m.end():] for a in m.group(1).split(",")]
+        else:
+            out.append(x)
+    return out
+
+
 def _make_word(words) -> str | None:
-    """The first of `words` that is a make name, by basename and case-blind."""
+    """The first of `words` that is a make name, by basename and case-blind, a word's brace
+    expansions included (r1 F5)."""
     for w in words:
-        if os.path.basename(w).lower() in MAKES:
-            return os.path.basename(w)
+        for x in (_braces(w) if "{" in w and "," in w else (w,)):
+            if os.path.basename(x).lower() in MAKES:
+                return os.path.basename(x)
     return None
 
 
