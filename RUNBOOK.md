@@ -152,6 +152,16 @@ and a `case` pattern's, is no subshell's edge), and `popd` returns to its `pushd
 passes the same way. A path matches by its absolute
 and its real spelling, in any case where the volume folds case.
 
+A second, loose reading (g6) reads the same line blind to quotes, comments and heredocs, split at
+every `;`, `&`, `|`, newline, paren, brace and backquote: a redirect's word and the targets of
+the commands above. A target of it the first reading did not resolve to the same path is tried
+in the call's folder, in the folder a plain line's `cd` moved to, and in each folder the first
+reading stood in; a gated one is refused with its own reason, which says the line was not read
+with confidence, and its `guard.jsonl` line says `the loose reading`. So a line the first
+reading cannot split, or a `cd "$T"` it cannot resolve, no longer passes when its target is
+gated where the call runs; and a line that only carries a write's text as data (a heredoc into a
+script, a quoted example, a commit message) is refused: keep the text in a file and name the file.
+
 The lane's write: `agentik session gates write <file> --from <draft> --preview` prints the diff,
 the byte change and a hash and writes nothing; `--expect <hash>` writes the draft atomically,
 keeping the file's mode, and refuses a file or draft changed since, a changed line of a
