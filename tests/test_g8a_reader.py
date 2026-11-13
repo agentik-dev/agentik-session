@@ -308,11 +308,11 @@ def test_11_a_body_is_not_read(shape):
 
 
 def test_11_the_body_texts():
-    assert _read("cat <<'EOF'\nmake x\nEOF")[1] == [Unread("data", "make x\n")]
-    assert _read("cat > x.md <<'EOF'\nit's\nEOF")[1] == [Unread("data", "it's\n")]
+    assert _read("cat <<'EOF'\nmake x\nEOF")[1] == [Unread("data", "make x")]
+    assert _read("cat > x.md <<'EOF'\nit's\nEOF")[1] == [Unread("data", "it's")]
     assert unattended.unbounded("cat > x.md <<'EOF'\nit's\nEOF") == ""
     assert _read("sh <<EOF\nmake x\nEOF")[1] == []                 # the script, read at level 1
-    assert _read("cat <<EOF\n$(make x)\nEOF")[1] == [Unread("data", "$(make x)\n")]
+    assert _read("cat <<EOF\n$(make x)\nEOF")[1] == [Unread("data", "$(make x)")]
 
 
 @pytest.mark.parametrize("shape", GLUED, ids=[str(i) for i in range(len(GLUED))])

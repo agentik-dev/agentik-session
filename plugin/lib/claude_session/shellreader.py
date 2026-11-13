@@ -47,6 +47,7 @@ _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _WRAPPERS = frozenset({"sudo", "env", "command", "exec", "nohup", "time", "builtin", "nice"})
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
 _SHELLS5 = _SHELLS | {"ksh"}               # g8a R5: the shells whose script the walk reads
+_C_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")     # g8a R5: a `-c` cluster (`-c`, `-lc`, `-ec`)
 _WRAP_TAKES = {"sudo": frozenset("-u -g -h -p -C -D -R -T -U -r -t --user --group --host --prompt "
                                  "--close-from --chdir --chroot --command-timeout --other-user "
                                  "--role --type".split()),
@@ -523,7 +524,9 @@ class Cmd(NamedTuple):
 
 
 class Unread(NamedTuple):
-    """g8a R7: a part not read: `why` is `split`, `eval`, `below` or `piped`."""
+    """g8a R7: a part not read: `why` is `split`, `eval`, `below` or `piped`; since the fix of
+    the read, `runner` (the words after a shell's `-c` cluster in a command that is no shell:
+    `timeout 9 sh -c 'x'`) and `data` (a heredoc's body the walk reads as no shell's script)."""
     why: str
     text: str
 
@@ -918,13 +921,16 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
         i, lead, said = _head(words, {j for j, w in enumerate(raw) if _SUB_RE.fullmatch(w)})
         heres = list(dict.fromkeys([st[fa][0]] + [f for f, _ in st]))
         name = os.path.basename(words[i]) if i < len(words) else None
-        args, script, why, wtext = words[i + 1:], None, "", None
+        if name is not None and _SUB_RE.search(raw[i]):    # fix E1: a substitution glued to
+            left = _SUB_RE.sub("", raw[i]).strip("`")      # the command word is read as empty
+            name = os.path.basename(put(left)) if left else name
+        args, script, why, wtext, used, run = words[i + 1:], None, "", None, None, None
         if name is not None and name.lower() in _SHELLS5:
             kind, k = _script(args)
             if kind == "c" and k is not None:
                 script = _SUB_RE.sub(_SUB_OUT, raw[i + 1 + k])
             elif kind == "in" and docs:
-                d = docs[-1]
+                d = used = docs[-1]
                 script = bodies[d] if quoted[d] else re.sub(
                     r"\\([$`\\])|\\\n", lambda m: m.group(1) or "",
                     _SUB_RE.sub(_SUB_OUT, _body(cache, bodies[d], bash3, depth)[0]))
@@ -936,12 +942,23 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
                 why, wtext, script = "below", script, None
         elif name == "eval":
             why, wtext = "eval", " ".join(args)
+        elif name is not None:            # fix A: a shell's `-c` text behind a runner (R4 stands)
+            j = next((j for j, a in enumerate(args) if os.path.basename(a).lower() in _SHELLS5),
+                     None)
+            k = None if j is None else next(
+                (k for k in range(j + 1, len(args)) if _C_FLAG.match(args[k])), None)
+            run = None if k is None or k + 1 >= len(args) else " ".join(args[k + 1:])
         if said is not None:
             why, wtext = "eval", said
         yield _Step("", pre=words[:i], name=name, args=args, outs=outs, heres=heres, mine=mine,
                     script=script, level=level, st=st, fa=fa)
         if why:
             yield _Step(why, text=wtext, level=level)
+        if run is not None:
+            yield _Step("runner", text=run, level=level)
+        for d in docs:                    # fix B: a body the walk reads as no script
+            if d != used:
+                yield _Step("data", text=bodies[d], level=level)
         pipe.append(" ".join(words + mine))
         st0, fa0 = st, fa
         if name in _CDS:                  # r1 R1: behind a reserved word a `cd` may not run, so

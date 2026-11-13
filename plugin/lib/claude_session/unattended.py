@@ -676,7 +676,9 @@ def unbounded(shell: str) -> str:
     (`shellreader.commands`, packet g8a R9), it is refused when the reader cannot split it (or
     reads past its bound), when a word of a command at any level, by basename and case-blind,
     is `make`, `gmake` or `gnumake` (round 1 F5), or when a text the reader does not read (an
-    `eval`'s, a shell's below the first level, one piped into a shell) holds one as a word."""
+    `eval`'s, a shell's below the first level, one piped into a shell, a shell's `-c` text
+    behind a runner, a heredoc's body read as no script) holds one as a word. A substitution
+    glued to the command word is read as empty (`$(true)make`)."""
     try:
         cmds, unread = commands(shell, None, {})
     except _Bound:
