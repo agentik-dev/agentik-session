@@ -83,24 +83,26 @@ def test_set_launch_key_does_not_promise_next_start():
 
 def test_set_config_without_save_is_refused():
     rc, _, err = run("set", "posture", "deny", "--config", "review")
-    assert rc == 1 and "--save" in err
+    assert rc == 1 and "profiles: review:" in err and "--save" not in err   # mt1 R2-F3
 
 
 def test_set_rejects_non_settable_and_invalid():
     rc, _, err = run("set", "name", "renamed")
     assert rc == 1 and "not a settable key" in err
-    rc, _, err = run("set", "permission_mode", "plan-mode", "--save", "--config", "frontier")
+    rc, _, err = run("set", "permission_mode", "plan-mode")
     assert rc == 1 and "permission_mode must be one of" in err
-    rc, _, err = run("set", "setting_sources", "project", "--save", "--config", "frontier")
+    rc, _, err = run("set", "setting_sources", "project")
     assert rc == 1 and "user" in err
-    # and the stored config was not bricked
+    # mt1 R4: --save keeps a tier alone, and the profile was not bricked
+    rc, _, err = run("set", "permission_mode", "plan", "--save", "--config", "frontier")
+    assert rc == 2 and "--save keeps a tier alone" in err
     assert sessionconfig.load_configs()["frontier"].permission_mode is None
 
 
 def test_set_notes_none_is_the_literal_string():
-    rc, _, _ = run("set", "notes", "none", "--save", "--config", "frontier")
+    rc, _, _ = run("set", "notes", "none")
     assert rc == 0
-    assert sessionconfig.load_configs()["frontier"].notes == "none"
+    assert sessionconfig.load_overlay()["notes"] == "none"
 
 
 # ---- checkpoint -------------------------------------------------------------

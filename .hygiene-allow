@@ -114,3 +114,5 @@ tests/test_g2b_gates.py: sibling
 # g4: the folder list gates a member's ledger by its file name (the brief's own line), and the packet names the ledger tool.
 design/packets/g4-folder-gates.md: sibling
 tests/test_g4_folder_gates.py: sibling
+# mt1: the packet cites the owner's decisions by the ledger tool's word.
+design/packets/mt1-model-tiers.md: sibling

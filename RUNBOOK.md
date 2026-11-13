@@ -3,7 +3,7 @@
 What the README does not say: setup detail, choosing a profile, what
 `local-only` measured on this machine, adjusting a session, and the budget
 zones. Two facts govern everything below. First, anything you change with
-`set` applies only to the running session unless you pass `--save`. Second,
+`set` applies only to the running session; `--save` writes only a model tier. Second,
 an unattended run cannot answer a permission prompt, so an unanswered prompt
 resolves to deny, even though Claude Code still reports success. Read section
 3 and the `local-only` entry in section 2 before you run anything unattended.
@@ -187,21 +187,21 @@ completely idle end to end, but the measured cost runs about 65 seconds per
 turn (see below), and its own design guidance argues against using it as a
 default. `agentik session config list` shows every profile; the shipped ones:
 
-| config | lane | main thread | subagents | effort | tools | posture |
+| config | lane | main thread | subagents (`tiers.build`) | effort | tools | posture |
 |---|---|---|---|---|---|---|
-| `frontier` | seat | opus | opus | xhigh | default | signal |
+| `frontier` | seat | opus | opus | high | default | signal |
 | `balanced` | seat | opus | sonnet | high | default | signal |
 | `local` | local | seat | agentik-agents local routing | high | default | signal |
 | `local-only` | local-only | local default (27B) | local default | medium | default | off |
 | `scratch` | local-only | local default | local default | low | default | off |
-| `review` | seat | opus | opus | xhigh | Read, Glob, Grep + plan mode | signal |
+| `review` | seat | opus | opus | high | Read, Glob, Grep + plan mode | signal |
 
 `frontier`, `balanced`, and `review` also load the respeak plugin, via
 `--plugin-dir`.
 
 - `agentik session start frontier`: full-effort seat work, opus on both
   threads. Pick it when the task needs the strongest model everywhere. Cost:
-  full seat billing at `xhigh` effort.
+  full seat billing at `high` effort.
 - `agentik session start balanced`: opus main thread, sonnet subagents. Pick
   it as the default seat config when subagent work does not need opus-grade
   reasoning. Cost: seat billing, lighter than `frontier` on the subagent
@@ -223,9 +223,9 @@ default. `agentik session config list` shows every profile; the shipped ones:
   it for throwaway exploration you would not run unattended. Cost:
   same serialization and reasoning-speed limits as `local-only`, at a lower
   effort ceiling.
-- `agentik session start review`: opus, `xhigh` effort, tools restricted to
+- `agentik session start review`: opus, `high` effort, tools restricted to
   `Read`, `Glob`, `Grep` plus plan mode. Pick it for an audit that cannot
-  edit anything by construction. Cost: full seat billing at `xhigh`, same as
+  edit anything by construction. Cost: full seat billing at `high`, same as
   `frontier`.
 
 ### What local-only actually measured (2026-09-05, this machine)
@@ -257,7 +257,7 @@ default. `agentik session config list` shows every profile; the shipped ones:
 
 ## 3. Configuring and adjusting sessions
 
-**Every `set` is session-only unless you pass `--save`.**
+**Every `set` is session-only; `--save` writes a model tier alone.**
 
 Applying a config never writes to `~/.claude/settings.json` either. Every
 knob becomes a per-session CLI flag: `--model`, `--effort`, `--tools`,
@@ -269,7 +269,11 @@ it runs anything.
 
 `set` writes to an overlay keyed by `$CLAUDE_CODE_SESSION_ID`. The
 `SessionEnd` hook drops that overlay when the session ends.
-`--save` promotes the value to the stored config instead.
+`--save` on any key but `tier.<role>` is refused (exit 2) and writes nothing:
+the profiles are the one table (`profiles.yaml`, then the layers below), so a
+profile's field is changed in the user's `profiles.yaml`, under `profiles:`.
+No verb writes `configs.json` any more; one an earlier release wrote is read
+for the hooks' checkpoint cadence alone, one release more.
 
 Two kinds of key behave differently:
 
@@ -278,14 +282,15 @@ Two kinds of key behave differently:
   `fallback_model`, `settings`, `env`) cannot change a process already
   running, and a session-only `set` of one **is not applied by the next
   `start` either**: the overlay dies with this session, and `start` reads the
-  stored config. `set` says so, and prints the in-session command that does
+  profile. `set` says so, and prints the in-session command that does
   change it now:
 
   ```
   note: model is a launch-time setting. This session-only record is
   informational -- it will NOT be applied by the next `start` ... To change
   it in this session right now, run  /model opus. To change what `start
-  frontier` launches, add --save.
+  frontier` launches, set it under `profiles: frontier:` in
+  ~/.claude/agentik/profiles.yaml.
   ```
 
   `--config NAME` is only accepted together with `--save`: a session-only
@@ -308,11 +313,97 @@ accepts; `setting_sources` must include `user`, since dropping it removes
 these hooks. `env` refuses `PATH`, `PYTHONPATH`, `DYLD_*`, `ANTHROPIC_*` and
 the credential variables outright. `name` and `description` are not settable.
 
-Commands: `agentik session set <key> <value> [--save] [--config NAME]`,
+Commands: `agentik session set <key> <value>`,
+`agentik session set tier.<role> <model|off> [--until <zoned time>] [--save [user|repo]]`,
+`agentik session set cap <model|off> [--until <zoned time>]`,
 `agentik session set fill <reset|opus> [--until <zoned time>]`,
 `agentik session set fill off`, `agentik session config list`, `agentik session config show [name] [--stored]`,
-`agentik session config new <name> --from <base> --description "..."`,
-`agentik session config delete <name>`.
+`agentik session profile [name]`. `config new` and `config delete` are refused
+(exit 2): add a profile under `profiles:` in the user's `profiles.yaml`.
+
+### Model tiers
+
+Every profile holds `tiers`, five roles each with a model and an effort (hq
+design/13 §3), shipped in `profiles.yaml`'s `defaults`:
+
+| role | the work | model, effort |
+|---|---|---|
+| `design` | a design record, a refutation, a decomposition | fable, high |
+| `build` | a packet with an acceptance table; a review of landed code | opus, high |
+| `words` | a respeak edit, a record from a hand-back | sonnet, medium |
+| `mend` | one small commit whose test the brief names | sonnet, high |
+| `lookup` | a read-only search, a summary of named files | haiku, low |
+
+`orchestrator-opus` holds `design` at opus; `local-only` and `scratch` send
+every tier to `local/default`; `balanced` keeps sonnet as its build tier. No
+shipped profile says `xhigh`. `agentik session profile <name>` prints the table
+as resolved here, the lines a brief pastes. `start` exports `tiers.build`'s
+model as `CLAUDE_CODE_SUBAGENT_MODEL`, so a spawn that names no model runs on
+the build tier; the doctor warns when the variable differs from the table.
+`subagents` is read as `tiers.build`'s model for one release.
+
+The user file is `$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when it exists,
+else `~/.claude/agentik/profiles.yaml`; its `defaults.profile` names the profile
+a repo naming none runs (read after the repo's `session: {profile: ...}`, before
+`frontier`). The tiers' layers, lowest first, role by role: the shipped
+`defaults`; the user file's `defaults`; the shipped profile; the user file's
+body of it (`profiles: <name>:`); the user file's top-level `tiers:` block,
+which overrides a role in every repo; the repo's `.claude/agentik/config.yaml`,
+then its `config.local.yaml`, each by its top-level `tiers:` block, the one
+spelling (`session.tiers` is not read, and the doctor's config row names it
+unknown); last, when `start <profile>` named the profile, that profile's own
+tiers again (shipped, then the user's body), so a launched `local-only` stays
+local whatever a repo says. A profile named on the start line re-applies the
+tiers its body states above every file, as it does every other field, and
+`set tier.*` sits above it; frontier, packets, builder, orchestrator and
+orchestrator-opus state `build: opus`, so under their start a file's build tier
+loses. A layer's model that names no family or is null, and its effort that is
+not one of low, medium, high, xhigh and max or is null, is skipped (the role keeps
+the layer below it), and the doctor's config row names
+`<layer>: tiers.<role>.model` or `.effort`.
+
+```yaml
+defaults:
+  profile: orchestrator
+tiers:
+  mend: {model: opus}
+```
+
+Two session words, neither kept by a profile. `set tier.<role> <model>
+[--until <zoned time>]` changes one role for this session, shown as
+`tiers: build sonnet to Ddd HH:MM` by `agentik session rules` and on the
+SessionStart line, gone at its time or the session's end; `off` drops it.
+`--save` writes the role into the user file's `tiers:` block, `--save repo`
+into the repo's `config.yaml`; the block is rewritten whole (comments inside
+it, blank lines after it and CRLF endings are not kept), every line outside it
+stays. Then the verb resolves as the next session here would, with this
+session's launch profile; when the role's model is not the one written, it
+names the file and block that holds it (`... is sonnet, from
+<repo>/.claude/agentik/config.yaml: tiers: change it there`; under a launched
+profile's body, `change it under profiles.<name>.tiers in` the user file) and
+exits 1. A
+model word, for `set tier.<role>` and `set cap` alike, is letters, digits and
+`. _ / [ ] -` (`opus`, `claude-opus-5-5`, `opus[1m]`) naming a family, refused
+(exit 2) before anything is written; `--save` writes it quoted. `set cap <model>
+[--until <zoned time>]` holds every tier at that family or below
+(`cap: opus to Ddd HH:MM`); `--save` and `--config` are refused, and a `run`
+launcher hands a cap with an end to its successor while the end is ahead, as it
+hands `fill`.
+
+The role check. A spawn names its role with a line `tier: <role>` in the Agent
+call's prompt (any case, a trailing full stop allowed; the first line naming one
+of the five roles counts). When the call's model, else its agent file's `model:`, ranks
+above the role's (fable, opus, sonnet, haiku, local, highest first), the spawn
+gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
+naming no role meets the family rule alone: a Fable helper starts only under a
+Fable session, in every posture.
+
+The start applies the profile. `start <profile>` takes every profile
+`profile` lists. A start, and each start of `run`, whose claude arguments name
+no `--model` passes the profile's `--model` and `--effort`; a `--model` on the
+line wins, and the profile then passes neither. `run` passes them on the seat
+lane only. `run` with no first prompt is refused (exit 2): give one,
+`agentik session run -- "<first prompt>"`.
 
 An overlay set with `set` is confirmed gone once the `SessionEnd` hook
 fires: this is covered by test, not just by design. It depends on the plugin's
@@ -587,11 +678,12 @@ CLAUDE_SESSION_PROFILE=orchestrator-opus agentik session run --chain night -- \
 ```
 
 Everything after `--` goes to `claude` unchanged at every start, behind a
-fresh `--session-id`. Flags that resume, fork, detach or print are refused,
+fresh `--session-id` and, when it names no `--model`, the profile's `--model`
+and `--effort` (packet mt1). Flags that resume, fork, detach or print are refused,
 and so is `/compact`. A value that begins with `-` is refused after its
 flag; write it as `--flag=value`. The last argument is the first prompt,
 sent again at every start. Without one, every restart opens an idle session
-that waits for a person, so `run` warns once and still runs. A list flag
+that waits for a person, so `run` refuses to start (exit 2). A list flag
 (`--add-dir`, `--tools`, `--allowedTools`, `--disallowedTools`,
 `--mcp-config`) reads every argument after it, the prompt too, so write it
 as `--flag=value`. A sitting restarts only when its charter's

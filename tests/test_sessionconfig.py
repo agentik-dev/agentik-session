@@ -51,7 +51,7 @@ def test_clearing_the_overlay_restores_the_config():
     sessionconfig.save_overlay({"posture": "deny", "effort": "low"})
     sessionconfig.clear_overlay()
     eff, ov = sessionconfig.effective("frontier")
-    assert ov == {} and eff.posture == "signal" and eff.effort == "xhigh"
+    assert ov == {} and eff.posture == "signal" and eff.effort is None   # mt1: no table
 
 
 def test_overlays_from_other_sessions_do_not_leak(monkeypatch):
@@ -71,7 +71,8 @@ def test_active_config_from_env_wins(monkeypatch):
     monkeypatch.setenv("CLAUDE_SESSION_CONFIG", "review")
     assert sessionconfig.get_active() == "review"
     eff, _ = sessionconfig.effective()
-    assert eff.name == "review" and eff.tools == "Read,Glob,Grep"
+    assert eff.name == "review"
+    assert sessionconfig.load_configs()["review"].tools == "Read,Glob,Grep"   # the profile
 
 
 def test_a_launch_does_not_claim_the_launching_session(monkeypatch):
@@ -90,22 +91,22 @@ def test_saving_a_config_roundtrips_and_is_private():
     cfgs = sessionconfig.load_configs()
     cfgs["mine"] = SessionConfig(name="mine", description="x", effort="low")
     sessionconfig.save_configs(cfgs)
+    assert sessionconfig.stored()["mine"].effort == "low"   # mt1: the legacy file, read alone
     back = sessionconfig.load_configs()
-    assert back["mine"].effort == "low"
-    assert back["frontier"].model == "opus"          # defaults still present
+    assert "mine" not in back and back["frontier"].model == "opus"   # the profiles alone
     mode = (config.STATE_DIR / sessionconfig.CONFIGS_FILE).stat().st_mode & 0o777
     assert oct(mode) == "0o600"
 
 
 def test_corrupt_config_file_falls_back_to_defaults():
     (config.STATE_DIR / sessionconfig.CONFIGS_FILE).write_text("{ not json")
-    assert "frontier" in sessionconfig.load_configs()
+    assert sessionconfig.stored() == {} and "frontier" in sessionconfig.load_configs()
 
 
 def test_unknown_fields_in_a_saved_config_are_tolerated():
     p = config.STATE_DIR / sessionconfig.CONFIGS_FILE
     p.write_text(json.dumps({"mine": {"effort": "low", "from_the_future": 1}}))
-    assert sessionconfig.load_configs()["mine"].effort == "low"
+    assert sessionconfig.stored()["mine"].effort == "low"
 
 
 def test_validation_rejects_nonsense():
