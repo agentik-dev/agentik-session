@@ -21,7 +21,7 @@
 - [x] review 1's fix: F1 `admission.draws_week` behind `band_status` and `status --json`'s band; F2 `cmd_status` passes the time to `mix_status`; two tests red at bda42c3, green after; the named files 318 passed under each venv; L1 to L3 are NICE n170 to n172 since phase 2 (n160 to n162 before main's n169); n103 to n106, the oldest S4 rows, moved to `history/NICE-overflow.md` for recordlint's bound
 - [x] phase 2 act 1: main bf2e112 (alpha.96) merged at f229854; README, source, sidecar and overflow take main's
 - [x] phase 2 act 2: NICE n170 to n172 (were n160 to n162); n111 and n112 moved to the overflow (NICE 24,555 B)
-- [ ] phase 2 act 3: the version commit, alpha.97
+- [x] phase 2 act 3: the version commit: plugin.json 2.0.0-alpha.97; README and source say alpha.97 and 3538 tests (source 16366 B); the sidecar by shasum
 - [ ] phase 2 act 4: this record closed
 
 ## Handover
@@ -30,7 +30,7 @@
 - The mod's tests (`claude plugin test plugin`) did not run here; `session.ts` was loaded under node 26 and drew all 78 fixture lines equal.
 
 ## Next act
-- Phase 2 act 3: the version commit (plugin.json alpha.97, the README's status line, the sidecar).
+- Phase 2 act 4: the step 5 runs, then this record closed.
 
 ## Exit
 - Phase 1 built: R1 to R7 in five acts and the count's act; both venvs green by chunks (.venv 3447 collected; floor 3319 passed, 105 skipped plus the fixed readme pair); handed back to the coordinator.
