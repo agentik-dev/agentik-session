@@ -204,6 +204,19 @@ def test_r1_f5_the_name_case_blind_and_gnumake():
         assert _refused(line), line
 
 
+# ---- round 1 F2: an in-word `#` (the reader's fix is g5's, on main since the merge) -----
+
+def test_r1_f2_an_in_word_hash_hides_no_make():
+    for line in ["v=${TAG#v}; make check", "echo x#y; make check", "echo $#; make check"]:
+        assert _refused(line), line
+    assert unattended.unbounded("echo x#y; echo ok") == ""      # the # alone refuses nothing
+
+
+def test_r1_f2_an_in_word_hash_hides_no_open_quote():
+    why = unattended.unbounded("echo a#b 'c")
+    assert _refused("echo a#b 'c") and "cannot split" in why
+
+
 # ---- R6, R7: the row refused before its stage (acceptance 6) ---------------------------
 
 def test_a6_an_unbounded_row_is_refused_before_its_stage(box, monkeypatch):
