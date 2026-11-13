@@ -94,6 +94,11 @@ def _unwritable(folder: Path, path: Path) -> str | None:
     return None
 
 
+def _kind(v) -> str:
+    from ..resolver import kind
+    return kind(v)
+
+
 def check(cwd, env, value=None) -> dict:
     """The key with its defaults, plus `tree_doc` (the tree file's JSON). `value` given is
     checked instead of the resolved key. Raises ConfigError, one line per bad key."""
@@ -112,8 +117,9 @@ def check(cwd, env, value=None) -> dict:
     tree, names = out.get("tree"), None
     if tree is None:
         bad.append(f"{_PATH}.tree is required: the repo file with a `repos` list")
-    elif not isinstance(tree, str) or not tree.strip():
-        bad.append(f"{_PATH}.tree must be a file name, not {tree!r}")
+    elif not isinstance(tree, str) or not tree.strip():     # ss4 R2: a string typed here
+        bad.append(f"{_PATH}.tree must be a file name, not "  # prints; any other its kind
+                   + (repr(tree) if isinstance(tree, str) else _kind(tree)))
     else:
         try:
             doc = json.loads((cwd / tree).read_text(encoding="utf-8"))
@@ -181,8 +187,9 @@ def check(cwd, env, value=None) -> dict:
                    f"({rd['floor']})")
     out["read"] = {k: rd[k] for k in READ_KEYS}
     if not _inside(cwd, out["record"]):
+        rec = out["record"]                                  # ss4 R2: as `tree`
         bad.append(f"{_PATH}.record must be a relative folder inside the repo, not "
-                   f"{out['record']!r}")
+                   + (repr(rec) if isinstance(rec, str) else _kind(rec)))
     if bad:
         raise ConfigError("\n".join(bad))
     return out

@@ -126,6 +126,18 @@ def scrubbed(msg: str) -> str:
     return _QUOTED.sub("(withheld)", withheld(msg))
 
 
+def kind(v) -> str:
+    """What a value read from a layer file is, never what it holds (row ss4): a line
+    mis-indented under a key makes the next line, `gate.ntfy_topic`'s among them, its value."""
+    if isinstance(v, bool):
+        return "a boolean"
+    for t, name in ((dict, "a mapping"), ((list, tuple), "a list"), ((int, float), "a number"),
+                    (str, "a word")):
+        if isinstance(v, t):
+            return name
+    return "nothing" if v is None else "a value"
+
+
 class ShippedGone(ResolveError):
     """The shipped profiles.yaml is missing, so its frozen tree went (F8). A ResolveError, so
     a caller holds on it as on any config error (respawn-r1 §4)."""
