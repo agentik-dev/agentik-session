@@ -59,7 +59,7 @@ The interfaces: `admission.band_line(b, now=None, columns=0)` unchanged in shape
 - `status` says `mix: …` and `admission mode: …` after the band's line; `--json` adds `admission: {mode, mix}`, band.json's own objects.
 - The README source does not show the line, so it is unchanged and not re-rendered.
 
-- Review 1 (hq review-1, as ruled). F1: `status` and `--json` show the band for every entry the line drew by `_line_none` (`admission.draws_week`: a `none` entry, or a `five_hour` one with no five-hour figure and no ceiling, S51's `5h no reading`), since that line carried the band at the pin; a five-hour entry with a figure stays as before, so the earlier tests stand unchanged. F2: `status` passes the time to `mix_status`, so a passed `until` prints no ` by Ddd HH:MM`. The fork was ruled as built: with the mix off the line reads as with it on, less `resets <n>`. Leads L1 to L3: NICE n160 to n162.
+- Review 1 (hq review-1, as ruled). F1: `status` and `--json` show the band for every entry the line drew by `_line_none` (`admission.draws_week`: a `none` entry, or a `five_hour` one with no five-hour figure and no ceiling, S51's `5h no reading`), since that line carried the band at the pin; a five-hour entry with a figure stays as before, so the earlier tests stand unchanged. F2: `status` passes the time to `mix_status`, so a passed `until` prints no ` by Ddd HH:MM`. The fork was ruled as built: with the mix off the line reads as with it on, less `resets <n>`. Leads L1 to L3: NICE n170 to n172 (n160 to n162 on the branch, renumbered after main's n169 at phase 2).
 
 ## 5. Forbidden reads
 

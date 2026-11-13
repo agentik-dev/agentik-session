@@ -18,7 +18,11 @@
 - [x] the suite at eac393b plus act 6: .venv 3445 passed but test_readme's count (fixed by act 6); .venv-floor four chunks green but the count and the floor's import error (both fixed); test_pl1 + test_readme 74 passed under each venv
 - [x] acceptance at the pin: tests/test_pl1_prompt_line.py 9 failed, 6 passed (the prompt hook's zone cases held at the pin) on the pin's tree
 
-- [x] review 1's fix: F1 `admission.draws_week` behind `band_status` and `status --json`'s band; F2 `cmd_status` passes the time to `mix_status`; two tests red at bda42c3, green after; the named files 318 passed under each venv; L1 to L3 are NICE n160 to n162; n103 to n106, the oldest S4 rows, moved to `history/NICE-overflow.md` for recordlint's bound
+- [x] review 1's fix: F1 `admission.draws_week` behind `band_status` and `status --json`'s band; F2 `cmd_status` passes the time to `mix_status`; two tests red at bda42c3, green after; the named files 318 passed under each venv; L1 to L3 are NICE n170 to n172 since phase 2 (n160 to n162 before main's n169); n103 to n106, the oldest S4 rows, moved to `history/NICE-overflow.md` for recordlint's bound
+- [x] phase 2 act 1: main bf2e112 (alpha.96) merged at f229854; README, source, sidecar and overflow take main's
+- [x] phase 2 act 2: NICE n170 to n172 (were n160 to n162); n111 and n112 moved to the overflow (NICE 24,555 B)
+- [ ] phase 2 act 3: the version commit, alpha.97
+- [ ] phase 2 act 4: this record closed
 
 ## Handover
 - Phase 2 (bump, gate job, merge) waits on the coordinator's word.
@@ -26,7 +30,7 @@
 - The mod's tests (`claude plugin test plugin`) did not run here; `session.ts` was loaded under node 26 and drew all 78 fixture lines equal.
 
 ## Next act
-- None for this builder: phase 2 on the coordinator's word.
+- Phase 2 act 3: the version commit (plugin.json alpha.97, the README's status line, the sidecar).
 
 ## Exit
 - Phase 1 built: R1 to R7 in five acts and the count's act; both venvs green by chunks (.venv 3447 collected; floor 3319 passed, 105 skipped plus the fixed readme pair); handed back to the coordinator.
