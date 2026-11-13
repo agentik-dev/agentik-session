@@ -53,6 +53,16 @@ def test_n56_a_huge_integer_reads_not_ready_and_never_raises(field):
     assert _chain()._ready(_folder(**kw), ENDED + 61) is False
 
 
+@pytest.mark.parametrize("shape", ["negative", "no activity", "written -inf"])
+def test_n56_a_huge_negative_or_infinite_stamp_never_reads_ready(shape):
+    """Round 1's F2: `ended` is bounded as `_opened` bounds `at` (AT_FLOOR <= ended)."""
+    marked = float("-inf") if shape == "written -inf" else -10 ** 402
+    sdir = _folder(marked=marked, acted=-10 ** 401, ended=-10 ** 400)
+    if shape == "no activity":
+        (sdir / hooks.ACTIVITY).unlink()
+    assert _chain()._ready(sdir, ENDED + 61) is False
+
+
 # ---- n99: a state file too deep to parse reads as one that does not parse ---------------
 
 def test_n99_load_json_of_a_deep_file_is_what_a_bad_file_gives(tmp_path):

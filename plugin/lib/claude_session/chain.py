@@ -680,8 +680,10 @@ class Chain:
         marker, te = _json(sdir / hooks.MARKER) or {}, _json(sdir / hooks.TURN_ENDED) or {}
         written, ended = marker.get("written"), te.get("at")
         # Compared, never subtracted, as `_opened` (NICE n56): a JSON integer past a float's
-        # range, in a file the hooks did not write, reads as not ready and never raises.
-        if not (_num(written) and _num(ended)) or ended <= written or not ended <= now - settle:
+        # range, in a file the hooks did not write, reads as not ready and never raises; an
+        # `ended` below AT_FLOOR (negative, -inf, huge negative) is no time (round 1's F2).
+        if (not (_num(written) and _num(ended)) or not AT_FLOOR <= ended
+                or ended <= written or not ended <= now - settle):
             return False
         act = _json(sdir / hooks.ACTIVITY)
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):
