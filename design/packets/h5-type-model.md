@@ -58,3 +58,11 @@ No transcript, no live state root, no file under `~/.claude`, no relay ledger.
 ## 6. Report
 
 The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the gate job (none in phase 1), the choices made, what was not done.
+
+## 7. Fix of review 1 (hq review 1 of h5, as ruled)
+
+- R1 a type is found by its frontmatter `name:`, else the file's name; a plugin's subfolders are its namespace (`plug:team:drafter`). Two files claiming one type in a folder, or across a plugin's installs: the higher family. Builder's choice: when no file claims the type by name, a file of that name (stem, any case) claiming another counts, since such a call fails in Claude Code and refusing it costs nothing; so nothing refused at `ee74523` passes but the ruled N3.
+- R2 the project's folders: the cwd's and each ancestor's `.claude/agents` up to the folder holding `.git` (else the top), nearest first, then `CLAUDE_PROJECT_DIR`'s; the user's after.
+- R3 only an `is_file()` entry is opened, with `O_NONBLOCK`; a listing holds at most 4,096 entries, a plugin's tree 8 folders deep.
+- R4 a BOM, blanks after `---` and before a key's colon, a non-UTF-8 byte (replaced, the file still counts), the block to its closing line within 256 KB; past the bound, what was read.
+- R5 NICE n160 to n165. R6: 2,000 agent files took 35.7 ms at best, 48 to 54 ms median, at a load average of 12 (the bare open-and-read floor there: 28.6 ms); a file whose stem is not the type is parsed only when its bytes hold the type's name.

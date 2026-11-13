@@ -399,15 +399,20 @@ naming no role meets the family rule alone: a Fable helper starts only under a
 Fable session, in every posture.
 
 The type's model counts. A call that names no `model` is judged, by the family
-rule and the role check alike, on the `model:` in its agent type's frontmatter:
-for a type `<name>`, the project's `.claude/agents/<name>.md`, else the user's
-(`$CLAUDE_CONFIG_DIR`, else `~/.claude`, then `agents/<name>.md`); for a
-plugin's type `<plugin>:<name>`, `<installPath>/agents/<name>.md` of each
-install of `<plugin>@<marketplace>` in that folder's
-`plugins/installed_plugins.json`, the highest family of them counting. A refusal
-then names the type and its model; name `model: 'opus'` on the call, which
-outranks the file. A type with no file, no `model:` line or `model: inherit`,
-and a built-in type, meet no rule; `CLAUDE_CODE_SUBAGENT_MODEL` is not read.
+rule and the role check alike, on the `model:` in its agent type's frontmatter.
+A type is found as Claude Code names it: by the file's frontmatter `name:`,
+else the file's name. A type `<name>` is looked up in the `.claude/agents`
+folders of the working directory and each ancestor up to the repo's root (the
+folder holding `.git`), then `$CLAUDE_PROJECT_DIR`'s, the nearest folder that
+defines it winning, else the user's (`$CLAUDE_CONFIG_DIR`, else `~/.claude`,
+then `agents/`). A plugin's type `<plugin>[:<folder>...]:<name>` is looked up in
+`<installPath>/agents` (its subfolders the type's namespace) of each install of
+`<plugin>@<marketplace>` in that folder's `plugins/installed_plugins.json`. Where
+two files claim one type, the highest family counts. Only regular files are
+read, the frontmatter to 256 KB. A refusal names the type and its model; name
+`model: 'opus'` on the call, which outranks the file. A type with no file, no
+`model:` line or `model: inherit`, and a built-in type, meet no rule;
+`CLAUDE_CODE_SUBAGENT_MODEL` is not read.
 
 The start applies the profile. `start <profile>` takes every profile
 `profile` lists. A start, and each start of `run`, whose claude arguments name
