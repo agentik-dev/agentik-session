@@ -891,6 +891,8 @@ def test_g6_a_strict_deny_logs_its_reading(box):
     "while false; do cd /tmp/box; done" + W, "(cd /tmp/box; case x in esac)" + W,
     "cd /tmp/box # here\ncp a CLAUDE.md", "cd /tmp/box\\ ; cp a CLAUDE.md",
     "cd sub; echo $(case x in esac); cp a ../CLAUDE.md", "cd /tmp/box && cp a CLAUDE.md & cd -" + W,
+    "f() { cd /tmp/box; }" + W, "function f { cd /tmp/box; }" + W,             # R5's neighbours
+    "case x in a) cd /tmp/box;; esac" + W, "select x in a; do cd /tmp/box; done" + W,
 ])
 def test_g6_a_cd_the_loose_reading_does_not_follow_leaves_the_call_folder(box, command):
     (box.repo / "sub").mkdir()

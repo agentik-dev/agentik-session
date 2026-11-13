@@ -14,7 +14,7 @@
 - [x] g6 R4 to R6 (018e702): `_WRITE_WORD` on the joined text; reserved words skipped as a wrapper; an inner `-c` that cannot be split gives the `split` mark
 - [x] g6 R1 to R3: `loose_targets` (pure), `_strict` names each target's word and folder, `_loose_gated` accounts by path, the loose folder moves only on a plain prefix; its own reason, `why` in `guard.jsonl`; 441 guard tests green under both venvs; round 3's 27 lines and g6's 41 at six commits: every write denied, REGRESS 0
 - [x] tests moved: nine lines a0055da passed with an `open` line (an open quote, `cd $X`, `popd`, `cd -`, a stray `)`, a trailing `\`, `echo '>> CLAUDE.md'`) are now the loose reading's; with it off they pass as at a0055da (a test)
-- [ ] g6 R8 records: head comment, RUNBOOK, NICE (n131, n132, n138, n161 close; one S3, one S4 row)
+- [x] g6 R8 records: head comment's g6 paragraph, RUNBOOK, NICE (n131, n132, n138, n161 closed; n162 S3, n163 S4); a0055da's 341 guard tests pass at the head with the loose reading off; 14 other files that read the guard or records: 690 passed (.venv)
 - [ ] g6 checks: round 3's command, 2 x 100k fuzz vs five commits, the replay
 - [ ] phase 2, on the coordinator's word
 

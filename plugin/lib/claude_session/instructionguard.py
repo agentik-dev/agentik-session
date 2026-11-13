@@ -25,6 +25,15 @@ of `bash -c` or `sh -c`, after a literal `cd`, and string literals in `python -c
 `python -` heredoc body, that also holds `open(` or `write_`. A list file's removal (`rm`,
 `unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it) is refused too. A target
 with `$`, a backquote or a glob, and a line `shlex` cannot split, pass: the gate fails open.
+g6: a second, loose reading blind to quotes, comments and heredocs (`loose_targets`) lists every
+target a line might have; one the strict reading did not resolve to the same path is resolved
+against the call's folder, its own (moved by a `cd` only on a plain line) and each folder the
+strict reading stood in, and a gated one is denied with its own reason. So a line the strict
+reading cannot split, a `cd` it cannot resolve, and text that holds a write (a heredoc body, a
+quoted line, a commit message naming the file after a write word) are refused when the loose
+reading's word is gated; what passes is a target neither reading resolves, a gated file a
+command neither knows writes (`dd`, `ln`, `truncate`, a script, a name in a variable), and a
+`cd` the strict reading wrongly follows on a plain line (`false && cd /tmp; ...`).
 
 R4: an exception lets the call through with one `open` line in the session's `guard.jsonl`;
 each refusal is a line there too, naming a helper by the payload's `agent_id`. No knob: the
