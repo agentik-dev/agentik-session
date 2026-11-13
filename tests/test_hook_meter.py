@@ -386,7 +386,9 @@ def test_status_reads_the_meter(env, tmp_path):
     assert rc == 0 and out.startswith(
         f"session {SID}: 80.0% context (144000/180000), 1.0% turns (4/400), zone notice")
     rc, out, _ = cli("status", "--json")
-    assert rc == 0 and json.loads(out) == meter.load(sdir(env))
+    got = json.loads(out)                    # packet ak5 R8: the plug's two keys open it
+    assert rc == 0 and list(got)[:2] == ["schema", "ok"]
+    assert {k: v for k, v in got.items() if k not in ("schema", "ok")} == meter.load(sdir(env))
 
 
 def test_status_transcript_parses_once_and_writes_nothing(env, tmp_path):

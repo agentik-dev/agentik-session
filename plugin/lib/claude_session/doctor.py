@@ -90,6 +90,11 @@ class Check:
     detail: str
     note: bool = False          # an optional piece is absent: ok, printed as a note
     warn: bool = False          # worth a look, never a failure: ok, printed as warn
+    remedy: str | None = None   # packet ak5 R8: the one command the detail names, or None
+
+    @property
+    def status(self) -> str:
+        return "fail" if not self.ok else "note" if self.note else "warn" if self.warn else "ok"
 
 
 @dataclass
@@ -101,8 +106,14 @@ class Report:
         return bool(self.checks) and all(c.ok for c in self.checks)
 
     def as_dict(self) -> dict:
-        return {"ok": self.ok,
-                "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
+        """The plug's doctor read (packet ak5 R8): `ok` says the read ran; `failed` and `warned`
+        count the statuses, so "no check failed" is `failed` 0. The exit stays `ok`'s."""
+        from .plug import withheld     # plug imports this module; a secret's text stays out
+        st = [c.status for c in self.checks]
+        return {"schema": "agentik.doctor/1", "ok": True, "tool": "session",
+                "failed": st.count("fail"), "warned": st.count("warn"),
+                "checks": [{"name": c.name, "ok": c.ok, "status": c.status,
+                            "detail": withheld(c.detail), "remedy": c.remedy}
                            for c in self.checks]}
 
 
@@ -254,25 +265,27 @@ def _check_launcher(env, plugins) -> Check:
     path = install.launcher_path(env)
     found = install.read_launcher(path)
     remedy = "run /session:install-cli"
+    cmd = "/session:install-cli"              # packet ak5 R8: the command the details name
     if found is None:
         return Check("launcher", True, f"none at {path}; /session:install-cli gives the terminal "
-                     "the CLI", note=True)
+                     "the CLI", note=True, remedy=cmd)
     if found["tree"] and not os.path.isdir(found["tree"]):
-        return Check("launcher", False, f"{path} runs {found['tree']}, which is gone; {remedy}")
+        return Check("launcher", False, f"{path} runs {found['tree']}, which is gone; {remedy}",
+                     remedy=cmd)
     version = found["version"]
     if not version:
         return Check("launcher", True, f"{path} has no VERSION= line, so no session refreshes it; "
-                     + remedy, warn=True)
+                     + remedy, warn=True, remedy=cmd)
     theirs = install.order(version)
     if theirs is None:
         return Check("launcher", True, f"{path} reads VERSION={version}, which is no version, so "
-                     f"no session refreshes it; {remedy}", warn=True)
+                     f"no session refreshes it; {remedy}", warn=True, remedy=cmd)
     _, p, _ = _pick_id(plugins, PLUGIN_ID, OLD_PLUGIN_ID) if plugins is not None else (None, None, None)
     plugin = (p or {}).get("version") or SEMVER
     ours = install.order(plugin)
     if ours is not None and theirs < ours:
         return Check("launcher", True, f"{path} is {version}, older than the plugin's {plugin}; the "
-                     f"next session's start moves it, or {remedy}", warn=True)
+                     f"next session's start moves it, or {remedy}", warn=True, remedy=cmd)
     return Check("launcher", True, f"{version} at {path}")
 
 
@@ -320,7 +333,7 @@ def _check_plugin(plugins, err) -> Check:
     if missing:
         return Check("plugin", False, "hooks not registered: " + ", ".join(missing)
                      + f"; update the plugin: `claude plugin update {pid}`, then "
-                     "restart Claude Code")
+                     "restart Claude Code", remedy=f"claude plugin update {pid}")
     if old:
         return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
                      + _switch_note(pid, PLUGIN_ID), warn=True)
@@ -363,13 +376,25 @@ def _sibling_absent(plugins, name: str) -> bool:
     return not (p and p.get("enabled"))
 
 
+# Build 3, L2: a layer file that cannot be opened, or nests past the parser, is a failed
+# check naming the file and why, as the config read names it; never a traceback.
+_UNREAD = (resolver.ResolveError, OSError, RecursionError)
+
+
+def _why(e, env, cwd) -> str:
+    from .plug import _failure, layer_files, scrubbed   # plug imports this module
+    if isinstance(e, resolver.ResolveError):
+        return scrubbed(str(e))    # review 2, R2-F1: no layer file's text
+    return _failure(e, layer_files(cwd, env))   # R2-F2: the paths picked without raising
+
+
 def _check_profiles(env, cwd) -> Check:
     try:
         _, profiles = resolver.load_profiles(env)
         for name in profiles:
             resolver.resolve(cwd, "doctor", env, profile=name, overlay={})
-    except resolver.ResolveError as e:
-        return Check("profiles", False, str(e))
+    except _UNREAD as e:
+        return Check("profiles", False, _why(e, env, cwd))
     return Check("profiles", True, f"{len(profiles)} resolve: " + ", ".join(profiles))
 
 
@@ -451,13 +476,13 @@ def _check_meter_hook(plugins, err) -> Check:
 
 
 def _check_config(env, cwd) -> tuple[Check, dict]:
-    path = resolver.repo_dir(cwd) / "config.yaml"
     sections: dict = {}
     try:
+        path = resolver.repo_dir(cwd) / "config.yaml"   # R2-F2: a folder above may refuse
         r = resolver.resolve(cwd, "doctor", env, overlay={})
         sections = r.sections
-    except resolver.ResolveError as e:
-        return Check("config", False, str(e)), sections
+    except _UNREAD as e:
+        return Check("config", False, _why(e, env, cwd)), sections
     if not path.exists():
         return Check("config", True, f"no {path}; the defaults"), sections
     detail = f"{path} parses, profile {sections['session']['profile']}"
@@ -469,7 +494,7 @@ def _check_config(env, cwd) -> tuple[Check, dict]:
 def _renamed(env, cwd) -> list:
     try:
         return resolver.resolve(cwd, "doctor", env, overlay={}).renamed
-    except resolver.ResolveError:
+    except _UNREAD:
         return []
 
 
@@ -477,7 +502,11 @@ def _check_renamed(cwd, r_renamed) -> list:
     """agentik-r1 §6.3's warn rows: the repo's old folder (c4), the old section key (c6)."""
     rows = []
     old = Path(cwd) / resolver.OLD_REPO_DIR
-    if old.is_dir() and not old.is_symlink():
+    try:
+        here = old.is_dir() and not old.is_symlink()
+    except OSError:    # R2-F2: the folder above cannot be searched; `config` fails naming it
+        here = False
+    if here:
         new = Path(cwd) / resolver.REPO_DIR
         where = "read" if resolver.repo_dir(cwd) == old else f"unread, {new} wins"
         rows.append(Check("config-dir", True, f"{old} is the folder before the rename "
@@ -497,7 +526,7 @@ def _check_subagent_model(env, sections, cwd=None) -> Check | None:
         try:
             sections = resolver.resolve(cwd or os.getcwd(), "doctor", env, profile=prof,
                                         overlay={}).sections
-        except resolver.ResolveError:
+        except _UNREAD:
             return None
     want = ((((sections.get("session") or {}).get("tiers") or {}).get("build")) or {}).get("model")
     if not have or not want or have == want:
@@ -589,9 +618,16 @@ def _check_guard(env, cwd) -> Check:
     return Check("guard", True, detail)
 
 
+class NoCwd(Exception):
+    """The working directory is gone (review 2, R2-F3)."""
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
-    cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    try:
+        cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    except FileNotFoundError:
+        raise NoCwd() from None
     rep = Report()
     add = rep.checks.append
     add(_check_claude(env))
@@ -632,8 +668,9 @@ def run(env=None, cwd=None) -> Report:
 
 
 def render(rep: Report) -> str:
+    from .plug import withheld     # build 3, L1: the text withholds a secret as the read does
     lines = [f"{('note' if c.note else 'warn' if c.warn else 'ok  ') if c.ok else 'FAIL'} "
-             f"{c.name:<12} {c.detail}"
+             f"{c.name:<12} {withheld(c.detail)}"
              for c in rep.checks]
     failed = [c.name for c in rep.checks if not c.ok]
     lines.append("doctor: green" if rep.ok else "doctor: failing: " + ", ".join(failed))

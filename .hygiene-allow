@@ -120,3 +120,7 @@ tests/test_g4_folder_gates.py: sibling
 design/packets/mt1-model-tiers.md: sibling
 # in2: the packet's first commit names the ledger file a sibling plugin reads.
 design/packets/in2-charter-show.md: sibling
+# ak5: the plug's module names an attribute `local` (the local layer), no network name.
+plugin/lib/claude_session/plug.py: lan
+# ak5: the plug's tests name a public plugin by its id.
+tests/test_ak5_plug.py: sibling
