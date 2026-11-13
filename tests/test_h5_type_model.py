@@ -193,11 +193,14 @@ def test_6_a_type_whose_file_names_no_fable_passes(world, text):
     assert call(world, {"subagent_type": "plain"}) == {}
 
 
-def test_6_a_project_file_that_cannot_be_decoded_falls_to_the_user_s_as_at_the_pin(world):
+def test_6_a_project_file_with_a_bad_byte_is_read_not_skipped(world):
+    """Review 1 R4: decoded with replacement, never skipped to the next source."""
     parent(OPUS)
     agent(world.repo / ".claude", "plain", b"---\nmodel: \xff\xfe\n---\n")
-    assert call(world, {"subagent_type": "plain"}) == {}
     agent(world.cfg, "plain", fm("fable"))
+    assert call(world, {"subagent_type": "plain"}) == {}
+    agent(world.repo / ".claude", "plain", b"---\nmodel: fable\ndescription: \xff\n---\n")
+    agent(world.cfg, "plain", fm("opus"))
     assert "agent type plain names fable" in reason(call(world, {"subagent_type": "plain"}))
 
 
@@ -263,3 +266,129 @@ def test_8_a_plugin_type_above_its_role_is_refused_under_deny_and_warned_under_s
     parent(OPUS, "signal")
     out = call(world, ti)
     assert "hookSpecificOutput" not in out and "tier: words" in out["systemMessage"], out
+
+
+# ---- review 1: where a type is found and how its file is read ----------------------------
+
+def fmn(name, model):
+    return f"---\nname: {name}\ndescription: d\nmodel: {model}\n---\nbody\n"
+
+
+def test_r1_a_project_type_is_found_by_its_name_field(world):
+    parent(OPUS)
+    agent(world.repo / ".claude", "d", fmn("designer", "fable"))
+    assert "agent type designer names fable" in reason(call(world, {"subagent_type": "designer"}))
+
+
+def test_r1_a_plugin_type_is_found_by_its_name_field(world):
+    parent(OPUS)
+    root = world.tmp / "inst"
+    agent(root, "helper", fmn("drafter", "fable"))
+    install(world, "plug@market", raw=json.dumps(
+        {"plugins": {"plug@market": [{"installPath": str(root)}]}}))
+    assert "names fable" in reason(call(world, {"subagent_type": "plug:drafter"}))
+
+
+def test_r1_a_plugin_s_subfolder_is_its_type_s_namespace(world):
+    parent(OPUS)
+    root = world.tmp / "inst"
+    agent(root / "agents", "team/drafter", fmn("drafter", "fable"))
+    install(world, "plug@market", raw=json.dumps(
+        {"plugins": {"plug@market": [{"installPath": str(root)}]}}))
+    assert "plug:team:drafter names fable" in reason(
+        call(world, {"subagent_type": "plug:team:drafter"}))
+    assert call(world, {"subagent_type": "plug:drafter"}) == {}
+
+
+def test_r1_a_file_named_for_another_type_is_not_that_type(world):
+    parent(OPUS)
+    agent(world.repo / ".claude", "designer", fmn("other", "fable"))
+    agent(world.repo / ".claude", "o", fmn("designer", "opus"))
+    assert call(world, {"subagent_type": "designer"}) == {}
+    assert "names fable" in reason(call(world, {"subagent_type": "other"}))
+
+
+def test_r1_two_files_claiming_one_name_take_the_higher_family(world):
+    parent(OPUS)
+    agent(world.repo / ".claude", "a", fmn("designer", "opus"))
+    agent(world.repo / ".claude", "b", fmn("designer", "fable"))
+    assert model_of(world, {"subagent_type": "designer"}) == "fable"
+
+
+@pytest.mark.parametrize("project_dir", [False, True])
+def test_r2_an_ancestor_s_agents_folder_is_read(world, monkeypatch, project_dir):
+    parent(OPUS)
+    (world.repo / ".git").mkdir()
+    sub = world.repo / "sub" / "deeper"
+    sub.mkdir(parents=True)
+    agent(world.repo / ".claude", "designer", fmn("designer", "fable"))
+    if project_dir:
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(world.repo))
+    r = reason(call(world, {"subagent_type": "designer"}, cwd=str(sub)))
+    assert "agent type designer names fable" in r
+
+
+def test_r2_the_nearest_folder_wins_and_the_walk_stops_at_the_repo_root(world):
+    parent(OPUS)
+    (world.repo / ".git").mkdir()
+    sub = world.repo / "sub"
+    sub.mkdir()
+    agent(world.tmp / ".claude", "above", fmn("above", "fable"))      # past the repo's root
+    assert call(world, {"subagent_type": "above"}, cwd=str(sub)) == {}
+    agent(world.repo / ".claude", "designer", fmn("designer", "fable"))
+    agent(sub / ".claude", "designer", fmn("designer", "opus"))
+    assert call(world, {"subagent_type": "designer"}, cwd=str(sub)) == {}
+    assert "names fable" in reason(call(world, {"subagent_type": "designer"}))
+
+
+def test_r2_claude_project_dir_is_read_beside_the_cwd(world, monkeypatch):
+    parent(OPUS)
+    other = world.tmp / "elsewhere"
+    other.mkdir()
+    agent(world.repo / ".claude", "designer", fmn("designer", "fable"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(world.repo))
+    assert "names fable" in reason(call(world, {"subagent_type": "designer"}, cwd=str(other)))
+
+
+def _within(seconds, fn):
+    import threading
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    t.start()
+    t.join(seconds)
+    assert box, "the hook did not answer in %s s" % seconds
+    return box[0]
+
+
+def test_r3_a_fifo_is_never_opened(world):
+    parent(OPUS)
+    a = world.repo / ".claude" / "agents"
+    a.mkdir(parents=True)
+    os.mkfifo(str(a / "designer.md"))
+    os.mkfifo(str(a / "other.md"))
+    assert _within(1, lambda: call(world, {"subagent_type": "designer"})) == {}
+    agent(world.cfg, "designer", fmn("designer", "fable"))
+    assert "names fable" in reason(_within(1, lambda: call(world, {"subagent_type": "designer"})))
+
+
+@pytest.mark.parametrize("text", [
+    "\ufeff---\nmodel: fable\n---\n",
+    "---  \t\nmodel: fable\n---\n",
+    "---\nmodel : fable\n---\n",
+    b"---\nmodel: fable\ndescription: caf\xe9\n---\n",
+    "---\ndescription: " + "x" * 20000 + "\nmodel: fable\n---\n",
+    "---\r\nname: designer\r\nmodel: fable\r\n---\r\n"])
+def test_r4_the_frontmatter_s_spellings_are_read(world, text):
+    parent(OPUS)
+    agent(world.repo / ".claude", "designer", text)
+    assert "names fable" in reason(call(world, {"subagent_type": "designer"}))
+
+
+def test_r4_past_the_bound_with_no_model_is_no_model_named(world):
+    parent(OPUS)
+    agent(world.repo / ".claude", "designer",
+          "---\ndescription: " + "x" * 300000 + "\nmodel: fable\n---\n")
+    assert call(world, {"subagent_type": "designer"}) == {}
+    agent(world.repo / ".claude", "designer",
+          "---\nmodel: fable\ndescription: " + "x" * 300000 + "\n---\n")
+    assert "names fable" in reason(call(world, {"subagent_type": "designer"}))
