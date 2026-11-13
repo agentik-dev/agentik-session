@@ -41,6 +41,14 @@
 
 - NICE n20, n56, n86, n99, n100 close with this packet and leave `NICE_TO_HAVE.md` in its last commit.
 
+## 4a. Round 1 (the hq's refutation of 3c14608, 2026-11-12)
+
+- Main (aee2f99) merged on the coordinator's word; NICE keeps neither n86 nor n87.
+- F1 blocked acceptance 4, R4 re-ruled: past BAND_MAX the other logins' weeks go first, oldest first, then this call's own (`out`); the current login's carry is the last to go. Red at 3c14608: others resetting 2 to 7 h later gave `(0, 2)` for `(1, 1)`.
+- F2: `_ready` bounds `ended` as `_opened` does (`AT_FLOOR <= ended`); a huge negative, `-inf` or negative end reads not ready. `ended=0, written=-1` now reads not ready (it read ready).
+- F3: `chain._json` and `meter._scan` treat RecursionError as a file or line that does not parse.
+- F4 filed as NICE n148, not built. Version 2.0.0-alpha.91 in its own commit (3335 tests).
+
 ## 5. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, no hq checkout.
