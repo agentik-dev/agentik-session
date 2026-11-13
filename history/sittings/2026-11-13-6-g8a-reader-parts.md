@@ -21,6 +21,7 @@
 - [x] F1: an unread text read as a shell spells it: the walk (to `_NEST` texts deep) and a split with `\`-NL, `\` and quotes off
 - [x] F7: a here-string's word is `data` unless a shell reads it as its script (`piped`); a pipe into a runner's shell is `piped`
 - [x] F5 built (the rule's word test expands braces, bounded); F6 built (an `alias` value is an `eval` text)
+- [x] N1: a body's refusal says what is true and the way out; a line of data sinks only (`cat` to a file, `tee`, `git commit -F -`) passes its bodies
 - [ ] Review 1's fix, left: F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
 
 ## Handover

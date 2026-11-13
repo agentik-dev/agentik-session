@@ -1059,6 +1059,46 @@ def commands(command: str, cwd, env) -> tuple:
     return cmds, unread
 
 
+_SINK_FILE = re.compile(r"[\w./@%+,:=~-]+\Z")
+
+
+def _sinks(command: str) -> bool:
+    """g8a r1 N1: whether every command of the line is a data sink, which reads a body and runs
+    nothing, at level 0, with no word before it: `cat` (no operand but `-`) writing a file, `tee`
+    to files named plainly, `git commit -F -` (`git -C <dir>` at most); the list is closed.
+    Any other command, a part the walk does not read but a body, a process substitution, or a
+    line read past its bound gives False."""
+    if "<(" in command or ">(" in command:
+        return False
+    try:
+        text, bodies, quoted, opers, other = _parse(command, False, True)
+        steps = list(_walk(text, bodies, quoted, opers, [(None, ())], 0, {}, 0, False, True,
+                           {}, 0, True))
+    except (_Bound, RecursionError):
+        return False
+    if other or not steps:
+        return False
+    for s in steps:
+        if s.why == "data":
+            continue
+        if s.why or s.level or s.pre:
+            return False
+        a = s.args
+        if s.name == "cat" and s.outs and all(x == "-" for x in a):
+            continue
+        if s.name == "tee" and a and all(x in ("-a", "--append") or (
+                not x.startswith("-") and _SINK_FILE.match(x)) for x in a):
+            continue
+        if s.name == "git":
+            globs, sub, rest = git_words(a)
+            if sub == "commit" and all(o == "-C" for o, _ in globs) and (
+                    "--file=-" in rest or "-F-" in rest or any(
+                        rest[k:k + 2] in (["-F", "-"], ["--file", "-"]) for k in range(len(rest)))):
+                continue
+        return False
+    return True
+
+
 # ---- g6: the loose reading, a second reading that no quote, comment or heredoc can hide ----
 
 _LOOSE_SEP = re.compile(r"(?<!\\)(?:[;|\n(){}`]|(?<![<>])&|(?<=\\[<>])&)")  # r1 R5: no split in

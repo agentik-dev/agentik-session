@@ -92,7 +92,7 @@ TABLE = [
     ("bash -c \"bash -c '{M}'\"", NONE, RUNS),
     ("echo \"$({M})\"", GATED, RUNS),
     ("sh <<EOF\n{M}\nEOF", GATED, RUNS),
-    ("cat <<EOF\n{M}\nEOF", NONE, RUNS),   # fix of the read: the pin's
+    ("cat <<EOF\n{M}\nEOF", NONE, "a heredoc's body"),   # refused as at the pin; r1 N1 words it
     ("echo `{M}`", GATED, RUNS),
     ("./make.sh > CLAUDE.md", GATED, ""),
     ("ksh -c '{M}'", GATED, RUNS),

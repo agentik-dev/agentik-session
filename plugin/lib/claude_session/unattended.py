@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
-from .shellreader import _NEST, _SUB_OUT, _Bound, commands  # packet g8a R9: the one walk
+from .shellreader import _NEST, _SUB_OUT, _Bound, _sinks, commands  # g8a R9: the one walk
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -732,8 +732,9 @@ def unbounded(shell: str) -> str:
     reads past its bound), when a word of a command at any level, by basename and case-blind,
     is `make`, `gmake` or `gnumake` (round 1 F5), or when a text the reader does not read (an
     `eval`'s, a shell's below the first level, one piped into a shell, a shell's `-c` text
-    behind a runner, a heredoc's body read as no script) holds one as a shell spells it (r1
-    F1, `_make_in`). A substitution glued to the command word is read as empty (`$(true)make`).
+    behind a runner, a heredoc's body or here-string read as no script) holds one as a shell
+    spells it (r1 F1, `_make_in`); a body or here-string passes where the line's only commands
+    are data sinks (r1 N1, `shellreader._sinks`). A substitution glued to the command word is read as empty (`$(true)make`).
     Nothing but this text comes out (r1 F4)."""
     try:
         cmds, unread = commands(shell, None, {})
@@ -744,9 +745,17 @@ def unbounded(shell: str) -> str:
             found = _make_word(c.pre + [c.name] + c.args)
             if found:
                 return f"it runs `{found}`; {WHY_MAKE}"
+        sink = None
         for u in unread:
             found = _make_in(u.text, 1)
-            if found:
+            if found and u.why == "data":     # r1 N1: what is true, and the way out
+                sink = _sinks(shell) if sink is None else sink
+                if not sink:
+                    return (f"a heredoc's body or a here-string holds `{found}`: text the "
+                            f"reader could not rule out as run, so it may run a make; write "
+                            f"the file with the editor tool, or keep the word out of the line; "
+                            f"{WHY_MAKE}")
+            elif found:
                 return (f"it runs `{found}` in a text the reader does not read ({u.why}); "
                         f"{WHY_MAKE}")
     except (_Bound, RecursionError):

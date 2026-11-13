@@ -243,7 +243,7 @@ def test_9_the_make_rule_reads_the_same():
     for shape in held:
         line = shape.format(G="make x")
         assert unattended.unbounded(line), line
-    assert unattended.unbounded("cat <<EOF\nmake x\nEOF").startswith("it runs `make`")  # the pin's
+    assert unattended.unbounded("cat <<EOF\nmake x\nEOF").startswith("a heredoc's body")  # r1 N1
     assert unattended.unbounded("echo 'make x'") == ""
 
 
@@ -269,7 +269,8 @@ RUNNERS = ["scripts/bounded -- sh -c '{M}'", "timeout 60 sh -c '{M}'", "xargs sh
            "flock /tmp/l sh -c '{M}'", "busybox sh -c '{M}'", "nice -n 5 timeout 9 BASH -lc '{M}'",
            "tool gate run /r -- /bin/sh -c \"{M} > $L 2>&1\"", "sh -c 'tool run -- sh -c \"{M}\"'"]
 # class B and its kin: a heredoc's body a shell may run, read by the walk as no script
-BODIES = ["cat > x.sh <<'EOF'\n{M}\nEOF", "cat > x.sh <<'EOF'\n{M}\nEOF\nbash x.sh",
+# (r1 N1: a lone `cat` writing x.sh is a data sink and passes, `test_12_a_data_sink_passes`)
+BODIES = ["cat > x.sh <<'EOF'\n{M}\nEOF\nbash x.sh",
           "cat > $S/x.sh <<'EOF'\nnice -n 19 {M} > log\nEOF\nbash -eu $S/x.sh",
           "cat > x.sh <<EOF\n{M}\nEOF\nnohup bash ./x.sh &", "tee x.sh <<EOF\n{M}\nEOF\nsh x.sh",
           "ssh host sh <<EOF\n{M}\nEOF", "source /dev/stdin <<EOF\n{M}\nEOF",
@@ -370,6 +371,7 @@ BASH_ONLY = {"{make,} check", "{ma,}ke check", F6[0],
              "echo 'm\\ake check' | sh"}    # zsh's echo reads `\a` as a bell
 # N1 (ii): data sinks, which read a body and run nothing
 SINKS = ["cat > notes.md <<'EOF'\nRun make check before landing.\nEOF",
+         "cat > x.sh <<'EOF'\nmake check\nEOF",
          "cat >> notes.md <<'EOF'\nSee the `make` target.\nEOF",
          "cat > notes.md <<EOF\n# make notes\nEOF", "tee notes.md <<'EOF'\nUse `make check` here.\nEOF",
          "git commit -F - <<'EOF'\ndocs: say \"make check\" in the runbook\nEOF",
