@@ -14,7 +14,7 @@
 - [x] 1d R1 (R3-F1): `_commands` reads a `case` glued to its opening backtick and (a choice) an `esac` glued to its closing one; R8: the unmasked `)` as proposed passed a line f1f012e denied and zsh writes (a `cd` in a case body in backticks), so the first reading masks it again and bash3's reading, which counts no `case` (R3), reads it
 - [x] 1d R2 (R3-F2): a backtick opened in a `${` goes on `opened` till it closes (a `)` there pops nothing); fuzz 40k: no line head denied and a shell writes passes
 - [x] 1d R3 (R3-F3): the bash3 reading counts no `case`, taken whenever its mask differs
-- [ ] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not
+- [x] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not, read again from the backslashes before it; F4 without `; echo b`: `[]` at f1f012e, `[(write, None)]` after R4
 - [ ] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
 - [ ] 1d R6 (R3-F6 a): backticks stripped from a target word's ends
 - [ ] 1d R7 (R3-F7): a comment's end searched to its newline only

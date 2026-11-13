@@ -376,7 +376,6 @@ _MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operat
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
 _KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\Z)")
-_TICK_END = re.compile(r"(?:[^\\`]|\\[\\`]|\\)*")    # r2 F3: `\`` ends no comment in backticks
 _LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
@@ -423,7 +422,8 @@ def _mask(text: str, bash3: bool = False) -> str:
     lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
     outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
     A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
-    ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1).
+    ends at a backtick, escaped or not (g5 r3); a backslash-newline is dropped outside single
+    quotes (g5 r1).
     A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
     a backtick in a `${` is a bracket of its own, in which a paren is a command's (g5 r3);
     `bash3`: bash 3.2's reading, which opens no `${` inside a `$(` and counts no `case`."""
@@ -441,9 +441,14 @@ def _mask(text: str, bash3: bool = False) -> str:
                 i, start, prev, cmd = i + 2, False, "", cmd and not start
                 continue
             if c == "#" and start and opened[-1:] != ["${"]:
-                ends = [j for j in (text.find("\n", i), _TICK_END.match(text, i).end()
-                                    if tick else -1) if 0 <= j < n]
-                i = min(ends) if ends else n
+                nl = text.find("\n", i)
+                k = text.find("`", i) if tick else -1     # r3 F4: escaped or not
+                if 0 <= k and (nl < 0 or k < nl):
+                    while text[k - 1] == "\\":          # an escaped one: read from its
+                        k -= 1                            # backslashes, so `tick` holds
+                    i = k
+                else:
+                    i = nl if nl >= 0 else n
                 continue
             if c in "'\"":
                 quote = c
