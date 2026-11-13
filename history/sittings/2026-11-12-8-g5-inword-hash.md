@@ -16,23 +16,20 @@
 - [x] tests moved: nine lines a0055da passed with an `open` line (an open quote, `cd $X`, `popd`, `cd -`, a stray `)`, a trailing `\`, `echo '>> CLAUDE.md'`) are now the loose reading's; with it off they pass as at a0055da (a test)
 - [x] g6 R8 records: head comment's g6 paragraph, RUNBOOK, NICE (n131, n132, n138, n161 closed; n162 S3, n163 S4); a0055da's 341 guard tests pass at the head with the loose reading off; 14 other files that read the guard or records: 690 passed (.venv)
 - [x] g6 checks: round 3's 27 lines at six commits, every write denied, REGRESS 0; fuzz 100k tokens (seed 9802) and 100k valid (seed 9902) vs 8153e52, d2f89d9, 40aee95, f1f012e, a0055da, a stub `cp` that prints nothing: REGRESS-with-a-shell 0 and 0; the replay of 415,408 lines: 72 newly refused, all by the loose reading, none a read or a `git add` (56 text the strict reading does not read as a write, 12 by the amendment's (b), 4 by its (a)): over the brief's 60 by the amendment's 16
-- [x] build 3 R1 (review 1's F3): a `cd`, `pushd` or `popd` behind a reserved word adds a folder state and replaces none; the first state moves as a0055da's, one follows every `cd` as db19d51's; at most 16; a test builds 392 lines from 13 prefixes (and none) and 28 writes a0055da denies: with the loose reading off, every one denied
-- [x] build 3 R2 (F1): `then`, `do`, `else`, `elif`, `if`, `while`, `until`, `{`, `!` are skipped only as a command's first words, in both readings; after an assignment or a wrapper each is a word; F1's 12 lines denied by the strict reading, neither reading follows their `cd`
-- [x] build 3 R3 (F2): a strict word stands for a loose target only whole: a word with a blank stands for the loose targets only where one command lists every piece of it in order, each once (the reviewer's "never by its pieces" alone denied g6's ordinary `sed -i '' 's/the CLAUDE.md file/x/' notes.md`); F2's four lines denied by the strict reading (R1), review 1's lead 2 (two lines, no R5 word) now denied by the loose reading
-- [x] build 3 R4 (F4): each `cd` of the loose reading resolved once, each loose target once, targets left times folders at most 4,096, past it the line is denied with the loose reading's refusal (naming its first target); `(?<!\d)\d*`; F4's shapes: 6 KB 7.76 s to 0.02 s, 20 KB of digits 3.78 s to 0.03 s, the `if` line 8.70 s to 0.01 s (denied), 100 KB over 25 s to 0.18 s
-- [x] build 3 R5 (F5): `_LOOSE_W` takes `>&` before a word that is not a digit or `-`, and `_LOOSE_SEP` no longer splits at the `&` of `>&` or `<&`; F5's line denied by the loose reading
-- [ ] build 3 checks (the sweep, the fuzz, seven, the replay), then the records (§3e, NICE)
+- [x] build 3 (review 1's fix, packet §3e): R1 a `cd` behind a reserved word adds a folder state (at most 16); R2 a reserved word only first; R3 a blank word stands only whole; R4 loose time bounded (4,096 pairs); R5 `>&`; 491 guard tests green, both venvs
+- [x] build 3 checks vs the six commits: sweeps, hand lines, round 3's and g6's lines REGRESS 0; fuzz 2 x 100k (seeds 80611, 80612) REGRESS 0; loose off vs a0055da 80k lines: 0 deny to pass; replay 72 newly refused, the same 72; NICE n164 to n166
 - [ ] phase 2, on the coordinator's word
 
 ## Handover
+- Build 3: recordlint's long n162 and n163 rows and doclint's packet section names (4 to 6) were red at db19d51 already; left for phase 2.
 - The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write.
 - NICE id n161: main holds n148, land2 n150, mt1 n159, u3 n160; renumber at merge if one passes it.
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 - decide, owner: the coordinator: acceptance 5's bound of 60 against the amendment's (a) and (b), which add 16 (72 in all); consumer: the review and phase 2.
 
 ## Next act
-- Build 3 goes on at the next unticked ruling, R2 to R5 then the records, each with its tests.
+- Review 2 of g5-g6 over the fix's slice (db19d51 onward), then phase 2 on the coordinator's word.
 - The review over the whole slice from 8153e52 with both readings on, then phase 2 on the coordinator's word.
 
 ## Exit
-g6 build 2 landed in phase 1 (R1 to R8, the records, the checks); waits on the coordinator.
+Build 3 landed review 1's fix (R1 to R10) and its checks; waits on review 2.

@@ -117,3 +117,28 @@ four shells, a stub `cp` that prints nothing):
    and R6 newly read; with both on, no line a shell runs as a gated write that `8153e52`,
    `d2f89d9`, `40aee95`, `f1f012e` or `a0055da` denied passes (round 3's command, two
    generators of 100,000 lines each, new seeds).
+
+## 3e. Review 1's fixes (brief g5-g6 build 3, R1 to R10)
+
+The rule (R1): a `cd`, `pushd` or `popd` the strict reading reads behind a reserved word adds a
+folder and replaces none, so with the loose reading off the head denies every line `a0055da`
+denies: a test of 392 lines built from parts; 80,000 fresh generator lines, 0 from deny to pass.
+
+- F3: R5's `cd` replaced the folder. Now the strict reading keeps folder states: the first moves
+  as `a0055da`'s, one follows every `cd` as `db19d51`'s, at most 16; each target is judged in each.
+- F1: a reserved word was skipped after an assignment or a wrapper; now only as a command's
+  first words, in both readings.
+- F2: a strict word's pieces were credits a later loose target could spend. Now a word with a
+  blank stands for loose targets only where one command lists every piece of it, in order (the
+  reviewer's "never by its pieces" alone denied g6's ordinary `sed -i '' 's/the CLAUDE.md
+  file/x/' notes.md`). Review 1's lead 2 is denied too.
+- F4: the loose reading was quadratic. Now each `cd` and target is resolved once; targets left
+  times folders is at most 4,096, and a line past it is denied with the loose refusal;
+  `(?<!\d)\d*`. The
+  replay's largest product is 286 (one line over 256), so no line of it or of the tests meets
+  4,096; at about 0.1 ms a pair the loose reading stays near 0.4 s at the bound.
+- F5: `>&` before a word; `_LOOSE_SEP` no longer splits at the `&` of `>&` or `<&`.
+- The replay of 415,408 lines: 72 newly refused against `a0055da`, all by the loose reading, the
+  same 72 lines as `db19d51`'s (none a read, a `git add` or a commit); R1's reads add none.
+- Leads: 1 and 3 are n164 and n165 (design/20's g7), 4 is n166; 5 landed with R1 (0 lines).
+  Lead 6's list is empty: rounds 1 and 2's probed-clean lines hold no `cd` behind a reserved word.
