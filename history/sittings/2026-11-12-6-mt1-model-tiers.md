@@ -22,7 +22,7 @@
 - [x] the gate, once, last: 20261112-195001-1278 exit 0 in 13 min on 0de14d5 (3400 passed; floor 3274 passed, 105 skipped)
 - [x] fix round 3 (hq `REFUTE-2026-11-12-mt1-r3.md`; fix builder, about 40 tool calls): tests first, 30 of 32 red at f713a6d (ea0bad3)
 - [x] R3-F1 a null model unstated, R3-F4 an effort outside the known or null dropped, each named by the doctor (5d7e8d2); R3-F2 R3-F3 NICE n158 n159, n98 n102 to the overflow (355f0e1); packet §4 and RUNBOOK; the files touching tiers or the resolver 2294 passed (.venv)
-- [ ] alpha.93 alone under `plugin/`; the gate once, last; the record closed
+- [x] alpha.93 alone under `plugin/` (26c7a8a), 3432 tests; the gate once, last: 20261112-203452-1282 exit 0 in 14 min on 26c7a8a (3432 passed; floor 3306 passed, 105 skipped)
 
 ## Handover
 - decide, owner: whether `--save` on a non-tier key should write the user's `profiles.yaml` `profiles.<name>.<key>` (today refused, exit 2); consumer: the owner's `set ... --save` habit.
@@ -33,8 +33,9 @@
 - none
 
 ## Next act
-Fix round 3: alpha.93 alone under `plugin/`, then the gate once, then the record closed.
+Done: the hand-back to the hq coordinator; the coordinator reads the fix's diff and test and lands it.
 
 ## Exit
 - 2026-11-12: built; gate 20261112-173918-1238 ran on 212f74e (before the round-2 fixes); the next gate runs on the head
 - 2026-11-12: fix rounds 1 and 2 and the merge of main built; gate 20261112-195001-1278 exit 0 on 0de14d5
+- 2026-11-12: fix round 3 built (R3-F1, R3-F4; n158, n159); gate 20261112-203452-1282 exit 0 on 26c7a8a
