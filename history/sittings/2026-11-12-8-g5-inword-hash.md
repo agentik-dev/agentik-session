@@ -15,16 +15,17 @@
 - [x] g6 R1 to R3: `loose_targets` (pure), `_strict` names each target's word and folder, `_loose_gated` accounts by path, the loose folder moves only on a plain prefix; its own reason, `why` in `guard.jsonl`; 441 guard tests green under both venvs; round 3's 27 lines and g6's 41 at six commits: every write denied, REGRESS 0
 - [x] tests moved: nine lines a0055da passed with an `open` line (an open quote, `cd $X`, `popd`, `cd -`, a stray `)`, a trailing `\`, `echo '>> CLAUDE.md'`) are now the loose reading's; with it off they pass as at a0055da (a test)
 - [x] g6 R8 records: head comment's g6 paragraph, RUNBOOK, NICE (n131, n132, n138, n161 closed; n162 S3, n163 S4); a0055da's 341 guard tests pass at the head with the loose reading off; 14 other files that read the guard or records: 690 passed (.venv)
-- [ ] g6 checks: round 3's command, 2 x 100k fuzz vs five commits, the replay
+- [x] g6 checks: round 3's 27 lines at six commits, every write denied, REGRESS 0; fuzz 100k tokens (seed 9802) and 100k valid (seed 9902) vs 8153e52, d2f89d9, 40aee95, f1f012e, a0055da, a stub `cp` that prints nothing: REGRESS-with-a-shell 0 and 0; the replay of 415,408 lines: 72 newly refused, all by the loose reading, none a read or a `git add` (56 text the strict reading does not read as a write, 12 by the amendment's (b), 4 by its (a)): over the brief's 60 by the amendment's 16
 - [ ] phase 2, on the coordinator's word
 
 ## Handover
 - The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write.
 - NICE id n161: main holds n148, land2 n150, mt1 n159, u3 n160; renumber at merge if one passes it.
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
+- decide, owner: the coordinator: acceptance 5's bound of 60 against the amendment's (a) and (b), which add 16 (72 in all); consumer: the review and phase 2.
 
 ## Next act
-- g6 R1 to R3 on this branch, then R8's records and the checks.
+- The review over the whole slice from 8153e52 with both readings on, then phase 2 on the coordinator's word.
 
 ## Exit
-Open: g6 build 2 in flight.
+g6 build 2 landed in phase 1 (R1 to R8, the records, the checks); waits on the coordinator.
