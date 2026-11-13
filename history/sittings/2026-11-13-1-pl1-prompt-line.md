@@ -23,7 +23,7 @@
 - [x] phase 2 act 2: NICE n170 to n172 (were n160 to n162); n111 and n112 moved to the overflow (NICE 24,555 B)
 - [x] phase 2 act 3: the version commit: plugin.json 2.0.0-alpha.97; README and source say alpha.97 and 3538 tests (source 16366 B); the sidecar by shasum
 - [x] phase 2 act 4: at 3ac56f8 the eight named test files 407 passed under each venv; recordlint, doclint, hygiene, vendored.sha256 and plugin-version-check exit 0; this record closed
-- [x] the landing's red (1 failed of 3538): test_old_format_and_unknown_key's first pass read the old band.json before its own `admission record` wrote `demand`; two plain passes moved alike with no unknown key. a149487 sets the rule by a second plain pass; red 3 of 3 at fb40df6, green 3 of 3 per venv after; a mutant that drops the band on an unknown key still fails it. Test only: alpha.97 stands, 3538 tests
+- [x] the landing's red: the bare-machine test's first pass read the old band.json before its own `admission record` wrote `demand`; a149487 sets the rule by a second plain pass (red at fb40df6, green after under each venv); alpha.97 stands
 
 ## Handover
 - Phase 2 done; the landing's check is the one full check, the coordinator's.
@@ -36,4 +36,4 @@
 ## Exit
 - Phase 1 built: R1 to R7 in five acts and the count's act; both venvs green by chunks (.venv 3447 collected; floor 3319 passed, 105 skipped plus the fixed readme pair); handed back to the coordinator.
 - Phase 2 done: main bf2e112 merged, NICE n170 to n172, plugin 2.0.0-alpha.97; no gate job, no push, no landing.
-- The landing's red mended in the test (the run's own writes, not the code); alpha.97 stands; the landing's check is the next check.
+- The landing's red mended in the test (the run's own writes); the landing's check is next.
