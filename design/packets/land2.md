@@ -45,6 +45,13 @@
 ## 4. Findings that name this row
 
 - R4 changes the order the hygiene stubs see: `--help` is probed before the check (and again before the merge), so `test_land.py`'s two order lists and `test_land_range.py`'s r1 and r6 change for R4 (the range stub passes a `<sha>..<commit>` scan), beside the R2 and R3 changes the brief allows.
+- Round 1 (the refuter's F1 to F6, the coordinator's ruling; tests in `TestRound1`, each red at `a55d99e`):
+  - F1, blocked: a worktree is nested when a parent of its directory is the branch's worktree by device and inode (`os.path.samefile`), never a string prefix, so a case-variant absolute path is seen; the main checkout never counts, nor a sibling `<tree>-2`.
+  - F2, blocked: main is read before the merged tree and once more after the message's second scan; a main that moved since is `red sha` before the merge. The dangling commit's first parent is that read main, not the ref's name (same commit, by construction).
+  - F3: `git worktree list --porcelain -z`, so a newline in a nested path is seen.
+  - F5: a non-zero message scan's note names hygiene's code and points at its stderr; the step stays `merge-file`, so a hygiene with no private list now reds `merge-file exit 2` before the check where the pin gave `hygiene exit 2` after it.
+  - F6: `git commit-tree`'s stderr reaches the log.
+  - F4 is NICE n149 (`unattended.py` is outside this packet); the builder's `worktree_dirt` note is n150; n77 leaves with this row.
 - The README source sat at 16380 of its 16384 B ceiling: the gate queue section's wait bullet was tightened to hold the `gate land` line (16381 B); `key` and the stdout-line clause stay in the RUNBOOK.
 
 ## 5. Forbidden reads

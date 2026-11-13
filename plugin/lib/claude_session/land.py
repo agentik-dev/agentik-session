@@ -26,19 +26,22 @@ The steps: usage, repo (not the top of a main checkout), merge-file (not readabl
 out; a merge, cherry-pick, revert or rebase under way there; any staged path, a `git add -N` too; a
 dirty path the merge touches; a file the merge would write that main does not track, ignored or
 not, or a directory there holding one), worktree (the branch has none of its own, or it is locked,
-or another worktree git lists sits under it, clean or dirty, which `worktree remove` would take, or
-dirty so a check there would not prove the sha, or its .venv is neither a link nor absent), sha
-(not the branch's head, or already on main, or behind main: the merge would make a tree other than
-<sha>'s, so the check would not run on what main would hold; merge main into the branch and land
-its new head), merge-file again (when `scripts/hygiene --help` names --commits, the merge commit is
-made as a dangling object, `git commit-tree <tree> -p refs/heads/main -p <sha> -F <merge-file>`,
-and `scripts/hygiene --require-private --commits <sha>..<it>` scans its message in the worktree; no
-ref is written), check, hygiene, merge (a conflict, read before the check, and read again after it;
-or git merge's own red), remove, branch (its sha is not on main, or it has moved), cut. After the
-check, before the merge, the nested worktrees, main's lead and the merge file's text and scan are
-read again with main and the worktree, since the check takes minutes. Usage reports 2; a refusal of
-this script's own reports 1; a step that ran reports that step's code; any other error reports 1 at
-the step reached, its reason on stderr.
+or another linked worktree git lists sits under it, a parent of its directory being this worktree
+by device and inode, clean or dirty, which `worktree remove` would take, or dirty so a check there
+would not prove the sha, or its .venv is neither a link nor absent), sha (not the branch's head, or
+already on main, or behind main: the merge would make a tree other than <sha>'s, so the check would
+not run on what main would hold; merge main into the branch and land its new head), merge-file
+again (when `scripts/hygiene --help` names --commits, the merge commit is made as a dangling
+object, `git commit-tree <tree> -p <main as read> -p <sha> -F <merge-file>`, its stderr to the log,
+and `scripts/hygiene --require-private --commits <sha>..<it>` scans its message in the worktree, a
+non-zero exit red merge-file with hygiene's code; no ref is written), check, hygiene, merge (a
+conflict, read before the check, and read again after it; or git merge's own red), remove, branch
+(its sha is not on main, or it has moved), cut. After the check, before the merge, the nested
+worktrees, main's lead and the merge file's text and scan are read again with main and the
+worktree, since the check takes minutes; then main is read once more, and one that moved since the
+merged tree was read is red sha, so nothing that takes time runs between the last read of main and
+the merge. Usage reports 2; a refusal of this script's own reports 1; a step that ran reports that
+step's code; any other error reports 1 at the step reached, its reason on stderr.
 
 A red before the merge leaves main unchanged. A `merge` red almost always does too: `git
 merge-tree` reads a conflict before the merge begins, one only git merge finds is aborted, never
