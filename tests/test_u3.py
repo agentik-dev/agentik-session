@@ -170,6 +170,40 @@ def test_r5_depth_three():
     assert unattended.unbounded(nest(5)) == ""                # a fourth -c text, not read
 
 
+# ---- round 1: F1 (every word after -c), F3 (a word's $( text), F5 (the name) ------------
+
+def _refused(line):
+    why = unattended.unbounded(line)
+    return bool(why) and "gate queue" in why and "land step runs the check" in why
+
+
+def test_r1_f1_every_word_after_dash_c_is_a_text():
+    for line in ["bash -o pipefail -c 'make check 2>&1 | tail -1'", "bash -O extglob -c 'make x'",
+                 "bash --rcfile /dev/null -c 'make x'", "bash +e -c 'make x'",
+                 "bash -c -e 'make check'", "bash -c -- 'make check'"]:
+        assert _refused(line), line
+    for line in ["bash -c 'echo hi'", "bash -o pipefail -c 'echo hi'"]:
+        assert unattended.unbounded(line) == "", line
+
+
+def test_r1_f3_a_words_substitution_is_a_text():
+    for line in ['d="$(make -n x)"', 'test "$(make check; echo $?)" = 0']:
+        assert _refused(line), line
+    assert unattended.unbounded('echo "$(date)"') == ""
+
+
+def test_r1_f3_the_substitution_counts_on_the_depth():
+    line = 'd="$(make -n x)"'
+    assert _refused("sh -c " + unattended.shlex.quote(line))         # its text at depth 2
+    assert unattended.unbounded(line, unattended.SHELL_DEPTH - 1)   # its text at depth 3: read
+    assert unattended.unbounded(line, unattended.SHELL_DEPTH) == ""  # a fourth text: not read
+
+
+def test_r1_f5_the_name_case_blind_and_gnumake():
+    for line in ["Make check", "MAKE check", "gnumake check", "/usr/bin/gnumake check"]:
+        assert _refused(line), line
+
+
 # ---- R6, R7: the row refused before its stage (acceptance 6) ---------------------------
 
 def test_a6_an_unbounded_row_is_refused_before_its_stage(box, monkeypatch):
