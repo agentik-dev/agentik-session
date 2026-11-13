@@ -10,6 +10,7 @@ glued to the command word is read as empty, and the walk returns early on a plai
 """
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -340,3 +341,156 @@ def test_11_the_early_returns(monkeypatch):
     assert shellreader._here_scan(line)[0] is line
     assert shellreader._subst(line, False, False, 0) == (line, [])
     assert shellreader._subst(line, False, False, 0)[0] is line
+
+
+# ---- 12: fix of review 1 (R1-F1 to F7, N1), each line also run by real shells over stubs ----
+
+MK = "make check"
+# R1-F1: a make word spelled with the shell's quoting in a text the walk does not read
+F1 = ["timeout 5 sh -c 'm\\ake check'", "runner -- sh -c 'm\"\"ake check'",
+      "timeout 5 sh -c 'ma\\\nke check'", "bash -c \"bash -c 'ma\\ke check'\"",
+      "cat > x.sh <<'EOF'\n'ma'ke check\nEOF\nsh x.sh", "cat <<EOF | sh\nm\\ake check\nEOF",
+      "eval 'm\\ake check'", "echo 'm\\ake check' | sh"]
+# R1-F2: E1's glue at level 1, in a `-c` text or a shell's heredoc
+F2 = ["bash -c \"$(true)make check\"", "sh <<EOF\n$(true)make check\nEOF",
+      "sh -c \"x=\\$($(true)make check)\"", "bash -c \"bash -c '$(true)make check'\"",
+      "bash -c \"make$(true) check\"", "bash -c \"`true`make check\"",
+      "sh -c \"ma$(true)ke check\"", "sh <<EOF\n`true`make check\nEOF"]
+# R1-F3: `$((` whose closing parens are apart is a substitution holding a subshell
+F3 = ["$((make check) )", "echo $((make check) )", "x=$((make check) )",
+      "echo \"$((make check) )\""]
+# R1-F7: a script fed on standard input by a here-string, or through a pipe from one
+F7 = [". /dev/stdin <<< 'make check'", "source /dev/stdin <<< 'make check'",
+      "bash /dev/stdin <<< 'make check'", "timeout 5 sh <<< 'make check'",
+      "echo 'make check' | timeout 5 sh", "cat <<< 'make check' | sh"]
+# R1-F5, R1-F6: a brace group in the command word, an alias defined and used on one line
+F5 = ["{make,} check", "{ma,}ke check", "ma{k,}e check"]
+F6 = ["shopt -s expand_aliases\nalias m='make check'\nm"]
+BASH_ONLY = {"{make,} check", "{ma,}ke check", F6[0],
+             "echo 'm\\ake check' | sh"}    # zsh's echo reads `\a` as a bell
+# N1 (ii): data sinks, which read a body and run nothing
+SINKS = ["cat > notes.md <<'EOF'\nRun make check before landing.\nEOF",
+         "cat >> notes.md <<'EOF'\nSee the `make` target.\nEOF",
+         "cat > notes.md <<EOF\n# make notes\nEOF", "tee notes.md <<'EOF'\nUse `make check` here.\nEOF",
+         "git commit -F - <<'EOF'\ndocs: say \"make check\" in the runbook\nEOF",
+         "cat > a.md <<'EOF'\nmake a\nEOF\ncat > b.md <<'EOF'\nmake b\nEOF"]
+NOT_SINKS = ["cat <<'EOF'\nmake x\nEOF", "cat > x.sh <<'EOF'\nmake check\nEOF\nsh x.sh",
+             "cd d && cat > f.md <<'EOF'\nmake x\nEOF", "cat > f <<EOF\n$(make check)\nEOF",
+             "python3 - <<'EOF'\nprint('we make it')\nEOF", "tee >(sh) <<'EOF'\nmake check\nEOF",
+             "cat > f <<'EOF' | sh\nmake check\nEOF", "sudo cat > f <<'EOF'\nmake x\nEOF"]
+
+
+def _box12(tmp_path):
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name in ("make", "gmake", "gnumake", "git"):
+        (stubs / name).write_text('#!/bin/sh\necho "%s $*" >> "$STUBLOG"\n' % name)
+    (stubs / "timeout").write_text('#!/bin/sh\nshift\nexec "$@"\n')
+    (stubs / "runner").write_text('#!/bin/sh\nwhile [ "$#" -gt 0 ] && [ "$1" != "--" ]; do '
+                                  'shift; done\nshift\nexec "$@"\n')
+    for p in stubs.iterdir():
+        p.chmod(0o755)
+    return stubs
+
+
+def _ran(tmp_path, stubs, line):
+    """{shell: the stubs' calls} for bash -c and zsh -fc, each in a fresh folder."""
+    got = {}
+    for shell, flag in (("/bin/bash", "-c"), ("/bin/zsh", "-fc")):
+        if not os.path.exists(shell):
+            continue
+        work = Path(tempfile.mkdtemp(dir=str(tmp_path)))
+        log = work / ".log"
+        log.write_text("")
+        try:
+            subprocess.run([shell, flag, line], cwd=str(work), capture_output=True, timeout=10,
+                           stdin=subprocess.DEVNULL, env={"PATH": "%s:/usr/bin:/bin" % stubs,
+                                                          "HOME": str(work), "STUBLOG": str(log)})
+        except subprocess.TimeoutExpired:
+            pass
+        got[os.path.basename(shell)] = log.read_text().splitlines()
+    return got
+
+
+ALL12 = F1 + F2 + F3 + F7 + F5 + F6
+
+
+@pytest.mark.parametrize("line", ALL12, ids=[str(i) for i in range(len(ALL12))])
+def test_12_the_shells_run_it_and_the_rule_refuses(line, tmp_path):
+    got = _ran(tmp_path, _box12(tmp_path), line)
+    want = {"bash"} if line in BASH_ONLY else {"bash", "zsh"}
+    for sh in want & set(got):
+        assert any(c.startswith("make ") for c in got[sh]), (sh, line, got)
+    assert unattended.unbounded(line), line
+
+
+def test_12_glue_at_level_one_names_the_command():
+    for line in F2[:2] + F2[4:]:
+        names = [c.name for c in _read(line)[0]]
+        assert "make" in names and not [n for n in names if "__g8" in n], (line, names)
+    cmds = _read("bash -c \"$(true)git push\"")[0]
+    assert [(c.name, c.args, c.level) for c in cmds if c.name == "git"] == [("git", ["push"], 1)]
+    gated = HERE + "/CLAUDE.md"
+    for line in ("bash -c \"$(true)cp a CLAUDE.md\"", "$((cp a CLAUDE.md) )",
+                 "echo \"$((cp a CLAUDE.md) )\""):
+        assert gated in [p for _, p in shellreader.bash_targets(line, HERE, ENV)], line
+
+
+def test_12_arithmetic_only_where_the_shells_read_it():
+    assert _read("$((git push) )")[0][0][:2] == ("git", ["push"])
+    for line in ("echo $((1+2))", "echo $(( (1+2) * 3 ))", "x=$((y))"):
+        assert [c.name for c in _read(line)[0]] in (["echo"], [""]), line
+    assert [c.name for c in _read("echo $(( $(git push) + 1 ))")[0]] == ["echo", "git"]
+
+
+def test_12_a_deep_nest_is_bounded(tmp_path):
+    from claude_session import instructionguard as ig
+    nests = ["echo " + "$(( " * 1000 + "1" + " ))" * 1000 + "; {X}",
+             "echo " + "$(" * 1000 + "true" + ")" * 1000 + "; {X}",
+             "(" * 1000 + "{X}" + ")" * 1000, "{ " * 1000 + "{X}; " + "} " * 1000,
+             "echo " + "${x:-" * 1000 + "a" + "}" * 1000 + "; {X}",
+             "if true; then " * 300 + "{X}" + "; fi" * 300]
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (tmp_path / "home").mkdir()
+    env = {"HOME": str(tmp_path / "home")}
+    for nest in nests:
+        assert unattended.unbounded(nest.replace("{X}", MK)), nest[:40]
+        line = nest.replace("{X}", "cp a " + ig.REPO_LIST)
+        for f in (lambda: _read(nest.replace("{X}", MK)),
+                  lambda: shellreader._strict(line, str(repo), env, 0, False, True, set())):
+            try:
+                f()
+            except shellreader._Bound:
+                pass
+        out = ig.check({"tool_name": "Bash", "tool_input": {"command": line}, "cwd": str(repo)},
+                       env)
+        assert out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny", nest[:40]
+
+
+def test_12_a_here_string_is_data():
+    assert Unread("data", "make check") in _read("timeout 5 sh <<< 'make check'")[1]
+    assert _read("cat <<< 'make check' | sh")[1] == [Unread("data", "make check"),
+                                                    Unread("piped", "cat make check")]
+    assert _read("bash <<< 'git add -A'")[1] == [Unread("piped", "git add -A")]
+    assert unattended.unbounded("grep -c x <<< 'a b'") == ""
+
+
+@pytest.mark.parametrize("line", SINKS, ids=[str(i) for i in range(len(SINKS))])
+def test_12_a_data_sink_passes(line, tmp_path):
+    got = _ran(tmp_path, _box12(tmp_path), line)
+    assert not [c for cs in got.values() for c in cs if c.startswith("make")], (line, got)
+    assert unattended.unbounded(line) == "", line
+
+
+@pytest.mark.parametrize("line", NOT_SINKS, ids=[str(i) for i in range(len(NOT_SINKS))])
+def test_12_any_other_command_keeps_the_refusal(line):
+    assert unattended.unbounded(line), line
+
+
+def test_12_the_body_refusal_says_what_is_true():
+    why = unattended.unbounded("python3 - <<'EOF'\nprint('we make it')\nEOF")
+    assert not why.startswith("it runs") and "could not rule out" in why, why
+    assert "editor tool" in why and "keep the word out of the line" in why, why
+    assert unattended.unbounded("timeout 5 sh -c 'm\\ake check'").startswith(
+        "it runs `make` in a text the reader does not read (runner)")
