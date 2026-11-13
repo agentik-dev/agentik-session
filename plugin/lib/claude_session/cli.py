@@ -1578,8 +1578,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "default) or the repo's .claude/agentik/config.yaml")
     se.add_argument("--config", metavar="NAME")
     se.add_argument("--until", metavar="TIME",
-                    help="with fill reset or fill opus, cap or tier.<role>: the zoned "
-                         "ISO time the word ends at, as 2026-11-10T18:00-08:00")
+                    help="with fill reset or fill opus, never with fill off; with cap or "
+                         "tier.<role>: the zoned ISO time the word ends at, as "
+                         "2026-11-10T18:00-08:00")
     se.set_defaults(func=cmd_set)
 
     cm = sub.add_parser("commit", help="add by explicit path, run the check, commit on green")

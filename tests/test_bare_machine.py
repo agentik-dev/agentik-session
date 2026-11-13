@@ -509,7 +509,7 @@ def _modules():
         "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "instructionguard",
         "instructions", "ledger",
         "measure",
-        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state",
+        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state", "tiers",
         "fill")}
 
 
@@ -585,6 +585,10 @@ READERS = {
     ("sessionconfig", "stored"): ("configs.json", {"mine": {"name": "mine"}}, None),
     ("sessionconfig", "load_overlay"): ("o.json", {"a": 1}, None),
     ("sessionconfig", "last_started"): ("l.json", {"name": "mine"}, None),
+    ("tiers", "hand"): ("cap.json", {"session": "p", "cap": {"model": "opus",
+                                                             "until": "2999-01-01T00:00:00+00:00"}},
+                        lambda m, d: m["tiers"].hand(d, d, "p", "s", __import__("datetime").datetime(
+                            2026, 11, 12, tzinfo=__import__("datetime").timezone.utc))),
     ("state", "hand"): ("state.json", {"from_session": "p", "at": 1.0},
                         lambda m, d: m["state"].hand(d, "p", "s")),
     ("state", "handed"): ("state.json", {"from_session": "p", "to_session": "s", "at": 1.0},

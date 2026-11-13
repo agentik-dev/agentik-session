@@ -66,7 +66,7 @@ Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates
 
 ## Profiles
 
-Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry carries every field; a profile names only what it changes. Each holds `tiers`: design fable, build opus, words and mend sonnet, lookup haiku (`profile <name>` prints them); `start` exports build as `CLAUDE_CODE_SUBAGENT_MODEL`.
+Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry carries every field; a profile names only what it changes. Each holds `tiers`: design fable, build opus, words, mend sonnet, lookup haiku; `start` exports build as `CLAUDE_CODE_SUBAGENT_MODEL`.
 
 | profile | for |
 |---|---|
@@ -82,7 +82,7 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 | `orchestrator-opus` | small and medium orchestrated projects: Opus 5.5 on its 1M window (`opus[1m]`) |
 
 - `agentik session start <profile>` launches Claude Code with that profile, using flags only, never `settings.json`. `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling. Claude Code's own `--max-turns` flag applies in print mode only. `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one. A nested `start` exits 2 without `--nested`.
-- `agentik session set <knob> <value>` changes this session only. Launch-time knobs print their in-session equivalent; `set tier.<role> <model>`, `set cap <model>` (each `--until`) hold this session's tiers; `--save` writes a tier to a layer file. `posture` applies at once. `set fill <reset|opus> [--until <zoned time>]` is the owner's word alone: an orchestrator's main thread on 1M, this session only. It ends at its time or the week's reset, and never takes `--save`. `run` hands it on. `set fill off` ends it from any seat.
+- `agentik session set <knob> <value>` changes this session only. Launch-time knobs print their in-session equivalent; `set tier.<role> <model>`, `set cap <model>` (each `--until`) hold the session's tiers; `--save` writes a tier to a layer file. `posture` applies at once. `set fill <reset|opus> [--until <zoned time>]` is the owner's word alone: an orchestrator's main thread on 1M, this session only. It ends at its time or the week's reset, and never takes `--save`. `run` hands it on. `set fill off` ends it from any seat.
 - A session's profile is its role. The SessionStart hook takes the profile name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets). Failing that, it reads `session.profile` in `config.local.yaml`, then in `config.yaml`, then falls back to `frontier`. A helper (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`, so an orchestrator's helper keeps 180000 context tokens.
 - Claude Code's measured window (`context.window`) decides: a model change moves window, ceilings and ctx % at its next measure. Before the first, `profiles.yaml`'s `models:` table does: fable and mythos 1M; a bare `opus` 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, the settings'.
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
@@ -107,7 +107,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
 - `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. With no first prompt `run` refuses; with no `--model` each start passes the profile's `--model` and `--effort`.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
-- `agentik session status` prints the one-line meter. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session (a resumed one: its last), written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured; another's are invisible to it.
+- `agentik session status` prints the one-line meter. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session (a resumed one: its last), written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured. Only this plugin's hooks are measured; another's are invisible to it.
 
 ## Priority and pacing
 
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.90`, rendered `2026-11-10`, `3349` tests in the suite.
+Status: version `v2.0.0-alpha.90`, rendered `2026-11-10`, `3350` tests in the suite.
 
 ## Credit
 

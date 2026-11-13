@@ -307,7 +307,7 @@ def test_r3_two_places_fires_for_effort_and_model(box):
     rows = _rows(box, sections=_sections(), name="two-places")
     assert [k for _, _, k in rows] == ["warn", "warn"]
     effort = [d for _, d, _ in rows if d.startswith("effort")][0]
-    assert "profile frontier" in effort and "xhigh" in effort
+    assert "profile frontier" in effort and "says high" in effort     # mt1 R5: no xhigh
     assert effort.endswith(f"; {p} says effortLevel high")
     assert any(d.startswith("model") and d.endswith(f"{p} says model opus") for _, d, _ in rows)
 

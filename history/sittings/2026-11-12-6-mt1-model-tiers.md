@@ -13,7 +13,8 @@
 - [x] tests first: `tests/test_mt1_tiers.py`, 31 tests, 25 red at the pin (4f408f4)
 - [x] R1 R2 R3 R5 (f960869), R6 and the doctor row (8fe727e), R3 R4 R7 (a27cbd9); mt1 31 passed under `.venv` and `.venv-floor`; test_chain 116 passed
 - [x] version bump in its own commit: 2.0.0-alpha.90 (651b4db)
-- [x] records: RUNBOOK's model tiers section, README source 16376 B and README, sidecar by shasum, the status line
+- [x] records: RUNBOOK tiers section, README source 16380 B, sidecar by shasum, 3350 tests
+- [x] round 2 (the full local run, 10 red): READERS row, sc3 prompts, the help text, no-xhigh test, README hooks line
 - [ ] the gate, once, last
 
 ## Handover
@@ -27,4 +28,4 @@
 The gate's `make check` on the branch tip, then the hand-back to the hq coordinator.
 
 ## Exit
-- (open)
+- 2026-11-12: built; gate 20261112-173918-1238 ran on 212f74e (before the round-2 fixes); the next gate runs on the head
