@@ -353,8 +353,12 @@ then its `config.local.yaml`, each by its top-level `tiers:` block, the one
 spelling (`session.tiers` is not read, and the doctor's config row names it
 unknown); last, when `start <profile>` named the profile, that profile's own
 tiers again (shipped, then the user's body), so a launched `local-only` stays
-local whatever a repo says. A layer's model names a family, else nothing
-resolves.
+local whatever a repo says. A profile named on the start line re-applies the
+tiers its body states above every file, as it does every other field, and
+`set tier.*` sits above it; frontier, packets, builder, orchestrator and
+orchestrator-opus state `build: opus`, so under their start a file's build tier
+loses. A layer's model that names no family is skipped (the role keeps the
+layer below it), and the doctor's config row names `<layer>: tiers.<role>.model`.
 
 ```yaml
 defaults:
@@ -373,7 +377,9 @@ it, blank lines after it and CRLF endings are not kept), every line outside it
 stays. Then the verb resolves as the next session here would, with this
 session's launch profile; when the role's model is not the one written, it
 names the file and block that holds it (`... is sonnet, from
-<repo>/.claude/agentik/config.yaml: tiers: change it there`) and exits 1. A
+<repo>/.claude/agentik/config.yaml: tiers: change it there`; under a launched
+profile's body, `change it under profiles.<name>.tiers in` the user file) and
+exits 1. A
 model word, for `set tier.<role>` and `set cap` alike, is letters, digits and
 `. _ / [ ] -` (`opus`, `claude-opus-5-5`, `opus[1m]`) naming a family, refused
 (exit 2) before anything is written; `--save` writes it quoted. `set cap <model>
