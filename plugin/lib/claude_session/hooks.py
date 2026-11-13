@@ -288,11 +288,17 @@ def _call(payload: dict, env) -> Path | None:
 
 def _open_call(payload: dict, env) -> None:
     """A helper's PreToolUse opens its call; the launcher's ready condition waits while
-    any call is open, so a call never closed holds the sitting. Never raises."""
+    any call is open, so a call never closed holds the sitting. The file holds `at` and,
+    when it is id-shaped, the helper's `agent_id`, which its SubagentStop reads (packet h4
+    R2). Never raises."""
     try:
         p = _call(payload, env)
         if p is not None:
-            store._write_private(p, json.dumps({"at": time.time()}))
+            aid = payload.get("agent_id")
+            doc = {"at": time.time()}
+            if isinstance(aid, str) and _SID.match(aid):
+                doc["agent_id"] = aid
+            store._write_private(p, json.dumps(doc))
     except Exception:                                   # noqa: BLE001
         pass
 
@@ -370,14 +376,228 @@ def _spawn_rule(payload: dict, env) -> str | None:
         return None
     ti = payload.get("tool_input")
     ti = ti if isinstance(ti, dict) else {}
-    if workflowguard.family(ti.get("model")) != "fable":
+    model = ti.get("model")
+    named = isinstance(model, str) and bool(model)      # h5 R1: the call outranks the file
+    if not named:
+        model = _agent_model(ti, payload, env)
+    if workflowguard.family(model) != "fable":
         return None
     parent = _session_family(payload, env)
     if parent == "fable":
         return None
+    runs = MODEL_UNKNOWN if parent is None else f"this one runs {parent}"
+    if not named:                                       # h5 R3: the type named it
+        return ("agentik-session: a Fable helper starts only under a Fable session: "
+                f"{runs}, and agent type {_token(ti.get('subagent_type'))} names "
+                f"{_token(model)}. Name model: 'opus' on the call.")
     return ("agentik-session: a Fable helper starts only under a Fable session: "
-            + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
-            + ". Name model: 'opus', or use an agent type that names its own model.")
+            + runs + ". Name model: 'opus', or use an agent type that names its own model.")
+
+
+_TYPE_PART = re.compile(r"[A-Za-z0-9._-]{1,64}")
+_FM_BOUND = 262144                  # review 1 R4: the whole frontmatter, to 256 KB
+_LIST_BOUND = 4096                  # entries listed per agents folder, and its depth
+_FM_OPEN = re.compile(r"---[ \t\r]*\n")
+_FM_CLOSE = re.compile(r"^---[ \t\r]*$", re.M)
+_FM_KEY = re.compile(r"(name|model)[ \t]*:[ \t]*(.*)")
+
+
+def _front(path: str, want: str | None = None) -> tuple:
+    """(name, model) of an agent file's frontmatter, None for either it does not state
+    (review 1 R4): a byte-order mark, blanks after the opening `---` and before a key's
+    colon, a byte that is not UTF-8 (replaced); the block up to its closing line, read to
+    256 KB, past which it is what was read. The caller opens only a regular file (R3), and
+    without blocking, so a FIFO put in its place since answers at once; a file that
+    cannot be read gives (None, None), and so does one whose bytes hold no `want` (it cannot
+    name that type), unparsed. Never raises."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return None, None
+    try:
+        raw = os.read(fd, 65536)                        # one read for a common file
+        if len(raw) == 65536:
+            while len(raw) < _FM_BOUND:
+                got = os.read(fd, _FM_BOUND - len(raw))
+                if not got:
+                    break
+                raw += got
+    except OSError:
+        return None, None
+    finally:
+        os.close(fd)
+    if want is not None and want.encode() not in raw:
+        return None, None
+    text = raw.decode("utf-8", "replace")
+    text = text[1:] if text.startswith("﻿") else text
+    m = _FM_OPEN.match(text)
+    if not m:
+        return None, None
+    body = text[m.end():]
+    end = _FM_CLOSE.search(body)
+    if end is None and len(raw) < _FM_BOUND:
+        return None, None                               # no closing line: no frontmatter
+    name = model = None
+    for line in body[:end.start() if end else len(body)].splitlines():
+        k = _FM_KEY.fullmatch(line.rstrip())
+        if k is None:
+            continue
+        if k.group(1) == "model" and model is None:     # the first that states one
+            got = re.match(r"['\"]?([^'\"\s]+)", k.group(2))
+            model = got.group(1) if got else None
+        elif k.group(1) == "name" and name is None:
+            v = k.group(2).strip()
+            v = v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else \
+                re.sub(r"\s+#.*$", "", v)
+            name = v or None
+    return name, model
+
+
+def _scan(folder: Path, nested: bool, want: str) -> list:
+    """[(type, stem, model)] for each regular `*.md` in an agents folder: the type its
+    frontmatter `name:`, else the file's stem, a plugin's subfolders its namespace
+    (`team:drafter`, review 1 R1); at most `_LIST_BOUND` entries and that depth. A file
+    whose stem is not `want` is parsed only when its bytes hold `want`."""
+    out, todo, seen = [], [(str(folder), ())], 0
+    while todo:
+        where, ns = todo.pop()
+        try:
+            with os.scandir(where) as it:
+                entries = [e for _, e in zip(range(_LIST_BOUND - seen), it)]
+        except (OSError, ValueError):
+            continue
+        seen += len(entries)
+        for e in entries:
+            try:
+                if e.is_dir():
+                    if nested and len(ns) < 8 and seen < _LIST_BOUND:
+                        todo.append((e.path, ns + (e.name,)))
+                    continue
+                if not e.name.endswith(".md") or not e.is_file():     # R3: no FIFO, no device
+                    continue
+            except OSError:
+                continue
+            stem = e.name[:-3]
+            name, model = _front(e.path, None if stem.casefold() == want.casefold() else want)
+            out.append((":".join(ns + (name or stem,)), ":".join(ns + (stem,)), model))
+    return out
+
+
+def _rank(model) -> int:
+    from . import tiers
+    f = tiers.family(model)
+    return tiers.ORDER.index(f) if f in tiers.ORDER else len(tiers.ORDER)
+
+
+def _project_folders(payload: dict, env) -> list:
+    """Review 1 R2: the agents folders of the working directory and each ancestor up to the
+    repo's root (the folder holding `.git`, else the top), nearest first, then
+    `CLAUDE_PROJECT_DIR`'s."""
+    out = []
+    try:
+        cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR")
+        if isinstance(cwd, str) and cwd:
+            d = Path(cwd)
+            for _ in range(256):
+                out.append(d / ".claude" / "agents")
+                if os.path.lexists(d / ".git") or d.parent == d:
+                    break
+                d = d.parent
+        pd = env.get("CLAUDE_PROJECT_DIR")
+        if isinstance(pd, str) and pd and Path(pd) / ".claude" / "agents" not in out:
+            out.append(Path(pd) / ".claude" / "agents")
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def _agent_model(ti: dict, payload: dict, env) -> str | None:
+    """The `model:` of the agent type the call's `subagent_type` names, found as Claude Code
+    names it (review 1 R1): by its file's frontmatter `name:`, else the file's name. A
+    type `<name>`: the nearest of the project's agents folders (R2) that defines it, else
+    the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`). A plugin's type
+    `<plugin>[:<folder>...]:<name>`: every install of `<plugin>@<marketplace>` in
+    `plugins/installed_plugins.json` (h5 R2). Two files claiming one type: the model whose
+    family ranks highest in `tiers.ORDER` (the reading that refuses), one naming no family
+    last. When no file claims it, a file of its name that claims another counts (a call
+    for such a type fails in Claude Code, so refusing it costs nothing). None when none
+    is found or it names no model; never raises on a read."""
+    name = ti.get("subagent_type")
+    if not isinstance(name, str):
+        return None
+    parts = name.split(":")
+    if len(parts) > 10 or not all(_TYPE_PART.fullmatch(p) for p in parts):
+        return None
+    user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    if len(parts) > 1:
+        plugins = _load_json(user / "plugins" / "installed_plugins.json").get("plugins")
+        group = []
+        for key, recs in (plugins.items() if isinstance(plugins, dict) else ()):
+            if not isinstance(key, str) or "@" not in key or key.partition("@")[0] != parts[0]:
+                continue
+            for rec in (recs if isinstance(recs, list) else ()):
+                where = rec.get("installPath") if isinstance(rec, dict) else None
+                if isinstance(where, str) and where:
+                    group += _scan(Path(where) / "agents", True, parts[-1])
+        groups, want = [group], ":".join(parts[1:])
+    else:
+        groups = [_scan(f, False, name) for f in _project_folders(payload, env)
+                  + [user / "agents"]]
+        want = name
+    for col in (0, 1):                                  # by the type's name, then the file's
+        for group in groups:
+            hits = [g for g in group if (g[0] == want if col == 0 else
+                                         g[1].casefold() == want.casefold())]
+            if hits:
+                models = [g[2] for g in hits if g[2]]
+                return min(models, key=_rank) if models else None
+    return None
+
+
+def _role_rule(payload: dict, env) -> tuple:
+    """Packet mt1 R6: (posture, line) when an Agent or Task call names its role by a line
+    `tier: <role>` in its prompt and its model (the call's, else its agent file's) ranks
+    above that role's in the session's table (resolved, with this session's `set tier.*`
+    and `set cap` words); else (posture, None). A call that names no role, or whose model or
+    session table is unknown, is left to the family rule. Never raises."""
+    try:
+        from datetime import datetime, timezone
+        from . import tiers
+        ti = payload.get("tool_input")
+        ti = ti if isinstance(ti, dict) else {}
+        role = tiers.role(ti.get("prompt"))
+        if role is None:
+            return None, None
+        sid = payload.get("session_id") or env.get("CLAUDE_CODE_SESSION_ID")
+        sdir = _session_dir(sid, env, fallback=False) if sid else None
+        s = (_load_json(sdir / "resolved.json").get("session") or {}) if sdir else {}
+        s = s if isinstance(s, dict) else {}
+        table = s.get("tiers")
+        if not isinstance(table, dict):
+            return s.get("posture"), None
+        ov = {} if sdir is None else _load_json(resolver.state_dir(env) / "overlays"
+                                                / f"{sdir.name}.json")
+        table = tiers.effective(table, ov, datetime.now(timezone.utc))
+        want = (table.get(role) or {}).get("model")
+        model = ti.get("model") if isinstance(ti.get("model"), str) and ti.get("model") \
+            else _agent_model(ti, payload, env)
+        if not tiers.above(model, want):
+            return s.get("posture"), None
+        return s.get("posture"), (
+            f"agentik-session: this spawn names tier: {role}, whose model is {want}, and "
+            f"runs {_token(str(model))}, above it. Name model: '{want}', or the role the "
+            "work is.")
+    except Exception:                                   # noqa: BLE001  (a check, never a crash)
+        return None, None
+
+
+def _warned(out: dict, warn: str | None) -> dict:
+    """`out` with the role check's warning (posture signal or ask) said beside it."""
+    if not warn:
+        return out
+    out = dict(out)
+    out["systemMessage"] = (out["systemMessage"] + " " if out.get("systemMessage") else "") + warn
+    return out
 
 
 def _deny(reason: str, note: str | None) -> dict:
@@ -403,6 +623,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             "systemMessage": "agentik-session: denied a helper's charter open or close.",
         }
     tool = payload.get("tool_name") or ""
+    warn = None
     if tool in SPAWNING_TOOLS:       # wfd, wfg: any posture, a helper's too, no call opened
         try:
             line = _spawn_rule(payload, os.environ if env is None else env)
@@ -414,6 +635,11 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             return _deny(line, None)
         if line:
             return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+        posture, warn = _role_rule(payload, os.environ if env is None else env)   # mt1 R6
+        if warn and posture == "deny":
+            return _deny(warn, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+        if posture not in ("signal", "ask"):
+            warn = None
     if tool in instructionguard.TOOLS:   # g2b: an edit or a Bash write of a gated file is refused
         try:
             guard = instructionguard.check(payload, os.environ if env is None else env)
@@ -422,13 +648,15 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         if guard:
             return guard             # a refused call opens none
     _open_call(payload, os.environ if env is None else env)
-    if tool not in SPAWNING_TOOLS or payload.get("agent_id"):
+    if tool not in SPAWNING_TOOLS:
         return {}
+    if payload.get("agent_id"):
+        return _warned({}, warn)
     cfg, zone = state(payload.get("session_id"), env)
     if cfg.posture in ("off", "signal"):
-        return {}                    # signalling happens on the prompt, not here
+        return _warned({}, warn)     # signalling happens on the prompt, not here
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
-        return {}
+        return _warned({}, warn)
 
     if cfg.posture == "deny" and zone in (RESERVE, EXHAUSTED):
         return {
@@ -442,7 +670,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "the rest is reserved for wrapping up."),
         }
 
-    return {
+    return _warned({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
@@ -451,7 +679,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
         }
-    }
+    }, warn)
 
 
 def _admission_line(sid=None) -> str | None:
@@ -479,6 +707,18 @@ def _fill_part(sid, session, env):
         return fill.part(fill.overlay(state, sid), session, env, datetime.now(timezone.utc))
     except Exception:  # noqa: BLE001 - the part never breaks a hook
         return None
+
+
+def _tiers_part(sid, env) -> str:
+    """`; tiers: build sonnet to Ddd HH:MM; cap: opus to Ddd HH:MM` while this session's
+    words are in force (mt1 R4), else ""; never raises."""
+    try:
+        from datetime import datetime, timezone
+        from . import fill, tiers
+        got = tiers.parts(fill.overlay(resolver.state_dir(env), sid), datetime.now(timezone.utc))
+        return "".join("; " + p for p in got)
+    except Exception:  # noqa: BLE001 - the part never breaks a hook
+        return ""
 
 
 def _lifetime(cwd, env, sid=None) -> tuple:
@@ -692,6 +932,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
+    line += _tiers_part(sid, env)                          # mt1 R4: the session's words
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
@@ -1023,6 +1264,37 @@ def pre_compact(payload: dict, env=None) -> dict:
     return {}
 
 
+def subagent_stop(payload: dict, env=None) -> dict:
+    """Packet h4 R2: a helper has ended, so every call it opened has ended, a call a
+    rejection ended included, which gets no Post. For a payload whose `agent_id` is
+    id-shaped and whose session's folder exists (the payload's id alone, never the
+    fallback), each regular file under `calls/` whose JSON object's `agent_id` is that id is
+    removed. Another helper's file, one with no `agent_id` (an older plugin's), one that does
+    not parse and a directory are left to the launcher's stale bound. It writes no stamp,
+    never raises, and says nothing: dispatch prints nothing for it (SILENT)."""
+    try:
+        aid = payload.get("agent_id")
+        if not isinstance(aid, str) or not _SID.match(aid):
+            return {}
+        sdir = _session_dir(payload.get("session_id"),
+                            os.environ if env is None else env, fallback=False)
+        if sdir is None or not sdir.is_dir():
+            return {}
+        cdir = sdir / CALLS
+        for name in os.listdir(cdir) if cdir.is_dir() else ():
+            if name.startswith("."):                    # a write in flight, as `_ready` skips
+                continue
+            p = cdir / name
+            try:
+                if stat.S_ISREG(os.lstat(p).st_mode) and _load_json(p).get("agent_id") == aid:
+                    p.unlink()
+            except Exception:                           # noqa: BLE001 - one file, never the rest
+                continue
+    except Exception:                                   # noqa: BLE001
+        pass
+    return {}
+
+
 def instructions_loaded(payload: dict, env=None) -> dict:
     """Packet g1 R1: one line in the session's `instructions.jsonl` for each instruction file
     Claude Code loads. The event cannot block and its output is discarded; dispatch prints
@@ -1044,6 +1316,7 @@ HANDLERS = {
     "pre-compact": pre_compact,
     "post-model-switch": post_model_switch,
     "instructions-loaded": instructions_loaded,
+    "subagent-stop": subagent_stop,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -1052,11 +1325,12 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
                  "PreCompact": pre_compact, "PostModelSwitch": post_model_switch,
-                 "InstructionsLoaded": instructions_loaded})
+                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
                     "post-model-switch", "PostModelSwitch",    # StopFailure: fire-and-forget
-                    "instructions-loaded", "InstructionsLoaded"})   # g1 R1: a log, no output
+                    "instructions-loaded", "InstructionsLoaded",    # g1 R1: a log, no output
+                    "subagent-stop", "SubagentStop"})     # h4 R1: read as a decision, as Stop
 # A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.

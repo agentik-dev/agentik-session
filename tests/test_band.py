@@ -2,7 +2,7 @@
 
 `band()` on a synthetic ledger against a hand count; `band.json` rewritten by `record` and
 by `admit`, atomic and 0600, inside the lock; `band_line` pinned at 80 columns, each part
-left out when absent, `no reading`, `observe`, the age; the line Python and the module draw
+left out when absent, `no reading`, no mode's word (pl1), the age; the line Python and the module draw
 from one shared fixture; the prompt hook's line with and without the file; `report`'s
 window rows (`held`, `idle`, `under 90`) and `no ledger`."""
 import fcntl
@@ -167,13 +167,13 @@ def test_a_held_lock_writes_no_band_json():
     assert not (adir() / "band.json").exists()
 
 
-# ---- band_line: pinned at 80 columns; parts left out; no reading; observe; age ----
+# ---- band_line: pinned at 80 columns; parts left out; no reading; no mode's word; age ----
 
 FULL = {"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
         "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe",
         "at": "2026-10-12T12:52:30+00:00"}
 LINE = ("5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · "
-        "1 deferred · 7d 41% · observe")
+        "1 deferred · 7d 41%")             # no mode's word (pl1 R1)
 
 
 def test_band_line_is_pinned_at_80_columns():
@@ -191,7 +191,7 @@ def test_band_line_is_pinned_at_80_columns():
     ("room", LINE.replace(", room for 2", "")),
     ("deferred", LINE.replace(" · 1 deferred", "")),
     ("P7", LINE.replace(" · 7d 41%", "")),
-    ("mode", LINE.replace(" · observe", "")),
+    ("mode", LINE),                     # pl1 R1: the mode is status's, never the line's
 ])
 def test_each_part_is_left_out_when_absent(key, line):
     assert admission.band_line({k: v for k, v in FULL.items() if k != key}, NOW) == line
@@ -204,7 +204,7 @@ def test_one_helper_and_enforce_and_a_bad_reset():
 
 
 def test_no_reading():
-    assert admission.band_line({"mode": "observe", "at": iso(NOW)}, NOW) == "5h no reading · observe"
+    assert admission.band_line({"mode": "observe", "at": iso(NOW)}, NOW) == "5h no reading"
 
 
 def test_the_age_past_120_s():
@@ -247,7 +247,7 @@ def test_the_prompt_hook_adds_the_band_line_after_the_budget_line(monkeypatch):
     record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
     with_ = _context(hooks.user_prompt_submit({"session_id": SID}))
     [line] = [x for x in with_ if x.startswith("5h ")]
-    assert line.startswith("5h 72% → ") and line.endswith(" · observe")
+    assert line.startswith("5h 72% → ") and "observe" not in line           # pl1 R1
     assert [x for x in with_ if x != line and not x.startswith("cache ")] == without   # S30
     assert with_.index(line) == len(without)         # after the budget line
 

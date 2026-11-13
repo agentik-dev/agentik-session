@@ -13,9 +13,11 @@ import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
-               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store)
+               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store,
+               tiers)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -69,12 +71,36 @@ def _positive_int(v: str) -> int:
     return int(v)
 
 
+def _on_line(args, flag: str) -> bool:
+    """claude's arguments name `flag` (`--model x` or `--model=x`)."""
+    return any(str(a) == flag or str(a).startswith(flag + "=") for a in args or ())
+
+
+def profile_flags(model, effort, args) -> list:
+    """mt1 R7: the profile's `--model` and `--effort` for a start whose claude arguments
+    name no `--model`; one on the line wins, and with it the profile passes neither."""
+    if _on_line(args, "--model"):
+        return []
+    out = ["--model", model] if model else []
+    if effort and not _on_line(args, "--effort"):
+        out += ["--effort", effort]
+    return out
+
+
 def cmd_start(args) -> int:
-    configs = sessionconfig.load_configs()
-    cfg = configs.get(args.config)
+    try:
+        _, known = resolver.load_profiles(os.environ)
+        cfg = sessionconfig.from_profile(args.config, os.getcwd(), os.environ) \
+            if args.config in known else None
+    except resolver.ResolveError as e:
+        _die(str(e), 2)
     if not cfg:
-        _die(f"unknown configuration {args.config!r}. Known: "
-             f"{', '.join(sorted(configs))}  (agentik session config list)")
+        _die(f"unknown profile {args.config!r}. Known: "
+             f"{', '.join(known)}  (agentik session profile)")
+    if _on_line(args.claude_args, "--model"):           # mt1 R7: the line's model wins
+        cfg.model = cfg.effort = None
+    elif _on_line(args.claude_args, "--effort"):
+        cfg.effort = None
     here = launch.depth(os.environ)
     if here is None:
         _die(f"{launch.DEPTH_VAR}={os.environ[launch.DEPTH_VAR]!r} is not a depth; "
@@ -142,7 +168,8 @@ def cmd_install_cli(args) -> int:
 
 
 def cmd_status(args) -> int:
-    """The session's meter: one line, or meter.json with --json."""
+    """The session's meter: one line, or meter.json with --json; then the band, the spend mix
+    and the admission's mode, which the prompt line no longer says (pl1 R3)."""
     env = os.environ
     state = resolver.state_dir(env)
     if args.transcript:
@@ -161,9 +188,12 @@ def cmd_status(args) -> int:
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
-        if args.json and isinstance(band, dict) and band.get("window") == admission.NO_WINDOW:
+        if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
             d = {**d, "band": {"window": band["window"], **({"demand": dem} if isinstance(dem, dict) else {})}}
+        facts = _admission_facts(band)          # pl1 R3: what left the prompt line
+        if args.json and facts:
+            d = {**d, "admission": facts}
         if not args.json:
             print(meter.one_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
@@ -176,9 +206,24 @@ def cmd_status(args) -> int:
             line = admission.band_status(band)
             if line:
                 print(line)
+            from datetime import datetime, timezone
+            mix = admission.mix_status(facts.get("mix"), datetime.now(timezone.utc))   # F2
+            if mix:                             # pl1 R3: each family's share, the next family
+                print(mix)
+            if "mode" in facts:
+                print(f"admission mode: {facts['mode']}")
             return 0
     print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
     return 0
+
+
+def _admission_facts(band) -> dict:
+    """pl1 R3: the facts that left the prompt line, from this session's band.json entry: the
+    admission's `mode` and the spend `mix` object, each only when the entry has it."""
+    if not isinstance(band, dict):
+        return {}
+    out = {"mode": band["mode"]} if isinstance(band.get("mode"), str) else {}
+    return {**out, "mix": band["mix"]} if isinstance(band.get("mix"), dict) else out
 
 
 def cmd_mod(args) -> int:
@@ -374,9 +419,12 @@ def cmd_rules(args) -> int:
     section = _session_section(cwd)
     fsid = sessionconfig.session_id()
     seat = admission._session_config(os.environ, fsid) if fsid else {}   # F4: one seat
-    word = fill.line(sessionconfig.load_overlay(), seat, os.environ,
-                     datetime.now(timezone.utc))                 # packet FW1b R4
-    sys.stdout.write(rules.render(section, life, fill=word))
+    now = datetime.now(timezone.utc)
+    ov = sessionconfig.load_overlay()
+    word = fill.line(ov, seat, os.environ, now)                  # packet FW1b R4
+    words = tiers.parts(ov, now)                                 # mt1 R4: while in force
+    sys.stdout.write(rules.render(section, life, fill=word)
+                     + "".join(w + "\n" for w in words))
     return 0
 
 
@@ -523,9 +571,10 @@ def cmd_profile(args) -> int:
     if not args.name:
         for name, body in profiles.items():
             eff = {**defaults, **(body or {})}
+            build = tiers.merge(defaults.get("tiers") or {}, (body or {}).get("tiers"))
             print(f"{name:<17} {str(eff.get('model')):<14} {str(eff.get('effort')):<7} "
-                  f"sub={str(eff.get('subagents')):<14} {str(eff.get('posture')):<7} "
-                  f"{eff.get('description') or ''}")
+                  f"build={str((build.get('build') or {}).get('model')):<14} "
+                  f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
         return 0
     if args.name not in profiles:
         _die(f"unknown profile {args.name!r}. Known: {', '.join(profiles)}")
@@ -534,6 +583,9 @@ def cmd_profile(args) -> int:
                              overlay={})
     except resolver.ResolveError as e:
         _die(str(e), 2)
+    print(f"# tiers ({args.name}, resolved here): role, model, effort")   # mt1 R3
+    for line in tiers.render(r.sections["session"]["tiers"]):
+        print("#" + line[1:])
     sys.stdout.write(dump({k: v for k, v in r.sections.items()}))
     return 0
 
@@ -586,34 +638,11 @@ def cmd_config(args) -> int:
             print(f"\nin force for THIS session only: {', '.join(sorted(live_ov))}")
         return 0
 
-    if args.action == "delete":
-        if not args.name:
-            _die("which configuration?")
-        if args.name not in configs:
-            _die(f"unknown configuration {args.name!r}")
-        del configs[args.name]
-        sessionconfig.save_configs(configs)
-        print(f"deleted {args.name}"
-              + (" (a shipped default of that name will reappear)"
-                 if args.name in {c.name for c in sessionconfig.DEFAULTS} else ""))
-        return 0
+    if args.action in ("delete", "new"):         # mt1 R2: the profiles are the one table
+        _die(f"config {args.action}: the configurations are the profiles now; add or change "
+             f"one under `profiles:` in {resolver._user_file(os.environ)}, or name one in a "
+             "repo's .claude/agentik/config.yaml (session: {profile: <name>})", 2)
 
-    if args.action == "new":
-        if not args.name:
-            _die("name the new configuration")
-        base = configs.get(args.From) if args.From else None
-        if args.From and not base:
-            _die(f"unknown configuration {args.From!r} to copy from")
-        from dataclasses import replace as _replace
-        cfg = _replace(base, name=args.name) if base else SessionConfig(name=args.name)
-        if args.description:
-            cfg.description = args.description
-        configs[args.name] = cfg
-        sessionconfig.save_configs(configs)
-        print(f"created {args.name}"
-              + (f" from {args.From}" if args.From else "")
-              + f"; adjust it with `agentik session set <key> <value> --config {args.name}`")
-        return 0
     return 0
 
 
@@ -739,12 +768,167 @@ def _fill_failed(word, e, sid, home):
          + ("; ".join(stands) if stands else "nothing stands, fill: off"), 2)
 
 
+def _until(raw):
+    """mt1 R4: `--until`'s zoned time, ahead of now, else a refusal; None when not given."""
+    from datetime import datetime, timezone
+    if raw is None:
+        return None
+    t = tiers.when(raw)
+    if t is None:
+        _die("--until takes an ISO time with its zone, as 2026-11-10T18:00-08:00", 2)
+    if t <= datetime.now(timezone.utc):
+        _die(f"--until names a time that has passed ({t.isoformat(timespec='seconds')})")
+    return t.isoformat(timespec="seconds")
+
+
+def _family_or_die(value: str) -> None:
+    """Round 1 F7: a model word is letters, digits and `._/[]-` alone, and names a family;
+    refused before any write."""
+    if not tiers.MODEL_WORD.fullmatch(value) or tiers.family(value) is None:
+        _die(f"{value[:40]!r} names no model: a model word is letters, digits and . _ / [ ] - "
+             f"and names a family ({', '.join(tiers.ORDER)})", 2)
+
+
+def _layer_file(where: str) -> Path:
+    if where == "repo":
+        return resolver.repo_dir(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()) \
+            / "config.yaml"
+    return resolver._user_file(os.environ)
+
+
+def _save_tier(path: Path, role: str, model: str) -> None:
+    """mt1 R4's `--save`: the file's top-level `tiers:` block gains or changes `role`; every
+    other line, its comments among them, stays as it was."""
+    from .yamlsubset import load
+    text = path.read_text() if path.exists() else ""
+    try:
+        doc = load(text) if text.strip() else {}
+    except ValueError as e:
+        _die(f"{path}: {e}; nothing written", 2)
+    cur = doc.get("tiers") if isinstance(doc, dict) and isinstance(doc.get("tiers"), dict) \
+        else {}
+    table = tiers.merge(cur, {role: {"model": model}})
+    block = ["tiers:"] + [
+        f"  {r}: {{" + ", ".join(f'{k}: "{v}"' if k == "model" else f"{k}: {v}"
+                                 for k, v in table[r].items()) + "}"
+        for r in tiers.ROLES if r in table]
+    lines, out, skip = text.splitlines(), [], False
+    for ln in lines:
+        if skip and (not ln.strip() or ln[:1] in (" ", "\t")):
+            continue
+        skip = False
+        if ln.rstrip() == "tiers:" or ln.startswith("tiers:"):
+            out += block
+            block, skip = [], True
+            continue
+        out.append(ln)
+    out += block
+    new = "\n".join(out) + "\n"
+    try:
+        check = load(new)
+        tiers.merge({}, check.get("tiers"))
+    except ValueError as e:
+        _die(f"{path}: the edit would not parse ({e}); nothing written", 2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new)
+
+
+def _set_tier(args, key: str) -> int:
+    """mt1 R4: `set tier.<role> <model|off> [--until <zoned time>] [--save [user|repo]]`."""
+    from datetime import datetime, timezone
+    role = key.split(".", 1)[1]
+    if role not in tiers.ROLES:
+        _die(f"no tier {role!r}; the tiers are {', '.join(tiers.ROLES)}", 2)
+    if args.config:
+        _die("tier.<role> takes no --config: it is this session's, or with --save a layer's", 2)
+    if args.save:
+        if args.until is not None or args.value == "off":
+            _die("--save writes a layer file, which keeps no end and no `off`", 2)
+        _family_or_die(args.value)
+        path = _layer_file(args.save)
+        _save_tier(path, role, args.value)
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        try:                                # round 1 F3: as the next session resolves
+            r = resolver.resolve(cwd, "save-check", os.environ,
+                                 profile=hooks.launch_profile(os.environ), overlay={})
+        except resolver.ResolveError as e:
+            _die(f"tiers: {role} {args.value} saved in {path}, but the next session here "
+                 f"resolves nothing: {e}")
+        got = ((r.sections["session"].get("tiers") or {}).get(role) or {}).get("model")
+        if got != args.value:
+            origin = r.tier_origins.get(role, "a layer above it")
+            prof = r.sections["session"].get("profile")
+            there = (f"change it under profiles.{prof}.tiers in {resolver._user_file(os.environ)}"
+                     if origin.startswith("the launch profile") else "change it there")
+            _die(f"tiers: {role} {args.value} saved in {path}, but the next session's {role} "
+                 f"is {got}, from {origin}: {there}")                   # mt1 R2-F4
+        print(f"tiers: {role} {args.value} (saved in {path}; the next session reads it)")
+        return 0
+    sid = sessionconfig.session_id()
+    if not sid:
+        _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is unset), so "
+             "there is no session to scope this to; --save writes a layer file")
+    cur = sessionconfig.load_overlay(sid).get(tiers.KEY)
+    cur = dict(cur) if isinstance(cur, dict) else {}
+    if args.value == "off":
+        if args.until is not None:
+            _die("--until goes with a model, never with off", 2)
+        cur.pop(role, None)
+    else:
+        _family_or_die(args.value)
+        cur[role] = {"model": args.value, "until": _until(args.until)}
+    sessionconfig.save_overlay({tiers.KEY: cur}, sid)
+    now = datetime.now(timezone.utc)
+    print("\n".join(tiers.parts({tiers.KEY: cur}, now)) or f"tiers: {role} as the profile")
+    return 0
+
+
+def _set_cap(args) -> int:
+    """mt1 R4: `set cap <model|off> [--until <zoned time>]`, this session's alone and never
+    saved; under a launcher a cap with an end is kept in the chain home for the successor."""
+    from datetime import datetime, timezone
+    from . import chain
+    if args.save or args.config:
+        _die("cap is this session's alone: --save and --config are refused, and no "
+             "profile or config layer keeps a cap", 2)
+    sid = sessionconfig.session_id()
+    if not sid:
+        _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is unset), so "
+             "there is no session to scope a cap to")
+    name = _chain_name()
+    home = chain.home(resolver.state_dir(os.environ), name) if name else None
+    cur = sessionconfig.load_overlay(sid)
+    if args.value == "off":
+        if args.until is not None:
+            _die("--until goes with a model, never with off", 2)
+        if home is not None:
+            tiers.keep(home, sid, None)
+        cur.pop(tiers.CAP, None)
+        cur.pop("_updated_at", None)
+        sessionconfig.clear_overlay(sid)
+        sessionconfig.save_overlay(cur, sid)
+        print("cap: off")
+        return 0
+    _family_or_die(args.value)
+    v = {"model": args.value, "until": _until(args.until)}
+    sessionconfig.save_overlay({tiers.CAP: v}, sid)
+    if home is not None:
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tiers.keep(home, sid, v if v["until"] else None)
+    print(tiers.parts({tiers.CAP: v}, datetime.now(timezone.utc))[0])
+    return 0
+
+
 def cmd_set(args) -> int:
     key = args.key.replace("-", "_")
     if key == "fill":                       # packet FW1b R1: ahead of the field check
         return _set_fill(args)
+    if key == "cap":                        # mt1 R4
+        return _set_cap(args)
+    if key.startswith("tier."):
+        return _set_tier(args, key)
     if args.until is not None:
-        _die("--until goes with fill", 2)
+        _die("--until goes with fill, cap or tier.<role>", 2)
     # `set checkpoint 8` is the common case: one number for every zone.
     if key == "checkpoint" and args.value.isdigit():
         n = int(args.value)
@@ -765,22 +949,18 @@ def cmd_set(args) -> int:
     if args.config and not args.save:
         # An overlay is keyed to THIS session, not to a config name. Writing a
         # session-only change "for" another config silently applies it here.
-        _die(f"--config {args.config} only makes sense with --save. A session-only "
-             "change always applies to the session you are in "
-             f"(currently '{sessionconfig.get_active() or 'balanced'}').")
+        _die(f"--config {args.config} names no session: a session-only change always "
+             "applies to the session you are in "
+             f"(currently '{sessionconfig.get_active() or 'balanced'}'). To change "
+             f"{args.config}, set it under `profiles: {args.config}:` in "
+             f"{resolver._user_file(os.environ)}.")          # mt1 R2-F3
 
-    if args.save:
-        cfg = configs.get(target)
-        if not cfg:
-            _die(f"unknown configuration {target!r}")
-        setattr(cfg, key, value)
-        try:
-            cfg.validate()
-        except ValueError as e:
-            _die(str(e))
-        configs[target] = cfg
-        sessionconfig.save_configs(configs)
-        print(f"{target}.{key} = {_fmt_value(value)}  (saved)")
+    keep = (f"To keep it, set it under `profiles: {target}:` in "      # round 1 F5
+            f"{resolver._user_file(os.environ)}.")
+    if args.save:                           # mt1 R4: no configs.json is written
+        _die(f"--save keeps a tier alone (set tier.<role> <model> --save); {key} is a "
+             f"profile's field: change it under `profiles: {target}:` in "
+             f"{resolver._user_file(os.environ)}", 2)
     else:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
@@ -790,10 +970,8 @@ def cmd_set(args) -> int:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):
             _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is "
-                 "unset), so there is no session to scope this to. Use --save to "
-                 "change the stored configuration instead.")
-        print(f"{key} = {_fmt_value(value)}  (this session only; "
-              f"add --save to keep it in '{target}')")
+                 f"unset), so there is no session to scope this to. {keep}")
+        print(f"{key} = {_fmt_value(value)}  (this session only; {keep})")
         _rewrite_resolved(model_set=key == "model" and value is not None)
 
     if key in LAUNCH_ONLY and not args.save:
@@ -806,7 +984,8 @@ def cmd_set(args) -> int:
         print(f"note: {key} is a launch-time setting. This session-only record "
               "is informational -- it will NOT be applied by the next `start`, "
               f"because the overlay ends with this session.{now_hint} "
-              f"To change what `start {target}` launches, add --save.")
+              f"To change what `start {target}` launches, set it under `profiles: "
+              f"{target}:` in {resolver._user_file(os.environ)}.")
     return 0
 
 
@@ -960,7 +1139,8 @@ def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
     if st is None:
         print(f"note: checkpoint --respawn: {path}: the charter's commit state is unknown "
               "(git status failed or timed out); the respawn goes on", file=sys.stderr)
-    elif st and st is not gitinfo._NOT_A_REPO and (st == "??" or not args.commit):
+    elif st and st is not gitinfo._NOT_A_REPO and (
+            st == "??" or not (args.commit and _named(path, getattr(args, "paths", None)))):
         _die(f"checkpoint --respawn: {path} is not committed; commit it first: "
              f"{_commit_line(path)}", 2)
     src = _state_check(args.state) if args.state else None
@@ -1039,7 +1219,27 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
     return "respawn marked; no launcher runs this sitting: print your start line and stop"
 
 
+CHECKPOINT_FORM = "checkpoint --commit <paths...> [-m <message>]"
+
+
+def _named(path: str, paths) -> bool:
+    """fw5 R3: `--commit` takes a modified charter only when its line names it, or a directory
+    holding it."""
+    real = os.path.realpath(path)
+    for p in paths or ():
+        q = os.path.realpath(p)
+        if real == q or real.startswith(q.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def cmd_checkpoint(args) -> int:
+    paths = list(getattr(args, "paths", None) or [])
+    if args.commit and not paths:
+        _die(f"checkpoint --commit commits the paths its line names and nothing else: "
+             f"{CHECKPOINT_FORM}", 2)
+    if paths and not args.commit:
+        _die(f"checkpoint: a path is committed only with --commit: {CHECKPOINT_FORM}", 2)
     mark = _respawn_check(args)
     cfg, _ = sessionconfig.effective()
     workdir = os.getcwd()
@@ -1051,21 +1251,18 @@ def cmd_checkpoint(args) -> int:
             _die("not a git repository, so there is nothing to commit")
         msg = args.message or ("checkpoint" if not sessionconfig.get_active()
                                else f"checkpoint ({cfg.name})")
-        # Tracked files only. `add -A` is repo-wide and would sweep up a
-        # plaintext .env, a tfstate, or an age key copied in for a test --
-        # the wind-down nudge makes an autonomous agent the likeliest caller.
-        subprocess.run(["git", "-C", workdir, "add", "-u"], check=False)
-        _, porcelain = gitinfo._git(workdir, "status", "--porcelain")
-        new_files = [l[3:] for l in porcelain.splitlines() if l.startswith("?? ")]
-        if new_files:
-            print(f"note: {len(new_files)} untracked file(s) NOT committed "
-                  f"({', '.join(new_files[:4])}{'…' if len(new_files) > 4 else ''}). "
-                  "Add them yourself if they belong in the repo.", file=sys.stderr)
-        r = subprocess.run(["git", "-C", workdir, "commit", "-m", msg],
-                           capture_output=True, text=True)
-        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
-            _die(f"commit failed: {(r.stderr or r.stdout).strip()}")
-        print((r.stdout or "").strip() or "nothing to commit")
+        # fw5 R3: the named paths alone, through `commit`'s core with no check (its witness,
+        # its lock, `commit --only`), so another writer's staged or edited file stays out.
+        from . import commit as core
+        try:
+            code = core.commit_paths(workdir, paths, msg, os.environ)
+        except core.Nothing:
+            print("nothing to commit")
+        except core.Refused as err:
+            _die(f"checkpoint --commit: {err}", 2)
+        else:
+            if code != 0:
+                _die(f"commit failed: exit {code}; nothing recorded")
     if not sessionconfig.save_overlay({hooks.COUNTER: 0,
                                        hooks.LAST_CHECKPOINT: time.time()}):
         _die("could not record the checkpoint (no session overlay path)")
@@ -1095,6 +1292,22 @@ def _respawn_flag(key: str, raw: str) -> int:
     return int(raw)
 
 
+def run_args(cwd, env, claude_args) -> list:
+    """mt1 R7: the arguments every start of a chain sends: the resolved profile's `--model`
+    and `--effort` ahead of the owner's when theirs name no `--model` (on the seat lane
+    only: `run` starts claude itself, never the local lane's dispatcher)."""
+    from . import chain
+    try:
+        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
+                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+    except resolver.ResolveError as e:
+        _die(f"agentik-session run: {e}", 2)
+    s = r.sections["session"]
+    if (s.get("lane") or "seat") != "seat":
+        return list(claude_args)
+    return profile_flags(s.get("model"), s.get("effort"), claude_args) + list(claude_args)
+
+
 def cmd_run(args) -> int:
     """`agentik session run`: start claude, and restart it at each confirmed RESPAWN
     close (respawn-r1 §3). Every refusal before the first start exits 2 with one line."""
@@ -1119,19 +1332,20 @@ def cmd_run(args) -> int:
         _die(f"agentik-session run: {e}", 2)
     warnings = []
     gap = chain.prompt_gap(args.claude_args)
-    if gap is not None:                 # S31: warned, never refused; it may be meant
+    if gap is not None:                 # mt1 R7: refused (S31 warned): each restart would idle
         why = (f" ({gap} reads every argument after it as its value: write {gap}=<value>)"
                if gap else "")
-        warnings.append(f"warning: claude's arguments after -- carry no first prompt{why}, "
-                        "so every restart opens an idle session that waits for a person; "
-                        'give one: agentik session run -- "<first prompt>"')
-    minutes = chain.long_loop(args.claude_args) if gap is None else None   # no prompt, no /loop
+        _die(f"agentik-session run: claude's arguments carry no first prompt{why}, so every "
+             'restart would open an empty prompt; give one: agentik session run -- '
+             '"<first prompt>"', 2)
+    claude_args = run_args(cwd, env, args.claude_args)
+    minutes = chain.long_loop(args.claude_args)
     if minutes is not None:
         warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; a "
                         "/loop of 60 minutes or more asks its question (cloud or session) "
                         "before it arms, so every restarted sitting waits there: give an "
                         "interval under 60m, or none")
-    return chain.Chain(name, list(args.claude_args), resolver.state_dir(env),
+    return chain.Chain(name, claude_args, resolver.state_dir(env),
                        chain.Effects(), lambda: chain.guards(cwd, env, flags),
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
@@ -1150,6 +1364,13 @@ def cmd_gate(args) -> int:
     if verb == "serve":
         return gate.serve(root)
     if verb == "wait":
+        own = _own_entry(root, env)
+        target = next((e for e in gate.entries(root) if e["id"] == args.id), None)
+        if own and target and not gate.result_path(root, args.id).exists() \
+                and gate.entry_key(target) == gate.entry_key(own):
+            _die(f"gate wait: this is gate job {own['id'][:40]}; {args.id[:40]} is queued on its "
+                 "own repo and waits behind it until the wall cuts it: wait from outside the "
+                 "job", 2)
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
@@ -1163,6 +1384,12 @@ def cmd_gate(args) -> int:
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
+    own = _own_entry(root, env) if args.wait else None
+    if own and os.path.isdir(args.repo) \
+            and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
+        _die(f"gate run: this is gate job {own['id'][:40]}; a job queued here on its own repo "
+             "waits until the wall cuts it: run the command directly, or queue it without "
+             "--wait", 2)
     try:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
@@ -1180,6 +1407,15 @@ def cmd_gate(args) -> int:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _own_entry(root, env) -> dict | None:
+    """fw5 R5: the entry of this state root that `$CLAUDE_SESSION_GATE_JOB` names, or None."""
+    from . import gate
+    mark = env.get(gate.JOB_MARK) or ""
+    if not gate.ID.match(mark):
+        return None
+    return next((e for e in gate.entries(root) if e["id"] == mark), None)
 
 
 def cmd_reconcile(args) -> int:
@@ -1418,12 +1654,14 @@ def build_parser() -> argparse.ArgumentParser:
     se = sub.add_parser("set", help="adjust a setting for this session only")
     se.add_argument("key")
     se.add_argument("value")
-    se.add_argument("--save", action="store_true",
-                    help="persist it to the configuration instead")
+    se.add_argument("--save", nargs="?", const="user", choices=["user", "repo"],
+                    help="with tier.<role>: write it to the user's profiles.yaml (the "
+                         "default) or the repo's .claude/agentik/config.yaml")
     se.add_argument("--config", metavar="NAME")
     se.add_argument("--until", metavar="TIME",
-                    help="with fill reset or fill opus, never with fill off: the zoned "
-                         "ISO time the word ends at, as 2026-11-10T18:00-08:00")
+                    help="with fill reset or fill opus, never with fill off; with cap or "
+                         "tier.<role>: the zoned ISO time the word ends at, as "
+                         "2026-11-10T18:00-08:00")
     se.set_defaults(func=cmd_set)
 
     cm = sub.add_parser("commit", help="add by explicit path, run the check, commit on green")
@@ -1439,9 +1677,12 @@ def build_parser() -> argparse.ArgumentParser:
     cm.set_defaults(func=cmd_commit)
 
     cp = sub.add_parser("checkpoint", help="mark a handoff-ready point")
+    cp.add_argument("paths", nargs="*",
+                    help="with --commit, each path to commit, as git takes it from the cwd")
     cp.add_argument("-m", "--message")
     cp.add_argument("-c", "--commit", action="store_true",
-                    help="git add -u (tracked files only) && git commit first")
+                    help="commit the named paths first, and nothing else (no add -u, no "
+                         "sweep): checkpoint --commit <paths...>")
     cp.add_argument("--respawn", action="store_true",
                     help="mark a RESPAWN close, the sitting's last act: the charter's "
                          "Next act must open on RESPAWN (needs --charter)")

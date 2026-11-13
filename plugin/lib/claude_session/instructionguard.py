@@ -25,6 +25,15 @@ of `bash -c` or `sh -c`, after a literal `cd`, and string literals in `python -c
 `python -` heredoc body, that also holds `open(` or `write_`. A list file's removal (`rm`,
 `unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it) is refused too. A target
 with `$`, a backquote or a glob, and a line `shlex` cannot split, pass: the gate fails open.
+g6: a second, loose reading blind to quotes, comments and heredocs (`loose_targets`) lists every
+target a line might have; one the strict reading did not resolve to the same path is resolved
+against the call's folder, its own (moved by a `cd` only on a plain line) and each folder the
+strict reading stood in, and a gated one is denied with its own reason. So a line the strict
+reading cannot split, a `cd` it cannot resolve, and text that holds a write (a heredoc body, a
+quoted line, a commit message naming the file after a write word) are refused when the loose
+reading's word is gated; what passes is a target neither reading resolves, a gated file a
+command neither knows writes (`dd`, `ln`, `truncate`, a script, a name in a variable), and a
+`cd` the strict reading wrongly follows on a plain line (`false && cd /tmp; ...`).
 
 R4: an exception lets the call through with one `open` line in the session's `guard.jsonl`;
 each refusal is a line there too, naming a helper by the payload's `agent_id`. No knob: the
@@ -52,6 +61,12 @@ REASON = ("agentik-session: `{path}` is gated: an edit of it is refused in every
           "mode. Make the change through the `" + SKILL + "` skill, which shows the owner the "
           "change and its cost and writes it only on the owner's yes. Do not write the file "
           "another way.")
+LOOSE_REASON = ("agentik-session: `{path}` is gated, and this Bash line may write it: the line "
+                "was not read with confidence. To change the file use the `" + SKILL + "` "
+                "skill, which writes it through `agentik session gates write` on the owner's "
+                "yes. A line that only carries such text as data keeps the text in a file and "
+                "names the file.")
+STRICT, LOOSE = "the strict reading", "the loose reading"   # g6 R3: which reading denied
 LIST = "edit-gates"
 REPO_LIST = ".claude/" + LIST
 LOG = "guard.jsonl"
@@ -372,14 +387,17 @@ _PH = "__g3_heredoc_%d__"
 _PH_RE = re.compile(r"__g3_heredoc_(\d+)__\Z")
 _PUNCT = ";&|<>()\n"
 _OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|()\n]")
-_MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
+_MASK = {"(": "", ")": "", "`": ""}    # a quoted or escaped paren, never an operator
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
+_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\\\n|\Z)")    # r3 F5: `\`-NL
+_LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _WRAPPERS = frozenset({"sudo", "env", "command", "exec", "nohup", "time", "builtin", "nice"})
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_CDS = frozenset({"cd", "pushd", "popd"})      # in backticks, no move of the line's folder
 _PY = re.compile(r"python[0-9.]*\Z")
 _SED_I = re.compile(r"-[nErsuz]*i|--in-place")
 _PERL_I = re.compile(r"-[pnlaws0]*i")
@@ -415,27 +433,87 @@ def _heredocs(text: str):
     return "\n".join(out), bodies
 
 
-def _mask(text: str) -> str:
+def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
     """The text with each quoted or backslashed paren replaced by a private character, so the
-    lexer never takes it for a subshell's edge (r2 F1); a comment is kept as it stands."""
+    lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
+    outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
+    A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
+    ends at a backtick, escaped or not (g5 r3); a backslash-newline is dropped outside single
+    quotes (g5 r1).
+    A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
+    a backtick in a `${` is a bracket of its own, in which a paren is a command's (g5 r3);
+    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(` and counts no `case`;
+    `ticks`: a pattern's `)` in backticks is masked into a word (r3 F1, R8: both are read)."""
     out, i, n, quote, start = [], 0, len(text), None, True
+    opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
+    esc = False                           # in backticks, inside an escaped pair of them
+    cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
     while i < n:
         c = text[i]
+        if c == "\\" and text[i + 1:i + 2] == "\n" and quote != "'":
+            i += 2                        # r1 F4: the line goes on, the word too
+            continue
         if quote is None:
             if c == "\\" and i + 1 < n:
+                esc ^= tick and text[i + 1] == "`"
                 out += [c, _MASK.get(text[i + 1], text[i + 1])]
-                i, start = i + 2, False
+                i, start, prev, cmd = i + 2, False, "", cmd and not start
                 continue
-            if c == "#" and start:
-                j = text.find("\n", i)
-                j = n if j < 0 else j
-                out.append(text[i:j])
-                i = j
+            if c == "#" and start and opened[-1:] != ["${"]:
+                nl = text.find("\n", i)
+                nl = n if nl < 0 else nl
+                k = text.find("`", i, nl) if tick else -1     # r3 F7: on its line alone
+                while k >= 0:                 # r3 F4: in an escaped pair, the first backtick
+                    j = k                     # ends it, escaped or not, and is read again
+                    while text[j - 1] == "\\":  # from its backslashes; else the first
+                        j -= 1                # unescaped one (R8: `# \`x\`` is all comment)
+                    if esc or (k - j) % 2 == 0:
+                        break
+                    k = text.find("`", k + 1, nl)
+                i = j if k >= 0 else nl
                 continue
             if c in "'\"":
                 quote = c
+            elif c == "`":
+                tick, esc = not tick, False
+                if tick and opened[-1:] == ["${"]:    # r3 F2: in it a paren is a command's
+                    opened.append(c)
+                    cases.append(0)
+                elif not tick and c in opened:
+                    while opened.pop() != c:
+                        cases.pop()
+                    cases.pop()
+            elif opened[-1:] == ["${"] and (c == ")" or (c == "(" and prev[:1] != "$")):
+                c = _MASK[c]              # r2 F1, F4: a bare paren in `${` is a word's
+            elif c == "(" or (c == "{" and prev == "$" and not (bash3 and "$(" in opened)):
+                opened.append("$" + c if prev[:1] == "$" else c)
+                cases.append(0)
+            elif c == "}" and opened[-1:] == ["${"]:
+                opened.pop()
+                cases.pop()
             out.append(c)
-            start = c in " \t\n;&|()<>"
+            if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
+                if cases[-1] or opened[-1:] in ([], ["`"]):    # r2 F2: nor a pattern's `)`
+                    start = True
+                    if (cases[-1] and tick and ticks) or (opened and not cases[-1]):
+                        out[-1] = _MASK[c]     # R8: one that closes nothing in a `${`'s tick
+                else:
+                    cases.pop()
+                    start = opened.pop() != "$("
+                cmd = start
+            else:
+                if c == "`":                   # a command starts inside backticks
+                    cmd = tick
+                elif start and c not in " \t\n;&|(<>":    # a word starts: a command's first?
+                    m = _KEY.match(text, i) if cmd else None
+                    w = m.group() if m else ""
+                    if not bash3:              # r3 F3: bash 3.2 ends a `$(` at any `)`
+                        cases[-1] += (w == "case") - (w == "esac" and cases[-1] > 0)
+                    cmd = w in _LEAD
+                elif c in ";&|(<>\n":
+                    cmd = c not in "<>"
+                start = c in " \t\n;&|(<>" or (c == "`" and tick)
+            prev = "$$" if c + prev == "$$" else c    # `$$`, the pid, opens no `${`
             i += 1
             continue
         if quote == '"' and c == "\\" and i + 1 < n:
@@ -445,19 +523,23 @@ def _mask(text: str) -> str:
         if c == quote:
             quote = None
         out.append(_MASK.get(c, c))
+        prev = ""
         i += 1
     return "".join(out)
 
 
-def _commands(text: str):
+def _commands(text: str, bash3: bool = False, ticks: bool = True):
     """Simple commands: (words, the words after a write redirection), in order; a subshell's
     `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
-    one, is no subshell's edge (r2 F2); a quoted or escaped one is a word (r2 F1)."""
-    lex = shlex.shlex(_mask(text), posix=True, punctuation_chars=_PUNCT)
+    one, is no subshell's edge (r2 F2), in backticks too (r3 F1); a quoted or escaped one is a
+    word (r2 F1), and a quoted or escaped backtick opens nothing (r3 F1)."""
+    lex = shlex.shlex(_mask(text, bash3, ticks), posix=True, punctuation_chars=_PUNCT)
+    lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     words, outs, expect = [], [], None
     cases: list = []                      # per open `case`: `head`, `pattern` or `body`
+    ticks = 0                             # the real backticks read so far
     for tok in lex:
         if tok and set(tok) <= set(_PUNCT):
             for op in _OPS.findall(tok):
@@ -478,17 +560,21 @@ def _commands(text: str):
                 elif op in "()":
                     yield op, None                # a subshell's bounds: its folder ends at `)`
             continue
-        tok = tok.translate(_UNMASK)
+        raw, tok = tok, tok.translate(_UNMASK)    # in `raw` a backtick is a real one
+        ticks += raw.count("`")
         if expect is not None:
             if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
                 outs.append(tok)
             expect = None
             continue
-        if not words and not outs and tok == "case":
-            cases.append("head")
-        elif not words and not outs and tok == "esac" and cases and cases[-1] != "head":
+        if not outs and (tok == "case" and all(w in _LEAD for w in words) or
+                         raw.endswith("`case") and (ticks - raw[-4:].count("`")) % 2):
+            cases.append("head")          # r3 F1: a `case` glued to its opening backtick too
+        elif (not words and not outs and (tok == "esac" or raw.startswith("esac`"))
+              and cases and cases[-1] != "head"):
             cases.pop()
-        elif tok == "in" and cases and cases[-1] == "head" and words[:1] == ["case"]:
+        elif tok == "in" and cases and cases[-1] == "head" and words[-2:-1] and (
+                words[-2] == "case" or words[-2].endswith("`case")):
             cases[-1] = "pattern"
         words.append(tok)
     if words or outs:
@@ -512,8 +598,9 @@ def _py_literals(code: str) -> list:
     return [m.group(2) for m in _LITERAL.finditer(code)]
 
 
-def _copy_like(name: str, args: list, cwd, env):
-    """(sources, destinations) of `cp`, `mv` or `install`."""
+def _copy_args(name: str, args: list):
+    """(sources, the `-t` folder or None, the last plain word or None) of `cp`, `mv` or
+    `install`; the last word is a source too where a `-t` names the folder."""
     srcs, tdir, i, done = [], None, 0, False
     while i < len(args):
         a = args[i]
@@ -531,6 +618,12 @@ def _copy_like(name: str, args: list, cwd, env):
         elif a in _TAKES.get(name, ()):
             i += 1
         i += 1
+    return srcs, tdir
+
+
+def _copy_like(name: str, args: list, cwd, env):
+    """(sources, destinations) of `cp`, `mv` or `install`."""
+    srcs, tdir = _copy_args(name, args)
     if tdir is not None:
         return srcs, [os.path.join(tdir, os.path.basename(s.rstrip("/"))) for s in srcs]
     if len(srcs) < 2:
@@ -542,116 +635,443 @@ def _copy_like(name: str, args: list, cwd, env):
     return srcs, [dst]
 
 
-def _git(args: list, cwd, env, found: list) -> None:
-    i, gcwd = 0, cwd
+def _git_paths(args: list):
+    """(the `-C` words, the removal's words) of a `git rm`, `git restore` or `git checkout --`."""
+    i, chdirs = 0, []
     while i < len(args) and args[i].startswith("-"):
         if args[i] == "-C" and i + 1 < len(args):
-            gcwd = _resolve(args[i + 1], cwd, env)
+            chdirs.append(args[i + 1])
             i += 2
         elif args[i] in ("-c", "--git-dir", "--work-tree"):
             i += 2
         else:
             i += 1
     if i >= len(args):
-        return
+        return chdirs, []
     sub, rest = args[i], args[i + 1:]
-    paths = []
     if sub in ("rm", "restore"):
-        paths = [a for a in rest if not a.startswith("-")]
-    elif sub == "checkout" and "--" in rest:
-        paths = rest[rest.index("--") + 1:]
-    for p in paths:
-        found.append(("remove", _resolve(p, gcwd, env)))
+        return chdirs, [a for a in rest if not a.startswith("-")]
+    if sub == "checkout" and "--" in rest:
+        return chdirs, rest[rest.index("--") + 1:]
+    return chdirs, []
 
 
-def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
-    """[(`write` or `remove`, a path or None)] in the line's order; ValueError where `shlex`
-    cannot split it."""
+def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
+                 ticks: bool = True) -> list:
+    """[(`write` or `remove`, a path or None)] in the line's order, then (`split`, None) where
+    `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3).
+    Where bash 3.2's reading, or the one that masks no pattern's `)` in backticks, masks the
+    line otherwise, its targets follow (g5 r2, r3)."""
+    return [(k, p) for k, p, _, _ in _strict(command, cwd, env, depth, bash3, ticks, set())]
+
+
+class _Bound(Exception):
+    """r2 R1: the strict reading judged past a bound on one line; `path` is the target it
+    stopped at. Never a ValueError, which would leave the line to the loose reading."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        self.path = path
+
+
+class _Paid:
+    """r2 R1: one line's strict reading so far, inner lines and other readings included: its
+    judgements (targets times folder states), the distinct paths they named, and each text it
+    split, kept so a `-c` line read in many folders is split once (the same words each time)."""
+    __slots__ = ("n", "paths", "parsed")
+
+    def __init__(self):
+        self.n, self.paths, self.parsed = 0, set(), {}
+
+
+def _parse(command: str, bash3: bool, ticks: bool) -> tuple:
+    """(text, heredoc bodies, the other readings to try, the commands read, the ValueError
+    that stopped the reading or None): what `_strict` reads before it stands in a folder."""
     text, bodies = _heredocs(command)
-    text = text.replace("\\\n", " ")
-    found, here, subshells, pushed = [], cwd, [], []
-    for words, outs in list(_commands(text)):
+    first = ticks and not bash3
+    m0 = _mask(text) if first else ""
+    other = [r for r in ((True, True), (False, False)) if first and _mask(text, *r) != m0]
+    read, err = [], None
+    try:
+        for c in _commands(text, bash3, ticks):
+            read.append(c)
+    except ValueError as e:
+        err = e
+    return text, bodies, other, read, err
+
+
+def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set,
+            paid: _Paid | None = None) -> list:
+    """`bash_targets` with each target's word and the folder it was read in (g6 R2):
+    [(kind, path, word, folder)], `word` None where a folder state other than the followed
+    one judged it again (r2 R4); each folder the reading stood in goes in `stood`. Past
+    `_STRICT_READS` judgements or `_STRICT_BOUND` distinct paths on the line it raises
+    `_Bound`, counted as it reads (r2 R1)."""
+    paid = _Paid() if paid is None else paid
+    if (command, bash3, ticks) not in paid.parsed:
+        paid.parsed[command, bash3, ticks] = _parse(command, bash3, ticks)
+    text, bodies, other, read, err = paid.parsed[command, bash3, ticks]
+    found, subshells = [], []
+    st, fa = [(cwd, ())], 0                # r1 R1: (folder, pushd stack) states; st[0] is
+                                           # a0055da's, st[fa] follows every `cd` (db19d51's)
+
+    def add(kind, word, at):
+        path = _resolve(word, at, env)
+        paid.n += 1                       # r2 R1: a line it cannot afford to read is denied
+        if (kind, path) not in paid.paths:
+            paid.paths.add((kind, path))
+        if paid.n > _STRICT_READS or len(paid.paths) > _STRICT_BOUND:
+            raise _Bound(path or word)
+        found.append((kind, path, word, at))
+    if err is not None:
+        if all(outs is None for _, outs in read):
+            if not _others(command, cwd, env, depth, other, found, stood, paid):
+                raise err
+            return found + [("split", None, None, None)]
+        read = read + [("split", "split")]
+    for words, outs in read:
+        if words == "split":
+            found.append(("split", None, None, None))
+            continue
         if outs is None:                  # r1 F1, r2 F3: a subshell's `cd` and pushd end with it
             if words == "(":
-                subshells.append((here, list(pushed)))
+                subshells.append((st, fa))
             elif subshells:
-                here, pushed = subshells.pop()
+                st, fa = subshells.pop()
             else:                         # a `)` with no `(`: the folder is unknown
-                here, pushed = None, []
+                st, fa = [(None, ())], 0
             continue
+        heres = list(dict.fromkeys([st[fa][0]] + [f for f, _ in st]))   # where a `cd` ran, first
+        stood.update(heres)
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
         words = [w for w in words if not _PH_RE.match(w)]
+        if words and not words[-1].strip("`"):
+            words.pop()                   # r3 F6: a lone closing backtick is no argument, and
+        words = [w if w.strip("`") in _CDS or not w.strip("`") else w.strip("`")
+                 for w in words]          # one at a word's end is the line's (R8: no `cd`)
         for o in outs:
-            if not _PH_RE.match(o):
-                found.append(("write", _resolve(o, here, env)))
-        while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
-                         or (words[0].startswith("-") and len(words) > 1)):
-            words = words[1:]
+            if not _PH_RE.match(o) and o.strip("`"):
+                for h in heres:
+                    add("write", o.strip("`"), h)
+                    if h != heres[0]:     # r2 R4: one credit a word and command (see below)
+                        found[-1] = found[-1][:2] + (None,) + found[-1][3:]
+        lead, run, i = False, True, 0     # g6 R5: `then cd` is read (n138); r1 R2: a reserved
+        while i < len(words):             # word only in the command's first run of them, which
+            w = words[i]                  # r2 R2: `time`'s options stand inside
+            opt = w.startswith("-") and i + 1 < len(words)
+            if run and (w in _LEAD or (opt and "time" in words[:i])):
+                lead = lead or (w in _LEAD and w != "time")
+            elif _ASSIGN.match(w) or w in _WRAPPERS or opt:
+                run = False
+            else:
+                break
+            i += 1
+        words = words[i:]
         if not words:
             continue
         name, args = os.path.basename(words[0]), words[1:]
         plain = [a for a in args if a and not a.startswith("-")]
-        if name in ("cd", "pushd"):
-            if name == "pushd":
-                pushed.append(here)
-            here = (_resolve(args[0], here, env) if len(args) == 1 else
-                    _tilde("~", env) if not args else None)
-        elif name == "popd":              # r1 F1: back to pushd's folder, else unknown
-            here = pushed.pop() if pushed and not args else None
-        elif name in _SHELLS and "-c" in args and depth == 0:
-            i = args.index("-c")
-            if i + 1 < len(args):
-                found += bash_targets(args[i + 1], here, env, depth + 1)
-        elif name == "tee":
-            found += [("write", _resolve(a, here, env)) for a in plain]
-        elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
-                (name == "perl" and any(_PERL_I.match(a) for a in args)):
-            found += [("write", _resolve(a, here, env)) for a in plain]
-        elif name in _TAKES:
-            srcs, dsts = _copy_like(name, args, here, env)
-            found += [("write", _resolve(d, here, env)) for d in dsts]
-            if name == "mv":
-                found += [("remove", _resolve(s, here, env)) for s in srcs]
-        elif name in ("rm", "unlink"):
-            found += [("remove", _resolve(a, here, env)) for a in plain]
-        elif name == "git":
-            _git(args, here, env, found)
-        elif _PY.match(name):
-            codes = list(mine)
-            if "-c" in args and args.index("-c") + 1 < len(args):
-                codes.append(args[args.index("-c") + 1])
-            for code in codes:
-                found += [("write", _resolve(s, here, env)) for s in _py_literals(code) if s]
+        if name in _CDS:                  # r1 R1: behind a reserved word a `cd` may not run, so
+            moved = [_move(name, args, s, env) for s in st]    # it adds a folder, replaces none
+            st, fa = _states(st + moved, len(st) + fa) if lead else _states(moved, fa)
+            continue
+        for h in heres:
+            n = len(found)
+            _judge(name, args, plain, h, mine, env, depth, stood, add, found, paid)
+            if h != heres[0]:             # r2 R4: a word judged in several folder states is one
+                found[n:] = [(k, p, None, a) for k, p, _, a in found[n:]]  # credit, the followed
+                                          # state's, as db19d51 judged it: never one per state
+    _others(command, cwd, env, depth, other, found, stood, paid)  # each reading's targets once
     return found
 
 
-def _bash_gated(payload: dict, env) -> str | None:
-    """The first gated target of a Bash line (a list file, for a removal); None when it has
-    none the gate can read."""
+_CAP_STATES = 16                          # r1 R1: a line's folder states, at most
+_STRICT_BOUND = 4096                      # r2 R1: distinct paths the strict reading judges
+_STRICT_READS = 65536                     # r2 R1: its judgements, a path judged again included
+
+
+def _move(name: str, args: list, s: tuple, env) -> tuple:
+    """The (folder, pushd stack) after one `cd`, `pushd` or `popd` (r1 F1: popd goes back to
+    pushd's folder, else to none)."""
+    f, pushed = s
+    if name == "popd":
+        return (pushed[-1], pushed[:-1]) if pushed and not args else (None, pushed)
+    to = _resolve(args[0], f, env) if len(args) == 1 else _tilde("~", env) if not args else None
+    return to, pushed + (f,) if name == "pushd" else pushed
+
+
+def _states(st: list, fa: int):
+    """`st` without repeats, at most `_CAP_STATES`, keeping the first and the `fa`th; fa's index."""
+    first, follow = st[0], st[fa]
+    rest = [x for x in dict.fromkeys(st) if x != first and x != follow]
+    keep = {first, follow, *rest[:_CAP_STATES - 2]}
+    order = [x for x in dict.fromkeys(st) if x in keep]
+    return order, order.index(follow)
+
+
+def _judge(name, args, plain, here, mine, env, depth, stood, add, found, paid) -> None:
+    """Adds the targets of one command, its words read in `here`."""
+    if name in _SHELLS and "-c" in args and depth == 0:
+        i = args.index("-c")
+        if i + 1 < len(args):
+            try:
+                found += _strict(args[i + 1], here, env, depth + 1, False, True, stood, paid)
+            except ValueError:            # g6 R6: the inner line is unread, the outer judged
+                found.append(("split", None, None, None))
+    elif name == "tee":
+        for a in plain:
+            add("write", a, here)
+    elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
+            (name == "perl" and any(_PERL_I.match(a) for a in args)):
+        for a in plain:
+            add("write", a, here)
+    elif name in _TAKES:
+        srcs, dsts = _copy_like(name, args, here, env)
+        for d in dsts:
+            add("write", d, here)
+        if name == "mv":
+            for s in srcs:
+                add("remove", s, here)
+    elif name in ("rm", "unlink"):
+        for a in plain:
+            add("remove", a, here)
+    elif name == "git":
+        chdirs, paths = _git_paths(args)
+        at = here
+        for d in chdirs:
+            at = _resolve(d, at, env)
+        for p in paths:
+            add("remove", p, at)
+    elif _PY.match(name):
+        codes = list(mine)
+        if "-c" in args and args.index("-c") + 1 < len(args):
+            codes.append(args[args.index("-c") + 1])
+        for code in codes:
+            for s in _py_literals(code):
+                if s:
+                    add("write", s, here)
+
+
+def _others(command: str, cwd, env, depth: int, other: list, found: list, stood: set,
+            paid: _Paid) -> int:
+    """Adds to `found` each other reading's targets it lacks; how many readings read the line."""
+    read = 0
+    for r in other:
+        try:
+            have = {f[:2] for f in found}
+            found += [f for f in _strict(command, cwd, env, depth, *r, stood, paid)
+                      if f[:2] not in have]
+            read += 1
+        except ValueError:
+            pass
+    return read
+
+
+# ---- g6: the loose reading, a second reading that no quote, comment or heredoc can hide ----
+
+_LOOSE_SEP = re.compile(r"(?<!\\)(?:[;|\n(){}`]|(?<![<>])&|(?<=\\[<>])&)")  # r1 R5: no split in
+                                          # `>&`; r2 R3: but at `\>&`, where `&` runs a command
+_LOOSE_W = re.compile(r"(?<![-=])(?:&>>|&>|>>|>\||>&(?=[ \t]*[^\s\d-])|>)[ \t]*"
+                      r"([^\s;&|<>(){}`]+)")         # r1 R5: `>&` before a word
+_LOOSE_REDIR = re.compile(r"(?<!\d)\d*(?:&>>|&>|>>|>\||>&|<<<|<<-?|<&|<>|>|<)[ \t]*[^\s;&|<>(){}`]*")
+_LOOSE_COMMENT = re.compile(r"(?:^|[ \t])#")
+_LOOSE_SKIP = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "eval"})
+_LOOSE_HARD = re.compile(r"[(){}`#\\]|<<|(?<![|&<>])[|&](?![|&>])")    # a `cd` past one: no move
+_LOOSE_COND = frozenset({"if", "then", "else", "elif", "while", "until", "do", "for", "select",
+                         "case", "function", "!", "eval"})
+
+
+def _clean(word: str) -> str:
+    return word.strip("'\"").rstrip("\\")
+
+
+def _loose(text: str) -> list:
+    """[(kind, word, the `cd` words before it, or None where the text before it is not plain,
+    its command's number)]: `loose_targets` with the folder moves a plain line makes (g6 R2)."""
+    text = text.replace("\\\n", "")
+    hard = _LOOSE_HARD.search(text)
+    plain_to = hard.start() if hard else len(text)
+    found, cds, start, segs = [], [], 0, []
+    for n, sep in enumerate([*_LOOSE_SEP.finditer(text), None]):
+        segs += [n] * (len(found) - len(segs))
+        end = sep.start() if sep else len(text)
+        seg, plain = text[start:end], start <= plain_to
+        start = sep.end() if sep else end
+        moves = tuple(cds) if plain else None
+        for m in _LOOSE_W.finditer(seg):
+            w = _clean(m.group(1))
+            if w:
+                found.append(("write", w, moves))
+        cut = _LOOSE_COMMENT.search(seg)          # the command's words end at a blank then `#`
+        words = [w for w in (_clean(x) for x in
+                             _LOOSE_REDIR.sub(" ", seg[:cut.start()] if cut else seg).split())
+                 if w]
+        if plain and words and words[0] in _LOOSE_COND:
+            plain_to = -1                         # a `cd` past a reserved word may not run
+        i = 0                                     # r2 R2: a reserved word wherever the loop
+        while i < len(words) and (_ASSIGN.match(words[i]) or words[i] in _WRAPPERS   # meets it,
+                                  or words[i] in _LOOSE_SKIP                    # as db19d51's
+                                  or os.path.basename(words[i]) in _SHELLS      # (an inner
+                                  or (words[i].startswith("-") and i + 1 < len(words))):  # line)
+            i += 1
+        words = words[i:]
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        plain_args = [a for a in args if not a.startswith("-")]
+        if name in ("cd", "pushd", "popd"):
+            cds.append(args[0] if name != "popd" and len(args) == 1 else
+                       "~" if name != "popd" and not args else None)
+        elif name == "tee" or (name == "sed" and any(_SED_I.match(a) for a in args)) or \
+                (name == "perl" and any(_PERL_I.match(a) for a in args)):
+            found += [("write", a, moves) for a in plain_args]
+        elif name in _TAKES:
+            srcs, tdir = _copy_args(name, args)
+            if tdir is not None:
+                found += [("write", os.path.join(tdir, os.path.basename(s.rstrip("/"))), moves)
+                          for s in srcs]
+            elif len(srcs) > 1:
+                found.append(("write", srcs[-1], moves))
+                srcs = srcs[:-1]
+            if name == "mv":
+                found += [("remove", s, moves) for s in srcs]
+        elif name in ("rm", "unlink"):
+            found += [("remove", a, moves) for a in plain_args]
+        elif name == "git":
+            chdirs, paths = _git_paths(args)
+            for p in paths:
+                for d in reversed(chdirs):
+                    p = os.path.join(d, p)
+                found.append(("remove", p, moves))
+    segs += [len(segs) and segs[-1] + 1] * (len(found) - len(segs))
+    return [(k, w, m, n) for (k, w, m), n in zip(found, segs)]
+
+
+def loose_targets(text: str) -> list:
+    """[(`write` or `remove`, word)]: every target a reading blind to quotes, comments and
+    heredocs finds (g6 R1). Pure: no list, no folder, no file."""
+    return [(k, w) for k, w, _, _ in _loose(text)]
+
+
+def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
+    """The first gated path (a list file, for a removal) of a loose target the strict reading
+    did not judge in the same place (g6 R2); None when there is none it can resolve."""
+    loose = _loose(command)
+    judged: dict = {}
+    owns, at = [cwd], []                  # r1 R4: each `cd` resolved once, each target once
+    for kind, word, moves, _ in loose:
+        for c in (moves or ())[len(owns) - 1:]:
+            owns.append(_resolve(c, owns[-1], env) if c is not None and owns[-1] else None)
+        at.append(owns[len(moves)] if moves is not None else cwd)
+    spent = _spent(loose, at, found, cwd, env)
+    for kind, path, word, _ in found:
+        if kind in ("write", "remove") and path is not None and word and len(word.split()) < 2:
+            judged[kind, path] = judged.get((kind, path), 0) + 1
+    left = []
+    for i, (kind, word, moves, _) in enumerate(loose):
+        if i in spent:
+            continue
+        own = at[i]
+        key = (kind, _resolve(word, own or cwd, env))
+        if key[1] is not None and judged.get(key):
+            judged[key] -= 1
+            continue
+        left.append((kind, word, own))
+    left = list(dict.fromkeys(left))
+    folders = list(dict.fromkeys([cwd] + sorted(f for f in stood if f)))
+    if len(left) * (len(folders) + 1) > _LOOSE_BOUND:   # a write it cannot afford to read
+        kind, word, own = left[0]
+        return _resolve(word, own or cwd, env) or word
+    tried: set = set()
+    for kind, word, own in left:
+        for f in dict.fromkeys([cwd, own] + folders):
+            p = _resolve(word, f, env) if f else None
+            if p is None or (kind, p) in tried:
+                continue
+            tried.add((kind, p))
+            if kind == "write" and gated(p, env, cache):
+                return p
+            if kind == "remove":
+                lf = _removes_list(p, env, cache)
+                if lf is not None:
+                    return lf
+    return None
+
+
+_RUN_CAP = 16                             # r1 R3: a word of more pieces stands for none
+_LOOSE_BOUND = 4096                       # r1 R4: loose targets left times folders, at most
+
+
+def _spent(loose: list, at: list, found: list, cwd, env) -> set:
+    """The loose targets a strict word with a blank stands for (r1 R3): only whole, every piece
+    in order, one command's targets of its kind, each loose target once; a word whose pieces
+    the loose reading did not list together stands for none, so no piece is left to spend.
+    A run stands for it only where the run's folder (`at`) resolves the run to the path the
+    strict reading judged, as db19d51's credit was keyed by the path (r2 R5)."""
+    want: dict = {}
+    shapes: set = set()
+    for kind, path, word, _ in found:
+        pieces = tuple(word.split()) if path is not None and word else ()
+        if 1 < len(pieces) < _RUN_CAP and kind in ("write", "remove"):
+            want[kind, pieces, path] = want.get((kind, pieces, path), 0) + 1
+            shapes.add((kind, pieces))
+    spent: set = set()
+    for k in sorted({len(p) for _, p in shapes}):
+        for i in range(len(loose) - k + 1):
+            run = loose[i:i + k]
+            shape = (run[0][0], tuple(r[1] for r in run))
+            if shape not in shapes or run[0][3] != run[-1][3] or \
+                    any(r[0] != shape[0] for r in run) or spent.intersection(range(i, i + k)):
+                continue
+            key = shape + (_resolve(" ".join(shape[1]), at[i] or cwd, env),)
+            if want.get(key):
+                want[key] -= 1
+                spent.update(range(i, i + k))
+    return spent
+
+
+def _bash_gated(payload: dict, env):
+    """(the first gated target of a Bash line, a list file for a removal; the reading that
+    found it), or None when it has none the gate can read."""
     ti = payload.get("tool_input")
     command = ti.get("command") if isinstance(ti, dict) else None
-    if not isinstance(command, str) or not _WRITE_WORD.search(command):
-        return None
+    if not isinstance(command, str) or not (_WRITE_WORD.search(command) or
+                                            _WRITE_WORD.search(command.replace("\\\n", ""))):
+        return None                       # g6 R4: `c\` newline `p` is a `cp`
     cwd = payload.get("cwd")
     cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and "\0" not in cwd else None
+    stood: set = set()
     try:
-        found = bash_targets(command, cwd, env)
-    except ValueError:                    # an open quote: it passes, with one line (r1 F6)
-        log(payload, env, "open", None, why="the line cannot be split")
-        return None
+        found, raised = _strict(command, cwd, env, 0, False, True, stood), False
+    except ValueError:                    # an open quote: the loose reading alone (g6 R2)
+        found, raised = [], True
+    except _Bound as b:                   # r2 R1: past the bound, denied unread
+        return b.path, STRICT
     cache: dict = {}
-    unresolved = False
-    for kind, path in found:
+    unresolved = split = False
+    seen: set = set()
+    for kind, path, _, _ in found:
+        if kind == "split":
+            split = True
+            continue
         if path is None:
             unresolved = True
             continue
+        if (kind, path) in seen:          # one answer a path: a long line costs no more
+            continue
+        seen.add((kind, path))
         if kind == "write" and gated(path, env, cache):
-            return path
+            return path, STRICT
         if kind == "remove":
             lf = _removes_list(path, env, cache)
             if lf is not None:
-                return lf
-    if unresolved:                        # r1 F6: an unresolved target passes, with one line
+                return lf, STRICT
+    loose = _loose_gated(command, cwd, env, cache, found, stood)
+    if loose is not None:
+        return loose, LOOSE
+    if raised or split:                   # g5 r1 F3, r1 F6: the line was not all read
+        log(payload, env, "open", None, why="the line cannot be split")
+    elif unresolved:                      # r1 F6: an unresolved target passes, with one line
         log(payload, env, "open", None, why="a target cannot be resolved")
     return None
 
@@ -709,10 +1129,13 @@ def check(payload: dict, env) -> dict:
         return {}
     path = None
     try:
+        reason, why = REASON, None
         if tool == "Bash":
-            path = _bash_gated(payload, env)
-            if path is None:
+            got = _bash_gated(payload, env)
+            if got is None:
                 return {}
+            path, why = got
+            reason = LOOSE_REASON if why == LOOSE else REASON
         else:
             path = _target(payload)
             if path is None:
@@ -720,10 +1143,10 @@ def check(payload: dict, env) -> dict:
                 return {}
             if not gated(path, env):
                 return {}
-        log(payload, env, "deny", path)
+        log(payload, env, "deny", path, why=why)
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "deny",
-                                       "permissionDecisionReason": REASON.format(path=path)}}
+                                       "permissionDecisionReason": reason.format(path=path)}}
     except Exception as e:                              # noqa: BLE001 - R4: fail open
         log(payload, env, "open", path, why=type(e).__name__)
         return {}

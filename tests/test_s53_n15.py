@@ -53,4 +53,4 @@ def test_s53_n15_the_cases_cover_on_phase_reset_absent_and_malformed():
 def test_s53_n15_the_module_s_hand_case():
     """The module's own corner (an `until` that is not a stamp, no resets count), drawn alike."""
     entry = {"P7": 26, "mix": {"points": {"fable": 1}, "budgets": {"fable": 50}, "until": 7}}
-    assert admission.band_line(entry, _now()) == "5h no reading · 7d 26% · mix fable 1/50 · next none"
+    assert admission.band_line(entry, _now()) == "5h no reading · 7d 26%"      # pl1 R1

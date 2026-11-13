@@ -76,7 +76,7 @@ class HygieneTest(unittest.TestCase):
         Path(self.repo, "docs", "allowed.md").write_text(FIXTURES["sibling"] + "\n")
         Path(self.repo, "docs", "deep").mkdir()
         Path(self.repo, "docs", "deep", "x.md").write_text(FIXTURES["sibling"] + "\n")
-        Path(self.repo, "blob.bin").write_bytes(b"\0\1" + FIXTURES["person"].encode())
+        Path(self.repo, "blob.bin").write_bytes(b"\0\1" + FIXTURES["lan"].encode())
         Path(self.repo, "untracked.txt").write_text(FIXTURES["domain"] + "\n")
         Path(self.repo, ".hygiene-allow").write_text(
             "# comment\ndocs/*.md: sibling\nlan.txt: lan,home\n")
@@ -145,7 +145,8 @@ class HygieneTest(unittest.TestCase):
         self.check_text_table()  # folded, so the README's test count holds
 
     def test_nul_file_scans_secret_and_email(self):
-        # ADV10-17: a NUL file's printable runs are scanned for home, secret and email
+        # ADV10-17: a NUL file's printable runs are scanned for home, secret and email;
+        # h2: its whole content for the private rows
         with tempfile.TemporaryDirectory() as repo:
             git(repo, "init", "-q")
             data = (b"\0 abcd" + b"@" + b"example.org sk-an" + b"t" + b"-abcdefghij\n"
@@ -156,7 +157,7 @@ class HygieneTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(sorted((f["path"], f["group"], f["lines"]) for f in d["files"]),
                              [("b.bin", "email", 1), ("b.bin", "home", 1),
-                              ("b.bin", "secret", 1)])
+                              ("b.bin", "person", 1), ("b.bin", "secret", 1)])
 
     def check_text_table(self):
         code, out, _ = run(self.repo)
@@ -283,10 +284,11 @@ class HygieneTest(unittest.TestCase):
                    + b"\0\x01")
             Path(repo, "a.png").write_bytes(png)
             code, d = self.json_in(repo)
-            # one run of 8+ bytes carries the home path; the 7-byte run and the
-            # person text are not evaluated in a binary
+            # one run of 8+ bytes carries the home path; the 7-byte run is not evaluated
+            # for home; the person text is a private row's hit (h2)
             self.assertEqual(code, 1)
-            self.assertEqual(d["files"], [{"path": "a.png", "group": "home", "lines": 1}])
+            self.assertEqual(d["files"], [{"path": "a.png", "group": "home", "lines": 1},
+                                          {"path": "a.png", "group": "person", "lines": 1}])
             self.assertEqual(d["oversize"], 0)
             # UTF-16 (a BOM, or NULs on 90% of the odd or even bytes) is text (ADV10-8)
             text = "/Us" + "ers/alice/x\n" + FIXTURES["person"] + "\n"
@@ -297,7 +299,8 @@ class HygieneTest(unittest.TestCase):
             Path(repo, "big.txt").write_bytes(("/Us" + "ers/alice\n").encode() * 500000)
             code, d = self.json_in(repo)
             self.assertEqual(sorted((f["path"], f["group"], f["lines"]) for f in d["files"]),
-                             [("a.png", "home", 1), ("be.md", "home", 1), ("be.md", "person", 1),
+                             [("a.png", "home", 1), ("a.png", "person", 1),
+                              ("be.md", "home", 1), ("be.md", "person", 1),
                               ("big.txt", "home", 500000), ("le.md", "home", 1),
                               ("le.md", "person", 1)])
             self.assertEqual(d["oversize"], 1)

@@ -3,7 +3,7 @@
 What the README does not say: setup detail, choosing a profile, what
 `local-only` measured on this machine, adjusting a session, and the budget
 zones. Two facts govern everything below. First, anything you change with
-`set` applies only to the running session unless you pass `--save`. Second,
+`set` applies only to the running session; `--save` writes only a model tier. Second,
 an unattended run cannot answer a permission prompt, so an unanswered prompt
 resolves to deny, even though Claude Code still reports success. Read section
 3 and the `local-only` entry in section 2 before you run anything unattended.
@@ -17,7 +17,9 @@ resolves to deny, even though Claude Code still reports success. Read section
    `~/.local/share/agentik-session/<hash>/` (`<hash>` is of their names and contents, so a
    version bump alone is a new tree; an older copy is pruned unless a running
    process names it, on its command line or in its environment, or it is among the newest
-   three) and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
+   three), writes `~/.local/bin/agentik` where none or an older door is there (a newer or
+   equal door stays byte for byte; a link, or a door with no `VERSION=` to compare, is left
+   alone with one line), and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
    runs that copy under `/usr/bin/python3` with `-I`, so
    neither the directory a command runs in nor a checkout can change it, with no clone or
    venv. `AGENTIK_PYTHON` names another interpreter; `python3` on PATH is the fallback. What
@@ -32,17 +34,17 @@ resolves to deny, even though Claude Code still reports success. Read section
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
    `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`,
-   `InstructionsLoaded`) through `hooks/run`, which execs
+   `InstructionsLoaded`, `SubagentStop`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
+   on `Stop`, `StopFailure`, `SubagentStop`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
    `PostModelSwitch` and `PreCompact` (keeping
    PreCompact's stdout, its block; the others' streams go to `/dev/null`), so no turn end,
-   no helper's loop and no
+   no helper's loop or end and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
    fails its `plugin` line and names an event its CLI does not handle.
@@ -150,6 +152,16 @@ and a `case` pattern's, is no subshell's edge), and `popd` returns to its `pushd
 passes the same way. A path matches by its absolute
 and its real spelling, in any case where the volume folds case.
 
+A second, loose reading (g6) reads the same line blind to quotes, comments and heredocs, split at
+every `;`, `&`, `|`, newline, paren, brace and backquote: a redirect's word and the targets of
+the commands above. A target of it the first reading did not resolve to the same path is tried
+in the call's folder, in the folder a plain line's `cd` moved to, and in each folder the first
+reading stood in; a gated one is refused with its own reason, which says the line was not read
+with confidence, and its `guard.jsonl` line says `the loose reading`. So a line the first
+reading cannot split, or a `cd "$T"` it cannot resolve, no longer passes when its target is
+gated where the call runs; and a line that only carries a write's text as data (a heredoc into a
+script, a quoted example, a commit message) is refused: keep the text in a file and name the file.
+
 The lane's write: `agentik session gates write <file> --from <draft> --preview` prints the diff,
 the byte change and a hash and writes nothing; `--expect <hash>` writes the draft atomically,
 keeping the file's mode, and refuses a file or draft changed since, a changed line of a
@@ -187,21 +199,21 @@ completely idle end to end, but the measured cost runs about 65 seconds per
 turn (see below), and its own design guidance argues against using it as a
 default. `agentik session config list` shows every profile; the shipped ones:
 
-| config | lane | main thread | subagents | effort | tools | posture |
+| config | lane | main thread | subagents (`tiers.build`) | effort | tools | posture |
 |---|---|---|---|---|---|---|
-| `frontier` | seat | opus | opus | xhigh | default | signal |
+| `frontier` | seat | opus | opus | high | default | signal |
 | `balanced` | seat | opus | sonnet | high | default | signal |
 | `local` | local | seat | agentik-agents local routing | high | default | signal |
 | `local-only` | local-only | local default (27B) | local default | medium | default | off |
 | `scratch` | local-only | local default | local default | low | default | off |
-| `review` | seat | opus | opus | xhigh | Read, Glob, Grep + plan mode | signal |
+| `review` | seat | opus | opus | high | Read, Glob, Grep + plan mode | signal |
 
 `frontier`, `balanced`, and `review` also load the respeak plugin, via
 `--plugin-dir`.
 
 - `agentik session start frontier`: full-effort seat work, opus on both
   threads. Pick it when the task needs the strongest model everywhere. Cost:
-  full seat billing at `xhigh` effort.
+  full seat billing at `high` effort.
 - `agentik session start balanced`: opus main thread, sonnet subagents. Pick
   it as the default seat config when subagent work does not need opus-grade
   reasoning. Cost: seat billing, lighter than `frontier` on the subagent
@@ -223,9 +235,9 @@ default. `agentik session config list` shows every profile; the shipped ones:
   it for throwaway exploration you would not run unattended. Cost:
   same serialization and reasoning-speed limits as `local-only`, at a lower
   effort ceiling.
-- `agentik session start review`: opus, `xhigh` effort, tools restricted to
+- `agentik session start review`: opus, `high` effort, tools restricted to
   `Read`, `Glob`, `Grep` plus plan mode. Pick it for an audit that cannot
-  edit anything by construction. Cost: full seat billing at `xhigh`, same as
+  edit anything by construction. Cost: full seat billing at `high`, same as
   `frontier`.
 
 ### What local-only actually measured (2026-09-05, this machine)
@@ -257,7 +269,7 @@ default. `agentik session config list` shows every profile; the shipped ones:
 
 ## 3. Configuring and adjusting sessions
 
-**Every `set` is session-only unless you pass `--save`.**
+**Every `set` is session-only; `--save` writes a model tier alone.**
 
 Applying a config never writes to `~/.claude/settings.json` either. Every
 knob becomes a per-session CLI flag: `--model`, `--effort`, `--tools`,
@@ -269,7 +281,11 @@ it runs anything.
 
 `set` writes to an overlay keyed by `$CLAUDE_CODE_SESSION_ID`. The
 `SessionEnd` hook drops that overlay when the session ends.
-`--save` promotes the value to the stored config instead.
+`--save` on any key but `tier.<role>` is refused (exit 2) and writes nothing:
+the profiles are the one table (`profiles.yaml`, then the layers below), so a
+profile's field is changed in the user's `profiles.yaml`, under `profiles:`.
+No verb writes `configs.json` any more; one an earlier release wrote is read
+for the hooks' checkpoint cadence alone, one release more.
 
 Two kinds of key behave differently:
 
@@ -278,14 +294,15 @@ Two kinds of key behave differently:
   `fallback_model`, `settings`, `env`) cannot change a process already
   running, and a session-only `set` of one **is not applied by the next
   `start` either**: the overlay dies with this session, and `start` reads the
-  stored config. `set` says so, and prints the in-session command that does
+  profile. `set` says so, and prints the in-session command that does
   change it now:
 
   ```
   note: model is a launch-time setting. This session-only record is
   informational -- it will NOT be applied by the next `start` ... To change
   it in this session right now, run  /model opus. To change what `start
-  frontier` launches, add --save.
+  frontier` launches, set it under `profiles: frontier:` in
+  ~/.claude/agentik/profiles.yaml.
   ```
 
   `--config NAME` is only accepted together with `--save`: a session-only
@@ -308,11 +325,113 @@ accepts; `setting_sources` must include `user`, since dropping it removes
 these hooks. `env` refuses `PATH`, `PYTHONPATH`, `DYLD_*`, `ANTHROPIC_*` and
 the credential variables outright. `name` and `description` are not settable.
 
-Commands: `agentik session set <key> <value> [--save] [--config NAME]`,
+Commands: `agentik session set <key> <value>`,
+`agentik session set tier.<role> <model|off> [--until <zoned time>] [--save [user|repo]]`,
+`agentik session set cap <model|off> [--until <zoned time>]`,
 `agentik session set fill <reset|opus> [--until <zoned time>]`,
 `agentik session set fill off`, `agentik session config list`, `agentik session config show [name] [--stored]`,
-`agentik session config new <name> --from <base> --description "..."`,
-`agentik session config delete <name>`.
+`agentik session profile [name]`. `config new` and `config delete` are refused
+(exit 2): add a profile under `profiles:` in the user's `profiles.yaml`.
+
+### Model tiers
+
+Every profile holds `tiers`, five roles each with a model and an effort (hq
+design/13 §3), shipped in `profiles.yaml`'s `defaults`:
+
+| role | the work | model, effort |
+|---|---|---|
+| `design` | a design record, a refutation, a decomposition | fable, high |
+| `build` | a packet with an acceptance table; a review of landed code | opus, high |
+| `words` | a respeak edit, a record from a hand-back | sonnet, medium |
+| `mend` | one small commit whose test the brief names | sonnet, high |
+| `lookup` | a read-only search, a summary of named files | haiku, low |
+
+`orchestrator-opus` holds `design` at opus; `local-only` and `scratch` send
+every tier to `local/default`; `balanced` keeps sonnet as its build tier. No
+shipped profile says `xhigh`. `agentik session profile <name>` prints the table
+as resolved here, the lines a brief pastes. `start` exports `tiers.build`'s
+model as `CLAUDE_CODE_SUBAGENT_MODEL`, so a spawn that names no model runs on
+the build tier; the doctor warns when the variable differs from the table.
+`subagents` is read as `tiers.build`'s model for one release.
+
+The user file is `$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when it exists,
+else `~/.claude/agentik/profiles.yaml`; its `defaults.profile` names the profile
+a repo naming none runs (read after the repo's `session: {profile: ...}`, before
+`frontier`). The tiers' layers, lowest first, role by role: the shipped
+`defaults`; the user file's `defaults`; the shipped profile; the user file's
+body of it (`profiles: <name>:`); the user file's top-level `tiers:` block,
+which overrides a role in every repo; the repo's `.claude/agentik/config.yaml`,
+then its `config.local.yaml`, each by its top-level `tiers:` block, the one
+spelling (`session.tiers` is not read, and the doctor's config row names it
+unknown); last, when `start <profile>` named the profile, that profile's own
+tiers again (shipped, then the user's body), so a launched `local-only` stays
+local whatever a repo says. A profile named on the start line re-applies the
+tiers its body states above every file, as it does every other field, and
+`set tier.*` sits above it; frontier, packets, builder, orchestrator and
+orchestrator-opus state `build: opus`, so under their start a file's build tier
+loses. A layer's model that names no family or is null, and its effort that is
+not one of low, medium, high, xhigh and max or is null, is skipped (the role keeps
+the layer below it), and the doctor's config row names
+`<layer>: tiers.<role>.model` or `.effort`.
+
+```yaml
+defaults:
+  profile: orchestrator
+tiers:
+  mend: {model: opus}
+```
+
+Two session words, neither kept by a profile. `set tier.<role> <model>
+[--until <zoned time>]` changes one role for this session, shown as
+`tiers: build sonnet to Ddd HH:MM` by `agentik session rules` and on the
+SessionStart line, gone at its time or the session's end; `off` drops it.
+`--save` writes the role into the user file's `tiers:` block, `--save repo`
+into the repo's `config.yaml`; the block is rewritten whole (comments inside
+it, blank lines after it and CRLF endings are not kept), every line outside it
+stays. Then the verb resolves as the next session here would, with this
+session's launch profile; when the role's model is not the one written, it
+names the file and block that holds it (`... is sonnet, from
+<repo>/.claude/agentik/config.yaml: tiers: change it there`; under a launched
+profile's body, `change it under profiles.<name>.tiers in` the user file) and
+exits 1. A
+model word, for `set tier.<role>` and `set cap` alike, is letters, digits and
+`. _ / [ ] -` (`opus`, `claude-opus-5-5`, `opus[1m]`) naming a family, refused
+(exit 2) before anything is written; `--save` writes it quoted. `set cap <model>
+[--until <zoned time>]` holds every tier at that family or below
+(`cap: opus to Ddd HH:MM`); `--save` and `--config` are refused, and a `run`
+launcher hands a cap with an end to its successor while the end is ahead, as it
+hands `fill`.
+
+The role check. A spawn names its role with a line `tier: <role>` in the Agent
+call's prompt (any case, a trailing full stop allowed; the first line naming one
+of the five roles counts). When the call's model, else its agent file's `model:`, ranks
+above the role's (fable, opus, sonnet, haiku, local, highest first), the spawn
+gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
+naming no role meets the family rule alone: a Fable helper starts only under a
+Fable session, in every posture.
+
+The type's model counts. A call that names no `model` is judged, by the family
+rule and the role check alike, on the `model:` in its agent type's frontmatter.
+A type is found as Claude Code names it: by the file's frontmatter `name:`,
+else the file's name. A type `<name>` is looked up in the `.claude/agents`
+folders of the working directory and each ancestor up to the repo's root (the
+folder holding `.git`), then `$CLAUDE_PROJECT_DIR`'s, the nearest folder that
+defines it winning, else the user's (`$CLAUDE_CONFIG_DIR`, else `~/.claude`,
+then `agents/`). A plugin's type `<plugin>[:<folder>...]:<name>` is looked up in
+`<installPath>/agents` (its subfolders the type's namespace) of each install of
+`<plugin>@<marketplace>` in that folder's `plugins/installed_plugins.json`. Where
+two files claim one type, the highest family counts. Only regular files are
+read, the frontmatter to 256 KB. A refusal names the type and its model; name
+`model: 'opus'` on the call, which outranks the file. A type with no file, no
+`model:` line or `model: inherit`, and a built-in type, meet no rule;
+`CLAUDE_CODE_SUBAGENT_MODEL` is not read.
+
+The start applies the profile. `start <profile>` takes every profile
+`profile` lists. A start, and each start of `run`, whose claude arguments name
+no `--model` passes the profile's `--model` and `--effort`; a `--model` on the
+line wins, and the profile then passes neither. `run` passes them on the seat
+lane only. `run` with no first prompt is refused (exit 2): give one,
+`agentik session run -- "<first prompt>"`.
 
 An overlay set with `set` is confirmed gone once the `SessionEnd` hook
 fires: this is covered by test, not just by design. It depends on the plugin's
@@ -422,17 +541,17 @@ findings}`, or `{due, last, next}` when not due.
 
 ## 4. Budget and checkpoints as a signal
 
-The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · clear`) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
+The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · notice`; the zone's word is left out while it is `clear`, and `status` keeps `zone clear`, packet pl1) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
 
 The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `agentik session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent.
 
 Before each spawn, and each SendMessage resume, the module asks `agentik session admission admit --session <id>` for a verdict (one JSON object on stdin: the spawn's type, model, parent model, background, fork, its `tool_use_id`, the window readings and `resume`). Inside the same lock the verb reads the ledger, projects the five-hour window's peak at its reset (the burn of each active main thread, each running helper's life left and the new spawn's, fit from the ledger once it holds 20 ten-minute intervals, seeded before), appends one `verdict` line and prints `{verdict, mode, text, peak, window, resume_at}`: `admitted`, `unread` (no five-hour reading, and the week under its ceiling), `stale` or `wait` (the reading's reset has passed), `denied` (the seven-day window at its ceiling), `deferred` (interactive) or `not-started` (`-p`), the last three with the text the Agent tool will show once refusals are built. `resume_at` is the reset a holder waits for: the five-hour one, the week's on a weekly denial, null with nothing to name. `session.admission` sets `ceiling` (97), `margin` (3), `ceiling_7d` (97), the `seeds` and the window override below; `mode` is `observe` only, so nothing is refused yet: each answer is one `admission: admit …` line in the debug log, and the spawn goes ahead whatever it says.
 
-The band shows the window: at every `record` and `admit` the verb rewrites `admission/band.json` (0600, after the ledger's lock, under its own `band.lock`, never waited for: a build already running goes round for the new line) with the newest five-hour reading, its projected peak with no new spawn, the helpers in flight, the room left for spawns of the parent's family under `ceiling` less `margin`, the `deferred` and `wait` verdicts since the window began and the seven-day reading. Two logins on one Mac are told apart by a reading's seven-day `resetsAt`, to the minute, since the statusline names no account: with two or more in the ledger, each session's band (its reading, fit, helpers and room) and each verdict use only its own account's lines, and band.json adds `accounts` and `sessions`, from which each session draws its own (packet S35); its top level is the current login's entry, the key of the newest keyed reading, and a request with no list and no readings of its own is judged on that login too (packet S42); the one-at-a-time gate on a stale reading also counts the verdicts of other sessions with no key, so sibling relay rows still wait for one another. The module draws it as a second line under the session's, cut to the band's width, for example `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41% · observe` (`5h no reading` before the first reading; `· <n>s old` past 120 s). While a survey holds the band it draws neither line; another plugin's line stays under the two. The UserPromptSubmit hook adds the same line to the budget context; nothing that decides reads the file. `agentik session report` ends with `admission: five-hour windows`, one row per window in the ledger: its reset, its last reading, `held` when a spawn waited in it (in observe: would have) or `idle`, and `under 90` when the last reading is below 90, the use the target asks for; `admission: no ledger` without one.
+The band shows the window: at every `record` and `admit` the verb rewrites `admission/band.json` (0600, after the ledger's lock, under its own `band.lock`, never waited for: a build already running goes round for the new line) with the newest five-hour reading, its projected peak with no new spawn, the helpers in flight, the room left for spawns of the parent's family under `ceiling` less `margin`, the `deferred` and `wait` verdicts since the window began and the seven-day reading. Two logins on one Mac are told apart by a reading's seven-day `resetsAt`, to the minute, since the statusline names no account: with two or more in the ledger, each session's band (its reading, fit, helpers and room) and each verdict use only its own account's lines, and band.json adds `accounts` and `sessions`, from which each session draws its own (packet S35); its top level is the current login's entry, the key of the newest keyed reading, and a request with no list and no readings of its own is judged on that login too (packet S42); the one-at-a-time gate on a stale reading also counts the verdicts of other sessions with no key, so sibling relay rows still wait for one another. The module draws it as a second line under the session's, cut to the band's width, for example `5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 deferred · 7d 41%` (`5h no reading` before the first reading; `· <n>s old` past 120 s). The line names no admission mode: `status` prints `admission mode: observe` and `status --json` has `admission.mode` (packet pl1). With `session.admission.mix` on, the mix's only words on the line are `resets <n>` after the 7d part, with ` by <Ddd> <HH:MM>` while its `until` is ahead, and `reset now` before it when a Fable reset is due; each family's share and target and the family the next helper should take are `status`'s `mix:` line (`mix: fable 33/50 · opus 27/50 · next fable · resets 1`) and `status --json`'s `admission.mix`. The mix still counts and still advises by its mode, as before: only its words left the prompt (packet pl1). While a survey holds the band it draws neither line; another plugin's line stays under the two. The UserPromptSubmit hook adds the same line to the budget context; nothing that decides reads the file. `agentik session report` ends with `admission: five-hour windows`, one row per window in the ledger: its reset, its last reading, `held` when a spawn waited in it (in observe: would have) or `idle`, and `under 90` when the last reading is below 90, the use the target asks for; `admission: no ledger` without one.
 
-Each login has a window mode, worked out from the readings at every call and stored nowhere (packet S42). `five_hour`, the default, is all of the above. `none` is a login with no five-hour window: after its newest list carrying a five-hour entry, whatever that entry's percent, one session holds two readings or spawns at least 30 minutes apart, each listing a fresh seven-day and no five-hour, with the week up at least one whole point. The pair stays in one session because an idle Max login lists the week alone from its five-hour reset to its next response. One list carrying a five-hour entry switches it back. An idle login whose pair has rotated out of the ledger reads `five_hour` until it is busy again, and a new weekly key detects afresh. On `none` a verdict is `denied` at `ceiling_7d`, else `admitted`, with `resume_at` the week's reset and earlier five-hour readings ignored; nothing waits for a band, attended or not. Its band entry has `P`, `peak` and `room` null, `P7`, `ceiling_7d` and `resetsAt` the week's. Every entry carries `window` and `slot`, the week's reset as weekday and minute (`Wed-1500Z`), and `accounts` is written whenever a key is `none`. To override the rule, set `session.admission.window` to `auto`, `five_hour` or `none`, or `windows: {Wed-1500Z: none}` per login, where a slot beats `window`; a slot it cannot read is one note in the answer and ignored, and a key spelled with a space or colon is refused by the config loader. Set a login's override in the user layer, `defaults.admission` in `~/.claude/agentik/profiles.yaml`: a session with no resolved file, as a relay row's ask is before its child starts, reads `window` and `windows` from there alone, and no other knob, profile or repo layer, so a repo-layer override binds only the sessions resolved with it, and band.json follows whichever session wrote it last; a user-layer override set after a session resolved still flips band.json until that session re-resolves. If a verified login reports five_hour at 0% rather than leaving it out, the rule never fires and the override is the switch. A `none` login's line reads `no 5h window · 7d 62% · week resets Fri 13:00 · band avoid to 11:00 · 3 helpers · observe` (packets S43, S44), each part left out with no figure, then the age past 120 s: no countdown, ceiling, room or deferred. The weekday and the time are the stamp's own digits, in fixed English names, so no locale or system zone moves them. Any other `window` draws the five-hour line, unchanged. Its prompt cache's lifetime reads the week while the week's reset is ahead: 1h under 100%, 5m at 100% or past, else unknown.
+Each login has a window mode, worked out from the readings at every call and stored nowhere (packet S42). `five_hour`, the default, is all of the above. `none` is a login with no five-hour window: after its newest list carrying a five-hour entry, whatever that entry's percent, one session holds two readings or spawns at least 30 minutes apart, each listing a fresh seven-day and no five-hour, with the week up at least one whole point. The pair stays in one session because an idle Max login lists the week alone from its five-hour reset to its next response. One list carrying a five-hour entry switches it back. An idle login whose pair has rotated out of the ledger reads `five_hour` until it is busy again, and a new weekly key detects afresh. On `none` a verdict is `denied` at `ceiling_7d`, else `admitted`, with `resume_at` the week's reset and earlier five-hour readings ignored; nothing waits for a band, attended or not. Its band entry has `P`, `peak` and `room` null, `P7`, `ceiling_7d` and `resetsAt` the week's. Every entry carries `window` and `slot`, the week's reset as weekday and minute (`Wed-1500Z`), and `accounts` is written whenever a key is `none`. To override the rule, set `session.admission.window` to `auto`, `five_hour` or `none`, or `windows: {Wed-1500Z: none}` per login, where a slot beats `window`; a slot it cannot read is one note in the answer and ignored, and a key spelled with a space or colon is refused by the config loader. Set a login's override in the user layer, `defaults.admission` in `~/.claude/agentik/profiles.yaml`: a session with no resolved file, as a relay row's ask is before its child starts, reads `window` and `windows` from there alone, and no other knob, profile or repo layer, so a repo-layer override binds only the sessions resolved with it, and band.json follows whichever session wrote it last; a user-layer override set after a session resolved still flips band.json until that session re-resolves. If a verified login reports five_hour at 0% rather than leaving it out, the rule never fires and the override is the switch. A `none` login's line reads `no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers` (packets S43, S44, pl1), each part left out with no figure, then the age past 120 s: no countdown, ceiling, room or deferred. The weekday and the time are the stamp's own digits, in fixed English names, so no locale or system zone moves them. Any other `window` draws the five-hour line, unchanged. Its prompt cache's lifetime reads the week while the week's reset is ahead: 1h under 100%, 5m at 100% or past, else unknown.
 
-A `none` login also reports when the account is in demand, and nothing waits for it (packet S44). The bands are a file, never code: the shipped `plugin/lib/claude_session/bands.yaml`, which `$XDG_CONFIG_HOME/agentik/session/bands.yaml` (else `~/.config/...`) replaces whole. It names a `tz` and a list of rules, `{days: Mon-Fri, from: "05:00", to: "11:00", band: avoid}`, read on that zone's wall clock across DST; the first match wins, and each rule runs from `from` up to, not including, `to`. Only admission reads the file, at a band.json write on a `none` login; a `five_hour` login never reads it. The `none` entry gains `demand: {band, until, next: {good, best}}`: `until` is the next instant the band's name changes, null when it never does; each `next` is the start of that band's next stretch, past the one now is in, and is left out when the schedule has no such band; the stamps read in band.json's zone. A wall time a DST gap skips reads as the first instant after the gap, and a repeated one as its first instant. A cut inside a repeated hour therefore happens once: in the hour's second pass the band is the one its first pass ended on. An admit's answer on `none` gains `band`, the name or null. `status` adds `band: avoid to 11:00; next good 23:00, best 16:00` and `status --json` adds `band: {window, demand}`, both from band.json and only on `none`. A time on the line or in `status` is `HH:MM` within 24 hours of the entry's `at`, else `Ddd HH:MM`. Because `demand` is resolved only at a write, an idle login's can be past its end, and the line and `status` then leave the band out. A file that does not parse, names a zone that does not load, holds a bad rule (a band name is 1 to 32 letters, digits, `-` or `_`), leaves a minute of the week unmatched, is not a regular file or is past 64 KB is one `doctor` warning, never a failure, and the shipped file is used; with no user file or a good one `doctor` has no such row. There is no reserve: attended or not, all work runs to `ceiling_7d`.
+A `none` login also reports when the account is in demand, and nothing waits for it (packet S44). The bands are a file, never code: the shipped `plugin/lib/claude_session/bands.yaml`, which `$XDG_CONFIG_HOME/agentik/session/bands.yaml` (else `~/.config/...`) replaces whole. It names a `tz` and a list of rules, `{days: Mon-Fri, from: "05:00", to: "11:00", band: avoid}`, read on that zone's wall clock across DST; the first match wins, and each rule runs from `from` up to, not including, `to`. Only admission reads the file, at a band.json write on a `none` login; a `five_hour` login never reads it. The `none` entry gains `demand: {band, until, next: {good, best}}`: `until` is the next instant the band's name changes, null when it never does; each `next` is the start of that band's next stretch, past the one now is in, and is left out when the schedule has no such band; the stamps read in band.json's zone. A wall time a DST gap skips reads as the first instant after the gap, and a repeated one as its first instant. A cut inside a repeated hour therefore happens once: in the hour's second pass the band is the one its first pass ended on. An admit's answer on `none` gains `band`, the name or null. `status` adds `band: avoid to 11:00; next good 23:00, best 16:00` and `status --json` adds `band: {window, demand}`, both from band.json and only on `none`. The band is `status`'s alone: the line does not say it (packet pl1). A time in `status` is `HH:MM` within 24 hours of the entry's `at`, else `Ddd HH:MM`. Because `demand` is resolved only at a write, an idle login's can be past its end, and `status` then leaves the band out. A file that does not parse, names a zone that does not load, holds a bad rule (a band name is 1 to 32 letters, digits, `-` or `_`), leaves a minute of the week unmatched, is not a regular file or is past 64 KB is one `doctor` warning, never a failure, and the shipped file is used; with no user file or a good one `doctor` has no such row. There is no reserve: attended or not, all work runs to `ceiling_7d`.
 
 The same module records the engine's own measure beside the meter: every `session.measure` runs `agentik session measure record --session <id>` with `{context, rateLimits, cost, changed}` on stdin, which writes `measure.json` (0600) in the session's directory; it exits 2 on a refused key, number, id, JSON or a window that is not a whole number from 1 to 10**9, and 1 when the session's directory is absent, writing nothing then. When the window has moved it also rewrites `resolved.json` and `resolved.yaml` (`window`, `ceilings`, `window_source`, `limits_source`; a failure is silent and the next measure retries). That window is the first source of the window pick (`window_source` `engine:<n>`), and the meter takes it at the next tool; `set` keeps it, and a reading holds for the rest of the session. `status` prints `measure: engine <t> tokens / meter <c> tokens, drift <d>% (<age>s apart)` when the two were written within 120 s, `measure: not comparable (…)` otherwise, and `measure: none` without the file; `doctor`'s `measure` row warns at a drift of 10% or more and never fails. A drift means the meter may parse the transcript wrong: the budget still reads only the meter, and the tokens, percent, rate limits and cost of a measure decide nothing.
 
@@ -479,11 +598,15 @@ type that names its own model.
   once and 1000 a run.
 
 A checkpoint is a commit or a durable record: run one and the session is
-handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
-where `-c` runs `git add -u` (tracked files only) and commits. It never
-stages untracked files: the wind-down nudge makes an autonomous agent the
-likeliest caller, and `add -A` would sweep up a plaintext `.env` or a
-tfstate. Untracked files are named on stderr so you can add them yourself.
+handoff-ready at that moment. `agentik session checkpoint [-m MSG]
+[--commit <paths...>]`: `--commit` commits the paths its line names and
+nothing else, through `commit`'s core (§6) with no check, so another
+writer's staged or edited file stays out (packet fw5, R3). There is no
+sweep: `--commit` with no path, or a path without `--commit`, exits 2
+naming the form, nothing committed or recorded; `commit`'s refusals exit 2
+the same way. Nothing to commit in the named paths prints `nothing to
+commit` and records; a red commit exits 1 and records nothing. With
+`--respawn`, a modified tracked charter passes only when the line names it.
 
 ### Priority and pacing
 
@@ -587,11 +710,12 @@ CLAUDE_SESSION_PROFILE=orchestrator-opus agentik session run --chain night -- \
 ```
 
 Everything after `--` goes to `claude` unchanged at every start, behind a
-fresh `--session-id`. Flags that resume, fork, detach or print are refused,
+fresh `--session-id` and, when it names no `--model`, the profile's `--model`
+and `--effort` (packet mt1). Flags that resume, fork, detach or print are refused,
 and so is `/compact`. A value that begins with `-` is refused after its
 flag; write it as `--flag=value`. The last argument is the first prompt,
 sent again at every start. Without one, every restart opens an idle session
-that waits for a person, so `run` warns once and still runs. A list flag
+that waits for a person, so `run` refuses to start (exit 2). A list flag
 (`--add-dir`, `--tools`, `--allowedTools`, `--disallowedTools`,
 `--mcp-config`) reads every argument after it, the prompt too, so write it
 as `--flag=value`. A sitting restarts only when its charter's
@@ -710,7 +834,16 @@ agentik session gate status                       # running, queued, the last fi
   lines go to stderr, and the exit is the job's; a log with no land line reads
   `red gate`. Inside a gate job the queue form refuses, since it would wait on
   its own repo until the wall: the job itself is `gate land --in-job`, which
-  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark.
+  runs only under the job's `CLAUDE_SESSION_GATE_JOB` mark. Four refusals
+  keep work and the check (packet land2), each read before the check and again
+  before the merge, main untouched: `red worktree` when another worktree sits
+  under the branch's, clean or dirty, named with its status lines, since
+  `worktree remove` would take it; `red sha` when main holds commits the
+  branch lacks, so the merge's tree is not the one checked (merge main into
+  the branch, land its new head); `red merge-file` when line 1 is not `Merge
+  <branch>: <text>` or line 2 is not blank; and `red merge-file` with
+  hygiene's code when `scripts/hygiene --commits` refuses the merge commit's
+  message, made as a dangling commit and scanned as `<sha>..<commit>`.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.
@@ -801,7 +934,13 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 `agentik session commit <paths...> --check <cmd> --message-file <f>` (packet
 FW4d) adds each named path, runs the check in the repo's top and commits on
 green with `git commit --only`, so a path someone else staged stays staged and
-out of the commit. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
+out of the commit. The add runs on a witness, a copy of the index in the git
+dir (`agentik-commit.witness`, by `GIT_INDEX_FILE` for that git call alone),
+so no path of the call is in the shared index while its check runs and
+another writer's plain `git commit` cannot take one (packet fw5, R1); the
+check's environment is the caller's. "Nothing to commit" and `moved` are asked
+of the witness; on green, `git add -N` for each new file the shared index
+lacks, then `commit --only`. The witness goes on every way out. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
 glob), as git takes them from the cwd. Stdout is one line, last:
 `commit <repo>: ok <sha>` (exit 0), or `red check exit <code>` (the check's
 code: 127 not found, 126 not runnable, 128+n a signal), `red moved exit 1` (a
@@ -812,15 +951,18 @@ code. One call at a time per work tree: a lock in its git dir
 wall, then `red lock exit 124`. Once HEAD has moved to this call's commit,
 nothing is restored: a red or a signal after it reads `red <step> exit
 <code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). Before
-the add HEAD's sha is read and the index file copied whole to
-`agentik-commit.index` in the git dir; right after the add, the index's
-entries (`git ls-files -s -z`: a stat-only refresh, anyone's `git status`,
-is no change). On every other failure (a red, a refusal after the add, an
-error, SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's
+the check nothing is written to the shared index, so a red check, a refusal
+or a signal there reads its own line (`red check exit <code>`) even when
+another writer committed meanwhile (fw5, R2). The span from the `add -N` to
+the commit alone is guarded: before the `add -N` HEAD's sha is read and the
+index file copied whole to `agentik-commit.index` in the git dir; right after
+it, the index's entries (`git ls-files -s -z`: a stat-only refresh, anyone's
+`git status`, is no change). On every failure in that span (a red, an error,
+SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's
 own protocol (`index.lock`, then a rename) only when HEAD is that sha and
 the entries are those, asked again under `index.lock`; then the index is as
-it was found. Otherwise another writer moved HEAD or the index during the
-check, and the old index over theirs would stage their work's reversal:
+it was found, no intent-to-add entry left. Otherwise another writer moved
+HEAD or the index in that span, and the old index over theirs would stage their work's reversal:
 nothing is written, the copy is dropped, and the line reads `red <step>
 exit <code>, the index moved under the check: nothing is restored` (the
 red's own code; `red refused exit 2` for a refusal, `red signal exit 143`
@@ -841,4 +983,13 @@ over the index or removed. After a SIGKILL the copy is the way back.
   its first word is `make` or `gmake` it is one gate job in the repo, labelled
   `commit check` (its code `gate wait --strict`'s, its wait line on stderr),
   since the gate holds every `make` on the machine; any other check, a
-  `sh -c '...'` wrapper too, runs directly, its output on stderr.
+  `sh -c '...'` wrapper too, runs directly, its output on stderr. A call that
+  leaves the wait with no result (SIGINT, SIGTERM, an error) writes the job's
+  cancel mark, `gate/queue/<id>.cancel`, and says `commit-step: check <id>
+  cut` on stderr; the runner alone acts on it: an entry not started is closed
+  unrun, a running one is cut as the wall cuts, both exit 130, `cut` "caller
+  cut" (fw5, R4).
+- Inside a gate job (`$CLAUDE_SESSION_GATE_JOB` naming an entry of this state
+  root), `gate run --wait` on the job's own repo and `gate wait` on a queued id
+  of its key exit 2, nothing queued, since that job waits behind its caller
+  until the wall cuts it (fw5, R5); another repo or no `--wait` is as before.

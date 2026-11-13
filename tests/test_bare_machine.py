@@ -477,8 +477,12 @@ def test_old_format_and_unknown_key_state_through_the_tools_verbs(box, tmp_path)
     _seed_state(box, old)
     state = box.t / ".local" / "state"
     assert list(state.rglob("meter.json")) and list(state.rglob("resolved.json"))
-    plain = _readers_run(box)                       # the old format, read by this version
+    first = _readers_run(box)                       # the old format, read by this version
     assert not watch.exists(), watch.read_text()
+    # The first pass's writers run after its `status`: `admission record` rewrites the old
+    # band.json, `demand` and all. The rule is set by a pass that reads what they wrote.
+    plain = _readers_run(box)
+    assert {k: v[0] for k, v in first.items()} == {k: v[0] for k, v in plain.items()}
     for path in sorted(state.rglob("*")):
         if path.is_file() and path.suffix in (".json", ".jsonl"):
             path.write_text(_future_text(path))
@@ -509,7 +513,7 @@ def _modules():
         "admission", "chain", "cli", "doctor", "gate", "harness", "hooks", "instructionguard",
         "instructions", "ledger",
         "measure",
-        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state",
+        "meter", "mod", "models", "unattended", "policystore", "resolver", "rules", "sessionconfig", "state", "tiers",
         "fill")}
 
 
@@ -582,9 +586,13 @@ READERS = {
     ("resolver", "rewindow"): ("resolved.json", RESOLVED, lambda m, d: m["resolver"].rewindow(d, 200000)),
     ("rules", "_settings"): ("home/.claude/settings.json", SETTINGS,
                              lambda m, d: m["rules"]._settings(_state_env(d), d)),
-    ("sessionconfig", "load_configs"): ("configs.json", {"mine": {"name": "mine"}}, None),
+    ("sessionconfig", "stored"): ("configs.json", {"mine": {"name": "mine"}}, None),
     ("sessionconfig", "load_overlay"): ("o.json", {"a": 1}, None),
     ("sessionconfig", "last_started"): ("l.json", {"name": "mine"}, None),
+    ("tiers", "hand"): ("cap.json", {"session": "p", "cap": {"model": "opus",
+                                                             "until": "2999-01-01T00:00:00+00:00"}},
+                        lambda m, d: m["tiers"].hand(d, d, "p", "s", __import__("datetime").datetime(
+                            2026, 11, 12, tzinfo=__import__("datetime").timezone.utc))),
     ("state", "hand"): ("state.json", {"from_session": "p", "at": 1.0},
                         lambda m, d: m["state"].hand(d, "p", "s")),
     ("state", "handed"): ("state.json", {"from_session": "p", "to_session": "s", "at": 1.0},
@@ -636,7 +644,7 @@ def test_each_reader_ignores_a_key_it_does_not_know(key, tmp_path):
 @pytest.mark.parametrize("name,rel,doc,call", [
     ("POLICY_FILE", "policy", {"reserve_pct": 7.0}, lambda m: m["policystore"].load_policy().reserve_pct),
     ("CONFIGS_FILE", "configs", {"mine": {"description": "d"}},
-     lambda m: repr(m["sessionconfig"].load_configs()["mine"])),
+     lambda m: repr(m["sessionconfig"].stored()["mine"])),
 ])
 def test_the_stores_ignore_a_key_they_do_not_know(name, rel, doc, call, tmp_path, monkeypatch):
     m = _modules()

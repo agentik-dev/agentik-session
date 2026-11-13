@@ -83,24 +83,26 @@ def test_set_launch_key_does_not_promise_next_start():
 
 def test_set_config_without_save_is_refused():
     rc, _, err = run("set", "posture", "deny", "--config", "review")
-    assert rc == 1 and "--save" in err
+    assert rc == 1 and "profiles: review:" in err and "--save" not in err   # mt1 R2-F3
 
 
 def test_set_rejects_non_settable_and_invalid():
     rc, _, err = run("set", "name", "renamed")
     assert rc == 1 and "not a settable key" in err
-    rc, _, err = run("set", "permission_mode", "plan-mode", "--save", "--config", "frontier")
+    rc, _, err = run("set", "permission_mode", "plan-mode")
     assert rc == 1 and "permission_mode must be one of" in err
-    rc, _, err = run("set", "setting_sources", "project", "--save", "--config", "frontier")
+    rc, _, err = run("set", "setting_sources", "project")
     assert rc == 1 and "user" in err
-    # and the stored config was not bricked
+    # mt1 R4: --save keeps a tier alone, and the profile was not bricked
+    rc, _, err = run("set", "permission_mode", "plan", "--save", "--config", "frontier")
+    assert rc == 2 and "--save keeps a tier alone" in err
     assert sessionconfig.load_configs()["frontier"].permission_mode is None
 
 
 def test_set_notes_none_is_the_literal_string():
-    rc, _, _ = run("set", "notes", "none", "--save", "--config", "frontier")
+    rc, _, _ = run("set", "notes", "none")
     assert rc == 0
-    assert sessionconfig.load_configs()["frontier"].notes == "none"
+    assert sessionconfig.load_overlay()["notes"] == "none"
 
 
 # ---- checkpoint -------------------------------------------------------------
@@ -111,13 +113,13 @@ def test_checkpoint_outside_a_session_is_refused(monkeypatch):
     assert rc == 1 and "no session" in err
 
 
-def test_checkpoint_help_names_tracked_only():
-    rc, out, _ = run("checkpoint", "--help")
+def test_checkpoint_help_names_the_paths_only():
+    rc, out, _ = run("checkpoint", "--help")                    # fw5 R3: no sweep
     assert rc == 0
-    assert "tracked files only" in out and "add -A" not in out
+    assert "checkpoint --commit <paths...>" in out and "add -A" not in out
 
 
-def test_checkpoint_commit_stages_tracked_only(tmp_path, monkeypatch):
+def test_checkpoint_commit_takes_the_named_paths_only(tmp_path, monkeypatch):
     import subprocess
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -127,11 +129,10 @@ def test_checkpoint_commit_stages_tracked_only(tmp_path, monkeypatch):
     (repo / "a.py").write_text("x=2\n")
     (repo / ".env").write_text("AWS_SECRET=hunter2\n")          # untracked secret
     monkeypatch.chdir(repo)
-    rc, out, err = run("checkpoint", "-c", "-m", "cp")
-    assert rc == 0
+    rc, out, err = run("checkpoint", "-c", "a.py", "-m", "cp")
+    assert rc == 0, err
     tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True).stdout
-    assert ".env" not in tracked
-    assert "NOT committed" in err and ".env" in err
+    assert ".env" not in tracked and "x=2" in g("show", "HEAD:a.py").stdout.decode()
 
 
 # ---- every subcommand has help; every error is actionable ------------------
@@ -279,12 +280,12 @@ def test_s19_respawn_refusals_write_nothing(tmp_path, monkeypatch, next_act, nam
         monkeypatch.setenv("CLAUDE_SESSION_HELPER", "1")
     else:
         f = _charter_file(tmp_path / "c.md", next_act)
-    rc, out, err = run("checkpoint", "-c", "--respawn", "--charter", str(f))
+    rc, out, err = run("checkpoint", "-c", "a.py", "--respawn", "--charter", str(f))
     assert rc == 2 and named in err and len(err.splitlines()) == 1, err
     assert not _marker().exists() and _counter() == 5
     assert g("rev-list", "--count", "HEAD").strip() == "1"
     monkeypatch.delenv("CLAUDE_SESSION_HELPER", raising=False)    # the positive control
-    rc, out, err = run("checkpoint", "-c", "--respawn", "--charter",
+    rc, out, err = run("checkpoint", "-c", "a.py", "--respawn", "--charter",
                        str(_charter_file(tmp_path / "good.md")))
     assert rc == 0 and _marker().exists() and _counter() == 0, err
     assert g("rev-list", "--count", "HEAD").strip() == "2"
@@ -485,7 +486,7 @@ def test_s22_respawn_takes_a_committed_charter(tmp_path, monkeypatch):
 def test_s22_respawn_commit_takes_a_tracked_charter(tmp_path, monkeypatch):
     repo, g, f = _s22_repo(tmp_path, monkeypatch)
     _s22_closed(f)
-    rc, out, err = run("checkpoint", "-c", "-m", "cp", "--respawn", "--charter", str(f))
+    rc, out, err = run("checkpoint", "-c", "c.md", "-m", "cp", "--respawn", "--charter", str(f))
     assert rc == 0 and _marker().exists() and _counter() == 0, err
     assert g("rev-list", "--count", "HEAD").strip() == "2"
     assert g("show", "HEAD:c.md") == f.read_text() and g("status", "--porcelain") == ""
@@ -495,7 +496,8 @@ def test_s22_respawn_commit_refuses_an_untracked_charter(tmp_path, monkeypatch):
     repo, g, _ = _s22_repo(tmp_path, monkeypatch)
     (repo / "a.py").write_text("x=2\n")                     # a tracked change -c would take
     f = _charter_file(repo / "new.md")
-    rc, _, err = run("checkpoint", "-c", "-m", "cp", "--respawn", "--charter", str(f))
+    rc, _, err = run("checkpoint", "-c", "a.py", "new.md", "-m", "cp", "--respawn",
+                     "--charter", str(f))
     _s22_refused(rc, err, f, g)
     assert g("status", "--porcelain", "--", "a.py").startswith(" M ")
 

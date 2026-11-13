@@ -97,8 +97,10 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
         "first, and it never counts toward n")
 # Packet S53 ruling 6: with session.admission.mix on, one more pacing item; advice only.
-MIX_ITEM = ("the spend mix (session.admission.mix): a helper takes the family the band "
-            "line's `next` names unless its task needs the other; design, refutation and "
+# Packet pl1 R4: the family is `agentik session status`'s to name, since the line no longer does.
+MIX_ITEM = ("the spend mix (session.admission.mix): a helper takes the family `agentik "
+            "session status` names (its `mix:` line's `next`) unless its task needs the "
+            "other; design, refutation and "
             "judgment are Fable's, bounded builds, records and reads are Opus's; `reset now` "
             "is the owner's Fable reset in Settings; advice only, nothing is held")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "
@@ -509,10 +511,16 @@ def admission(session, notes: list | None = None) -> dict:
 
 # ---- session.admission.mix (packet S53 ruling 1): the week's spend shares, advice only ----
 # Off unless `shares` names at least one family with a positive number. Prices are USD per
-# million tokens; cache_write and cache_read default to 1.25 and 0.1 times the input price.
+# million tokens, one row a family, its newest model's: the pricing page of
+# platform.claude.com, read 2026-11-12, for Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5
+# (prompts up to 100,000 tokens) (packet h4 R4). cache_write defaults to 1.25 times the
+# input price for every family, cache_read to the family's MIX_READ times it, so a user's
+# `input` scales that family's cache prices and a given cache price wins.
 MIX_FAMILIES = ("fable", "opus", "sonnet", "haiku")
-MIX_PRICES = {"fable": (8.0, 40.0), "opus": (5.0, 25.0), "sonnet": (3.0, 15.0),
-              "haiku": (1.0, 5.0)}
+MIX_PRICES = {"fable": (8.0, 40.0), "opus": (4.0, 20.0), "sonnet": (2.0, 10.0),
+              "haiku": (0.10, 0.50)}
+MIX_WRITE = 1.25
+MIX_READ = {"fable": 0.025, "opus": 0.05, "sonnet": 0.05, "haiku": 0.1}
 MIX_CAP, MIX_RESETS_MAX = 50, 99
 
 
@@ -564,7 +572,7 @@ def mix(m) -> dict | None:
         g = given.get(f) if isinstance(given.get(f), dict) else {}
         i = g["input"] if _positive(g.get("input")) else i
         p = {"input": i, "output": g["output"] if _positive(g.get("output")) else o}
-        for k, x in (("cache_write", 1.25), ("cache_read", 0.1)):
+        for k, x in (("cache_write", MIX_WRITE), ("cache_read", MIX_READ[f])):
             p[k] = g[k] if _positive(g.get(k)) else round(x * i, 6)
         prices[f] = p
     return {"shares": shares, "fable_cap": cap, "resets": n, "until": _zoned(m.get("until")),

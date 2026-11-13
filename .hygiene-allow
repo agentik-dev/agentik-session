@@ -111,6 +111,10 @@ history/sittings/2026-11-10-9-fw4d-fold-2.md: email
 design/packets/g2b-edit-gates.md: sibling
 plugin/lib/claude_session/instructionguard.py: sibling
 tests/test_g2b_gates.py: sibling
+# h4: the packet lists the repo's one tracked `.claude` file, the README renderer's config, by its path.
+design/packets/h4-hardening.md: sibling
 # g4: the folder list gates a member's ledger by its file name (the brief's own line), and the packet names the ledger tool.
 design/packets/g4-folder-gates.md: sibling
 tests/test_g4_folder_gates.py: sibling
+# mt1: the packet cites the owner's decisions by the ledger tool's word.
+design/packets/mt1-model-tiers.md: sibling

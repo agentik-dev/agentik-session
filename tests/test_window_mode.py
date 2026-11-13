@@ -496,8 +496,8 @@ def test_band_line_none_draws_the_module_s_fixtures():
     now = _ts_now()
     assert admission.band_line(json.loads(_ts_fixture("BAND_NONE")), now) == _ts_fixture("BAND_NONE_LINE")
     assert admission.band_line(json.loads(_ts_fixture("BAND_NONE_BARE")), now) == _ts_fixture("BAND_NONE_BARE_LINE")
-    assert _ts_fixture("BAND_NONE_LINE") == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe"
-    assert _ts_fixture("BAND_NONE_BARE_LINE") == "no 5h window · 3 helpers · observe"
+    assert _ts_fixture("BAND_NONE_LINE") == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers"
+    assert _ts_fixture("BAND_NONE_BARE_LINE") == "no 5h window · 3 helpers"
 
 
 def test_band_line_none_draws_the_module_s_cases():
@@ -512,7 +512,7 @@ def test_band_line_none_on_the_entry_decide_writes():
     """The record's entry, from band(), not a fixture: the line S42 pinned as today's is gone."""
     rows = rising(61, 62) + [spawn(at(5), "h1"), spawn(at(4), "h2"), spawn(at(3), "h3")]
     b = admission.band(rows, NOW, settings(), tz=UTC)
-    assert admission.band_line(b, NOW) == "no 5h window · 7d 62% · week resets Fri 21:00 · 3 helpers · observe"
+    assert admission.band_line(b, NOW) == "no 5h window · 7d 62% · week resets Fri 21:00 · 3 helpers"
     assert admission.band_line(b, NOW, 30) == "no 5h window · 7d 62% · week …"
 
 
@@ -536,7 +536,7 @@ def test_band_line_none_in_the_prompt_hook_with_its_cache_clause(monkeypatch):
     out = hooks.user_prompt_submit({"session_id": SID})
     bits = out["hookSpecificOutput"]["additionalContext"].split("\n\n")
     [line] = [x for x in bits if x.startswith("no 5h window")]
-    assert line == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers · observe"
+    assert line == "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers"
     assert bits[bits.index(line) + 1].startswith("cache 1h (within plan usage, 7d 62%): ")
 
 
@@ -555,7 +555,7 @@ def test_s51_a_new_login_s_week_alone_is_its_band_and_its_line():
     assert mine is b["accounts"][KEY2] and b["sessions"] == {SID: KEY2}
     assert (mine["window"], mine["P"], mine["peak"], mine["room"], mine["P7"]) == ("five_hour", None, None, None, 3)
     assert (mine["resetsAt"], mine["until"], mine["bound"]) == (iso(OTHER), iso(OTHER), "seven_day")
-    assert admission.band_line(mine, NOW) == "5h no reading · 7d 3% · week resets Wed 15:00 · 0 helpers · observe"
+    assert admission.band_line(mine, NOW) == "5h no reading · 7d 3% · week resets Wed 15:00 · 0 helpers"
     assert b["accounts"][KEY] == admission.band(a, NOW, settings(), tz=UTC)          # A's entry unchanged
     assert (b["accounts"][KEY]["P"], b["accounts"][KEY]["P7"]) == (41, 100)
 
@@ -577,18 +577,18 @@ def test_s51_the_cache_line_reads_the_new_login_s_week(monkeypatch):
     bits = out["hookSpecificOutput"]["additionalContext"].split("\n\n")
     [line] = [x for x in bits if x.startswith("5h no reading")]
     day = admission._WEEKDAYS[week.weekday()]
-    assert line.startswith(f"5h no reading · 7d 3% · week resets {day} 23:00 · 0 helpers · observe")
+    assert line.startswith(f"5h no reading · 7d 3% · week resets {day} 23:00 · 0 helpers")
     assert bits[bits.index(line) + 1].startswith("cache 1h (within plan usage, 7d 3%): ")
 
 
 def test_s51_week_only_line_draws_the_module_s_fixture():
-    assert _ts_fixture("BAND_WEEK_ONLY_LINE") == "5h no reading · 7d 3% · week resets Mon 15:00 · 0 helpers · observe"
+    assert _ts_fixture("BAND_WEEK_ONLY_LINE") == "5h no reading · 7d 3% · week resets Mon 15:00 · 0 helpers"
     assert admission.band_line(json.loads(_ts_fixture("BAND_WEEK_ONLY")), _ts_now()) == _ts_fixture("BAND_WEEK_ONLY_LINE")
 
 
 def test_s51_an_entry_with_no_reading_at_all_draws_as_before():
     assert admission.band_line({"mode": "observe", "at": iso(NOW), "window": "five_hour", "slot": "Fri-2100Z"},
-                               NOW) == "5h no reading · observe"
+                               NOW) == "5h no reading"
     assert rules.lifetime({}, "/nonexistent", {"window": "five_hour", "mode": "observe"}, now=NOW) == (None, rules.UNKNOWN)
 
 
@@ -598,11 +598,11 @@ def test_band_line_five_hour_bytes_unchanged(window):
     `window` but the string `none` changes nothing."""
     now = _ts_now()
     fives = [("BAND", None, "5h 72% → 91% · ceiling 97 · resets 13:12 (1h12) · 3 helpers, room for 2 · "
-                            "1 deferred · 7d 41% · observe"),
+                            "1 deferred · 7d 41%"),
              ("BAND_WEEK", None, "5h 72% → 91% · ceiling 97 · week resets 13:17 (1h17), 5h 15:30 · "
-                                 "3 helpers, room for 2 · 1 deferred · 7d 41% · observe"),
+                                 "3 helpers, room for 2 · 1 deferred · 7d 41%"),
              ("BAND_TWO", "sess-1", "5h 40% → 55% · ceiling 97 · resets 14:30 (2h30) · 1 helper, room for 9 · "
-                                    "0 deferred · 7d 81% · observe")]
+                                    "0 deferred · 7d 81%")]
     for name, sid, line in fives:
         assert _ts_fixture(f"{name}_LINE") == line
         b = json.loads(_ts_fixture(name))
