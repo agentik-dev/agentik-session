@@ -192,9 +192,9 @@ def test_r1_idle_counts_one_of_three_and_prices_it(tmp_path):
     f = one(_rc().detect(tree, 14, NOW, roots, detectors=["eff.idle"]), "eff.idle")
     n = f["evidence"]["numbers"]
     assert (n["idle"], n["ticks"]) == (1, 3)
-    # two calls reading 200,000 cached tokens at 0.1: 40,000, plus outputs at 5, writes at
-    # 1.25 and input at 1 (rules.mix's ratios)
-    assert n["idle_weighted"] == pytest.approx(40000 + 5 * (50 + 30) + 1.25 * 100 + 2)
+    # two calls reading 200,000 cached tokens at 0.05: 20,000, plus outputs at 5, writes at
+    # 1.25 and input at 1 (rules.mix's opus ratios; packet h4 R5)
+    assert n["idle_weighted"] == pytest.approx(20000 + 5 * (50 + 30) + 1.25 * 100 + 2)
     assert set(f) == KEYS and f["kind"] == "eff"
 
 
@@ -203,7 +203,7 @@ def test_r1_weights_are_the_mix_prices_ratios():
     w = _rc().weights()
     p = rules.mix({"shares": {"opus": 1}})["prices"]["opus"]
     assert w == {k: v / p["input"] for k, v in p.items()}
-    assert w["cache_read"] * 2 * 200000 == pytest.approx(40000)
+    assert w["cache_read"] * 2 * 200000 == pytest.approx(20000)                # packet h4 R5
 
 
 # ---- (4) every finding carries its command; no model client --------------------------------

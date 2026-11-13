@@ -5,7 +5,7 @@
 | from | the hq coordinator, brief h4 (row `h4-hardening`), 2026-11-12; NICE n51, n57, n85 (and n25 as stale) |
 | pin | `8a4b593` on main (mt1 and t2 merged, 2.0.0-alpha.93). Worktree `.claude/worktrees/h4-hardening`, branch `h4-hardening`; `.venv`, `.venv-floor` linked from the main checkout. Phase 1 ends at the commits: no version bump, no merge, no gate job (phase 2, on the coordinator's word, bumps to the next alpha after main's) |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make`; no `claude`; no test reads live state or writes the live home; no relay verb, and the relay is not run (its read of the key is its own code's); `chain.py` unchanged; no old call file swept; in `hooks.py` only `_open_call`, the new handler, `HANDLERS` and `SILENT` |
-| may touch | `plugin/lib/claude_session/{hooks,doctor,rules}.py`; `plugin/lib/claude_session/reconcile/__init__.py` (the docstring); `plugin/hooks/{hooks.json,run}`; `.claude/agentik/config.yaml` (new); `Makefile` (the `check` comment); `tests/test_h4_hardening.py` (new); the hook set's pins in `tests/{test_doctor,test_precompact,test_mod,test_s49,test_wfg,test_bare_machine}.py`; `tests/test_r1.py` (R4's two numbers); `RUNBOOK.md`; `NICE_TO_HAVE.md`; this packet and its `.hygiene-allow` row (§1 names the repo's one tracked `.claude` file); `history/sittings/2026-11-13-2-h4-hardening.md` |
+| may touch | `plugin/lib/claude_session/{hooks,doctor,rules}.py`; `plugin/lib/claude_session/reconcile/__init__.py` (the docstring); `plugin/hooks/{hooks.json,run}`; `.claude/agentik/config.yaml` (new); `Makefile` (the `check` comment); `tests/test_h4_hardening.py` (new); the hook set's pins in `tests/{test_doctor,test_precompact,test_mod,test_s49,test_wfg,test_bare_machine}.py`; `tests/test_r1.py` (R4's two numbers) and `tests/test_s53.py` (R4's three); `RUNBOOK.md`; `NICE_TO_HAVE.md`; this packet and its `.hygiene-allow` row (§1 names the repo's one tracked `.claude` file); `history/sittings/2026-11-13-2-h4-hardening.md` |
 | overlap | `hooks.py` and `rules.py` with g5, pl1 and h5 (other functions); `plugin.json` and the status line with every row (phase 2) |
 | verify | phase 1: pytest under `.venv` and `.venv-floor` on the touched files; phase 2: the gate queue's `make check`, once, last |
 | acceptance | §3; `.venv/bin/python -m pytest -q tests/test_h4_hardening.py` green and under `.venv-floor` (red at the pin); every other test green, changed only for R4's numbers |
@@ -39,7 +39,7 @@
 | 7 | the repo resolves `relay.verify_seconds` 1920 with no unknown key; the tie is red with the key at 1800 or the wall at 1900 | no file |
 | 8 | `rules.mix({"shares": {"opus": 1}})["prices"]` is the page's four rows | the pin's four |
 | 9 | `prices: {opus: {input: 10}}`: cache read 0.5, write 12.5; `{fable: {cache_read: 0.8}}`: 0.8 | read 1.0 |
-| 10 | every other test green, changed only for R4's numbers | the touched set: 812 passed (`.venv`), 809 passed, 3 skipped (`.venv-floor`) |
+| 10 | every other test green, changed only for R4's numbers: `test_r1.py`'s idle weight and weights test (cache read 0.05: 20,000, not 40,000); `test_s53.py`'s opus spend in `f_a_helper_s_opus_turns_count_as_opus` and `f6` (4/20, the helper 4.0), and B's tokens in `f2` (130,000 output, the same 2.6 USD at 20 per MTok) | the touched set: 812 passed (`.venv`), 809 passed, 3 skipped (`.venv-floor`) |
 
 ## 4. Findings that name this row
 
