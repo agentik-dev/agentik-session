@@ -714,7 +714,7 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
         lead, i = False, 0                # g6 R5: `then cd` is read (n138); r1 R2: a reserved
         while i < len(words):             # word only as the command's first word
             w = words[i]
-            if w in _LEAD:
+            if w in _LEAD and all(x in _LEAD for x in words[:i]):
                 lead = lead or w != "time"
             elif not (_ASSIGN.match(w) or w in _WRAPPERS
                       or (w.startswith("-") and i + 1 < len(words))):
@@ -852,10 +852,14 @@ def _loose(text: str) -> list:
                  if w]
         if plain and words and words[0] in _LOOSE_COND:
             plain_to = -1                         # a `cd` past a reserved word may not run
-        while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
-                         or words[0] in _LOOSE_SKIP or os.path.basename(words[0]) in _SHELLS
-                         or (words[0].startswith("-") and len(words) > 1)):
-            words = words[1:]
+        i = 0                                     # r1 R2: a reserved word only as the first
+        while i < len(words) and (_ASSIGN.match(words[i]) or words[i] in _WRAPPERS
+                                  or words[i] == "eval" or os.path.basename(words[i]) in _SHELLS
+                                  or (words[i] in _LOOSE_SKIP
+                                      and all(x in _LOOSE_SKIP for x in words[:i]))
+                                  or (words[i].startswith("-") and i + 1 < len(words))):
+            i += 1
+        words = words[i:]
         if not words:
             continue
         name, args = os.path.basename(words[0]), words[1:]

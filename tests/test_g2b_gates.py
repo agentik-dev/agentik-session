@@ -986,3 +986,33 @@ def test_r1_the_folders_are_bounded(box, strict_only):
     order, fa = instructionguard._states([(str(box.repo), ())] + st, 40)
     assert len(order) == instructionguard._CAP_STATES and order[0] == (str(box.repo), ())
     assert order[fa] == st[-1]
+
+
+# ---- review 1, R2 (F1): a reserved word is skipped only as a command's first word ----------
+
+R2_F1 = ["x=1 then cd sub; cp a CLAUDE.md", "x=1 do cd sub; cp a CLAUDE.md",
+         "x=1 elif cd sub\ncp a CLAUDE.md", "x=1 ! cd sub; cp a CLAUDE.md",
+         "x=1 then pushd sub; cp a CLAUDE.md", "x=1 while cd sub; printf x >> CLAUDE.md",
+         "env else cd sub; cp a CLAUDE.md", "command if cd sub; cp a CLAUDE.md",
+         "command until cd sub; cp a CLAUDE.md", "builtin then cd sub; cp a CLAUDE.md",
+         "\"x=1\" then cd sub; cp a CLAUDE.md", "x=1 then cd /tmp; rm .claude/edit-gates"]
+
+
+@pytest.mark.parametrize("command", R2_F1)
+def test_r2_f1_a_reserved_word_after_an_assignment_or_a_wrapper_is_a_word(box, command):
+    (box.repo / "sub").mkdir()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(_gated_path(box, command))), command
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert all(p.startswith(str(box.repo) + os.sep) and "/sub/" not in p and
+               not p.startswith("/tmp") for _, p in found), found
+    if not command.startswith("\""):             # the loose reading follows no such `cd` either
+        assert {m for _, _, m in instructionguard._loose(command)} == {()}, command
+
+
+def test_r2_a_reserved_word_first_still_reads_the_cd(box):
+    (box.repo / "sub").mkdir()
+    found = instructionguard.bash_targets("then cd sub; cp a CLAUDE.md", str(box.repo), box.env)
+    assert found == [("write", str(box.repo / "sub" / "CLAUDE.md")),
+                     ("write", str(box.repo / "CLAUDE.md"))]
+    assert instructionguard._loose("x=1 cd sub; cp a b") == [("write", "b", ("sub",))]
