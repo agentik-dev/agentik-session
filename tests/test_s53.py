@@ -81,7 +81,7 @@ def at(h, m=0):
 
 # ---- (a) mix off: the band line and band.json as before ----
 
-GOLDEN_LINE = "5h 40% → 52% · ceiling 97 · resets 14:00 (2h00) · 0 helpers, room for 18 · 0 deferred · 7d 40% · observe"
+GOLDEN_LINE = "5h 40% → 52% · ceiling 97 · resets 14:00 (2h00) · 0 helpers, room for 18 · 0 deferred · 7d 40%"
 
 
 def test_s53_a_mix_off_band_json_and_line_unchanged():
@@ -96,8 +96,8 @@ def test_s53_a_mix_off_band_json_and_line_unchanged():
     assert admission.band_line(off, NOW) == GOLDEN_LINE
     on = admission.band(rows, NOW, settings(shares={"fable": 1, "opus": 1}), tz=UTC)
     assert {k: v for k, v in on.items() if k != "mix"} == off       # the mix only adds
-    assert admission.band_line(on, NOW) == GOLDEN_LINE.replace(
-        " · observe", " · mix fable 30/50 · opus 10/50 · next opus · resets 0 · observe")
+    assert admission.band_line(on, NOW) == GOLDEN_LINE + " · resets 0"     # pl1 R1: the shares are status's
+    assert admission.mix_status(on["mix"], NOW) == "mix: fable 30/50 · opus 10/50 · next opus · resets 0"
     assert "spend mix" not in rules.render({})
     assert "spend mix" in rules.render({"admission": {"mix": {"shares": {"opus": 1}}}})
 
@@ -133,7 +133,7 @@ def test_s53_b_points_follow_spend_and_next_follows_shares():
     assert m["next"] == "fable"                     # 30 / 4 under 10 / 1
     m = admission.mix(rows[:0], NOW, settings(shares={"fable": 1})["mix"], tz=UTC)
     assert m["points"] is None and m["next"] is None
-    assert admission._mix_part(m) == ["mix no reading"]
+    assert admission._mix_part(m) == [] and admission.mix_status(m) == "mix: no reading"   # pl1
 
 
 # ---- (c) Fable at 49 of 50 with two resets in hand: reset now ----
@@ -143,11 +143,10 @@ def test_s53_c_fable_at_its_cap_says_reset_now():
     s = settings(shares={"fable": 3, "opus": 1}, resets=2, until="2026-11-13T18:00:00+00:00")
     m = admission.mix(rows, NOW, s["mix"], tz=UTC)
     assert (m["points"]["fable"], m["reset"], m["resets_left"]) == (49.0, True, 2)
-    assert admission._mix_part(m) == ["mix fable 49/50", "opus 11/50", "reset now",
-                                      "resets 2 by Fri 18:00"]
+    assert admission._mix_part(m) == ["reset now", "resets 2 by Fri 18:00"]     # pl1 R1
+    assert admission.mix_status(m, NOW) == "mix: fable 49/50 · opus 11/50 · reset now · resets 2 by Fri 18:00"
     b = {"P7": 60, "mix": m}
-    assert admission.band_line(b, NOW).endswith(
-        "7d 60% · mix fable 49/50 · opus 11/50 · reset now · resets 2 by Fri 18:00")
+    assert admission.band_line(b, NOW).endswith("7d 60% · reset now · resets 2 by Fri 18:00")
 
 
 # ---- (d) a Fable reset: 75 to 26, resetsAt unchanged ----
@@ -208,7 +207,7 @@ def test_s53_f_a_helper_s_opus_turns_count_as_opus(tmp_path):
     st = _meter_state(tmp_path, sdir)
     prices = settings(shares={"fable": 1})["mix"]["prices"]
     fable = (1000 * 8 + 100 * 40 + 1_000_000 * 10) / 1e6              # cache_write 1.25 x 8
-    opus = (1000 * 5 + 100 * 25) / 1e6 + 5.0                           # the sidechain, the helper
+    opus = (1000 * 4 + 100 * 20) / 1e6 + 4.0               # the sidechain, the helper (h4 R4)
     assert meter.spend(st, prices) == {"fable": round(fable, 6), "opus": round(opus, 6)}
     user_mix(shares={"fable": 1, "opus": 1})
     rec(A, 40, NOW)
@@ -239,7 +238,7 @@ def test_s53_f2_the_week_survives_the_ledger_s_rotation():
     user_mix(shares={"fable": 3, "opus": 1}, resets=2)
     t = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
     by_state(A, {"fable": [0, 122500, 0, 0]})
-    by_state(B, {"opus": [0, 104000, 0, 0]})
+    by_state(B, {"opus": [0, 130000, 0, 0]})     # 2.6 USD at opus's 20 per MTok (h4 R4)
     rec(A, 75, t), rec(B, 75, t + timedelta(minutes=1)), rec(A, 26, t + timedelta(hours=1))
     assert band_file()["mix"]["points"] == {"fable": 0.0, "opus": 26.0}
     for h in (30, 60, 90):
@@ -297,7 +296,7 @@ def test_s53_f6_a_turn_counts_once_and_spend_never_falls(tmp_path):
     prices = settings(shares={"opus": 1})["mix"]["prices"]
     st: dict = {}
     meter.parse(p, st, session_id=A)
-    assert meter.spend(st, prices)["opus"] == round((1000 * 5 + 100 * 25) / 1e6, 6)
+    assert meter.spend(st, prices)["opus"] == round((1000 * 4 + 100 * 20) / 1e6, 6)   # h4 R4
     before = meter.spend(st, prices)["fable"]
     p.write_text(_turn(7, "claude-fable-5-2") + "\n")                # rewritten, shorter
     meter.parse(p, st, session_id=A)

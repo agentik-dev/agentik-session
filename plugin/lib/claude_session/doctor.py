@@ -34,7 +34,8 @@ FRESH_S = 120
 HOOK_EVENTS = ("SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
                "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
                "PreCompact", "PostModelSwitch",               # wfg R7: PostModelSwitch
-               "InstructionsLoaded")                          # g1 R1: the instruction log
+               "InstructionsLoaded",                          # g1 R1: the instruction log
+               "SubagentStop")                                # h4 R1: a helper's end
 # The newest release of each supported minor, for when pyenv is absent (offline-safe).
 KNOWN_PYTHONS_OF = "2026-09-22"
 KNOWN_PYTHONS = ("3.11.16", "3.12.14", "3.13.15", "3.14.7")

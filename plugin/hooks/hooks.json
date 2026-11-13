@@ -36,6 +36,9 @@
     ],
     "InstructionsLoaded": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" InstructionsLoaded", "timeout": 5}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SubagentStop", "timeout": 5}]}
     ]
   }
 }

@@ -1,0 +1,3 @@
+# A relay row's verify line runs this repo's make check, walled at 1800 s by the Makefile; 1920 is that wall plus two minutes, so the check's own stop is the one a row reads (packet h4 R3).
+relay:
+  verify_seconds: 1920
