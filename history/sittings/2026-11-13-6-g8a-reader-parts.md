@@ -14,13 +14,14 @@
 - [x] Fix (c), E1 (4eda8ac, tests 1ed9caa red: 53 fail): replay class A 151 of 151 and class B 26 of 26 refused; refused 3,037; the 20 make lines and 7 Python bodies read; `runner` (a shell's `-c` text behind a command that is no wrapper) and `data` (a heredoc body not read as a script); a command word's substitutions read as empty for its name
 - [x] Fix (b): three early returns; 0 answers changed against 4eda8ac over tests, packets, replay, 200,000 fuzz; hand lines 4.86 to 4.99 s against the pin's 5.36 (0.91 to 0.93)
 - [x] Fix (d): the three flips kept (packet acceptance 8); E2 into NICE n180; n197 gains `$sh -c`; n204 class C
-- [ ] The replay counts and the acceptance table at the head; the gate once, last
+- [x] The replay counts and the acceptance table at the head (make rule: replay 3,037 refused, packets 13 and 13; gate flips 0 on the replay; acceptance 2 to 5, 12, 13 green both venvs); the gate job 20261113-112930-1563 queued on this commit
 
 ## Handover
-- The make rule's class C (a tool's own option holds the make line, 18 replay lines) and a body fed to Python that shells out a make are not built (ruled): the pin passes them by rule.
+- The make rule's class C (a tool's own option holds the make line, 18 replay lines, NICE n204) and a shell's name in a variable (NICE n197) pass, as at the pin. A Python body that shells out a make is refused now, as `data`.
+- Not rerun this round: acceptance 7 by the brief's classes, 10 (real shells, 20,000 lines), 11's launcher cold runs.
 
 ## Next act
 - The gate job once, then the hand-back; phase 2 on the coordinator's word.
 
 ## Exit
-- (open)
+- Fix round committed: (a) to (d), E1, E2 built; the gate's job queued last; phase 2 (merge of main, version) on the coordinator's word.
