@@ -85,6 +85,9 @@ def test_describe_json(box):
     assert DESCRIBE_KEYS <= set(d)
     assert d["schema"] == "agentik.describe/1" and d["ok"] is True and d["tool"] == "session"
     assert len(d["summary"]) < 80 and d["plugin"] == "session@agentik"
+    man = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
+    assert man["repository"] == f"https://github.com/{d['repo']}"     # the manifest's names
+    assert d["plugin"] == f"{man['name']}@agentik" and d["version"] == man["version"]
     assert [r["name"] for r in d["reads"]] == ["config", "doctor", "meter", "gate", "unattended"]
     assert [r["kind"] for r in d["reads"]] == ["config", "doctor", "status", "status", "status"]
     assert d["reads"][0]["argv"] == ["describe", "config", "--json"]

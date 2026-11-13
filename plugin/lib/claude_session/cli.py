@@ -16,8 +16,8 @@ import time
 from pathlib import Path
 
 from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
-               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store,
-               tiers)
+               launch, ledger, measure, meter, mod, plug, resolver, rules, sessionconfig,
+               store, tiers)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -143,6 +143,27 @@ def cmd_doctor(args) -> int:
     return 0 if rep.ok else 2
 
 
+def cmd_describe(args) -> int:
+    """Packet ak5: `describe --json` and `describe config --json [KEY]`, the reads the suite's
+    `agentik config` and `agentik doctor` take; one JSON object on stdout, nothing written."""
+    words = list(args.words or [])
+    if not args.json:
+        print("agentik-session: describe: say describe --json, or describe config --json [KEY]",
+              file=sys.stderr)
+        return 2
+    if not words:
+        print(plug.dumps(plug.describe(build_parser())))
+        return 0
+    if words[0] != "config" or len(words) > 2:
+        print(f"agentik-session: describe: no read {' '.join(words)[:60]!r}; say describe "
+              "--json, or describe config --json [KEY]", file=sys.stderr)
+        return 2
+    d, rc = plug.config_read(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(), os.environ,
+                             words[1] if len(words) > 1 else None)
+    print(plug.dumps(d))
+    return rc
+
+
 def cmd_gates(args) -> int:
     """g2b: what the edit gates guard here; `gates write`, the lane's write of a gated file."""
     if getattr(args, "gates_verb", None) == "write":
@@ -213,7 +234,7 @@ def cmd_status(args) -> int:
             if "mode" in facts:
                 print(f"admission mode: {facts['mode']}")
             return 0
-    print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
+    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else meter.one_line(d))
     return 0
 
 
@@ -1378,7 +1399,7 @@ def cmd_gate(args) -> int:
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
         est = gate.entry_estimates(root)
-        print(json.dumps({**st, "est": est}, indent=2) if args.json
+        print(json.dumps(plug.envelope("gate", {**st, "est": est}), indent=2) if args.json
               else "\n".join(gate.status_lines(st, est)))
         return 0
     command = list(args.command)
@@ -1456,7 +1477,8 @@ def cmd_unattended(args) -> int:
     from . import unattended
     if args.unattended_verb == "status":
         st = unattended.status(os.environ, time.time())
-        print(json.dumps(st, indent=2) if args.json else "\n".join(unattended.status_lines(st)))
+        print(json.dumps(plug.envelope("unattended", st), indent=2) if args.json
+              else "\n".join(unattended.status_lines(st)))
         return 0
     if args.unattended_verb == "report":
         d = unattended.find_run(os.environ, args.run)
@@ -1641,6 +1663,12 @@ def build_parser() -> argparse.ArgumentParser:
     dr = sub.add_parser("doctor", help="check the tool, the plugin and its dependencies")
     dr.add_argument("--json", action="store_true")
     dr.set_defaults(func=cmd_doctor)
+
+    ds = sub.add_parser("describe", help="the reads the agentik suite takes: describe --json, "
+                        "describe config --json [KEY]")
+    ds.add_argument("--json", action="store_true")
+    ds.add_argument("words", nargs="*", metavar="config [KEY]")
+    ds.set_defaults(func=cmd_describe)
 
     ic = sub.add_parser("install-cli", help="give the terminal the CLI: freeze this code, write "
                         "the launcher in ~/.local/bin, its link and the agentik door, and prune")

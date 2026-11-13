@@ -90,6 +90,11 @@ class Check:
     detail: str
     note: bool = False          # an optional piece is absent: ok, printed as a note
     warn: bool = False          # worth a look, never a failure: ok, printed as warn
+    remedy: str | None = None   # packet ak5 R8: the one command the detail names, or None
+
+    @property
+    def status(self) -> str:
+        return "fail" if not self.ok else "note" if self.note else "warn" if self.warn else "ok"
 
 
 @dataclass
@@ -101,9 +106,13 @@ class Report:
         return bool(self.checks) and all(c.ok for c in self.checks)
 
     def as_dict(self) -> dict:
-        return {"ok": self.ok,
-                "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
-                           for c in self.checks]}
+        """The plug's doctor read (packet ak5 R8): `ok` says the read ran; `failed` and `warned`
+        count the statuses, so "no check failed" is `failed` 0. The exit stays `ok`'s."""
+        st = [c.status for c in self.checks]
+        return {"schema": "agentik.doctor/1", "ok": True, "tool": "session",
+                "failed": st.count("fail"), "warned": st.count("warn"),
+                "checks": [{"name": c.name, "ok": c.ok, "status": c.status, "detail": c.detail,
+                            "remedy": c.remedy} for c in self.checks]}
 
 
 # --- the npm-style range matcher -------------------------------------------------
@@ -254,25 +263,27 @@ def _check_launcher(env, plugins) -> Check:
     path = install.launcher_path(env)
     found = install.read_launcher(path)
     remedy = "run /session:install-cli"
+    cmd = "/session:install-cli"              # packet ak5 R8: the command the details name
     if found is None:
         return Check("launcher", True, f"none at {path}; /session:install-cli gives the terminal "
-                     "the CLI", note=True)
+                     "the CLI", note=True, remedy=cmd)
     if found["tree"] and not os.path.isdir(found["tree"]):
-        return Check("launcher", False, f"{path} runs {found['tree']}, which is gone; {remedy}")
+        return Check("launcher", False, f"{path} runs {found['tree']}, which is gone; {remedy}",
+                     remedy=cmd)
     version = found["version"]
     if not version:
         return Check("launcher", True, f"{path} has no VERSION= line, so no session refreshes it; "
-                     + remedy, warn=True)
+                     + remedy, warn=True, remedy=cmd)
     theirs = install.order(version)
     if theirs is None:
         return Check("launcher", True, f"{path} reads VERSION={version}, which is no version, so "
-                     f"no session refreshes it; {remedy}", warn=True)
+                     f"no session refreshes it; {remedy}", warn=True, remedy=cmd)
     _, p, _ = _pick_id(plugins, PLUGIN_ID, OLD_PLUGIN_ID) if plugins is not None else (None, None, None)
     plugin = (p or {}).get("version") or SEMVER
     ours = install.order(plugin)
     if ours is not None and theirs < ours:
         return Check("launcher", True, f"{path} is {version}, older than the plugin's {plugin}; the "
-                     f"next session's start moves it, or {remedy}", warn=True)
+                     f"next session's start moves it, or {remedy}", warn=True, remedy=cmd)
     return Check("launcher", True, f"{version} at {path}")
 
 
@@ -320,7 +331,7 @@ def _check_plugin(plugins, err) -> Check:
     if missing:
         return Check("plugin", False, "hooks not registered: " + ", ".join(missing)
                      + f"; update the plugin: `claude plugin update {pid}`, then "
-                     "restart Claude Code")
+                     "restart Claude Code", remedy=f"claude plugin update {pid}")
     if old:
         return Check("plugin", True, f"{pid} {p.get('version')} enabled; "
                      + _switch_note(pid, PLUGIN_ID), warn=True)
