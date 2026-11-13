@@ -22,7 +22,7 @@
 - [x] build 4 checks vs eight commits (6aed3c5 too): hand lines and sweeps REGRESS 0; fuzz 2 x 100k (seeds 93111, 93112) REGRESS 0; loose off vs a0055da 80k: 0 deny to pass; NICE n179 to n185, seven S4 rows to the overflow
 - [x] phase 2 records: main 688bfbf merged; NICE n186 to n190, n174/n175/n183 mended, n113 to n129 to the overflow; packet §3a to §3f to `history/g5-inword-hash-rounds.md`
 - [x] phase 2: version alpha.98, 3909 tests
-- [ ] this record closed
+- [x] phase 2 checks at 56c7ac4: six test files, both venvs, and the lints green
 
 ## Handover
 - Recordlint and doclint, red since db19d51, are green in phase 2.
@@ -32,7 +32,7 @@
 - decide, owner: the coordinator: acceptance 5's bound of 60 against the amendment's (a) and (b), which add 16 (72 in all); consumer: the review and phase 2.
 
 ## Next act
-- Phase 2: this record closed; the landing is the coordinator's.
+- The landing, the coordinator's.
 
 ## Exit
-Review 3 closed; phase 2 in flight.
+Phase 2 done (version 56c7ac4); waits on the landing.
