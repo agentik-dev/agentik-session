@@ -665,7 +665,7 @@ def acceptance(text: str) -> list:
 
 # Packet u3 R5: a line that runs make is refused before the row's stage (design/07 §2
 # item 4): a make runs only through the gate queue, and the land step runs the check.
-MAKES = ("make", "gmake")
+MAKES = ("make", "gmake", "gnumake")   # by basename, case-blind (round 1 F5)
 SHELL_DEPTH = 3                  # the shells' `-c` texts read, nested
 LINE_SHOWN = 80                  # R6: the line in the log, cut
 _DASH_C = re.compile(r"^-[A-Za-z]*c[A-Za-z]*\Z")
@@ -675,8 +675,9 @@ WHY_MAKE = "a make runs only through the gate queue, and the land step runs the 
 def unbounded(shell: str, depth: int = 0) -> str:
     """Why the line may not run, "" when it may: read with the hook's reader
     (`instructionguard._commands`), it is refused when the reader cannot split it, when a
-    word of a simple command, by basename, is `make` or `gmake`, or when a shell's `-c` text
-    is, to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
+    word of a simple command, by basename and case-blind, is `make`, `gmake` or `gnumake`
+    (round 1 F5; a shell's name is compared case-blind too), or when a shell's `-c` text is,
+    to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
     every later word of that command is a text, whatever flags sit around it (round 1 F1); a
     word's `$(` text is one too, on the same depth count (F3)."""
     try:
@@ -688,9 +689,9 @@ def unbounded(shell: str, depth: int = 0) -> str:
             continue
         shell_seen = texts = False
         for w in words:
-            name = os.path.basename(w)
+            name = os.path.basename(w).lower()
             if name in MAKES:
-                return f"it runs `{name}`; {WHY_MAKE}"
+                return f"it runs `{os.path.basename(w)}`; {WHY_MAKE}"
             if depth >= SHELL_DEPTH:
                 continue
             if texts:
