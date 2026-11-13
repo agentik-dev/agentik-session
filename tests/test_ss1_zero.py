@@ -314,3 +314,16 @@ def test_review1_f3_a_metered_meter_still_goes_stale(env, repo, tmp_path):
     os.utime(tp, (st.st_atime, st.st_mtime + 600))
     c = doctor._check_meter(env)
     assert not c.ok and "stale" in c.detail
+
+
+def test_review1_f4_no_drift_against_a_zero_turn_meter(env, repo, tmp_path):
+    from claude_session import measure
+    start(env, repo, transcript(tmp_path, 0))
+    measure.record(SID, json.dumps({"context": {"tokens": 31000, "window": 200000,
+                                                "percent": 15.5},
+                                    "rateLimits": [], "changed": ["context"]}), env)
+    c = doctor._check_measure(env)
+    assert c.ok and not c.warn and c.detail.startswith("not comparable (no turns metered)"), c.detail
+    rc, out, _ = status()
+    assert rc == 0 and "measure: not comparable (no turns metered)" in out, out
+    assert "drift" not in out
