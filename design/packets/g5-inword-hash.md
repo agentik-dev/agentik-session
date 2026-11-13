@@ -39,6 +39,12 @@
 8. F4: `# note \` newline `cp a CLAUDE.md`, `echo x\` newline `#y; cp a CLAUDE.md`: the write. At `d2f89d9`: `[]`.
 9. The round's "probed and clean" lines keep their result, as a table in the tests.
 
+## 3a. Round 1's results (cc4a20a, c7130e9)
+
+- F1 to F4: the review's lines give the write and the deny; 10 cases red at d2f89d9.
+- Beyond the review's lines: `cp a CLAUDE.md; echo x\` (F3's control, passed at the pin) is now denied, by F3's rule; `cp a CLAU\` newline `DE.md` (g6's lead 3) now reads `CLAUDE.md`, by F4's drop.
+- F5 is NICE n161. Leads 1 and 2 stay as at the pin, for g6.
+
 ## 4. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, nothing written in the reviewer's folder.

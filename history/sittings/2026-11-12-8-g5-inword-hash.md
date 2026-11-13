@@ -14,15 +14,16 @@
 - [x] R3 survey: `shlex.split` in `commit.py`, `install.py`, `agentik_install.py` splits with `comments=False` (no commenter) and refuses no shell line: no other site shares the cause
 - [x] phase 1: `test_g2b_gates.py` and `test_g4_folder_gates.py` green under `.venv` and `.venv-floor`; a small change (under 50 changed lines), no packet
 - [x] phase 1 at d2f89d9
-- [ ] phase 1b: the packet (past 50 lines), F1, F2, F4 in `_mask`; F3 in `bash_targets`; F5 a NICE row; the probed-clean lines as a test table (10 cases red at d2f89d9)
+- [x] phase 1b: the packet (ca56886); F1, F2, F4 in `_mask`, F3 in `bash_targets` and `_bash_gated`, the probed-clean table (cc4a20a, 10 cases red at d2f89d9); F5 NICE n161 (c7130e9); guard files 234 passed under both venvs; whole suite under `.venv` 3396 passed, the README count deselected
 - [ ] phase 2, on the coordinator's word: merge main after mt1, the next alpha, README and sidecar, the gate once
 
 ## Handover
 - The pin differs from the brief: `echo a\#b; cp a CLAUDE.md` already gave the write; `echo x #c` then a newline then `cp a CLAUDE.md` gave `[]` (the comment's `readline` ate the newline, so `cp` joined `echo`'s words), now the write.
+- NICE id n161: main holds n148, land2 n150, mt1 n159, u3 n160; renumber at merge if one passes it.
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
 - Phase 2 on the coordinator's word.
 
 ## Exit
-Phase 1b in flight.
+Phase 1b landed; waits on the coordinator for phase 2.
