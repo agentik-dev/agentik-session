@@ -22,10 +22,13 @@ Run in a branch's work tree (DIR, default the working directory) after it merges
            collected one; the date and every other byte stay.
   sidecar  design/readme/rendered.sha256, as `shasum -a 256 design/readme/source.md
            README.md` prints it, where it does not read so already, and only over
-           fresh files: each file's sum is the one the sidecar names, or the file
-           differs only in its Status line from the file at HEAD or at a parent of
-           HEAD whose own sidecar names that commit's file. Else `red sidecar`: a new
-           sum would call an unrendered README fresh.
+           fresh files, the two fresh against one reference together: the sidecar as
+           it stands naming both files' sums, or one commit (HEAD or a parent of HEAD)
+           whose own sidecar names both of that commit's files and from which each
+           file differs only in its Status line. Else `red sidecar`, naming each file
+           fresh against no reference, or the README where each is fresh only
+           against a reference of its own: a new sum would call an unrendered README
+           fresh.
   nice     while NICE_TO_HAVE.md is at or over 24,576 B (recordlint's bound), its
            first S4 row in the file's order leaves it and becomes, byte for byte, the
            last row of the table under `## From the open findings` in
@@ -327,16 +330,34 @@ def only_status_differs(old, new):
                for x, y in zip(a, b))
 
 
-def fresh(repo, path, data, sidecar, commits):
-    if sums(sidecar).get(path) == sha256(data):
-        return True
+def fresh_against(named, pair, then=None):
+    """Whether every file of `pair` (path: bytes) is fresh against one reference: the
+    sidecar `named` (path: sum) names each, and, for a commit (`then`, path: bytes there),
+    the file differs from the commit's only in its Status line."""
+    for path, data in pair.items():
+        old = data if then is None else then.get(path)
+        if old is None or named.get(path) != sha256(old):
+            return False
+        if then is not None and not only_status_differs(old, data):
+            return False
+    return True
+
+
+def stale(repo, pair, sidecar, commits):
+    """[] where the README and its source are fresh against one reference together (the
+    sidecar as it stands, or one commit of `commits` whose sidecar names both); else the
+    files to name: those fresh against no reference, or the README where each file is
+    fresh only against a reference of its own (review 1's F2)."""
+    refs = [(sums(sidecar), None)]
     for sha in commits:
-        then, side = blob_at(repo, sha, path), blob_at(repo, sha, SIDECAR)
-        if then is None or side is None or sums(side).get(path) != sha256(then):
-            continue
-        if only_status_differs(then, data):
-            return True
-    return False
+        side = blob_at(repo, sha, SIDECAR)
+        if side is not None:
+            refs.append((sums(side), {p: blob_at(repo, sha, p) for p in pair}))
+    if any(fresh_against(named, pair, then) for named, then in refs):
+        return []
+    alone = [p for p in pair if not any(fresh_against(named, {p: pair[p]}, then)
+                                        for named, then in refs)]
+    return alone or [README]
 
 
 # the NICE rows (R6)
@@ -445,10 +466,10 @@ def plan(repo, base, forced):
     if sidecar != files[SIDECAR]:
         _, out = git(repo, "rev-list", "--parents", "-n", "1", head)
         commits = out.decode("ascii").split()
-        for p in (SOURCE, README):
-            if not fresh(repo, p, files[p], files[SIDECAR], commits):
-                reds.append("stamp: red sidecar: %s is not the file %s names; run make readme"
-                            % (p, SIDECAR))
+        for p in stale(repo, {SOURCE: files[SOURCE], README: files[README]}, files[SIDECAR],
+                       commits):
+            reds.append("stamp: red sidecar: %s is not the file %s names; run make readme"
+                        % (p, SIDECAR))
     new[SIDECAR] = sidecar
 
     moves = nice_moves(repo, files[NICE])
