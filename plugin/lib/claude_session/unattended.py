@@ -677,7 +677,8 @@ def unbounded(shell: str, depth: int = 0) -> str:
     (`instructionguard._commands`), it is refused when the reader cannot split it, when a
     word of a simple command, by basename, is `make` or `gmake`, or when a shell's `-c` text
     is, to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
-    every later word of that command is a text, whatever flags sit around it (round 1 F1)."""
+    every later word of that command is a text, whatever flags sit around it (round 1 F1); a
+    word's `$(` text is one too, on the same depth count (F3)."""
     try:
         cmds = list(_commands(shell))
     except ValueError as e:
@@ -700,7 +701,28 @@ def unbounded(shell: str, depth: int = 0) -> str:
                 texts = True
             elif name in _SHELLS:
                 shell_seen = True
+        if depth >= SHELL_DEPTH:
+            continue
+        for w in words + outs:            # round 1 F3: a quoted `$(`, a text on the same count
+            for text in _substituted(w):
+                why = unbounded(text, depth + 1)
+                if why:
+                    return why
     return ""
+
+
+def _substituted(word: str) -> list:
+    """Round 1 F3: the texts of a word's `$(...)`, which the reader keeps inside one word when
+    it is quoted, each to its closing paren by count; an unclosed one runs to the word's end."""
+    out, i = [], word.find("$(")
+    while i >= 0:
+        k, n = i + 2, 1
+        while k < len(word) and n:
+            n += {"(": 1, ")": -1}.get(word[k], 0)
+            k += 1
+        out.append(word[i + 2:k - 1] if n == 0 else word[i + 2:])
+        i = word.find("$(", k)
+    return out
 
 
 def unbounded_item(lines: list) -> str | None:
