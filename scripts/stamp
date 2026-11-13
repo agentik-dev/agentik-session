@@ -1,0 +1,512 @@
+#!/usr/bin/env python3
+"""stamp: write what a landing derives, and red a merge that drops a test (hq design/19, land3)
+
+Usage: stamp [--repo DIR] [--base REF] [--version X]
+
+Run in a branch's work tree (DIR, default the working directory) after it merges REF
+(default main), it writes the lines a landing derives, and only those:
+
+  version  plugin.json's `version`. The branch's own paths are the version check's
+           second read, taken against REF: the paths under plugin/ that differ from
+           each merge base of HEAD and REF to HEAD, plus the uncommitted and untracked
+           ones, less plugin.json (none where HEAD is a merge base). With none the
+           version stays. With one, a version above REF's (semver precedence, as
+           scripts/plugin-version-check orders it) stays; else it becomes REF's with
+           its last number plus one (2.0.0-alpha.98 gives 2.0.0-alpha.99). --version X
+           is written in every case and must be semver-shaped and above REF's. Only
+           the value on plugin.json's one `"version"` line changes.
+  count    the last line of `<this python> -m pytest --collect-only -q -p
+           no:cacheprovider` in DIR (120 s wall, no bytecode written). README.md and
+           design/readme/source.md each hold one Status line (tests/test_readme.py's
+           STATUS); in it the version becomes the one above and the count the
+           collected one; the date and every other byte stay.
+  sidecar  design/readme/rendered.sha256, as `shasum -a 256 design/readme/source.md
+           README.md` prints it, where it does not read so already, and only over
+           fresh files: each file's sum is the one the sidecar names, or the file
+           differs only in its Status line from the file at HEAD or at a parent of
+           HEAD whose own sidecar names that commit's file. Else `red sidecar`: a new
+           sum would call an unrendered README fresh.
+  nice     while NICE_TO_HAVE.md is at or over 24,576 B (recordlint's bound), its
+           first S4 row in the file's order leaves it and becomes, byte for byte, the
+           last row of the table under `## From the open findings` in
+           history/NICE-overflow.md. No S4 row left: `red nice`.
+
+The count's equation is asked only while HEAD is a merge of two parents whose second
+is REF's commit or its ancestor: the collected count must equal B + M - A, B collected
+from the first parent in a temp extract (removed after), M and A read from the
+source's Status line at the second parent and at the parents' merge base where that
+commit is on REF's first-parent line, else collected as B is. Unequal is `red count`.
+With more or fewer than one merge base it is not asked, and one stderr note says so.
+No flag overrides it.
+
+Everything is read and decided first: a red or an exit 2 writes nothing. Output on
+stdout, one line per thing written, in this order: `stamp: version <old> -> <new>`,
+`stamp: count <old> -> <new>` (old: the source's), `stamp: moved <ids> to
+history/NICE-overflow.md`, `stamp: sidecar written`; last, always, `stamp: ok: plugin
+<version>, <count> tests`, ending `; nothing to write` when no file changed. A red is
+one stderr line each: `stamp: red count: ...`, `stamp: red sidecar: <file> ...`,
+`stamp: red nice: ...`.
+
+Exit codes: 0 stamped, or nothing to write; 1 a red; 2 usage, DIR no work tree, HEAD
+or REF no commit, a file above absent or misshapen, a version that cannot be ordered
+or bumped (STAMP_VERSION named), or a collection that gave no count: one stderr line,
+`stamp: <what>`.
+
+The Makefile's `stamp` target calls it with --base "$(STAMP_BASE)" (default main) and
+--version "$(STAMP_VERSION)" where that is set. `make check` never calls it. Stdlib
+only, Python 3.9 syntax; this repo's own, not vendored.
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+MANIFEST = "plugin/.claude-plugin/plugin.json"
+PLUGIN = "plugin/"
+SOURCE = "design/readme/source.md"
+README = "README.md"
+SIDECAR = "design/readme/rendered.sha256"
+NICE = "NICE_TO_HAVE.md"
+OVERFLOW = "history/NICE-overflow.md"
+OVERFLOW_HEADING = b"## From the open findings"
+NICE_CAP = 24576  # scripts/recordlint's CAPS[NICE]; a test ties the two
+COLLECT_WALL = 120
+USAGE = "usage: stamp [--repo DIR] [--base REF] [--version X]"
+# tests/test_readme.py's STATUS, byte for byte (a test ties the two)
+STATUS = re.compile(r"^Status: version `v([^`]+)`, rendered `(\d{4}-\d{2}-\d{2})`, "
+                    r"`(\d+)` tests in the suite\.$", re.M)
+STATUS_LINE = "Status: version `v%s`, rendered `%s`, `%s` tests in the suite."
+VERSION_LINE = re.compile(r'^(\s*"version"\s*:\s*")([^"\\]*)(")', re.M)
+SUM_LINE = re.compile(r"^([0-9a-f]{64}) [ *](.+)$")
+CELL = re.compile(r"(?<!\\)\|")
+COLLECTED = re.compile(r"(\d+) tests? collected")
+LAST_NUMBER = re.compile(r"^(.*?)(0|[1-9][0-9]*)$")
+# the user's git config must not change what is read, and nothing refreshes .git/index
+GIT = ["git", "--no-optional-locks", "-c", "log.follow=false", "-c", "log.showSignature=false",
+       "-c", "diff.relative=false", "-c", "core.quotePath=false"]
+# scripts/plugin-version-check's semver shape and precedence (a test ties the two)
+_ID = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+                    r"(?:-(%s(?:\.%s)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?" % (_ID, _ID))
+
+
+class Stop(Exception):
+    """Exit 2: usage, no work tree, no ref, or a file absent or misshapen."""
+
+
+def precedence(version):
+    """A sort key by semver precedence, or None for a value not semver-shaped."""
+    m = SEMVER.fullmatch(version) if isinstance(version, str) else None
+    if m is None:
+        return None
+    core = tuple(int(n) for n in m.group(1, 2, 3))
+    if m.group(4) is None:
+        return core, 1, ()
+    return core, 0, tuple((0, int(i), "") if i.isdigit() else (1, 0, i)
+                          for i in m.group(4).split("."))
+
+
+def one_line(text):
+    return " ".join(str(text).split())
+
+
+def git(repo, *args, ok=(0,)):
+    try:
+        p = subprocess.run(GIT + ["-C", repo] + list(args), capture_output=True)
+    except OSError as exc:
+        raise Stop("git: %s" % exc)
+    if p.returncode not in ok:
+        raise Stop("git %s: %s" % (args[0], one_line(p.stderr.decode("utf-8", "replace"))))
+    return p.returncode, p.stdout
+
+
+def blob_at(repo, rev, path):
+    """The file's bytes at `rev`, or None where the revision or the file is missing."""
+    code, out = git(repo, "cat-file", "blob", "%s:./%s" % (rev, path), ok=(0, 128))
+    return out if code == 0 else None
+
+
+def read(repo, path):
+    try:
+        with open(os.path.join(repo, path), "rb") as fh:
+            return fh.read()
+    except OSError as exc:
+        raise Stop("no %s: %s" % (path, exc.strerror or exc))
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def status_match(text, path):
+    """The one Status line's match in `text`, else Stop naming `path`."""
+    found = list(STATUS.finditer(text))
+    if len(found) != 1:
+        raise Stop("%s holds %d Status lines, not 1" % (path, len(found)))
+    return found[0]
+
+
+def parse(argv):
+    opts = {"--repo": ".", "--base": "main", "--version": None}
+    seen = set()
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-h", "--help"):
+            return None
+        name, eq, value = arg.partition("=")
+        if name not in opts or name in seen:
+            raise Stop("unknown or repeated argument %s; %s" % (arg, USAGE))
+        if not eq:
+            if i + 1 >= len(argv):
+                raise Stop("%s takes a value; %s" % (name, USAGE))
+            i += 1
+            value = argv[i]
+        seen.add(name)
+        opts[name] = value
+        i += 1
+    return opts
+
+
+# the version (R3)
+
+def own_paths(repo, ref_sha, head):
+    """The branch's own paths under plugin/, less plugin.json, as the version check's
+    second read takes them against REF; empty where HEAD is a merge base, or none."""
+    code, out = git(repo, "merge-base", "--all", "HEAD", ref_sha, ok=(0, 1, 128))
+    bases = out.decode("ascii").split() if code == 0 else []
+    if not bases or head in bases:
+        return set()
+    _, out = git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                 "--no-renames", "--", PLUGIN)
+    paths = {r[3:] for r in out.decode("utf-8", "replace").split("\0") if len(r) > 3}
+    for base in bases:
+        _, out = git(repo, "diff", "--name-only", "--no-renames", "-z", base, "HEAD", "--", PLUGIN)
+        paths |= {p for p in out.decode("utf-8", "replace").split("\0") if p}
+    return paths - {MANIFEST}
+
+
+def manifest_version(data, where):
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise Stop("%s at %s is not readable JSON" % (MANIFEST, where))
+    version = doc.get("version") if isinstance(doc, dict) else None
+    if not isinstance(version, str):
+        raise Stop("%s at %s holds no string version" % (MANIFEST, where))
+    return version
+
+
+def new_version(repo, base, ref_sha, head, current, forced):
+    ref_version = manifest_version(blob_at(repo, ref_sha, MANIFEST) or b"", base)
+    above_ref = precedence(ref_version)
+    if forced is not None:
+        if above_ref is None or precedence(forced) is None or precedence(forced) <= above_ref:
+            raise Stop("--version %s is not a semver version above %s's %s"
+                       % (forced, base, ref_version))
+        return forced
+    if not own_paths(repo, ref_sha, head):
+        return current
+    if above_ref is None:
+        raise Stop("%s's version %s is not semver-shaped; set STAMP_VERSION" % (base, ref_version))
+    if precedence(current) is not None and precedence(current) > above_ref:
+        return current
+    m = LAST_NUMBER.match(ref_version)
+    bumped = m.group(1) + str(int(m.group(2)) + 1) if m else None
+    if bumped is None or precedence(bumped) is None or precedence(bumped) <= above_ref:
+        raise Stop("%s's version %s ends in no number to raise; set STAMP_VERSION to the new "
+                   "version" % (base, ref_version))
+    return bumped
+
+
+def write_version(data, version):
+    text = data.decode("utf-8")
+    found = list(VERSION_LINE.finditer(text))
+    if len(found) != 1:
+        raise Stop("%s holds %d \"version\" lines, not 1" % (MANIFEST, len(found)))
+    m = found[0]
+    return (text[:m.start(2)] + version + text[m.end(2):]).encode("utf-8")
+
+
+# the count (R4) and its equation (R7)
+
+def collect(cwd, where):
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    try:
+        p = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
+                            "-p", "no:cacheprovider"], cwd=cwd, env=env, capture_output=True,
+                           text=True, timeout=COLLECT_WALL)
+    except subprocess.TimeoutExpired:
+        raise Stop("pytest --collect-only at %s ran past %d s" % (where, COLLECT_WALL))
+    except OSError as exc:
+        raise Stop("pytest --collect-only at %s: %s" % (where, exc))
+    lines = p.stdout.strip().splitlines()
+    last = lines[-1] if lines else ""
+    m = COLLECTED.match(last)
+    if p.returncode != 0 or not m:
+        raise Stop("pytest --collect-only at %s gave no count (exit %d): %s"
+                   % (where, p.returncode, one_line(last or p.stderr)[:200]))
+    return int(m.group(1))
+
+
+def collect_at(repo, sha):
+    """B: the count of a commit's tree, extracted to a temp folder that is removed."""
+    tmp = tempfile.mkdtemp(prefix="stamp-")
+    try:
+        tree, tar = os.path.join(tmp, "tree"), os.path.join(tmp, "tree.tar")
+        os.mkdir(tree)
+        git(repo, "archive", "--format=tar", "-o", tar, sha)
+        p = subprocess.run(["tar", "-xf", tar, "-C", tree], capture_output=True)
+        if p.returncode != 0:
+            raise Stop("tar of %s: %s" % (sha[:12], one_line(p.stderr.decode("utf-8", "replace"))))
+        return collect(tree, sha[:12])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def status_count_at(repo, sha):
+    data = blob_at(repo, sha, SOURCE)
+    found = STATUS.findall(data.decode("utf-8", "replace")) if data is not None else []
+    return int(found[0][2]) if len(found) == 1 else None
+
+
+def equation(repo, base, ref_sha, head, collected, notes):
+    """The `red count` line, or None where the equation holds or is not asked."""
+    _, out = git(repo, "rev-list", "--parents", "-n", "1", head)
+    parents = out.decode("ascii").split()[1:]
+    if len(parents) != 2:
+        return None
+    first, second = parents
+    if git(repo, "merge-base", "--is-ancestor", second, ref_sha, ok=(0, 1))[0] != 0:
+        return None
+    code, out = git(repo, "merge-base", "--all", first, second, ok=(0, 1))
+    bases = out.decode("ascii").split() if code == 0 else []
+    if len(bases) != 1:
+        notes.append("stamp: note: the merge's parents have %d merge bases; the count's "
+                     "equation is not asked" % len(bases))
+        return None
+    _, out = git(repo, "rev-list", "--first-parent", ref_sha)
+    line = set(out.decode("ascii").split())
+
+    def count(sha):
+        found = status_count_at(repo, sha) if sha in line else None
+        return found if found is not None else collect_at(repo, sha)
+
+    b, m, a = collect_at(repo, first), count(second), count(bases[0])
+    expected = b + m - a
+    if collected == expected:
+        return None
+    return ("stamp: red count: the merge collects %d tests; the branch's %d plus %s's %d less "
+            "the merge base's %d is %d. Compare pytest --collect-only -q at HEAD and at its two "
+            "parents" % (collected, b, base, m, a, expected))
+
+
+# the sidecar (R5)
+
+def sums(data):
+    found = {}
+    for line in data.decode("utf-8", "replace").splitlines():
+        m = SUM_LINE.match(line)
+        if m:
+            found[m.group(2)] = m.group(1)
+    return found
+
+
+def only_status_differs(old, new):
+    a = old.decode("utf-8", "surrogateescape").splitlines(True)
+    b = new.decode("utf-8", "surrogateescape").splitlines(True)
+    if len(a) != len(b):
+        return False
+    return all(x == y or (STATUS.match(x.rstrip("\r\n")) and STATUS.match(y.rstrip("\r\n")))
+               for x, y in zip(a, b))
+
+
+def fresh(repo, path, data, sidecar, commits):
+    if sums(sidecar).get(path) == sha256(data):
+        return True
+    for sha in commits:
+        then, side = blob_at(repo, sha, path), blob_at(repo, sha, SIDECAR)
+        if then is None or side is None or sums(side).get(path) != sha256(then):
+            continue
+        if only_status_differs(then, data):
+            return True
+    return False
+
+
+# the NICE rows (R6)
+
+def s4_rows(lines):
+    """The indexes of the S4 table rows, in the file's order."""
+    found = []
+    for i, line in enumerate(lines):
+        if not line.startswith(b"|"):
+            continue
+        body = line.decode("utf-8", "replace").strip()
+        body = body[1:-1] if body.endswith("|") and not body.endswith("\\|") else body[1:]
+        cells = [c.strip() for c in CELL.split(body)]
+        if len(cells) > 1 and cells[1] == "S4":
+            found.append(i)
+    return found
+
+
+def overflow_insert_at(data):
+    """The offset just past the last row of the table under `## From the open findings`."""
+    lines = data.splitlines(True)
+    heads = [i for i, l in enumerate(lines) if l.rstrip(b"\r\n") == OVERFLOW_HEADING]
+    if not heads:
+        raise Stop("%s has no `%s` heading" % (OVERFLOW, OVERFLOW_HEADING.decode()))
+    j = heads[0] + 1
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    start = j
+    while j < len(lines) and lines[j].startswith(b"|"):
+        j += 1
+    if j - start < 2 or not lines[j - 1].endswith(b"\n"):
+        raise Stop("%s has no table under `%s`" % (OVERFLOW, OVERFLOW_HEADING.decode()))
+    return sum(len(l) for l in lines[:j])
+
+
+def nice_moves(repo, nice):
+    """(new NICE bytes, new overflow bytes, ids) or None for nothing to move; Stop or a red
+    line (a str) otherwise."""
+    if len(nice) < NICE_CAP:
+        return None
+    lines = nice.splitlines(True)
+    rows, size, moved = s4_rows(lines), len(nice), []
+    while size >= NICE_CAP:
+        if not rows:
+            return ("stamp: red nice: %s is %s B and no S4 row is left to move; the bound is "
+                    "under %s B" % (NICE, format(len(nice), ","), format(NICE_CAP, ",")))
+        i = rows.pop(0)
+        moved.append(i)
+        size -= len(lines[i])
+    overflow = read(repo, OVERFLOW)
+    at = overflow_insert_at(overflow)
+    rows_out = [lines[i] if lines[i].endswith(b"\n") else lines[i] + b"\n" for i in moved]
+    ids = []
+    for i in moved:
+        body = lines[i].decode("utf-8", "replace").strip()[1:]
+        ids.append(CELL.split(body)[0].strip())
+    new_nice = b"".join(l for i, l in enumerate(lines) if i not in moved)
+    return new_nice, overflow[:at] + b"".join(rows_out) + overflow[at:], ids
+
+
+# the stamp
+
+def plan(repo, base, forced):
+    """(writes in order, stdout lines, reds, notes)."""
+    if not os.path.isdir(repo):
+        raise Stop("%s is not a directory" % repo)
+    code, out = git(repo, "rev-parse", "--is-inside-work-tree", ok=(0, 128))
+    if code != 0 or out.strip() != b"true":
+        raise Stop("%s is not inside a git work tree" % repo)
+    repo = git(repo, "rev-parse", "--show-toplevel")[1].decode("utf-8").strip()
+    code, out = git(repo, "rev-parse", "--verify", "-q", "HEAD^{commit}", ok=(0, 1))
+    if code != 0:
+        raise Stop("%s has no commit at HEAD" % repo)
+    head = out.decode("ascii").strip()
+    code, out = git(repo, "rev-parse", "--verify", "-q", "--end-of-options", base + "^{commit}",
+                    ok=(0, 1, 128))
+    if code != 0:
+        raise Stop("--base %s names no commit" % base)
+    ref_sha = out.decode("ascii").strip()
+
+    files = {p: read(repo, p) for p in (MANIFEST, SOURCE, README, SIDECAR, NICE)}
+    texts = {}
+    for p in (SOURCE, README):
+        try:
+            texts[p] = files[p].decode("utf-8")
+        except UnicodeDecodeError:
+            raise Stop("%s is not UTF-8" % p)
+    matches = {p: status_match(texts[p], p) for p in (SOURCE, README)}
+    current = manifest_version(files[MANIFEST], "the work tree")
+    version = new_version(repo, base, ref_sha, head, current, forced)
+    manifest = write_version(files[MANIFEST], version) if version != current else files[MANIFEST]
+    collected = collect(repo, repo)
+
+    new = {MANIFEST: manifest}
+    for p in (SOURCE, README):
+        m = matches[p]
+        line = STATUS_LINE % (version, m.group(2), collected)
+        new[p] = (texts[p][:m.start()] + line + texts[p][m.end():]).encode("utf-8")
+
+    reds, notes, lines = [], [], []
+    red = equation(repo, base, ref_sha, head, collected, notes)
+    if red:
+        reds.append(red)
+
+    sidecar = "".join("%s  %s\n" % (sha256(new[p]), p) for p in (SOURCE, README)).encode()
+    if sidecar != files[SIDECAR]:
+        _, out = git(repo, "rev-list", "--parents", "-n", "1", head)
+        commits = out.decode("ascii").split()
+        for p in (SOURCE, README):
+            if not fresh(repo, p, files[p], files[SIDECAR], commits):
+                reds.append("stamp: red sidecar: %s is not the file %s names; run make readme"
+                            % (p, SIDECAR))
+    new[SIDECAR] = sidecar
+
+    moves = nice_moves(repo, files[NICE])
+    if isinstance(moves, str):
+        reds.append(moves)
+        moves = None
+    if moves:
+        new[NICE], new[OVERFLOW], ids = moves
+        files[OVERFLOW] = None
+
+    if version != current:
+        lines.append("stamp: version %s -> %s" % (current, version))
+    old_counts = [matches[p].group(3) for p in (SOURCE, README)]
+    if any(c != str(collected) for c in old_counts):
+        lines.append("stamp: count %s -> %d" % (old_counts[0], collected))
+    if moves:
+        lines.append("stamp: moved %s to %s" % (", ".join(ids), OVERFLOW))
+    if sidecar != files[SIDECAR]:
+        lines.append("stamp: sidecar written")
+    order = (MANIFEST, SOURCE, README, NICE, OVERFLOW, SIDECAR)
+    writes = [(p, new[p]) for p in order if p in new and new[p] != files.get(p)]
+    lines.append("stamp: ok: plugin %s, %d tests%s"
+                 % (version, collected, "" if writes else "; nothing to write"))
+    return repo, writes, lines, reds, notes
+
+
+def write(repo, path, data):
+    dest = os.path.join(repo, path)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".stamp-")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        shutil.copymode(dest, tmp)
+        os.replace(tmp, dest)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def main(argv):
+    try:
+        opts = parse(argv[1:])
+        if opts is None:
+            print(__doc__.strip())
+            return 0
+        repo, writes, lines, reds, notes = plan(opts["--repo"], opts["--base"], opts["--version"])
+    except Stop as exc:
+        sys.stderr.write("stamp: %s\n" % one_line(exc))
+        return 2
+    for note in notes:
+        sys.stderr.write(note + "\n")
+    if reds:
+        sys.stderr.write("".join(r + "\n" for r in reds))
+        return 1
+    for path, data in writes:
+        write(repo, path, data)
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

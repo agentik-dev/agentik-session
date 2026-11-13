@@ -238,7 +238,12 @@ def test_line3_main_ending_in_no_number_names_stamp_version(tmp_path):
 
 
 def test_line3_an_uncommitted_or_untracked_plugin_path_counts(box):
+    # as the version check's second read: nothing of the branch's own while HEAD is the base
     box.write("plugin/lib/apple.py", "x = 1\n")
+    assert box.stamp().stdout.splitlines() == [ok_line("2.0.0-alpha.7", 3, nothing=True)]
+    box.write("notes.txt", "a note\n")
+    box.git("add", "notes.txt")
+    box.git("commit", "-qm", "quince: a note")
     p = box.stamp()
     assert p.returncode == 0, p.stderr
     assert p.stdout.splitlines()[0] == "stamp: version 2.0.0-alpha.7 -> 2.0.0-alpha.8"
@@ -309,6 +314,27 @@ def test_line5_a_merge_of_another_branch_is_not_asked(box):
     box.git("merge", "-q", "--no-edit", "plum")
     p = box.stamp()
     assert p.returncode == 0, p.stderr
+
+
+def test_line5_two_merge_bases_are_not_asked_and_noted(box):
+    box.write("q1.txt", "q1\n")
+    box.commit("quince: q1")
+    box.git("checkout", "-q", "main")
+    box.write("m1.txt", "m1\n")
+    box.commit("main: m1")
+    box.git("merge", "-q", "--no-edit", "quince")
+    box.git("checkout", "-q", "quince")
+    box.git("merge", "-q", "--no-edit", "main~1")
+    box.git("checkout", "-q", "main")
+    box.write("m3.txt", "m3\n")
+    box.commit("main: m3")
+    box.git("checkout", "-q", "quince")
+    box.git("merge", "-q", "--no-edit", "main")
+    assert len(box.git("merge-base", "--all", "HEAD^1", "HEAD^2").split()) == 2
+    p = box.stamp()
+    assert p.returncode == 0, p.stderr
+    assert p.stderr.splitlines() == ["stamp: note: the merge's parents have 2 merge bases; the "
+                                     "count's equation is not asked"]
 
 
 # 6: the sidecar only over fresh files.
