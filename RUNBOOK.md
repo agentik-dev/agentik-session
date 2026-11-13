@@ -17,7 +17,9 @@ resolves to deny, even though Claude Code still reports success. Read section
    `~/.local/share/agentik-session/<hash>/` (`<hash>` is of their names and contents, so a
    version bump alone is a new tree; an older copy is pruned unless a running
    process names it, on its command line or in its environment, or it is among the newest
-   three) and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
+   three), writes `~/.local/bin/agentik` where none or an older door is there (a newer or
+   equal door stays byte for byte; a link, or a door with no `VERSION=` to compare, is left
+   alone with one line), and writes `~/.local/bin/agentik-session`, its `VERSION=` line the plugin's, which
    runs that copy under `/usr/bin/python3` with `-I`, so
    neither the directory a command runs in nor a checkout can change it, with no clone or
    venv. `AGENTIK_PYTHON` names another interpreter; `python3` on PATH is the fallback. What
