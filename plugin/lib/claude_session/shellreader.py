@@ -367,7 +367,9 @@ def _parse(command: str, bash3: bool, ticks: bool) -> tuple:
     split by `_split`, a text at a time, a substitution's included)."""
     text, bodies, quoted, opers = _here_scan(command)
     first = ticks and not bash3
-    m0 = _mask(text) if first else ""
+    if not first or not ("case" in text or ("$(" in text and "${" in text)):
+        return text, bodies, quoted, opers, []    # fix (b): by _mask's code the masks agree
+    m0 = _mask(text)
     other = [r for r in ((True, True), (False, False)) if first and _mask(text, *r) != m0]
     return text, bodies, quoted, opers, other
 
@@ -546,6 +548,8 @@ def _here_scan(text: str):
     """`_heredocs` for the walk (g8a): a `<<` in quotes, in a comment or in `$((` opens no
     heredoc, and a `$(` in double quotes quotes afresh. (text, bodies, whether each delimiter is
     quoted, each operator as written)."""
+    if "<<" not in text:                  # fix (b): no heredoc, nothing to scan
+        return text, [], [], []
     out, bodies, quoted, opers = [], [], [], []
     stack, pending, i, n, word = ["t"], [], 0, len(text), True
     while i < n:
@@ -747,6 +751,8 @@ def _subst(text: str, body: bool, bash3: bool, depth: int):
     the texts to walk)])
     (g8a R6): outside single quotes and comments, in double quotes too; a heredoc's body
     (`body`) knows no quote. `$((` holds none; in backticks one `\\` is taken off."""
+    if "$(" not in text and "`" not in text:     # fix (b): no substitution, nothing to scan
+        return text, []
     out, subs, i, n, quote, word = [], [], 0, len(text), None, True
     while i < n:
         c = text[i]

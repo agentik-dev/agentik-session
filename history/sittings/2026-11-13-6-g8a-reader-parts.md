@@ -10,17 +10,17 @@
 
 ## Done-ness
 - [x] Build 1: R1 to R13 built, five commits to 9b2c48c (acceptance 11 red in process; one decide line, since ruled)
-- [ ] Fix (a): the packet's acceptance 6 reads "the loose reading with the pin's `_git_paths` put back differs on 0 lines"; probe run
-- [ ] Fix (c), E1: tests red at 9b2c48c, then `runner` (a shell's `-c` text behind a command that is no wrapper) and `data` (a heredoc body not read as a script); a command word's substitutions read as empty for its name
-- [ ] Fix (b): `_here_scan`, `_subst`, `_parse` return early; 0 answers changed; the ratio measured
-- [ ] Fix (d): the three flips kept, named in the packet; E2 into NICE n180
+- [x] Fix (a): acceptance 6 narrowed in the packet; with the pin's `_git_paths` put back 0 differ (git fuzz, builder's fuzz, tests, packets, replay); as built 11,611 and 32,574 fuzz lines, each with one of the four
+- [x] Fix (c), E1 (4eda8ac, tests 1ed9caa red: 53 fail): replay class A 151 of 151 and class B 26 of 26 refused; refused 3,037; the 20 make lines and 7 Python bodies read; `runner` (a shell's `-c` text behind a command that is no wrapper) and `data` (a heredoc body not read as a script); a command word's substitutions read as empty for its name
+- [x] Fix (b): three early returns; 0 answers changed against 4eda8ac over tests, packets, replay, 200,000 fuzz; hand lines 4.86 to 4.99 s against the pin's 5.36 (0.91 to 0.93)
+- [x] Fix (d): the three flips kept (packet acceptance 8); E2 into NICE n180; n197 gains `$sh -c`; n204 class C
 - [ ] The replay counts and the acceptance table at the head; the gate once, last
 
 ## Handover
 - The make rule's class C (a tool's own option holds the make line, 18 replay lines) and a body fed to Python that shells out a make are not built (ruled): the pin passes them by rule.
 
 ## Next act
-- Fix (c) and E1, behind the red tests.
+- The gate job once, then the hand-back; phase 2 on the coordinator's word.
 
 ## Exit
 - (open)
