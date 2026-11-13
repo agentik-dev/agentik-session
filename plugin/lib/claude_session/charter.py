@@ -134,20 +134,26 @@ def _near_miss(text: str, head: str = WHILE_WAITING) -> str | None:
     return None
 
 
+def waits_parts(raw: bytes) -> list[list[tuple[int, str]]]:
+    """Packet in2: each Waits on the owner part in file order, as its non-blank lines with
+    their 1-based line numbers in the file, trailing blanks cut; [] with no part."""
+    parts: list = []
+    cur = None
+    for i, line in enumerate(raw.decode("utf-8", "replace").splitlines()):
+        if line.startswith("## "):
+            cur = [] if line.rstrip() == WAITS else None
+            if cur is not None:
+                parts.append(cur)
+        elif cur is not None and line.strip():
+            cur.append((i + 1, line.rstrip()))
+    return parts
+
+
 def waits(raw: bytes) -> list[tuple[int, str]] | None:
-    """Packet in2: the Waits on the owner part's non-blank lines, each with its 1-based line
-    number in the file, trailing blanks cut; None when the charter has no such part."""
-    lines = raw.decode("utf-8", "replace").splitlines()
-    start = next((i for i, l in enumerate(lines) if l.rstrip() == WAITS), None)
-    if start is None:
-        return None
-    out = []
-    for i in range(start + 1, len(lines)):
-        if lines[i].startswith("## "):
-            break
-        if lines[i].strip():
-            out.append((i + 1, lines[i].rstrip()))
-    return out
+    """The lines of every Waits on the owner part, in file order (review 1's L2: a second
+    part hides nothing); None when the charter has no such part."""
+    parts = waits_parts(raw)
+    return [x for p in parts for x in p] if parts else None
 
 
 def hand_line(line: str) -> tuple[str, str] | None:
@@ -165,12 +171,22 @@ def hand_line(line: str) -> tuple[str, str] | None:
     return what, command
 
 
-def _waits_shape(lines: list[tuple[int, str]] | None, text: str = "") -> list[str]:
-    """The Waits on the owner part's shape warnings (in2 R4), each naming its line or
-    heading; no part, and no near-miss heading, warns nothing (the part is optional)."""
-    if lines is None:
+def _waits_shape(parts: list[list[tuple[int, str]]], text: str = "") -> list[str]:
+    """The Waits on the owner parts' shape warnings (in2 R4), each naming its line or
+    heading; no part, and no near-miss heading, warns nothing (the part is optional). A
+    second part is the fifth shape (review 1's L2), then each part is read as one."""
+    if not parts:
         near = _near_miss(text, WAITS)
         return [f"heading '{near}' is not '{WAITS}'"] if near is not None else []
+    out = []
+    if len(parts) > 1:
+        out.append(f"Waits on the owner has {len(parts)} parts: keep one '{WAITS}'")
+    for lines in parts:
+        out.extend(_waits_part_shape(lines))
+    return out
+
+
+def _waits_part_shape(lines: list[tuple[int, str]]) -> list[str]:
     if not lines:
         return ["Waits on the owner is empty: write - none, or the hand lines"]
     body = [line for _, line in lines]
@@ -278,7 +294,7 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     n = waiting(line) if pacing["enabled"] else None
     lines = while_waiting(raw)
     out.extend(_while_waiting_shape(lines, text))
-    out.extend(_waits_shape(waits(raw), text))          # in2 R4: whatever pacing says
+    out.extend(_waits_shape(waits_parts(raw), text))    # in2 R4: whatever pacing says
     if n:
         # FW1a: <what> up to its first `;`, since WAITING_LINE's `\S` lets it take one, and
         # in FULL that would read <how to tell> as the wait's subject.
