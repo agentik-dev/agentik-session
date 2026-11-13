@@ -9,10 +9,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -52,6 +55,15 @@ SIBLINGS = [
     {"name": "relay", "marketplace": "agentik", "old": "agent-relay@agent-relay",
      "adds": "the relay, and the hook that guards `push: never`", "row": "relay-plugin"},
 ]
+# fk3 R1: which plugin stands for a sibling is the suite's answer, read once a run from the
+# launcher's fixed place (never PATH) under a wall (5 s: the suite's own reads end in 2 s).
+# A launcher that hangs, floods or lies costs one wall and reads as no answer (R2).
+SOURCES_WALL = 5.0
+SOURCES_CAP = 1 << 20
+SOURCES_SCHEMA = "agentik.sources/1"
+SOURCE_KINDS = ("own", "plugin", "folder", "undecided", "absent")
+# fk3 R2: with no answer, the installs Claude Code records at these scopes are the candidates.
+SOURCE_SCOPES = ("user", "managed")
 
 
 def _pick_id(plugins, new: str, old: str):
@@ -91,6 +103,9 @@ class Check:
     note: bool = False          # an optional piece is absent: ok, printed as a note
     warn: bool = False          # worth a look, never a failure: ok, printed as warn
     remedy: str | None = None   # packet ak5 R8: the one command the detail names, or None
+    # fk3 R4: a sibling that is not `<name>@agentik`: {kind, plugin, root, version, declared}
+    # (and `seen` when undecided); the id, folder and version leave the detail for it.
+    source: dict | None = None
 
     @property
     def status(self) -> str:
@@ -113,7 +128,8 @@ class Report:
         return {"schema": "agentik.doctor/1", "ok": True, "tool": "session",
                 "failed": st.count("fail"), "warned": st.count("warn"),
                 "checks": [{"name": c.name, "ok": c.ok, "status": c.status,
-                            "detail": withheld(c.detail), "remedy": c.remedy}
+                            "detail": withheld(c.detail), "remedy": c.remedy,
+                            "source": c.source}
                            for c in self.checks]}
 
 
@@ -344,9 +360,10 @@ def _check_plugin(plugins, err) -> Check:
                  + ", ".join(HOOK_EVENTS))
 
 
-def _check_dependency(dep: dict, plugins, err) -> Check:
+def _check_dependency_by_id(dep: dict, plugins, err) -> Check:
     """A sibling is optional: absent or disabled is a note, any version is fine. With no
-    plugin list the `plugin` check is already red; this line only names the unknown."""
+    plugin list the `plugin` check is already red; this line only names the unknown.
+    fk3 R5: kept for a plugin list that holds the sibling's `old` id alone."""
     name, mkt, adds = dep["name"], dep["marketplace"], dep["adds"]
     new = f"{name}@{mkt}"
     name = dep.get("row", name)
@@ -365,6 +382,199 @@ def _check_dependency(dep: dict, plugins, err) -> Check:
         return Check(name, True, f"{pid} {p.get('version')} installed; "
                      + _twice_note(dep["old"], pid), warn=True)
     return Check(name, True, f"{pid} {p.get('version')} installed")
+
+
+def _clean(v):
+    """A string of the suite's answer or Claude Code's record as a line may print it: no
+    control byte, at most 200 characters; anything else None."""
+    if not isinstance(v, str):
+        return None
+    return "".join(ch for ch in v if ch >= " " and ch != "\x7f")[:200] or None
+
+
+def _drain(p, wall: float, cap: int):
+    """The child's stdout by the wall, or None (killed with its group) when it runs past the
+    wall, writes past the cap, or the pipe fails."""
+    deadline = time.monotonic() + wall
+    buf = bytearray()
+    try:
+        with selectors.DefaultSelector() as sel:
+            sel.register(p.stdout, selectors.EVENT_READ)
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0 or len(buf) > cap:
+                    raise TimeoutError
+                if not sel.select(left):
+                    continue
+                chunk = os.read(p.stdout.fileno(), 65536)
+                if not chunk:
+                    break
+                buf += chunk
+        p.wait(timeout=max(0.01, deadline - time.monotonic()))
+    except (TimeoutError, subprocess.TimeoutExpired, OSError, ValueError):
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            p.kill()
+        except OSError:
+            pass
+        p.wait()
+        return None
+    finally:
+        p.stdout.close()
+    return bytes(buf)
+
+
+def _suite_sources(env, cwd):
+    """fk3 R1: the suite's rows by tool, from `$HOME/.local/bin/agentik-suite describe sources
+    --json`; None when there is no launcher or the answer does not count (exit 0, one object,
+    `schema` agentik.sources/1, `ok` true, `tools` a list)."""
+    home = env.get("HOME")
+    exe = Path(home) / ".local" / "bin" / "agentik-suite" if home else None
+    if not exe or not exe.is_file() or not os.access(exe, os.X_OK):
+        return None
+    try:
+        p = subprocess.Popen([str(exe), "describe", "sources", "--json"], cwd=str(cwd),
+                             env=dict(env), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    except (OSError, ValueError):
+        return None
+    out = _drain(p, SOURCES_WALL, SOURCES_CAP)
+    if out is None or p.returncode != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except (ValueError, RecursionError):
+        return None
+    if not (isinstance(data, dict) and data.get("schema") == SOURCES_SCHEMA
+            and data.get("ok") is True and isinstance(data.get("tools"), list)):
+        return None
+    rows = {}
+    for row in data["tools"]:
+        if isinstance(row, dict) and isinstance(row.get("tool"), str):
+            rows.setdefault(row["tool"], row)
+    return rows
+
+
+def _answered(row, name: str):
+    """fk3 R1: one row of the suite's answer as the check reads it, or None when it says
+    nothing this check can use (R2 then): an unknown kind, an id kind with no id, a folder
+    with no folder. `own` is the id `<name>@agentik`, whatever kind the row gives it."""
+    if not isinstance(row, dict) or row.get("kind") not in SOURCE_KINDS:
+        return None
+    kind, plugin, root = row["kind"], _clean(row.get("plugin")), _clean(row.get("root"))
+    if kind in ("own", "plugin"):
+        if not plugin:
+            return None
+        kind = "own" if plugin == f"{name}@agentik" else "plugin"
+    if kind == "folder" and not root:
+        return None
+    d = row.get("declared")
+    declared = None
+    if isinstance(d, dict) and _clean(d.get("path")):
+        line = d.get("line")
+        declared = {"path": _clean(d["path"]),
+                    "line": line if isinstance(line, int) and not isinstance(line, bool) else None}
+    seen = [{k: _clean(s.get(k)) for k in ("plugin", "version", "scope", "root")}
+            for s in (row.get("seen") if isinstance(row.get("seen"), list) else ())
+            if isinstance(s, dict)]
+    return {"kind": kind, "plugin": plugin if kind != "folder" else None, "root": root,
+            "version": _clean(row.get("version")), "found": row.get("found") is True,
+            "declared": declared, "seen": seen, "road": "suite"}
+
+
+def _installed(env) -> dict:
+    """Claude Code's record of the installs, `plugins/installed_plugins.json` under
+    `CLAUDE_CONFIG_DIR`, else `~/.claude`; {} when absent or unreadable."""
+    user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    got = hooks._load_json(user / "plugins" / "installed_plugins.json").get("plugins")
+    return got if isinstance(got, dict) else {}
+
+
+def _recorded(installed: dict, name: str) -> dict:
+    """fk3 R2: the installs whose plugin is named `name`, over every id, at scope `user` or
+    `managed`. One id stands; two or more are undecided (the file names no choice); none,
+    absent."""
+    ids = {}
+    for pid, recs in installed.items():
+        if not isinstance(pid, str) or pid.partition("@")[0] != name:
+            continue
+        for rec in (recs if isinstance(recs, list) else ()):
+            if isinstance(rec, dict) and rec.get("scope") in SOURCE_SCOPES:
+                ids.setdefault(pid, rec)
+    base = {"plugin": None, "root": None, "version": None, "found": False, "declared": None,
+            "seen": [], "road": "file"}
+    if not ids:
+        return dict(base, kind="absent")
+    if len(ids) > 1:
+        return dict(base, kind="undecided", seen=[
+            {"plugin": _clean(pid), "version": _clean(rec.get("version")),
+             "scope": _clean(rec.get("scope")), "root": _clean(rec.get("installPath"))}
+            for pid, rec in ids.items()])
+    pid, rec = next(iter(ids.items()))
+    return dict(base, kind="own" if pid == f"{name}@agentik" else "plugin",
+                plugin=_clean(pid), root=_clean(rec.get("installPath")),
+                version=_clean(rec.get("version")), found=True)
+
+
+def _source_key(src: dict) -> dict:
+    """fk3 R4: the check's `source`; `seen` only for an undecided sibling."""
+    out = {k: src[k] for k in ("kind", "plugin", "root", "version", "declared")}
+    if src["kind"] == "undecided":
+        out["seen"] = src["seen"]
+    return out
+
+
+def _check_dependency(dep: dict, plugins, err, src: dict | None = None) -> Check:
+    """fk3 R3: a sibling's line from the plugin that stands (`src`: the suite's answer, else
+    Claude Code's record). Optional all through: absent or disabled is a note, any version is
+    fine. `enabled` comes from the plugin list by the standing id. A plugin list that holds
+    the `old` id is read as before the suite's answer (R5)."""
+    if src is None or (plugins is not None and dep["old"] in plugins):
+        return _check_dependency_by_id(dep, plugins, err)
+    name, adds = dep["name"], dep["adds"]
+    own = f"{name}@{dep['marketplace']}"
+    row = dep.get("row", name)
+    kind = src["kind"]
+    if kind == "absent":
+        return Check(row, True, f"not installed, optional: {adds} (`{own}`)", note=True)
+    cmd = f"agentik config suite.sources.{name}"
+    if kind == "undecided":
+        n = len(src["seen"])
+        if src["road"] == "file":
+            return Check(row, True, f"{n} plugins named {name} installed, optional, not "
+                         "checked: say which with the suite's sources", note=True,
+                         source=_source_key(src))
+        return Check(row, True, f"{n} plugins named {name} installed and none chosen: say "
+                     f"which, `{cmd}`", warn=True, remedy=cmd, source=_source_key(src))
+    is_own = kind == "own"
+    source = None if is_own else _source_key(src)
+    if not src["found"]:
+        d = src["declared"]
+        where = (f"{d['path']}:{d['line']}" if d["line"] is not None else d["path"]) if d \
+            else "the suite's sources"
+        what = ("a folder that is gone" if kind == "folder" else
+                f"{own}, which is not installed" if is_own else "a plugin that is not installed")
+        return Check(row, True, f"{where} names {what}: `{cmd}`", warn=True, remedy=cmd,
+                     source=source)
+    if kind == "folder":
+        return Check(row, True, "installed", source=source)
+    if plugins is None:
+        return Check(row, True, f"optional, not checked: {err}", note=True, source=source)
+    pid = src["plugin"]
+    p = plugins.get(pid)
+    if not p:
+        return Check(row, True, f"not installed, optional: {adds} (`{own}`)", note=True,
+                     source=source)
+    if not p.get("enabled"):
+        lead = f"{pid} {p.get('version')} " if is_own else ""
+        return Check(row, True, f"{lead}installed, disabled, optional: {adds}", note=True,
+                     source=source)
+    if is_own:
+        return Check(row, True, f"{pid} {p.get('version')} installed")
+    return Check(row, True, "installed", source=source)
 
 
 def _sibling_absent(plugins, name: str) -> bool:
@@ -630,8 +840,14 @@ def run(env=None, cwd=None) -> Report:
     add(_check_state(env))
     plugins, err = _plugin_list(env)
     add(_check_plugin(plugins, err))
+    rows = _suite_sources(env, cwd) or {}       # fk3 R1: once a run
+    installed = None
     for dep in SIBLINGS:
-        add(_check_dependency(dep, plugins, err))
+        src = _answered(rows.get(dep["name"]), dep["name"])
+        if src is None:                         # fk3 R2: no answer for this sibling
+            installed = _installed(env) if installed is None else installed
+            src = _recorded(installed, dep["name"])
+        add(_check_dependency(dep, plugins, err, src))
     add(_check_profiles(env, cwd))
     add(_check_resolved(env))
     add(_check_meter(env))
@@ -662,10 +878,25 @@ def run(env=None, cwd=None) -> Report:
     return rep
 
 
+def _from(source) -> str:
+    """fk3 R4: the id or folder and the version a sibling's text line prints after its detail;
+    an undecided sibling's, each one seen."""
+    if not source:
+        return ""
+    each = source.get("seen") if source.get("kind") == "undecided" else [source]
+    names = [" ".join(x for x in (s.get("plugin") or s.get("root"), s.get("version")) if x)
+             for s in each or ()]
+    names = [n for n in names if n]
+    if not names:
+        return ""
+    return (" (seen: " if source.get("kind") == "undecided" else " (from ") \
+        + ", ".join(names) + ")"
+
+
 def render(rep: Report) -> str:
     from .plug import withheld     # build 3, L1: the text withholds a secret as the read does
     lines = [f"{('note' if c.note else 'warn' if c.warn else 'ok  ') if c.ok else 'FAIL'} "
-             f"{c.name:<12} {withheld(c.detail)}"
+             f"{c.name:<12} {withheld(c.detail)}{_from(c.source)}"
              for c in rep.checks]
     failed = [c.name for c in rep.checks if not c.ok]
     lines.append("doctor: green" if rep.ok else "doctor: failing: " + ", ".join(failed))
