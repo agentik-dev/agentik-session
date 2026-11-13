@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] act 1: the packet and this charter
 - [x] act 2: the failing tests, measured red at the pin (13 failed of 13 under .venv)
-- [ ] act 3: R2 to R4: the part, `open`'s line, the four warnings; old tests that pin `open`'s text
+- [x] act 3: R2 to R4: the part, `open`'s line, the four warnings; acceptance 6 green; four tests of `test_charter.py` that pin `open`'s text take the part (close_appends_one_line, s21_open_seeds_the_handover_line, s21_open_seeds_nothing_with_priority_off, s40_open_writes_the_section)
 - [ ] act 4: R5 to R8: `show`, its object and its text view
 - [ ] act 5: R9: the hook's read and the denial's sentence
 - [ ] act 6: R10: the records and one NICE row; both venvs green
@@ -26,4 +26,4 @@
 - none
 
 ## Next act
-Act 3: the part, `open`'s line and the four warnings in `charter.py`.
+Act 4: `show` in `charter.py` and `cli.py`.

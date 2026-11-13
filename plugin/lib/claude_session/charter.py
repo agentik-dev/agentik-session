@@ -1,13 +1,18 @@
-"""The sitting's charter: open one, check its shape, close it (overhaul-r1 D10).
+"""The sitting's charter: open one, check its shape, close it, show it (overhaul-r1 D10).
 
-The port of the `charter-close` shape check (overhaul-r1 D10). The charter has six
-parts and nothing else:
+The port of the `charter-close` shape check (overhaul-r1 D10). The charter has seven
+parts and nothing else, the seventh optional:
   1. the title line        # Sitting <date>-<n>: <repo>, <component>
   2. the table             goal, budget, pin, window, agents
   3. ## Done-ness
   4. ## Handover
   5. ## While waiting      (S40; a charter opened before alpha.24 has none)
   6. ## Next act
+  7. ## Waits on the owner (in2; optional, anywhere among the ## parts; `open` writes it
+                            directly before While waiting)
+Waits on the owner's lines are `- hand: <what>; `<command>`` (the line ends in one code
+span holding no backtick, `; ` before it) or `- none` alone; `check` and `close` warn on any
+other shape, never refuse. `show` reads a repo's newest charter and changes nothing.
 Refusals, the part named: a charter of 4,096 bytes or more (doclint's `>=`); a missing part
 other than While waiting; a table missing one of its five rows. An empty Done-ness or Handover
 is not refused here: `open` seeds the Handover's open-by-level line (none with priority off)
@@ -60,6 +65,10 @@ MAX_READY = 3
 RED = "WAITING while ready"
 STALLED_RED = "STALLED without its parts"
 REDS = (RED, STALLED_RED)
+# Packet in2: the seventh part, optional, and its one line shape besides `- none`.
+WAITS = "## Waits on the owner"
+HAND = "- hand: "
+HAND_SHAPE = "'- hand: <what>; `<command>`'"
 
 
 class CharterError(ValueError):
@@ -115,13 +124,62 @@ def while_waiting(raw: bytes) -> list[str] | None:
     return out
 
 
-def _near_miss(text: str) -> str | None:
-    """A heading that is nearly `## While waiting` (its case, or a tail after it), or None."""
+def _near_miss(text: str, head: str = WHILE_WAITING) -> str | None:
+    """A heading that is nearly `head` (its case, or a tail after it), or None."""
     for line in text.splitlines():
         s = line.strip()
-        if line.rstrip() != WHILE_WAITING and s.lower().startswith(WHILE_WAITING.lower()):
+        if line.rstrip() != head and s.lower().startswith(head.lower()):
             return line.rstrip()
     return None
+
+
+def waits(raw: bytes) -> list[tuple[int, str]] | None:
+    """Packet in2: the Waits on the owner part's non-blank lines, each with its 1-based line
+    number in the file, trailing blanks cut; None when the charter has no such part."""
+    lines = raw.decode("utf-8", "replace").splitlines()
+    start = next((i for i, l in enumerate(lines) if l.rstrip() == WAITS), None)
+    if start is None:
+        return None
+    out = []
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            break
+        if lines[i].strip():
+            out.append((i + 1, lines[i].rstrip()))
+    return out
+
+
+def hand_line(line: str) -> tuple[str, str] | None:
+    """`(what, command)` of a hand line, ``- hand: <what>; `<command>` ``: the line ends in
+    one code span that holds no backtick and something past blanks, `; ` before it, and
+    <what> is the non-blank text between (it may hold a `;`); None for any other line."""
+    if not line.startswith(HAND) or not line.endswith("`") or len(line) < len(HAND) + 2:
+        return None
+    tick = line.rfind("`", 0, len(line) - 1)
+    if tick < len(HAND) + 2 or line[tick - 2:tick] != "; ":
+        return None
+    what, command = line[len(HAND):tick - 2], line[tick + 1:-1]
+    if not what.strip() or not command.strip():
+        return None
+    return what, command
+
+
+def _waits_shape(lines: list[tuple[int, str]] | None, text: str = "") -> list[str]:
+    """The Waits on the owner part's shape warnings (in2 R4), each naming its line or
+    heading; no part, and no near-miss heading, warns nothing (the part is optional)."""
+    if lines is None:
+        near = _near_miss(text, WAITS)
+        return [f"heading '{near}' is not '{WAITS}'"] if near is not None else []
+    if not lines:
+        return ["Waits on the owner is empty: write - none, or the hand lines"]
+    body = [line for _, line in lines]
+    out = []
+    if NONE in body and len(body) > 1:
+        out.append(f"Waits on the owner has '{NONE}' beside other lines: drop '{NONE}' "
+                   "or the others")
+    out.extend(f"Waits on the owner line is not {HAND_SHAPE} or '{NONE}' alone: {line}"
+               for line in body if line != NONE and hand_line(line) is None)
+    return out
 
 
 def _while_waiting_shape(lines: list[str] | None, text: str = "") -> list[str]:
@@ -219,6 +277,7 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     n = waiting(line) if pacing["enabled"] else None
     lines = while_waiting(raw)
     out.extend(_while_waiting_shape(lines, text))
+    out.extend(_waits_shape(waits(raw), text))          # in2 R4: whatever pacing says
     if n:
         # FW1a: <what> up to its first `;`, since WAITING_LINE's `\S` lets it take one, and
         # in FULL that would read <how to tell> as the wait's subject.
@@ -426,6 +485,9 @@ def open(dir, goal: str, section: dict, head: str | None,
         "",
         "## Handover",
         *([rules.SEED] if rules.parts(section)[0]["enabled"] else []),
+        "",
+        WAITS,                                   # in2 R3: directly before While waiting
+        NONE,
         "",
         WHILE_WAITING,
         NONE,
