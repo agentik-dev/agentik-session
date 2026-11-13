@@ -7,7 +7,9 @@
 # `defaults` carries every field; a profile names only what it changes, except
 # frontier, which states every field so the whole shape is readable in one place.
 # `tiers` (packet mt1, hq design/13 §3) maps the five roles to {model, effort}: the
-# shipped table is in `defaults`; a profile names only the roles it changes. `subagents`
+# shipped table is in `defaults`; a profile names only the roles it changes, and the five
+# whose body said `subagents: opus` state `build` (mt1 R2-F2), so a start that names them
+# re-applies it above every file, as it re-applies their other fields. `subagents`
 # is read as `tiers.build`'s model one release more, and `start` exports that model as
 # CLAUDE_CODE_SUBAGENT_MODEL. `lane`, `plugins` and `notes` are `start`'s (the former
 # sessionconfig table, folded here).
@@ -82,6 +84,8 @@ profiles:
     description: Everything on the seat, full effort. For work that matters.
     model: opus
     effort: high
+    tiers:
+      build: {model: opus}
     tools: null
     permission_mode: auto
     posture: signal
@@ -145,17 +149,23 @@ profiles:
     description: Writes packets and designs, never builds.
     model: fable
     effort: high
+    tiers:
+      build: {model: opus}
     posture: signal
   builder:
     description: What the relay spawns.
     model: opus
     effort: high
+    tiers:
+      build: {model: opus}
     posture: deny
   orchestrator:
     description: The orchestrator for large, complex work, Fable 5.1 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: fable
     effort: high
     builders: {model: opus, max_concurrent: 3}
+    tiers:
+      build: {model: opus}
     posture: signal
     charter: {required: true}
     ceilings: {context: 180000, turns: 400}
@@ -166,6 +176,7 @@ profiles:
     effort: high
     tiers:
       design: {model: opus}
+      build: {model: opus}
     builders: {model: opus, max_concurrent: 3}
     posture: signal
     charter: {required: true}
