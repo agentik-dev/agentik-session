@@ -19,6 +19,7 @@
 - [x] Review 1's fix: tests red at 831110a (d1fa778, section 12: 41 fail, 8 pass)
 - [x] F3 `$((` arithmetic only with its `))` adjacent; F4 `_subst`'s arithmetic nest bounded, RecursionError read as `_Bound` in `commands` and `_strict`; F2 `$__g8_out` out of the command word
 - [x] F1: an unread text read as a shell spells it: the walk (to `_NEST` texts deep) and a split with `\`-NL, `\` and quotes off
+- [x] F7: a here-string's word is `data` unless a shell reads it as its script (`piped`); a pipe into a runner's shell is `piped`
 - [ ] Review 1's fix, left: F1; F7; F5, F6; N1; the (a) test; the reruns; the gate once, last
 
 ## Handover

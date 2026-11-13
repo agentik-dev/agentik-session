@@ -955,6 +955,7 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
             left = _SUB_RE.sub("", raw[i]).replace(_SUB_OUT, "").strip("`")   # fix E1, r1 F2:
             name = os.path.basename(put(left)) if left else name    # read as empty, any level
         args, script, why, wtext, used, run = words[i + 1:], None, "", None, None, None
+        strs = [put(t) for op, t in ins if op == "<<<"]     # r1 F7: a here-string's word
         if name is not None and name.lower() in _SHELLS5:
             kind, k = _script(args)
             if kind == "c" and k is not None:
@@ -964,8 +965,8 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
                 script = bodies[d] if quoted[d] else re.sub(
                     r"\\([$`\\])|\\\n", lambda m: m.group(1) or "",
                     _SUB_RE.sub(_SUB_OUT, _body(cache, bodies[d], bash3, depth)[0]))
-            elif kind == "in" and any(op == "<<<" for op, _ in ins):
-                why, wtext = "piped", put([t for op, t in ins if op == "<<<"][-1])
+            elif kind == "in" and strs:
+                why, wtext, strs = "piped", strs[-1], strs[:-1]
             elif kind == "in" and before in ("|", "|&") and pipe:
                 why, wtext = "piped", " ".join(pipe)
             if script is not None and level >= 1:
@@ -978,6 +979,8 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
             k = None if j is None else next(
                 (k for k in range(j + 1, len(args)) if _C_FLAG.match(args[k])), None)
             run = None if k is None or k + 1 >= len(args) else " ".join(args[k + 1:])
+            if j is not None and k is None and before in ("|", "|&") and pipe:
+                why, wtext = "piped", " ".join(pipe)     # r1 F7: `... | timeout 5 sh`
         if said is not None:
             why, wtext = "eval", said
         yield _Step("", pre=words[:i], name=name, args=args, outs=outs, heres=heres, mine=mine,
@@ -989,7 +992,9 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
         for d in docs:                    # fix B: a body the walk reads as no script
             if d != used:
                 yield _Step("data", text=bodies[d], level=level)
-        pipe.append(" ".join(words + mine))
+        for t in strs:                    # r1 F7: a here-string's word, as a body
+            yield _Step("data", text=t, level=level)
+        pipe.append(" ".join(words + mine + strs))
         st0, fa0 = st, fa
         if name in _CDS:                  # r1 R1: behind a reserved word a `cd` may not run, so
             moved = [_move(name, args, s, env) for s in st]    # it adds a folder, replaces none
