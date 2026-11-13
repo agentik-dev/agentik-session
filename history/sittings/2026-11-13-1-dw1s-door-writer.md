@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] Baseline at the pin: test_install.py + test_bare_machine.py, .venv 157 passed; .venv-floor 154 passed, 3 skipped
 - [x] Act 1: the packet
-- [ ] Act 2: the failing tests (`tests/test_dw1_door.py`)
+- [x] Act 2: the failing tests (`tests/test_dw1_door.py`): at the pin 11 failed, 2 passed (acceptance 3 holds) under both venvs
 - [ ] Act 3: R1 to R5 in `install.py`; R6 the records
 - [ ] R7 proofs under both venvs
 
@@ -19,7 +19,7 @@
 - Phase 2 (bump, gate job) waits on the coordinator's word.
 
 ## Next act
-- Act 2: write `tests/test_dw1_door.py`, red at the pin.
+- Act 3: `install._door`, called from `_locked_install`, its line first in `pruned`; the records.
 
 ## Exit
 - (open)
