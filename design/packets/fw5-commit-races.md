@@ -41,7 +41,9 @@
 
 ## 4. Findings that name this row
 
-(filled as the build finds them)
+- R2 changes `test_fw4d.py`: its three round-2 tests (another writer's commit or staging during a red check, SIGTERM after another writer's commit) now read the plain `red check` line, or none for the signal, nothing of this call staged; its two r1_f3 tests reach the restore that cannot be made by a red commit holding `index.lock`, since a red check no longer restores.
+- R3 changes `test_cli.py` beyond its two checkpoint tests: four respawn tests ran `-c` with no path (s19's helper refusal and its control, s22's tracked and untracked charter) and now name their paths. A modified tracked charter passes `--respawn` with `--commit` only when the line names it.
+- `test_readme.py`'s status line (3455 tests, the README's count) reds at 3473 collected: the count is phase 2's, with the version.
 
 ## 5. Forbidden reads
 
