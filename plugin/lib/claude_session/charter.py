@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import time
 from pathlib import Path
 
@@ -510,6 +511,9 @@ NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)(?:-[A-Za-z0-9._-]+)?\.md$")
 SHOW_PARTS = ("title", "table", "Done-ness", "Handover", "Waits on the owner",
               "While waiting", "Next act")
 NO_DIR, NO_CHARTER, UNREADABLE = "not a directory", "no charter", "unreadable"
+# Review 1's F1: the most `show` reads of one charter, 16 times the ceiling, so a charter
+# over the ceiling is still read and its refusal shown; past it, the REPO is unreadable.
+SHOW_BOUND = 16 * CEILING
 
 
 def newest(dir) -> Path | None:
@@ -524,11 +528,36 @@ def newest(dir) -> Path | None:
     return Path(dir) / max(found)[2] if found else None
 
 
+def _read_regular(path) -> tuple[bytes, int]:
+    """Review 1's F1: the bytes and whole mtime of `path` when it is a regular file of at
+    most SHOW_BOUND bytes, opened without blocking (a FIFO with no writer, a device, a
+    folder never hold the read); OSError for anything else. `show` chooses the file
+    itself, so it reads only this way; `check` reads the file it is handed as before."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(f"{path}: not a regular file")
+        if st.st_size > SHOW_BOUND:
+            raise OSError(f"{path}: over {SHOW_BOUND} bytes")
+        chunks, size = [], 0
+        while size <= SHOW_BOUND:
+            b = os.read(fd, SHOW_BOUND + 1 - size)
+            if not b:
+                break
+            chunks.append(b)
+            size += len(b)
+        if size > SHOW_BOUND:
+            raise OSError(f"{path}: over {SHOW_BOUND} bytes")
+        return b"".join(chunks), int(st.st_mtime)
+    finally:
+        os.close(fd)
+
+
 def read(repo, path) -> dict:
     """R7: one repo's object for the charter at `path`. Raises OSError when unreadable."""
     path = Path(path)
-    raw = path.read_bytes()
-    mtime = int(path.stat().st_mtime)
+    raw, mtime = _read_regular(path)
     text = raw.decode("utf-8", "replace")
     lines = text.splitlines()
     heads = {line.rstrip() for line in lines}
