@@ -7,6 +7,7 @@ a wait on the job's own key is refused. Every repo, home and state root is the t
 import contextlib
 import io
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -151,6 +152,80 @@ def test_fw5_r2_the_witness_goes_on_a_refusal_and_on_a_red_add(repo):
     rc, out, err = repo.commit("a.txt")                          # nothing to commit
     assert (rc, out) == (2, "") and "nothing to commit" in err
     assert not repo.witness().exists() and repo.staged() == []
+
+
+# ---- review 1, F1: the index moved between the `add -N` and a red commit --------------------
+
+SPAN = r"""#!/bin/sh
+gd=$(git rev-parse --absolute-git-dir); top=$(git rev-parse --show-toplevel)
+(
+  cd "$top"
+  until (set -C; : > "$gd/index.lock") 2>/dev/null; do :; done
+  sleep 0.5
+  echo other > other.txt
+  cp "$gd/index" "$gd/writer.idx"
+  GIT_INDEX_FILE="$gd/writer.idx" git add -- %s
+  mv "$gd/writer.idx" "$gd/index"; rm -f "$gd/index.lock"
+) </dev/null >/dev/null 2>&1 &
+exit 1
+"""
+
+
+def moved_span(repo, paths, *names):
+    """A red pre-commit hook whose writer, once the commit lets index.lock go, stages `paths`
+    by git's protocol: the index moves after the check, during the commit."""
+    hook = repo.path / ".git" / "hooks" / "pre-commit"
+    hook.write_text(SPAN % paths)
+    hook.chmod(0o755)
+    rc, out, err = repo.commit(*names)
+    gd = repo.path / ".git"
+    until(lambda: not (gd / "index.lock").exists() and not (gd / "writer.idx").exists())
+    hook.unlink()
+    return rc, out, err
+
+
+def moved_line(err, left):
+    return ("commit-step: red commit exit 1; another writer changed the index after the check, "
+            f"during the commit, so the index as found is not put back over it: {left}\n") in err
+
+
+def test_fw5_f1_a_move_during_the_commit_leaves_no_intent_to_add_entry_of_the_call(repo):
+    repo.write("n.txt", "new\n")
+    rc, out, err = moved_span(repo, "other.txt", "n.txt")
+    assert (rc, out) == (1, f"commit scratch: red commit exit 1, {verb.MOVED}\n"), err
+    assert git(repo.path, "ls-files", "--", "n.txt") == "" and repo.staged() == ["other.txt"]
+    assert moved_line(err, "none of this call's paths is staged or intent-to-add"), err
+    git(repo.path, *OTHER.split()[1:], "commit", "-qam", "theirs")      # their sweep
+    assert repo.took() == ["other.txt"] and not repo.witness().exists()
+    assert git(repo.path, "status", "--porcelain", "--", "n.txt") == "?? n.txt"
+
+
+def test_fw5_f1_the_moved_line_names_a_path_of_the_call_that_stays_staged(repo):
+    repo.write("a.txt", "mine\n")
+    repo.write("n.txt", "new\n")
+    rc, out, err = moved_span(repo, "a.txt", "a.txt", "n.txt")
+    assert (rc, out) == (1, f"commit scratch: red commit exit 1, {verb.MOVED}\n"), err
+    assert repo.staged() == ["a.txt"] and git(repo.path, "ls-files", "--", "n.txt") == ""
+    top = shlex.quote(git(repo.path, "rev-parse", "--show-toplevel"))
+    assert moved_line(err, f"this call's paths still staged or intent-to-add: a.txt; "
+                           f"`git -C {top} restore --staged -- a.txt` unstages them"), err
+
+
+def test_fw5_f1_an_intent_to_add_entry_left_behind_is_named(repo, monkeypatch):
+    monkeypatch.setattr(verb, "_unadd", lambda *a: None)                # index.lock not had
+    repo.write("n.txt", "new\n")
+    rc, out, err = moved_span(repo, "other.txt", "n.txt")
+    assert (rc, out) == (1, f"commit scratch: red commit exit 1, {verb.MOVED}\n"), err
+    top = shlex.quote(git(repo.path, "rev-parse", "--show-toplevel"))
+    assert moved_line(err, f"this call's paths still staged or intent-to-add: n.txt; "
+                           f"`git -C {top} restore --staged -- n.txt` unstages them"), err
+
+
+def test_fw5_f1_gits_reason_on_stdout_reaches_stderr(repo):
+    repo.write("a.txt", "mine\n")
+    rc, out, err = repo.commit("a.txt", check=f"sh -c 'git add a.txt && {OTHER} commit -qm t'")
+    assert (rc, out) == (1, "commit scratch: red commit exit 1\n")
+    assert "nothing" in err and repo.took() == ["a.txt"], err
 
 
 # ---- R3 (n78): checkpoint --commit <paths...> -------------------------------------------------

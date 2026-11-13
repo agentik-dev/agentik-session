@@ -3,7 +3,7 @@
 | item | value |
 |---|---|
 | goal | packet fw5 (`design/packets/fw5-commit-races.md`): R1 witness index, R2 what stands, R3 `checkpoint --commit <paths...>`, R4 a cut wait cancels its job, R5 no wait on the job's own key; phase 1 ends at the commits |
-| budget | builder: about 90 tool calls |
+| budget | builder: about 90 tool calls (build 1); the fix of review 1: about 90 more |
 | pin | f1cbccd on main (alpha.94); worktree `.claude/worktrees/fw5-commit-races`, `.venv`, `.venv-floor` linked |
 | window | 200k |
 | agents | 0 |
@@ -17,6 +17,9 @@
 - [x] R4 (commit.py `_gate_check` writes the mark in a `finally`, the signals held; gate.py `cancel`, `cancel_path`, `_step` closes a marked entry unrun, `_reap` cuts a marked child as the wall does, `_finish` and `_sweep_marks` drop marks); test_gate, test_fw2, test_fw4c, test_fw4d, test_s47 green (240)
 - [x] R5 (cli.py `cmd_gate`, `_own_entry`): `gate run --wait` of the job's own key and `gate wait` of a queued id of that key exit 2; the six named test files green under `.venv-floor` (175)
 - [x] docs (README and source, sidecar by `shasum`, RUNBOOK §checkpoint and §6, SKILL.md, the checkpoint command, help) and n71, n78, n81, n84 out of NICE; doclint and recordlint pass; the README's test count (3455, now 3473 collected) left for phase 2
+- [x] review 1's fix, tests first: F1 (the `add -N` span), the moved line asserted, git's reason on stdout; red at 2a9fa14 (4 failed)
+- [ ] review 1's fix: `_unadd` and `_tell_moved` (commit.py), git's stdout reason on stderr
+- [ ] review 1's records: the packet's section 7, NICE rows for the other leads
 - [ ] phase 2: main merged, the version, the gate's `make check` once
 
 ## Handover
