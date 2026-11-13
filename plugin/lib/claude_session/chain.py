@@ -270,7 +270,7 @@ def _json(path: Path):
         d = json.loads(path.read_bytes())
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):    # too deep to parse (round 1's F3)
         return {}
     return d if isinstance(d, dict) else {}
 

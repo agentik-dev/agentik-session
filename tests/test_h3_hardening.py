@@ -72,6 +72,21 @@ def test_n99_load_json_of_a_deep_file_is_what_a_bad_file_gives(tmp_path):
     assert hooks._load_json(deep) == hooks._load_json(bad) == {}
 
 
+def test_n99_ready_reads_a_deep_turn_ended_as_one_that_does_not_parse():
+    """Round 1's F3: chain._json treats RecursionError as a file that does not parse."""
+    sdir = _folder()
+    (sdir / hooks.TURN_ENDED).write_text(DEEP)
+    assert _chain()._ready(sdir, ENDED + 61) is False
+
+
+def test_n99_meter_parse_skips_a_deep_transcript_line(tmp_path):
+    """Round 1's F3: meter._scan treats RecursionError as a line that does not parse."""
+    from claude_session import meter
+    t = tmp_path / "t.jsonl"
+    t.write_text(AT_100.read_text() + DEEP + "\n")
+    assert meter.parse(t) is not None
+
+
 def _post(monkeypatch, capsys, sid, resolved_text):
     repo = Path(os.environ["HOME"]) / "repo"
     (repo / ".claude" / "agentik").mkdir(parents=True, exist_ok=True)

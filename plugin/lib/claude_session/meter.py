@@ -172,7 +172,7 @@ def _scan(path: Path, st: dict, table=None, shared=None) -> dict | None:
     for raw in data[:end].splitlines():
         try:
             obj = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):    # too deep to parse (round 1's F3)
             continue
         if not isinstance(obj, dict):
             continue
