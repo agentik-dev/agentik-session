@@ -52,6 +52,13 @@ class Land2Case(LandCase):
     def index(self):
         return self.git("ls-files", "-s")
 
+    def git_wrapped(self, arms):
+        """An env whose `git` first runs these `case` arms on "$1 $2", $REAL the real one."""
+        bindir = os.path.join(self.tmp, "wrapped")
+        self.write(bindir, "git", '#!/bin/sh\nREAL=%s\ncase "$1 $2" in\n%s\nesac\nexec "$REAL" "$@"\n'
+                   % (shutil.which("git", path=self.env["PATH"]), arms), 0o755)
+        return dict(self.env, PATH=bindir + os.pathsep + self.env["PATH"])
+
 
 class TestNested(Land2Case):
     """R1: a worktree under the branch's worktree is red, clean or dirty, and is never removed."""
@@ -319,4 +326,71 @@ class TestRound1(Land2Case):
         p = self.land("work", sha, env=env)
         self.assertRed(p, "merge-file", 1)
         self.assertIn("fatal:", p.stderr)
+        self.assertEqual(self.ran(), [])
+
+
+class TestRound2(Land2Case):
+    """Round 2's findings: R2-F1 the main checkout under the branch's worktree, R2-F2 every read
+    of the merge from the commit read as main, R2-F3 the dangling commit's parent and an empty
+    worktree list."""
+
+    def test_r2f1_a_main_checkout_under_the_branchs_worktree_is_red_and_kept(self):
+        wt = os.path.join(self.tmp, "wt")
+        self.git("worktree", "add", "-q", "-b", "work", wt, "main")
+        self.write(wt, "a.txt", "a\n")
+        self.git("add", "a.txt", cwd=wt)
+        self.git("commit", "-qm", "the work", cwd=wt)
+        sha = self.git("rev-parse", "HEAD", cwd=wt)
+        moved = os.path.join(wt, ".claude", "worktrees", "scratch")
+        os.makedirs(os.path.dirname(moved))
+        shutil.move(self.repo, moved)
+        self.repo = moved
+        self.git("worktree", "repair")
+        charter = self.write(moved, "charter.md", "a sitting's uncommitted charter\n")
+        p = self.land("work", sha)
+        self.assertRed(p, "worktree", 1)
+        self.assertEqual(self.ran(), [])
+        self.assertTrue(os.path.isdir(os.path.join(moved, ".git")))
+        self.assertTrue(os.path.exists(charter))
+        self.assertIn(moved, p.stderr)
+
+    def test_r2f2_main_reset_and_restored_during_merge_tree_is_red_sha(self):
+        # The check commits on main; during the merged-tree read after it, main goes back to
+        # its parent and returns, so only the commit read as main shows what the merge holds.
+        arm = ('"merge-tree --write-tree") if [ -e "$LAND_ORDER.checked" ] && '
+               '[ ! -e "$LAND_ORDER.done" ]; then touch "$LAND_ORDER.done"; '
+               'A=$("$REAL" -C "%s" rev-parse refs/heads/main); '
+               '"$REAL" -C "%s" update-ref refs/heads/main "$A^"; "$REAL" "$@"; c=$?; '
+               '"$REAL" -C "%s" update-ref refs/heads/main "$A"; exit $c; fi;;'
+               % ((self.repo,) * 3))
+        env = self.git_wrapped(arm)
+        make = ("check:\n\t@cd \"%s\" && echo x > raced.txt && git add raced.txt && "
+                "git commit -qm raced\n\t@touch \"$$LAND_ORDER.checked\"\n" % self.repo)
+        sha = self.branch("work", {"Makefile": make, "a.txt": "a\n"})
+        p = self.land("work", sha, env=env)
+        self.assertRed(p, "sha", 1)
+        self.assertTrue(os.path.exists(self.order + ".done"))
+        self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "raced")
+        self.assertEqual(len(self.git("rev-list", "--parents", "-n1", "main").split()), 2)
+
+    def test_r2f3_the_dangling_commits_first_parent_is_the_commit_read_as_main(self):
+        sha = self.branch("work", {"scripts/hygiene": STUB})
+        before = self.main_sha()
+        # Main moves between its read and the dangling commit: the commit keeps the read one.
+        arm = ('"commit-tree %s") "$REAL" -C "%s" commit -q --allow-empty -m moved;;'
+               % (self.git("merge-tree", "--write-tree", "main", sha), self.repo))
+        p = self.land("work", sha, env=self.git_wrapped(arm))
+        self.assertNotEqual(self.main_sha(), before)
+        spans = [a.split()[-1] for a in self.argv() if a.startswith("--require-private --commits ")
+                 and a.split()[-1].startswith(sha + "..")]
+        self.assertTrue(spans, self.argv() + [p.stdout])
+        commit = spans[0].split("..")[1]
+        self.assertEqual(self.git("rev-list", "--parents", "-n1", commit).split()[1:],
+                         [before, sha])
+
+    def test_r2f3_an_empty_worktree_list_is_red_repo(self):
+        sha = self.branch("work", {"a.txt": "a\n"})
+        p = self.land("work", sha, env=self.git_wrapped('"worktree list") exit 0;;'))
+        self.assertRed(p, "repo", 1)
+        self.assertIn("the main checkout is unknown", p.stderr)
         self.assertEqual(self.ran(), [])
