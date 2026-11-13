@@ -19,7 +19,7 @@
 - [x] F1 F2 F3 (3ecd8a9), F4 (596922a), F3's save, F5, F7, F8, F10 (ef96726); NICE n149 to n152 (F6, F8's unknown role, two observations), n87 n88 n91 to the overflow; packet §4 and RUNBOOK; 1163 passed under `.venv`
 - [x] fix round 2 (hq `REFUTE-2026-11-12-mt1-r2.md`): tests aa476d5 (10 red at 731c398); R2-F1 a no-family model skipped and named; R2-F2 the five bodies state build opus; R2-F3 R2-F4 the messages; records; mat.py 68 of 768 differ from the pin (64 `local`, R1; 4 user `defaults.profile`, R3)
 - [x] phase 2: main merged (h3, alpha.91) on the coordinator's word; NICE n149 to n152 renumbered, n153 to n157 filed; alpha.92, 3400 tests; post-merge 21 files 1248 passed (.venv), 1245 passed 3 skipped (.venv-floor)
-- [ ] the gate, once, last
+- [x] the gate, once, last: 20261112-195001-1278 exit 0 in 13 min on 0de14d5 (3400 passed; floor 3274 passed, 105 skipped)
 
 ## Handover
 - decide, owner: whether `--save` on a non-tier key should write the user's `profiles.yaml` `profiles.<name>.<key>` (today refused, exit 2); consumer: the owner's `set ... --save` habit.
@@ -30,7 +30,8 @@
 - none
 
 ## Next act
-The gate's `make check` on the head, once; on green, the hand-back to the hq coordinator; on red, the log is the work.
+Done: the hand-back to the hq coordinator; the coordinator lands it.
 
 ## Exit
 - 2026-11-12: built; gate 20261112-173918-1238 ran on 212f74e (before the round-2 fixes); the next gate runs on the head
+- 2026-11-12: fix rounds 1 and 2 and the merge of main built; gate 20261112-195001-1278 exit 0 on 0de14d5
