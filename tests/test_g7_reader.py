@@ -92,7 +92,7 @@ TABLE = [
     ("bash -c \"bash -c '{M}'\"", NONE, RUNS),
     ("echo \"$({M})\"", GATED, RUNS),
     ("sh <<EOF\n{M}\nEOF", GATED, RUNS),
-    ("cat <<EOF\n{M}\nEOF", NONE, ""),
+    ("cat <<EOF\n{M}\nEOF", NONE, RUNS),   # fix of the read: the pin's
     ("echo `{M}`", GATED, RUNS),
     ("./make.sh > CLAUDE.md", GATED, ""),
     ("ksh -c '{M}'", GATED, RUNS),

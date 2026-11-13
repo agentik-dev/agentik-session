@@ -4,7 +4,9 @@
 level 1; 3 data read as no command; 4 the parts not read, each by its kind; 5 the folder a
 command runs in; 6 the words around a substitution kept with their command; 7 git's global
 options; 8 real shells run the lines and call what the reader names; 9 the gates and the make
-rule read the same commands; 10 the quoted-substitution cutter is gone.
+rule read the same commands; 10 the quoted-substitution cutter is gone; 11 (fix of the read)
+a shell's `-c` text behind a runner and a heredoc's body are texts not read, a substitution
+glued to the command word is read as empty, and the walk returns early on a plain line.
 """
 import os
 import subprocess
@@ -56,7 +58,7 @@ def test_1_the_commands(shape):
     gits = [c for c in cmds if c.name == "git"]
     assert len(gits) == 1, cmds
     assert gits[0].args == ["add", "-A"] and gits[0].level == 0, gits
-    assert unread == [], unread
+    assert [u for u in unread if u.why != "data"] == [], unread     # fix: a body is `data`
     assert all(isinstance(c, Cmd) for c in cmds)
 
 
@@ -72,7 +74,10 @@ def test_2_level_one(shape):
 @pytest.mark.parametrize("shape", T3, ids=[str(i) for i in range(len(T3))])
 def test_3_no_command(shape):
     cmds, unread = _read(shape.format(G=G))
-    assert _adds(cmds) == [] and unread == [], (cmds, unread)
+    assert _adds(cmds) == [], cmds
+    # fix of the read: a heredoc's body is `data`, a runner's `-c` text `runner`; nothing else
+    assert all(u.why in ("data", "runner") for u in unread), unread
+    assert bool(unread) == ("<<" in shape or "bash -c" in shape), (shape, unread)
 
 
 def test_3_the_commit_is_one_git():
@@ -85,6 +90,7 @@ def test_3_the_commit_is_one_git():
 def test_4_unread(shape, why):
     cmds, unread = _read(shape.format(G=G))
     assert _adds(cmds) == [], cmds
+    unread = [u for u in unread if u.why != "data"]     # fix of the read: a body is `data`
     assert len(unread) == 1 and unread[0].why == why, unread
     assert G in unread[0].text and isinstance(unread[0], Unread)
 
@@ -236,7 +242,7 @@ def test_9_the_make_rule_reads_the_same():
     for shape in held:
         line = shape.format(G="make x")
         assert unattended.unbounded(line), line
-    assert unattended.unbounded("cat <<EOF\nmake x\nEOF") == ""
+    assert unattended.unbounded("cat <<EOF\nmake x\nEOF").startswith("it runs `make`")  # the pin's
     assert unattended.unbounded("echo 'make x'") == ""
 
 
@@ -250,3 +256,87 @@ def test_10_no_cutter():
                 if "_substituted" in ln:
                     hits.append((p.name, n))
     assert len(hits) == 1 and hits[0][0] == "test_g8a_reader.py", hits
+
+
+# ---- 11: fix of the read (classes A and B, E1, the early returns) -------------------------
+
+M = "make check"
+# class A: a shell and its `-c` text behind a command that is no wrapper
+RUNNERS = ["scripts/bounded -- sh -c '{M}'", "timeout 60 sh -c '{M}'", "xargs sh -c '{M}'",
+           "find . -exec sh -c '{M}' \\;", "ssh host sh -c '{M}'", "/usr/bin/env bash -c '{M}'",
+           "doas sh -c '{M}'", "setsid sh -c '{M}'", "stdbuf -oL sh -c '{M}'",
+           "flock /tmp/l sh -c '{M}'", "busybox sh -c '{M}'", "nice -n 5 timeout 9 BASH -lc '{M}'",
+           "tool gate run /r -- /bin/sh -c \"{M} > $L 2>&1\"", "sh -c 'tool run -- sh -c \"{M}\"'"]
+# class B and its kin: a heredoc's body a shell may run, read by the walk as no script
+BODIES = ["cat > x.sh <<'EOF'\n{M}\nEOF", "cat > x.sh <<'EOF'\n{M}\nEOF\nbash x.sh",
+          "cat > $S/x.sh <<'EOF'\nnice -n 19 {M} > log\nEOF\nbash -eu $S/x.sh",
+          "cat > x.sh <<EOF\n{M}\nEOF\nnohup bash ./x.sh &", "tee x.sh <<EOF\n{M}\nEOF\nsh x.sh",
+          "ssh host sh <<EOF\n{M}\nEOF", "source /dev/stdin <<EOF\n{M}\nEOF",
+          "bash /dev/stdin <<EOF\n{M}\nEOF", "( sh ) <<EOF\n{M}\nEOF", "{{ sh; }} <<EOF\n{M}\nEOF",
+          "sh 0<<EOF\n{M}\nEOF", "timeout 9 sh <<EOF\n{M}\nEOF", "sudo -i <<EOF\n{M}\nEOF",
+          "cat <<EOF | ssh host sh\n{M}\nEOF", "cat <<EOF | xargs -I{{}} sh -c '{{}}'\n{M}\nEOF",
+          "cat <<EOF | (sh)\n{M}\nEOF", "cat <<EOF | timeout 9 sh\n{M}\nEOF",
+          "eval \"$(cat <<EOF\n{M}\nEOF\n)\"", "sh -c \"$(cat <<EOF\n{M}\nEOF\n)\"",
+          "x=$(cat <<EOF\n{M}\nEOF\n); eval \"$x\"", "bash <(cat <<EOF\n{M}\nEOF\n)",
+          "python3 - <<'EOF'\nimport subprocess; subprocess.run('{M}', shell=True)\nEOF"]
+# E1: a substitution glued to the command word
+GLUED = ["$(true){M}", "$(){M}", "sudo $(true){M}", "x=1 $(true){M}", "`true`{M}",
+         "make$(true) check", "make`true` check"]
+
+
+@pytest.mark.parametrize("shape", RUNNERS, ids=[str(i) for i in range(len(RUNNERS))])
+def test_11_a_runner_text_is_not_read(shape):
+    assert unattended.unbounded(shape.format(M=M)).startswith("it runs `make` in a text"), shape
+    assert unattended.unbounded(shape.format(M="echo hi")) == "", shape
+    cmds, unread = _read(shape.format(M=M))
+    assert any(u.why == "runner" and M in u.text for u in unread), unread
+    assert [c for c in cmds if c.name == "make"] == [], cmds        # R4 stands: no Cmd from it
+
+
+def test_11_the_runner_texts():
+    assert _read("timeout 60 sh -c 'make check'")[1] == [Unread("runner", "make check")]
+    assert _read("x sh -c -e 'a' b")[1] == [Unread("runner", "-e a b")]
+    assert _read("runner -- bash -c 'make x'")[1] == [Unread("runner", "make x")]
+    assert _read("sudo sh -c 'make x'")[1] == []                   # a wrapper: read at level 1
+    assert _read("echo sh")[1] == [] and _read("grep -c sh f")[1] == []
+
+
+@pytest.mark.parametrize("shape", BODIES, ids=[str(i) for i in range(len(BODIES))])
+def test_11_a_body_is_not_read(shape):
+    assert unattended.unbounded(shape.format(M=M)), shape
+    assert unattended.unbounded(shape.format(M="echo hi")) == "", shape
+
+
+def test_11_the_body_texts():
+    assert _read("cat <<'EOF'\nmake x\nEOF")[1] == [Unread("data", "make x\n")]
+    assert _read("cat > x.md <<'EOF'\nit's\nEOF")[1] == [Unread("data", "it's\n")]
+    assert unattended.unbounded("cat > x.md <<'EOF'\nit's\nEOF") == ""
+    assert _read("sh <<EOF\nmake x\nEOF")[1] == []                 # the script, read at level 1
+    assert _read("cat <<EOF\n$(make x)\nEOF")[1] == [Unread("data", "$(make x)\n")]
+
+
+@pytest.mark.parametrize("shape", GLUED, ids=[str(i) for i in range(len(GLUED))])
+def test_11_a_glued_substitution_is_read_as_empty(shape):
+    line = shape.format(M=M)
+    assert unattended.unbounded(line) == "it runs `make`; " + unattended.WHY_MAKE, line
+    assert [c.name for c in _read(line)[0]][0] == "make", line
+
+
+def test_11_a_glued_substitution_in_the_gates():
+    gated = HERE + "/CLAUDE.md"
+    for line in ("$()cp a CLAUDE.md", "$(true)cp a CLAUDE.md", "x=1 `true`cp a CLAUDE.md"):
+        assert gated in [p for _, p in shellreader.bash_targets(line, HERE, ENV)], line
+
+
+def test_11_the_early_returns(monkeypatch):
+    calls = []
+    real = shellreader._mask
+    monkeypatch.setattr(shellreader, "_mask", lambda *a, **k: calls.append(a) or real(*a, **k))
+    for line in ("git add -A && echo $(date)", "x=${y:-1}; cp a b", "echo `date` > f"):
+        assert shellreader._parse(line, False, True)[4] == [], line
+    assert calls == []
+    assert shellreader._parse("x=$(echo ${y:-a)}); cp a b", False, True)[4] != []
+    line = "git status --short " * 40
+    assert shellreader._here_scan(line)[0] is line
+    assert shellreader._subst(line, False, False, 0) == (line, [])
+    assert shellreader._subst(line, False, False, 0)[0] is line
