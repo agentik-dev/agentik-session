@@ -311,7 +311,7 @@ def _write_atomic(path: Path, text: str) -> None:
 def _load(path: Path) -> dict | None:
     try:
         d = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):     # too deep to parse: no parse (n99)
         return None
     return d if isinstance(d, dict) else None
 
