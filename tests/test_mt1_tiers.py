@@ -135,8 +135,10 @@ def test_3_user_tiers_everywhere_and_the_repo_over_them(world, tmp_path):
         assert resolved(world, p)["tiers"]["words"] == {"model": "haiku", "effort": "medium"}
     repo_file(world, "tiers:\n  words: {model: opus}\n")
     assert resolved(world)["tiers"]["words"]["model"] == "opus"
-    repo_file(world, "session:\n  tiers:\n    words: {model: sonnet}\n")
-    assert resolved(world)["tiers"]["words"]["model"] == "sonnet"
+    repo_file(world, "session:\n  tiers:\n    words: {model: sonnet}\n")   # r1 F3: not read
+    assert resolved(world)["tiers"]["words"]["model"] == "haiku"
+    r = resolver.resolve(world, "probe", os.environ, overlay={})
+    assert "config.yaml: session.tiers" in r.unknown
 
 
 def test_3_the_config_dir_s_user_file(world, tmp_path, monkeypatch):
@@ -183,7 +185,7 @@ def test_4_the_session_start_line_says_the_words():
 
 def test_4_cap_save_is_refused_and_writes_nothing():
     rc, _, err = run("set", "cap", "opus", "--save")
-    assert rc == 2 and "never" in err or "refused" in err
+    assert rc == 2 and ("never" in err or "refused" in err)
     assert sessionconfig.load_overlay(SID) == {}
 
 
@@ -221,7 +223,7 @@ def test_5_save_writes_the_user_layer(world):
 def test_5_save_repo_writes_the_repo_layer(world):
     rc, _, err = run("set", "tier.words", "haiku", "--save", "repo")
     assert rc == 0, err
-    assert "words: {model: haiku}" in (world / ".claude" / "agentik" / "config.yaml").read_text()
+    assert 'words: {model: "haiku"' in (world / ".claude" / "agentik" / "config.yaml").read_text()
     assert resolved(world)["tiers"]["words"]["model"] == "haiku"
 
 
@@ -327,3 +329,161 @@ def test_7_run_with_no_prompt_is_refused(monkeypatch):
 
 def test_8_no_shipped_profile_says_xhigh():
     assert "xhigh" not in (LIB / "profiles.yaml").read_text()
+
+
+# ---- round 1 (the refuter's F1 to F10, as the coordinator ruled) -------------------------
+
+def test_r1_f1_a_launched_profile_re_applies_its_own_tiers(world):
+    repo_file(world, "session:\n  subagents: opus\n")
+    assert resolved(world, "local-only")["tiers"]["build"]["model"] == "local/default"
+    repo_file(world, "tiers:\n  build: {model: opus}\n  words: {model: opus}\n")
+    s = resolved(world, "local-only")
+    assert {v["model"] for v in s["tiers"].values()} == {"local/default"}
+    assert s["subagents"] == "local/default"
+    assert sessionconfig.from_profile("local-only", world, dict(os.environ)).subagent_model \
+        == "local/default"
+    rc, out, _ = run("start", "-n", "local-only")
+    assert rc == 0 and "CLAUDE_CODE_SUBAGENT_MODEL=local/default " in out
+    assert resolved(world, "balanced")["tiers"]["build"]["model"] == "sonnet"   # its own body
+    assert resolved(world, "balanced")["tiers"]["words"]["model"] == "opus"     # not its body
+    user_file("profiles:\n  local-only:\n    tiers:\n      words: {model: haiku}\n")
+    assert resolved(world, "local-only")["tiers"]["words"]["model"] == "haiku"  # the user's body
+    repo_file(world, "session:\n  profile: local-only\ntiers:\n  build: {model: opus}\n")
+    assert resolved(world)["tiers"]["build"]["model"] == "opus"     # named, not launched
+
+
+def test_r1_f2_the_layer_order(world):
+    user_file("defaults:\n  subagents: opus\n")
+    assert resolved(world, "balanced")["tiers"]["build"]["model"] == "sonnet"
+    assert resolved(world)["tiers"]["build"]["model"] == "opus"
+    user_file("defaults:\n  subagents: sonnet\nprofiles:\n  frontier:\n    subagents: haiku\n")
+    assert resolved(world, "frontier")["tiers"]["build"]["model"] == "haiku"
+    assert resolved(world)["tiers"]["build"]["model"] == "haiku"
+    user_file("defaults:\n  tiers:\n    design: {model: sonnet}\n    build: {model: sonnet}\n"
+              "profiles:\n  frontier:\n    tiers:\n      build: {model: haiku}\n"
+              "tiers:\n  words: {model: haiku}\n")
+    t = resolved(world, "orchestrator-opus")["tiers"]
+    assert t["design"]["model"] == "opus"        # the shipped profile over the user's defaults
+    assert t["build"]["model"] == "sonnet"       # the user's defaults over the shipped ones
+    assert t["words"]["model"] == "haiku"        # the user's top-level tiers over both
+    assert resolved(world, "frontier")["tiers"]["build"]["model"] == "haiku"
+
+
+def test_r1_f2_a_user_file_of_admission_alone_leaves_every_table(world):
+    names = [None] + list(resolver.load_profiles(os.environ)[1])
+    base = {p: resolved(world, p)["tiers"] for p in names}
+    user_file("defaults:\n  admission:\n    mix:\n      shares: {fable: 2, opus: 1}\n"
+              "      resets: 1\n")         # the shape `defaults: {admission: {mix: ...}}`
+    for p in names:
+        assert resolved(world, p)["tiers"] == base[p], p
+
+
+def test_r1_f3_one_spelling_and_save_reaches_it(world):
+    repo_file(world, "session:\n  tiers:\n    words: {model: opus}\n")
+    assert resolved(world)["tiers"]["words"]["model"] == "sonnet"
+    rc, out, err = run("set", "tier.words", "haiku", "--save", "repo")
+    assert rc == 0, err
+    assert resolved(world)["tiers"]["words"]["model"] == "haiku"
+    assert "the next session reads it" in out
+
+
+def test_r1_f3_save_outranked_names_the_holder_and_exits_1(world, monkeypatch):
+    rf = repo_file(world, "tiers:\n  build: {model: sonnet}\n")
+    rc, out, err = run("set", "tier.build", "haiku", "--save")
+    assert rc == 1 and "the next session reads it" not in out + err
+    assert f"{rf}: tiers" in err and "sonnet" in err
+    uf = Path(os.environ["HOME"]) / ".claude" / "agentik" / "profiles.yaml"
+    assert 'build: {model: "haiku"' in uf.read_text()                 # written, outranked
+    monkeypatch.setenv("CLAUDE_SESSION_PROFILE", "local-only")
+    rc, out, err = run("set", "tier.build", "opus", "--save", "repo")
+    assert rc == 1 and "launch profile local-only" in err and "local/default" in err
+
+
+@pytest.mark.parametrize("name,model", [("balanced", "sonnet"), ("local-only", "local/default"),
+                                        ("frontier", "opus")])
+def test_r1_f4_the_doctor_resolves_with_the_launch_profile(world, monkeypatch, name, model):
+    from claude_session import doctor
+    for k in ("CLAUDE_SESSION_CONFIG", "CLAUDE_SESSION_PROFILE"):
+        monkeypatch.setenv(k, name)
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", model)
+    assert "subagents" not in {c.name for c in doctor.run(cwd=world).checks}
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
+    rows = {c.name: c for c in doctor.run(cwd=world).checks}
+    assert rows["subagents"].warn and f"tiers.build is {model}" in rows["subagents"].detail
+
+
+def test_r1_f5_no_hint_names_a_flag_that_refuses():
+    for argv in (("set", "posture", "deny"), ("set", "model", "sonnet")):
+        rc, out, err = run(*argv)
+        assert rc == 0, err
+        assert "--save" not in out and "profiles:" in out, out
+
+
+@pytest.mark.parametrize("word", ["opus}\nsession: {profile: scratch", "opus #x", "opus\n",
+                                  "op us", 'opus"', "opus,x"])
+def test_r1_f7_a_model_word_outside_the_grammar_is_refused_before_any_write(world, word):
+    uf, rf = user_file("# mine\n"), repo_file(world, "# theirs\n")
+    for argv in (("set", "tier.build", word, "--save"),
+                 ("set", "tier.build", word, "--save", "repo"),
+                 ("set", "tier.build", word), ("set", "cap", word)):
+        rc, _, err = run(*argv)
+        assert rc == 2 and "names no model" in err, (argv, err)
+    assert uf.read_text() == "# mine\n" and rf.read_text() == "# theirs\n"
+    assert sessionconfig.load_overlay(SID) == {}
+    assert resolved(world)["profile"] == "frontier"
+
+
+def test_r1_f7_a_bracketed_model_saves_quoted(world):
+    for argv in (("set", "tier.build", "opus[1m]", "--save"),
+                 ("set", "tier.mend", "claude-opus-5-5", "--save", "repo"),
+                 ("set", "tier.build", "opus[1m]")):
+        rc, _, err = run(*argv)
+        assert rc == 0, (argv, err)
+    t = resolved(world)["tiers"]
+    assert t["build"]["model"] == "opus[1m]" and t["mend"]["model"] == "claude-opus-5-5"
+
+
+@pytest.mark.parametrize("prompt", ["Tier: mend\nx", "tier: MEND\nx", "tier: mend\r\nx",
+                                    "tier: mend.\nx", "tier: foo\ntier: mend\nx"])
+def test_r1_f8_the_role_line_s_spellings(prompt):
+    assert tiers.role(prompt) == "mend"
+    _session("deny")
+    assert denied(spawn(prompt, "opus"))
+
+
+def test_r1_f9_the_chain_hands_the_cap_to_its_successor(tmp_path, monkeypatch):
+    import test_chain as cx
+    until = datetime.fromtimestamp(cx.T0 + 7200, timezone.utc).isoformat(timespec="seconds")
+    home, seen = cx._state() / "respawn" / "c1", []
+
+    def put(fx, p):                                  # the owner's word, in the sitting
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv("CLAUDE_CODE_SESSION_ID", p.sid)
+            m.setenv("CLAUDE_SESSION_CHAIN", "c1")
+            rc, _, err = run("set", "cap", "opus", "--until", until)
+            assert rc == 0, err
+
+    def look(fx, p):
+        seen.append(sessionconfig.load_overlay(p.sid).get("cap"))
+
+    fx = cx._fx(monkeypatch, [[(1, look), (5, put)] + cx.respawn_seq(tmp_path / "c.md")
+                              + [cx.end(3600)], [(1, look), cx.end(2)]])
+    cx._frun(fx, cx.FAST)
+    assert seen[0] is None and seen[1] == {"model": "opus", "until": until}
+    assert json.loads((home / tiers.RECORD).read_text())["session"] == fx.procs[1].sid
+    assert [s for s in fx.said if "cap" in s] == [
+        f"c1: cap opus to {tiers.wall(tiers.when(until))} goes to the successor"]
+
+
+def test_r1_f9_the_session_start_line_carries_the_words(world):
+    run("set", "tier.build", "sonnet", "--until", _future())
+    run("set", "cap", "opus")
+    out = hooks.session_start({"session_id": SID, "cwd": str(world)}, os.environ)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert re.search(r"; tiers: build sonnet to \w{3} \d\d:\d\d; cap: opus this session", ctx)
+
+
+def test_r1_f10_a_layer_s_model_names_a_family(world):
+    user_file("tiers:\n  build: {model: gpt5}\n")
+    with pytest.raises(resolver.ResolveError, match="family"):
+        resolved(world)
