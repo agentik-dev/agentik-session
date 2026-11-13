@@ -15,9 +15,9 @@
 - [x] phase 1: `test_g2b_gates.py` and `test_g4_folder_gates.py` green under `.venv` and `.venv-floor`; a small change (under 50 changed lines), no packet
 - [x] phase 1 at d2f89d9
 - [x] phase 1b: the packet (ca56886); F1, F2, F4 in `_mask`, F3 in `bash_targets` and `_bash_gated`, the probed-clean table (cc4a20a, 10 cases red at d2f89d9); F5 NICE n161 (c7130e9); guard files 234 passed under both venvs; whole suite under `.venv` 3396 passed, the README count deselected
-- [x] phase 1c tests first: 11 of 13 round-2 lines red at 40aee95 (`test_g5_r2_*`), the two controls green
+- [x] phase 1c tests first: 12 of 14 round-2 lines red at 40aee95 (`test_g5_r2_*`), the two controls green
 - [x] phase 1c R1, R2 (R2-F1, R2-F4): a bare paren in `${` is masked; `$${` opens no `${`
-- [ ] phase 1c R3 (R2-F2): a `case` pattern's `)` in `$(` closes nothing
+- [x] phase 1c R3 (R2-F2): a `case` pattern's `)` closes no bracket: `_mask` counts each bracket's open `case`s at a command's start (after `;`, `&`, `|`, `(`, a newline or a lead word); `_commands` reads a `case` after a lead word too
 - [ ] phase 1c R4 (R2-F3): an escaped backtick does not end a comment in backticks
 - [ ] phase 1c R6: the packet's §3b, this record
 - [ ] phase 2, on the coordinator's word: merge main after mt1, the next alpha, README and sidecar, the gate once

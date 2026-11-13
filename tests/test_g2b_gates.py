@@ -653,7 +653,10 @@ G5_R2_WRITES = [
     "echo $${ # don't" + N,                                                          # F1 c
     "v=${v#(}; v=${v%)}; case $v in a) echo 1;; esac # don't" + N,
     "name=${sig%%\\(*}\ncase $name in\n  foo) echo yes ;;  # don't care\nesac" + N,  # control
-    "# strip the paren \\\nv=${v%)}" + N, "x=${l%% #*)}" + N, "v=${v%)}" + N]       # F4
+    "# strip the paren \\\nv=${v%)}" + N, "x=${l%% #*)}" + N, "v=${v%)}" + N,       # F4
+    "echo $(case x in x)#don't\necho a;; esac)" + W,                                 # F2
+    "v=$(case x in\n x)# don't\n echo a;;\nesac)" + N,
+    "echo $(if true; then case x in x)# don't\necho;; esac; fi)" + W]
 
 
 @pytest.mark.parametrize("command", G5_R2_WRITES)

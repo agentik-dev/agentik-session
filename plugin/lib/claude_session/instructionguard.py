@@ -375,6 +375,8 @@ _OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|
 _MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
+_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>]|\Z)")
+_LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
@@ -420,9 +422,11 @@ def _mask(text: str) -> str:
     lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
     outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
     A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
-    ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1)."""
+    ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1).
+    A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2)."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
+    cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
     while i < n:
         c = text[i]
         if c == "\\" and text[i + 1:i + 2] == "\n" and quote != "'":
@@ -431,7 +435,7 @@ def _mask(text: str) -> str:
         if quote is None:
             if c == "\\" and i + 1 < n:
                 out += [c, _MASK.get(text[i + 1], text[i + 1])]
-                i, start, prev = i + 2, False, ""
+                i, start, prev, cmd = i + 2, False, "", cmd and not start
                 continue
             if c == "#" and start and opened[-1:] != ["${"]:
                 ends = [j for j in (text.find("\n", i), text.find("`", i) if tick else -1)
@@ -446,12 +450,26 @@ def _mask(text: str) -> str:
                 c = _MASK[c]              # r2 F1, F4: a bare paren in `${` is a word's
             elif c == "(" or (c == "{" and prev == "$"):
                 opened.append("$" + c if prev[:1] == "$" else c)
+                cases.append(0)
             elif c == "}" and opened[-1:] == ["${"]:
                 opened.pop()
+                cases.pop()
             out.append(c)
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
-                start = (opened.pop() if opened and opened[-1] != "${" else None) != "$("
+                if cases[-1] or not opened:    # r2 F2: a `case` pattern's `)` closes nothing
+                    start = True
+                else:
+                    cases.pop()
+                    start = opened.pop() != "$("
+                cmd = start
             else:
+                if start and c not in " \t\n;&|(<>":      # a word starts: a command's first?
+                    m = _KEY.match(text, i) if cmd else None
+                    w = m.group() if m else ""
+                    cases[-1] += (w == "case") - (w == "esac" and cases[-1] > 0)
+                    cmd = w in _LEAD
+                elif c in ";&|(<>\n":
+                    cmd = c not in "<>"
                 start = c in " \t\n;&|(<>"
             prev = "$$" if c + prev == "$$" else c    # `$$`, the pid, opens no `${`
             i += 1
@@ -504,11 +522,11 @@ def _commands(text: str):
                 outs.append(tok)
             expect = None
             continue
-        if not words and not outs and tok == "case":
+        if not outs and tok == "case" and all(w in _LEAD for w in words):
             cases.append("head")
         elif not words and not outs and tok == "esac" and cases and cases[-1] != "head":
             cases.pop()
-        elif tok == "in" and cases and cases[-1] == "head" and words[:1] == ["case"]:
+        elif tok == "in" and cases and cases[-1] == "head" and words[-2:-1] == ["case"]:
             cases[-1] = "pattern"
         words.append(tok)
     if words or outs:
