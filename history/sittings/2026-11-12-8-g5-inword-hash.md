@@ -18,7 +18,8 @@
 - [x] g6 checks: round 3's 27 lines at six commits, every write denied, REGRESS 0; fuzz 100k tokens (seed 9802) and 100k valid (seed 9902) vs 8153e52, d2f89d9, 40aee95, f1f012e, a0055da, a stub `cp` that prints nothing: REGRESS-with-a-shell 0 and 0; the replay of 415,408 lines: 72 newly refused, all by the loose reading, none a read or a `git add` (56 text the strict reading does not read as a write, 12 by the amendment's (b), 4 by its (a)): over the brief's 60 by the amendment's 16
 - [x] build 3 R1 (review 1's F3): a `cd`, `pushd` or `popd` behind a reserved word adds a folder state and replaces none; the first state moves as a0055da's, one follows every `cd` as db19d51's; at most 16; a test builds 392 lines from 13 prefixes (and none) and 28 writes a0055da denies: with the loose reading off, every one denied
 - [x] build 3 R2 (F1): `then`, `do`, `else`, `elif`, `if`, `while`, `until`, `{`, `!` are skipped only as a command's first words, in both readings; after an assignment or a wrapper each is a word; F1's 12 lines denied by the strict reading, neither reading follows their `cd`
-- [ ] build 3 R3 to R5 (F2, F4, F5), then the records (§3e, NICE)
+- [x] build 3 R3 (F2): a strict word stands for a loose target only whole: a word with a blank stands for the loose targets only where one command lists every piece of it in order, each once (the reviewer's "never by its pieces" alone denied g6's ordinary `sed -i '' 's/the CLAUDE.md file/x/' notes.md`); F2's four lines denied by the strict reading (R1), review 1's lead 2 (two lines, no R5 word) now denied by the loose reading
+- [ ] build 3 R4, R5 (F4, F5), then the records (§3e, NICE)
 - [ ] phase 2, on the coordinator's word
 
 ## Handover

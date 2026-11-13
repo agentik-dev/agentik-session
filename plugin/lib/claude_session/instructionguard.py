@@ -831,13 +831,14 @@ def _clean(word: str) -> str:
 
 
 def _loose(text: str) -> list:
-    """[(kind, word, the `cd` words before it, or None where the text before it is not plain)]:
-    `loose_targets` with the folder moves a plain line makes (g6 R2)."""
+    """[(kind, word, the `cd` words before it, or None where the text before it is not plain,
+    its command's number)]: `loose_targets` with the folder moves a plain line makes (g6 R2)."""
     text = text.replace("\\\n", "")
     hard = _LOOSE_HARD.search(text)
     plain_to = hard.start() if hard else len(text)
-    found, cds, start = [], [], 0
-    for sep in [*_LOOSE_SEP.finditer(text), None]:
+    found, cds, start, segs = [], [], 0, []
+    for n, sep in enumerate([*_LOOSE_SEP.finditer(text), None]):
+        segs += [n] * (len(found) - len(segs))
         end = sep.start() if sep else len(text)
         seg, plain = text[start:end], start <= plain_to
         start = sep.end() if sep else end
@@ -888,26 +889,29 @@ def _loose(text: str) -> list:
                 for d in reversed(chdirs):
                     p = os.path.join(d, p)
                 found.append(("remove", p, moves))
-    return found
+    segs += [len(segs) and segs[-1] + 1] * (len(found) - len(segs))
+    return [(k, w, m, n) for (k, w, m), n in zip(found, segs)]
 
 
 def loose_targets(text: str) -> list:
     """[(`write` or `remove`, word)]: every target a reading blind to quotes, comments and
     heredocs finds (g6 R1). Pure: no list, no folder, no file."""
-    return [(k, w) for k, w, _ in _loose(text)]
+    return [(k, w) for k, w, _, _ in _loose(text)]
 
 
 def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
     """The first gated path (a list file, for a removal) of a loose target the strict reading
     did not judge in the same place (g6 R2); None when there is none it can resolve."""
+    loose = _loose(command)
     judged: dict = {}
+    spent = _spent(loose, found)
     for kind, path, word, at in found:
-        if kind in ("write", "remove") and path is not None and word:
-            for piece in word.split():
-                key = (kind, _resolve(piece, at, env))
-                judged[key] = judged.get(key, 0) + 1
+        if kind in ("write", "remove") and path is not None and word and len(word.split()) < 2:
+            judged[kind, path] = judged.get((kind, path), 0) + 1
     tried: set = set()
-    for kind, word, moves in _loose(command):
+    for i, (kind, word, moves, _) in enumerate(loose):
+        if i in spent:
+            continue
         own = cwd
         for c in moves or ():
             own = _resolve(c, own, env) if c is not None and own else None
@@ -927,6 +931,30 @@ def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
                 if lf is not None:
                     return lf
     return None
+
+
+_RUN_CAP = 16                             # r1 R3: a word of more pieces stands for none
+
+
+def _spent(loose: list, found: list) -> set:
+    """The loose targets a strict word with a blank stands for (r1 R3): only whole, every piece
+    in order, one command's targets of its kind, each loose target once; a word whose pieces
+    the loose reading did not list together stands for none, so no piece is left to spend."""
+    want: dict = {}
+    for kind, path, word, _ in found:
+        pieces = tuple(word.split()) if path is not None and word else ()
+        if 1 < len(pieces) < _RUN_CAP and kind in ("write", "remove"):
+            want[kind, pieces] = want.get((kind, pieces), 0) + 1
+    spent: set = set()
+    for k in sorted({len(p) for _, p in want}):
+        for i in range(len(loose) - k + 1):
+            run = loose[i:i + k]
+            key = (run[0][0], tuple(r[1] for r in run))
+            if want.get(key) and run[0][3] == run[-1][3] and all(r[0] == key[0] for r in run) \
+                    and not spent.intersection(range(i, i + k)):
+                want[key] -= 1
+                spent.update(range(i, i + k))
+    return spent
 
 
 def _bash_gated(payload: dict, env):

@@ -1007,7 +1007,7 @@ def test_r2_f1_a_reserved_word_after_an_assignment_or_a_wrapper_is_a_word(box, c
     assert all(p.startswith(str(box.repo) + os.sep) and "/sub/" not in p and
                not p.startswith("/tmp") for _, p in found), found
     if not command.startswith("\""):             # the loose reading follows no such `cd` either
-        assert {m for _, _, m in instructionguard._loose(command)} == {()}, command
+        assert {m for _, _, m, _ in instructionguard._loose(command)} == {()}, command
 
 
 def test_r2_a_reserved_word_first_still_reads_the_cd(box):
@@ -1015,4 +1015,41 @@ def test_r2_a_reserved_word_first_still_reads_the_cd(box):
     found = instructionguard.bash_targets("then cd sub; cp a CLAUDE.md", str(box.repo), box.env)
     assert found == [("write", str(box.repo / "sub" / "CLAUDE.md")),
                      ("write", str(box.repo / "CLAUDE.md"))]
-    assert instructionguard._loose("x=1 cd sub; cp a b") == [("write", "b", ("sub",))]
+    assert [t[:3] for t in instructionguard._loose("x=1 cd sub; cp a b")] == [
+        ("write", "b", ("sub",))]
+
+
+# ---- review 1, R3 (F2): a strict word stands for a loose target only whole ---------------
+
+R3_F2 = ["echo x > \"a CLAUDE.md\"; " + R1_IF + "cp a CLAUDE.md",
+         "echo x > \"a CLAUDE.md\"; " + R1_IF + "printf x >> CLAUDE.md",
+         "echo x > \"a CLAUDE.md\"; for i in; do cd sub; done; cp a CLAUDE.md",
+         "python3 -c \"open('x CLAUDE.md','w')\"; " + R1_IF + "cp a CLAUDE.md"]
+R3_LEAD2 = ["echo x > \"a CLAUDE.md\"; cp a CLAUDE.md \\",          # review 1's lead 2: no R5 word
+            "echo x > \"a CLAUDE.md\"; cat <(echo a)#c; cp a CLAUDE.md"]
+
+
+@pytest.mark.parametrize("command", R3_F2 + R3_LEAD2)
+def test_r3_f2_a_word_split_at_its_blank_leaves_no_credit(box, command):
+    (box.repo / "sub").mkdir()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    reason = LOOSE_REASON if command in R3_LEAD2 else REASON
+    assert _decision(out) == ("deny", reason.format(box.repo / "CLAUDE.md")), command
+
+
+R3_WHOLE = ["sed -i '' 's/the CLAUDE.md file/x/' notes.md", "rm -f \"a CLAUDE.md\"",
+            "tee 'x CLAUDE.md' < a", "mv \"a CLAUDE.md\" b"]
+
+
+@pytest.mark.parametrize("command", R3_WHOLE)
+def test_r3_a_word_the_loose_reading_lists_whole_stands_for_its_pieces(box, command):
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+
+
+def test_r3_the_loose_reading_alone_spends_no_piece_of_a_word(box):
+    found = [("write", str(box.repo / "a CLAUDE.md"), "a CLAUDE.md", str(box.repo))]
+    got = instructionguard._loose_gated("cp a CLAUDE.md", str(box.repo), box.env, {}, found, set())
+    assert got == str(box.repo / "CLAUDE.md")
+    found = [("write", str(box.repo / "CLAUDE.md"), "CLAUDE.md", str(box.repo))]   # whole: spent
+    assert instructionguard._loose_gated("cp a CLAUDE.md", str(box.repo), box.env, {}, found,
+                                         set()) is None
