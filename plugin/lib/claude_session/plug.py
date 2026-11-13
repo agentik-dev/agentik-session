@@ -582,20 +582,43 @@ def _error(e, files) -> dict:
                       "remedy": None}}
 
 
+def _too_deep(paths) -> str | None:
+    """The layer file whose nesting the parser cannot follow, read again one by one."""
+    for p in paths:
+        try:
+            raw = Path(p).read_bytes()
+            (json.loads if p.endswith(".json") else load)(raw.decode("utf-8", "replace"))
+        except RecursionError:
+            return p
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _failure(e, paths) -> str:
+    """A file that cannot be opened, or nests past the parser, as the file and why."""
+    if isinstance(e, OSError):
+        return f"{e.filename}: {e.strerror}" if e.filename else str(e)
+    if isinstance(e, RecursionError):
+        p = _too_deep(paths)
+        return f"{p}: nested too deep to read" if p else "a layer file is nested too deep to read"
+    return str(e)
+
+
 def config_read(cwd, env, key: str | None = None) -> tuple[dict, int]:
     """(the config read's object, its exit): 0 when it ran, 2 with the envelope's error."""
     sid, launch = _sid(env), hooks.launch_profile(env)
     try:
         r = resolver.resolve(cwd, sid or "unsaved", env, profile=launch)
-    except resolver.ResolveError as e:
-        rdir = resolver.repo_dir(cwd)
+        f = _Files(cwd, env, sid, launch, r)
+        settings, warnings = _settings(f), _warnings(f)
+    except (resolver.ResolveError, OSError, RecursionError) as e:
+        rdir, state = resolver.repo_dir(cwd), resolver.state_dir(env)
         files = [str(resolver._user_file(env)), str(rdir / "config.yaml"),
-                 str(rdir / "config.local.yaml"), str(resolver.SHIPPED),
-                 str(resolver.state_dir(env) / "overlays")]
-        return _error(e, files), 2
-    f = _Files(cwd, env, sid, launch, r)
-    settings = _settings(f)
+                 str(rdir / "config.local.yaml"), str(resolver.SHIPPED), str(state / "overlays")]
+        deep = files[:3] + ([str(state / "overlays" / f"{sid}.json")] if sid else [])
+        return _error(_failure(e, deep), files), 2
     if key is not None:
         settings = [s for s in settings if s["key"] == key.lower()]
     return {"schema": "agentik.config/1", "ok": True, "tool": TOOL, "layers": f.layers(),
-            "settings": settings, "warnings": _warnings(f)}, 0
+            "settings": settings, "warnings": warnings}, 0

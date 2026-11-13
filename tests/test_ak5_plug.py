@@ -299,6 +299,64 @@ def test_config_unknowns_and_bad_file(box):
     assert str(u) in d["error"]["message"] and "\n" not in d["error"]["message"]
 
 
+# ---- review 1, R1-F2: a file that cannot be read is `bad_file`, exit 2, never a traceback ------
+
+def _deep(n):
+    return "defaults:\n" + "".join("  " * (i + 1) + f"k{i}:\n" for i in range(n)) + \
+        "  " * (n + 1) + "leaf: 1\n"
+
+
+def _unreadable(home, cwd, case):
+    """Lay out `case`; give the path the read must name."""
+    if case == "user-mode-000":
+        p = user_file(home, "defaults:\n  effort: low\n")
+        p.chmod(0)
+    elif case == "repo-mode-000":
+        p = repo_file(cwd, "session:\n  effort: low\n")
+        p.chmod(0)
+    elif case == "user-folder":
+        p = home / ".claude" / "agentik" / "profiles.yaml"
+        p.mkdir(parents=True)
+    elif case == "repo-folder":
+        p = cwd / ".claude" / "agentik" / "config.yaml"
+        p.mkdir(parents=True)
+    elif case == "overlay-folder":
+        p = resolver.state_dir(_env(home)) / "overlays" / f"{SID}.json"
+        p.mkdir(parents=True)
+    elif case == "user-nested-1200":
+        p = user_file(home, _deep(1200))
+    elif case == "repo-nested-1200":
+        p = repo_file(cwd, "session:\n" + _deep(1200)[len("defaults:\n"):])
+    elif case == "user-not-utf-8":
+        p = user_file(home, "x")
+        p.write_bytes(b"defaults:\n  effort: \xff\xfelow\n")
+    else:                                               # not the subset: a tab in the indent
+        p = user_file(home, "defaults:\n\teffort: low\n")
+    return p
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode 000 file")
+@pytest.mark.parametrize("case", ["user-mode-000", "repo-mode-000", "user-folder", "repo-folder",
+                                  "overlay-folder", "user-nested-1200", "repo-nested-1200",
+                                  "user-not-utf-8", "user-tab"])
+def test_a_file_that_cannot_be_read_is_bad_file(box, case):
+    home, cwd = box
+    p = _unreadable(home, cwd, case)
+    try:
+        for words in ((), ("effort",)):
+            rc, out, err = sh(box, "describe", "config", "--json", *words,
+                              CLAUDE_CODE_SESSION_ID=SID)
+            assert rc == 2 and "Traceback" not in err and err == "", (case, rc, err)
+            d = json.loads(out)
+            assert list(d) == ["schema", "ok", "tool", "error"] and d["ok"] is False, d
+            e = d["error"]
+            assert e["code"] == "bad_file" and e["message"].startswith(f"{p}: "), (case, e)
+            assert "\n" not in e["message"] and e["remedy"] is None
+    finally:
+        if p.is_file():
+            p.chmod(0o644)
+
+
 # ---- line 11: doctor --json -----------------------------------------------------------------
 
 def test_doctor_json(box):
