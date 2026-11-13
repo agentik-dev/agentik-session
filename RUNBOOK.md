@@ -626,6 +626,18 @@ prompt cache's lifetime.
   other lines are `- ready: <row> (<repo>, S<n>)`, an off-path row built
   without a gate, at most three, and `- owed: <item>; <what it needs>`, an
   owed item that needs no gate (a runsheet, a refuter round, a draft).
+  Directly before it, `charter open` writes `## Waits on the owner` with
+  `- none`: the part is optional and may stand anywhere among the parts;
+  its other lines are ``- hand: <what>; `<command>` ``, one step on the
+  owner's hand each, the line ending in one code span (the command, no
+  backtick in it) with `; ` before it, `<what>` free to hold a `;`.
+  `agentik-session charter show [REPO...] [--json]` reads each REPO's
+  newest charter (the greatest date, then n, any suffix) under `--dir`, else
+  the REPO's own `session.charter.dir`; the default REPO is the git top of
+  the working directory. It prints the Next act, the hand lines, the form's
+  refusals, or `agentik.charter/1` under `--json`; a REPO that is no
+  directory, has no charter or cannot be read is skipped; it writes nothing
+  and exits 0 whenever the read ran.
 - Pacing: the fallback wakeup rides the act's last tool call. A pending
   helper, Monitor or background task is the wake, with one fallback of
   `fallback` seconds, never re-armed on a hand-back. An act ready takes the
@@ -673,7 +685,10 @@ prompt cache's lifetime.
   the Next act's WAITING is misshapen, short of `; by <who>; est <zoned
   time|none>`, or with an est that is neither; at `waiting` or past it,
   where the line says to say STALLED once and arm no wakeup; and on a While
-  waiting line of another shape. A charter opened before 2.0.0-alpha.24 has
+  waiting line of another shape; on a Waits on the owner part that is
+  empty, holds `- none` beside other lines, holds a line that is neither a
+  hand line nor `- none`, or whose heading differs by case or a tail (no
+  part warns nothing). A charter opened before 2.0.0-alpha.24 has
   no While waiting section: `check` passes it with one warning to add it
   with `- none`. Two lines are red, with `session.pacing` on: a Next act of
   WAITING or STALLED while While waiting holds a ready row of S1 to S3, an
@@ -685,9 +700,9 @@ prompt cache's lifetime.
   from the current directory, and a failed resolve warns nothing.
 - A helper's Bash carries its sitting's session id, so the PreToolUse hook denies a helper's
   Bash that names `agentik-session charter` (any launcher name, quotes and continuations
-  read through) with any word but `check` right after `charter`, flags included, whatever
-  the posture: write the charter by hand (a helper's one charter call is
-  `charter check <file>`, the verb first), and put a probe's own call in a script file. With hooks off, `charter open` refuses, exit 2 and
+  read through) with any word but `check` or `show` right after `charter`, flags included,
+  whatever the posture: write the charter by hand (a helper's charter calls are
+  `charter check <file>` and `charter show`, the verb first), and put a probe's own call in a script file. With hooks off, `charter open` refuses, exit 2 and
   nothing written, to move the record off a charter still open in the same directory: close
   it, open in a worktree, or take it on purpose with `charter open --replace`; a bare close
   then refuses while the replaced file stays open.

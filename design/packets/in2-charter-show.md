@@ -62,7 +62,16 @@ Each a case of `tests/test_in2_charter_show.py`, through `cli.main`, in temp rep
 
 ## 4. Findings that name this row: the choices inside the rulings
 
-(Filled as the acts land.)
+- A hand line is read by hand, not by a regex, so the read is linear: it opens `- hand: `, ends in a backtick, the backtick before that has `; ` before it, and both `<what>` and `<command>` hold something past blanks. A line's trailing blanks are cut first, as While waiting's are.
+- `waits[].line` is the line's 1-based number in the file.
+- The near-miss heading warns only when the exact part is absent, as While waiting's does.
+- "Newest" picks by name among every entry of the folder, so an entry of that name that cannot be read (a folder, no permission) is `unreadable`; a folder that is missing or cannot be listed is `no charter`.
+- `skipped[].repo` is the real path; the text view names a repo by its folder's name, and the `skipped` lines are a last block after a blank line, names joined by `, `.
+- `--json` prints the object with an indent of 2.
+- Each REPO's folder resolves as `check`'s rules do (`resolver.resolve` from the REPO, the session id or `unsaved`, the launch profile); an absolute `--dir` is taken as is.
+- `--continue` and `--replace` with `show` keep their refusals (exit 2).
+- Old tests changed: `test_charter.py`'s `test_close_appends_one_line`, `test_s21_open_seeds_the_handover_line`, `test_s21_open_seeds_nothing_with_priority_off`, `test_s40_open_writes_the_section` (they pin `open`'s text); `test_n33.py`'s `VERB_FIRST` (the denial's sentence). `test_fw1a.py` and `test_rules.py` unchanged.
+- NICE n191 (S4): the README names neither the part nor `show`.
 
 ## 5. Forbidden reads
 

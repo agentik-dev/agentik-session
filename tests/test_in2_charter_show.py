@@ -315,4 +315,4 @@ def test_in2_docs_say_the_part_and_show():
     for rel in ("RUNBOOK.md", "plugin/skills/session/SKILL.md"):
         text = (root / rel).read_text()
         assert "## Waits on the owner" in text and "charter show" in text, rel
-    assert "seven parts" in charter.__doc__
+    assert "seven parts" in " ".join(charter.__doc__.split())
