@@ -97,8 +97,10 @@ PACE = ("the fallback wakeup rides the message of the act's last tool call, neve
         "Next act stays the act, the wake is the band's reset or one fallback, whichever is "
         "first, and it never counts toward n")
 # Packet S53 ruling 6: with session.admission.mix on, one more pacing item; advice only.
-MIX_ITEM = ("the spend mix (session.admission.mix): a helper takes the family the band "
-            "line's `next` names unless its task needs the other; design, refutation and "
+# Packet pl1 R4: the family is `agentik session status`'s to name, since the line no longer does.
+MIX_ITEM = ("the spend mix (session.admission.mix): a helper takes the family `agentik "
+            "session status` names (its `mix:` line's `next`) unless its task needs the "
+            "other; design, refutation and "
             "judgment are Fable's, bounded builds, records and reads are Opus's; `reset now` "
             "is the owner's Fable reset in Settings; advice only, nothing is held")
 BOUND = ("a packet or brief bounds them: a builder files what lies outside it and takes "

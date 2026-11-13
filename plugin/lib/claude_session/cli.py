@@ -168,7 +168,8 @@ def cmd_install_cli(args) -> int:
 
 
 def cmd_status(args) -> int:
-    """The session's meter: one line, or meter.json with --json."""
+    """The session's meter: one line, or meter.json with --json; then the band, the spend mix
+    and the admission's mode, which the prompt line no longer says (pl1 R3)."""
     env = os.environ
     state = resolver.state_dir(env)
     if args.transcript:
@@ -187,9 +188,12 @@ def cmd_status(args) -> int:
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
-        if args.json and isinstance(band, dict) and band.get("window") == admission.NO_WINDOW:
+        if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
             d = {**d, "band": {"window": band["window"], **({"demand": dem} if isinstance(dem, dict) else {})}}
+        facts = _admission_facts(band)          # pl1 R3: what left the prompt line
+        if args.json and facts:
+            d = {**d, "admission": facts}
         if not args.json:
             print(meter.one_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
@@ -202,9 +206,24 @@ def cmd_status(args) -> int:
             line = admission.band_status(band)
             if line:
                 print(line)
+            from datetime import datetime, timezone
+            mix = admission.mix_status(facts.get("mix"), datetime.now(timezone.utc))   # F2
+            if mix:                             # pl1 R3: each family's share, the next family
+                print(mix)
+            if "mode" in facts:
+                print(f"admission mode: {facts['mode']}")
             return 0
     print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
     return 0
+
+
+def _admission_facts(band) -> dict:
+    """pl1 R3: the facts that left the prompt line, from this session's band.json entry: the
+    admission's `mode` and the spend `mix` object, each only when the entry has it."""
+    if not isinstance(band, dict):
+        return {}
+    out = {"mode": band["mode"]} if isinstance(band.get("mode"), str) else {}
+    return {**out, "mix": band["mix"]} if isinstance(band.get("mix"), dict) else out
 
 
 def cmd_mod(args) -> int:

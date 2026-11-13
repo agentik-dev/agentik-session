@@ -69,7 +69,8 @@ class LandCase(unittest.TestCase):
             self.env.pop(name, None)
         self.new_repo("scratch")
         self.message = os.path.join(self.tmp, "merge-message")
-        self.write(self.tmp, "merge-message", "land the branch\n\nThe trailer line.\n")
+        # land2 R3: line 1 is `Merge <branch>: ` and text; land() writes one for its branch.
+        self.write(self.tmp, "merge-message", "Merge work: land the branch\n\nThe trailer line.\n")
 
     def new_repo(self, name):
         self.repo = os.path.join(self.tmp, name)
@@ -127,10 +128,18 @@ class LandCase(unittest.TestCase):
         self.git("commit", "-qm", "main moves " + name)
 
     def land(self, branch, sha, message=None, repo=None, env=None, cwd=None):
-        p = subprocess.run([*LAND, repo or self.repo, branch, sha, message or self.message],
+        p = subprocess.run([*LAND, repo or self.repo, branch, sha,
+                            message or self.merge_file(branch)],
                            cwd=cwd or self.repo, env=env or self.env, text=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return p
+
+    def merge_file(self, branch):
+        """land2 R3: the merge file names its branch; `work`'s is self.message."""
+        if branch == "work":
+            return self.message
+        return self.write(self.tmp, "merge-message-" + branch,
+                          "Merge %s: land the branch\n\nThe trailer line.\n" % branch)
 
     def assertRed(self, p, step, code=None):
         self.assertNotEqual(p.returncode, 0)
@@ -175,7 +184,8 @@ class TestGreen(LandCase):
         self.assertEqual(p.stdout, "land scratch: ok %s, main readied\n" % sha)
         parents = self.git("rev-list", "--parents", "-n1", "main").split()[1:]
         self.assertEqual(parents, [before, sha])
-        self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "land the branch")
+        self.assertEqual(self.git("log", "-1", "--format=%s", "main"),
+                         "Merge work: land the branch")
         self.assertEqual(self.porcelain(), "")
         self.assertFalse(os.path.exists(self.worktree("work")))
         self.assertEqual(self.ran(), ["check"])
@@ -186,16 +196,18 @@ class TestGreen(LandCase):
         sha = self.branch("work", {"scripts/hygiene": HYGIENE % 0})
         p = self.land("work", sha)
         self.assertEqual(p.returncode, 0, p.stderr)
-        # The tree scan, then the --help probe for --commits (test_land_range.py).
-        self.assertEqual(self.ran(), ["check", "hygiene", "hygiene"])
+        # The tree scan, then the --help probe for --commits (test_land_range.py); land2 R4
+        # probes it for the merge message's scan before the check and again before the merge.
+        self.assertEqual(self.ran(), ["hygiene", "check", "hygiene", "hygiene", "hygiene"])
 
     def test_a_a_repo_outside_the_working_directory_and_a_relative_message(self):
         sha = self.branch("work", {"new.txt": "new\n"})
-        self.write(self.repo, ".git/land-msg", "from a relative path\n")
+        self.write(self.repo, ".git/land-msg", "Merge work: from a relative path\n")
         p = self.land("work", sha, message=".git/land-msg")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout, "land scratch: ok %s, main readied\n" % sha)
-        self.assertEqual(self.git("log", "-1", "--format=%s", "main"), "from a relative path")
+        self.assertEqual(self.git("log", "-1", "--format=%s", "main"),
+                         "Merge work: from a relative path")
 
 
     def test_a_a_repo_that_does_not_ignore_its_worktrees_still_lands(self):
@@ -276,7 +288,7 @@ class TestRed(LandCase):
         self.assertRed(p, "hygiene", 5)
         self.assertEqual(self.main_sha(), before)
         self.assertTrue(os.path.isdir(self.worktree("work")))
-        self.assertEqual(self.ran(), ["check", "hygiene"])
+        self.assertEqual(self.ran(), ["hygiene", "check", "hygiene"])  # land2 R4's --help first
 
     def test_c_a_conflict_aborts_and_leaves_the_tree_clean(self):
         sha = self.branch("work", {"shared.txt": "the branch\n"})
@@ -1127,9 +1139,14 @@ class TestAmendment3(LandCase):
         sha = self.branch("work", {"shared.txt": "the branch\n"})
         self.write(self.repo, "shared.txt", "main\n")
         self.git("commit", "-qam", "main")
-        tree = self.git("rev-parse", "main^{tree}")
-        env = self.git_wrapped('"merge-tree --write-tree") case "$*" in *refs/heads/main*) '
-                               'printf "%%s\\0" %s; exit 0;; esac;;' % tree)
+        # land2 R2: the clean read gives the branch's own tree, as a merge main is under does;
+        # land2 R2-F2: merge-tree is given main's commit, so the reads before git merge are
+        # wrapped, not those naming refs/heads/main.
+        tree = self.git("rev-parse", sha + "^{tree}")
+        merging = os.path.join(self.tmp, "merging")
+        env = self.git_wrapped('"merge --no-ff") touch "%s";; "merge-tree --write-tree") '
+                               '[ -e "%s" ] || { printf "%%s\\0" %s; exit 0; };;'
+                               % (merging, merging, tree))
         before = self.main_sha()
         p = self.land("work", sha, env=env)
         self.assertRed(p, "merge", 1)
@@ -1210,7 +1227,7 @@ class TestAmendment3(LandCase):
 
     # F3: the written paths are the merge's own, from merge-tree (p7 O11, p8 D3, D4).
 
-    def dir_renamed_on_main(self, name, config=None):
+    def dir_renamed_on_main(self, name, config=None, merged=False):
         self.tree_on_main()
         if config:
             self.git("config", "merge.directoryRenames", config)
@@ -1221,6 +1238,9 @@ class TestAmendment3(LandCase):
         self.git("commit", "-qm", "adds in dir", cwd=tree)
         self.git("mv", "dir", "moved")
         self.git("commit", "-qm", "main renames dir")
+        if merged:
+            # land2 R2: a branch behind main merges main first, then lands its new head.
+            self.git("merge", "-q", "--no-edit", "main", cwd=tree)
         self.write(self.repo, "moved/" + name, "PRECIOUS\n")
         return self.git("rev-parse", "HEAD", cwd=tree)
 
@@ -1231,14 +1251,14 @@ class TestAmendment3(LandCase):
         self.assertEqual(self.read_main("moved/new.ign"), "PRECIOUS\n")
 
     def test_f3_d3_an_ignored_file_at_a_rename_target_is_red_main_and_kept(self):
-        sha = self.dir_renamed_on_main("new.ign", "true")
+        sha = self.dir_renamed_on_main("new.ign", "true", merged=True)
         before = self.main_sha()
         self.assertNothingMoved(self.land("work", sha), before)
         self.assertEqual(self.read_main("moved/new.ign"), "PRECIOUS\n")
         self.assertEqual(self.git("rev-parse", "work"), sha)
 
     def test_f3_d4_an_untracked_file_at_a_rename_target_is_red_main_and_kept(self):
-        sha = self.dir_renamed_on_main("new.txt", "true")
+        sha = self.dir_renamed_on_main("new.txt", "true", merged=True)
         before = self.main_sha()
         self.assertNothingMoved(self.land("work", sha), before)
         self.assertEqual(self.read_main("moved/new.txt"), "PRECIOUS\n")
@@ -1398,7 +1418,7 @@ class TestGate(LandCase):
 
     def through_the_gate(self, branch, sha, *run_args):
         p = self.agentik("run", self.repo, *run_args, "--", *LAND, self.repo, branch, sha,
-                         self.message)
+                         self.merge_file(branch))
         self.assertEqual(p.returncode, 0, p.stderr)
         gid = re.search(r"\b\d{8}-\d{6}-\d+\b", p.stdout).group(0)
         w = self.agentik("wait", gid, "--timeout", self.WAIT)
