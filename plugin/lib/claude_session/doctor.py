@@ -381,8 +381,8 @@ def _check_resolved(env) -> Check:
         sid = resolver.newest_session(state)
         note = " ($CLAUDE_CODE_SESSION_ID unset: the newest session)"
         if not sid:
-            return Check("resolved", False, "$CLAUDE_CODE_SESSION_ID unset and no session "
-                         "resolved yet")
+            return Check("resolved", True, "$CLAUDE_CODE_SESSION_ID unset and no session "
+                         "resolved yet", note=True)     # fr1: a bare machine is no failure
     path = resolver.session_dir(state, sid) / "resolved.json"
     try:
         doc = json.loads(path.read_text())
@@ -398,8 +398,8 @@ def _check_meter(env) -> Check:
     state = resolver.state_dir(env)
     sid = env.get("CLAUDE_CODE_SESSION_ID") or resolver.newest_session(state)
     if not sid:
-        return Check("meter", False, "no session to meter ($CLAUDE_CODE_SESSION_ID unset, "
-                     "none resolved)")
+        return Check("meter", True, "no session to meter ($CLAUDE_CODE_SESSION_ID unset, "
+                     "none resolved)", note=True)       # fr1: a bare machine is no failure
     path = resolver.session_dir(state, sid) / meter.METER
     m = meter.load(path.parent)
     if m is None:
