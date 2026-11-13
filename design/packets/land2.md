@@ -46,12 +46,16 @@
 
 - R4 changes the order the hygiene stubs see: `--help` is probed before the check (and again before the merge), so `test_land.py`'s two order lists and `test_land_range.py`'s r1 and r6 change for R4 (the range stub passes a `<sha>..<commit>` scan), beside the R2 and R3 changes the brief allows.
 - Round 1 (the refuter's F1 to F6, the coordinator's ruling; tests in `TestRound1`, each red at `a55d99e`):
-  - F1, blocked: a worktree is nested when a parent of its directory is the branch's worktree by device and inode (`os.path.samefile`), never a string prefix, so a case-variant absolute path is seen; the main checkout never counts, nor a sibling `<tree>-2`.
+  - F1, blocked: a worktree is nested when a parent of its directory is the branch's worktree by device and inode (`os.path.samefile`), never a string prefix, so a case-variant absolute path is seen; a sibling `<tree>-2` never counts (round 1 also skipped the main checkout; R2-F1 reverses that).
   - F2, blocked: main is read before the merged tree and once more after the message's second scan; a main that moved since is `red sha` before the merge. The dangling commit's first parent is that read main, not the ref's name (same commit, by construction).
   - F3: `git worktree list --porcelain -z`, so a newline in a nested path is seen.
   - F5: a non-zero message scan's note names hygiene's code and points at its stderr; the step stays `merge-file`, so a hygiene with no private list now reds `merge-file exit 2` before the check where the pin gave `hygiene exit 2` after it.
   - F6: `git commit-tree`'s stderr reaches the log.
   - F4 is NICE n149 (`unattended.py` is outside this packet); the builder's `worktree_dirt` note is n150; n77 leaves with this row.
+- Round 2 (the coordinator's ruling; tests in `TestRound2`):
+  - R2-F1, blocked: round 1's `blocks[1:]` skipped a main checkout sitting under the branch's worktree, which `worktree remove` then deleted; `nested()` reads every block but the branch's own (red at `52bcea4`).
+  - R2-F2: `merge-tree`, both diffs, `ls-tree` and R2's log read the commit read as main, never the ref's name, so a main reset and restored during `merge-tree` is `red sha` (red at `52bcea4`). The window left, the last read then `git merge`, is accepted.
+  - R2-F3: pins for the dangling commit's first parent and for an empty worktree list (`red repo`), each red when its choice is reverted.
 - The README source sat at 16380 of its 16384 B ceiling: the gate queue section's wait bullet was tightened to hold the `gate land` line (16381 B); `key` and the stdout-line clause stay in the RUNBOOK.
 
 ## 5. Forbidden reads
