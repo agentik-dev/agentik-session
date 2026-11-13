@@ -289,7 +289,8 @@ Two kinds of key behave differently:
   note: model is a launch-time setting. This session-only record is
   informational -- it will NOT be applied by the next `start` ... To change
   it in this session right now, run  /model opus. To change what `start
-  frontier` launches, add --save.
+  frontier` launches, set it under `profiles: frontier:` in
+  ~/.claude/agentik/profiles.yaml.
   ```
 
   `--config NAME` is only accepted together with `--save`: a session-only
@@ -341,13 +342,19 @@ model as `CLAUDE_CODE_SUBAGENT_MODEL`, so a spawn that names no model runs on
 the build tier; the doctor warns when the variable differs from the table.
 `subagents` is read as `tiers.build`'s model for one release.
 
-The layers, lowest first: the shipped profile; the user file,
-`$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when it exists, else
-`~/.claude/agentik/profiles.yaml`, whose `defaults.profile` names the profile a
-repo naming none runs (read after the repo's files, before `frontier`) and whose
-top-level `tiers:` block overrides a role in every repo; then the repo's
-`.claude/agentik/config.yaml` and `config.local.yaml`, each with
-`session: {profile: ...}` and a `tiers:` block (top level, or under `session`).
+The user file is `$CLAUDE_CONFIG_DIR/agentik/profiles.yaml` when it exists,
+else `~/.claude/agentik/profiles.yaml`; its `defaults.profile` names the profile
+a repo naming none runs (read after the repo's `session: {profile: ...}`, before
+`frontier`). The tiers' layers, lowest first, role by role: the shipped
+`defaults`; the user file's `defaults`; the shipped profile; the user file's
+body of it (`profiles: <name>:`); the user file's top-level `tiers:` block,
+which overrides a role in every repo; the repo's `.claude/agentik/config.yaml`,
+then its `config.local.yaml`, each by its top-level `tiers:` block, the one
+spelling (`session.tiers` is not read, and the doctor's config row names it
+unknown); last, when `start <profile>` named the profile, that profile's own
+tiers again (shipped, then the user's body), so a launched `local-only` stays
+local whatever a repo says. A layer's model names a family, else nothing
+resolves.
 
 ```yaml
 defaults:
@@ -361,14 +368,23 @@ Two session words, neither kept by a profile. `set tier.<role> <model>
 `tiers: build sonnet to Ddd HH:MM` by `agentik session rules` and on the
 SessionStart line, gone at its time or the session's end; `off` drops it.
 `--save` writes the role into the user file's `tiers:` block, `--save repo`
-into the repo's `config.yaml`, every other line kept. `set cap <model>
+into the repo's `config.yaml`; the block is rewritten whole (comments inside
+it, blank lines after it and CRLF endings are not kept), every line outside it
+stays. Then the verb resolves as the next session here would, with this
+session's launch profile; when the role's model is not the one written, it
+names the file and block that holds it (`... is sonnet, from
+<repo>/.claude/agentik/config.yaml: tiers: change it there`) and exits 1. A
+model word, for `set tier.<role>` and `set cap` alike, is letters, digits and
+`. _ / [ ] -` (`opus`, `claude-opus-5-5`, `opus[1m]`) naming a family, refused
+(exit 2) before anything is written; `--save` writes it quoted. `set cap <model>
 [--until <zoned time>]` holds every tier at that family or below
 (`cap: opus to Ddd HH:MM`); `--save` and `--config` are refused, and a `run`
 launcher hands a cap with an end to its successor while the end is ahead, as it
 hands `fill`.
 
 The role check. A spawn names its role with a line `tier: <role>` in the Agent
-call's prompt. When the call's model, else its agent file's `model:`, ranks
+call's prompt (any case, a trailing full stop allowed; the first line naming one
+of the five roles counts). When the call's model, else its agent file's `model:`, ranks
 above the role's (fable, opus, sonnet, haiku, local, highest first), the spawn
 gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
 naming no role meets the family rule alone: a Fable helper starts only under a

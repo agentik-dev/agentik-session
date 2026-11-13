@@ -1,8 +1,8 @@
 """The model tiers (packet mt1, hq design/13 §3 to §6): one table of five roles.
 
 A profile's `tiers` maps each role to `{model, effort}`; the shipped default is in
-`profiles.yaml`'s `defaults`. The resolver layers it (the profile, the user file's
-`tiers:`, the repo's, then `config.local.yaml`'s) and writes it with no clock. A session's
+`profiles.yaml`'s `defaults`. The resolver layers it (its docstring gives the order, a
+launched profile's own body last) and writes it with no clock. A session's
 own word sits in its overlay and is read here, against the clock, by every reader:
 `set tier.<role> <model> [--until]` replaces one role's model, and `set cap <model>
 [--until]` holds every tier at that family or below. Neither is saved by a profile; the cap

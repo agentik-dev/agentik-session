@@ -16,11 +16,12 @@
 - [x] records: RUNBOOK tiers section, README source 16380 B, sidecar by shasum, 3350 tests
 - [x] round 2 (the full local run, 10 red): READERS row, sc3 prompts, the help text, no-xhigh test, README hooks line
 - [x] fix round 1, phase 1 (hq `REFUTE-2026-11-12-mt1-r1.md`; fix builder, about 40 tool calls): tests first (50c7418, 21 red at d4b280e)
-- [ ] F1 F2 F3 (resolver), F4 (doctor), F3's save, F5, F7, F8, F10 (cli, tiers); NICE rows; packet §4 and RUNBOOK
+- [x] F1 F2 F3 (3ecd8a9), F4 (596922a), F3's save, F5, F7, F8, F10 (ef96726); NICE n144 to n147 (F6, F8's unknown role, two observations), n87 n88 n91 to the overflow; packet §4 and RUNBOOK; 1163 passed under `.venv`
 - [ ] phase 2, on the coordinator's word only: merge main, recount, version, then the gate once
 
 ## Handover
 - decide, owner: whether `--save` on a non-tier key should write the user's `profiles.yaml` `profiles.<name>.<key>` (today refused, exit 2); consumer: the owner's `set ... --save` habit.
+- F6 is NICE n144, so no record claims comments are kept; F8's unknown-role warning is n145.
 - The README was edited by hand in source and render (no `make readme`: it runs claude); the sidecar is by shasum.
 
 ## While waiting
