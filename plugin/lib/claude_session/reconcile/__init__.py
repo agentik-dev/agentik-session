@@ -28,7 +28,8 @@ THRESHOLDS = {"eff.idle": 5.0, "live.since_landing": 5, "live.goal_unchanged": 1
 
 def weights() -> dict:
     """Weighted tokens per token, input = 1: `rules.mix`'s opus prices over their input
-    price (output 5, cache_write 1.25, cache_read 0.1: the same ratios for every family)."""
+    price (output 5, cache_write 1.25, cache_read 0.05; packet h4 R5: the families' cache
+    read ratios differ since then, and this reads opus's)."""
     p = rules.mix({"shares": {"opus": 1}})["prices"]["opus"]
     return {k: v / p["input"] for k, v in p.items()}
 

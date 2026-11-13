@@ -429,11 +429,15 @@ def cmd_rules(args) -> int:
 
 
 def cmd_charter(args) -> int:
-    """The sitting's charter: open, check, close (the shape of D10)."""
+    """The sitting's charter: open, check, close (the shape of D10); show reads (in2)."""
     if getattr(args, "cont", False) and args.action != "open":
         _die(f"charter --continue is read only with open, not {args.action}", 2)
     if getattr(args, "replace", False) and args.action != "open":
         _die(f"charter --replace is read only with open, not {args.action}", 2)
+    if getattr(args, "json", False) and args.action != "show":
+        _die(f"charter --json is read only with show, not {args.action}", 2)
+    if args.action == "show":
+        return _charter_show(args)
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
@@ -519,6 +523,37 @@ def cmd_charter(args) -> int:
         # beside it, on stderr.
         print("note: add --state <file> to that checkpoint to hand the successor its state "
               "(optional; its shape is in RUNBOOK \"Restarting a sitting\")", file=sys.stderr)
+    return 0
+
+
+def _charter_show(args) -> int:
+    """Packet in2 R5 to R8: each REPO's newest charter, read and never written: no session
+    record, no resolved.json, no lock; `git` only to find the default REPO. Exit 0 whenever
+    the read ran."""
+    repos = list(args.args)
+    if not repos:
+        cwd = os.getcwd()
+        rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
+        repos = [top.strip() if rc == 0 and top.strip() else cwd]
+
+    def dir_of(repo: str) -> str:
+        if args.dir:
+            return args.dir
+        try:                                 # the repo's own session.charter.dir; writes nothing
+            section = resolver.resolve(repo, sessionconfig.session_id() or "unsaved",
+                                       os.environ, profile=hooks.launch_profile(os.environ)
+                                       ).sections["session"]
+        except Exception:                                   # noqa: BLE001
+            return charter.DEFAULT_DIR
+        # Review 1's F2: a charter.dir that is not a non-empty string reads as the default.
+        d = _charter_dir(section) if isinstance(section, dict) else None
+        return d if isinstance(d, str) and d else charter.DEFAULT_DIR
+
+    doc = charter.show(repos, dir_of)
+    if args.json:
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+    else:
+        sys.stdout.write(charter.show_text(doc))
     return 0
 
 
@@ -1139,7 +1174,8 @@ def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
     if st is None:
         print(f"note: checkpoint --respawn: {path}: the charter's commit state is unknown "
               "(git status failed or timed out); the respawn goes on", file=sys.stderr)
-    elif st and st is not gitinfo._NOT_A_REPO and (st == "??" or not args.commit):
+    elif st and st is not gitinfo._NOT_A_REPO and (
+            st == "??" or not (args.commit and _named(path, getattr(args, "paths", None)))):
         _die(f"checkpoint --respawn: {path} is not committed; commit it first: "
              f"{_commit_line(path)}", 2)
     src = _state_check(args.state) if args.state else None
@@ -1218,7 +1254,27 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
     return "respawn marked; no launcher runs this sitting: print your start line and stop"
 
 
+CHECKPOINT_FORM = "checkpoint --commit <paths...> [-m <message>]"
+
+
+def _named(path: str, paths) -> bool:
+    """fw5 R3: `--commit` takes a modified charter only when its line names it, or a directory
+    holding it."""
+    real = os.path.realpath(path)
+    for p in paths or ():
+        q = os.path.realpath(p)
+        if real == q or real.startswith(q.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def cmd_checkpoint(args) -> int:
+    paths = list(getattr(args, "paths", None) or [])
+    if args.commit and not paths:
+        _die(f"checkpoint --commit commits the paths its line names and nothing else: "
+             f"{CHECKPOINT_FORM}", 2)
+    if paths and not args.commit:
+        _die(f"checkpoint: a path is committed only with --commit: {CHECKPOINT_FORM}", 2)
     mark = _respawn_check(args)
     cfg, _ = sessionconfig.effective()
     workdir = os.getcwd()
@@ -1230,21 +1286,18 @@ def cmd_checkpoint(args) -> int:
             _die("not a git repository, so there is nothing to commit")
         msg = args.message or ("checkpoint" if not sessionconfig.get_active()
                                else f"checkpoint ({cfg.name})")
-        # Tracked files only. `add -A` is repo-wide and would sweep up a
-        # plaintext .env, a tfstate, or an age key copied in for a test --
-        # the wind-down nudge makes an autonomous agent the likeliest caller.
-        subprocess.run(["git", "-C", workdir, "add", "-u"], check=False)
-        _, porcelain = gitinfo._git(workdir, "status", "--porcelain")
-        new_files = [l[3:] for l in porcelain.splitlines() if l.startswith("?? ")]
-        if new_files:
-            print(f"note: {len(new_files)} untracked file(s) NOT committed "
-                  f"({', '.join(new_files[:4])}{'…' if len(new_files) > 4 else ''}). "
-                  "Add them yourself if they belong in the repo.", file=sys.stderr)
-        r = subprocess.run(["git", "-C", workdir, "commit", "-m", msg],
-                           capture_output=True, text=True)
-        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
-            _die(f"commit failed: {(r.stderr or r.stdout).strip()}")
-        print((r.stdout or "").strip() or "nothing to commit")
+        # fw5 R3: the named paths alone, through `commit`'s core with no check (its witness,
+        # its lock, `commit --only`), so another writer's staged or edited file stays out.
+        from . import commit as core
+        try:
+            code = core.commit_paths(workdir, paths, msg, os.environ)
+        except core.Nothing:
+            print("nothing to commit")
+        except core.Refused as err:
+            _die(f"checkpoint --commit: {err}", 2)
+        else:
+            if code != 0:
+                _die(f"commit failed: exit {code}; nothing recorded")
     if not sessionconfig.save_overlay({hooks.COUNTER: 0,
                                        hooks.LAST_CHECKPOINT: time.time()}):
         _die("could not record the checkpoint (no session overlay path)")
@@ -1346,6 +1399,13 @@ def cmd_gate(args) -> int:
     if verb == "serve":
         return gate.serve(root)
     if verb == "wait":
+        own = _own_entry(root, env)
+        target = next((e for e in gate.entries(root) if e["id"] == args.id), None)
+        if own and target and not gate.result_path(root, args.id).exists() \
+                and gate.entry_key(target) == gate.entry_key(own):
+            _die(f"gate wait: this is gate job {own['id'][:40]}; {args.id[:40]} is queued on its "
+                 "own repo and waits behind it until the wall cuts it: wait from outside the "
+                 "job", 2)
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
@@ -1359,6 +1419,12 @@ def cmd_gate(args) -> int:
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
+    own = _own_entry(root, env) if args.wait else None
+    if own and os.path.isdir(args.repo) \
+            and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
+        _die(f"gate run: this is gate job {own['id'][:40]}; a job queued here on its own repo "
+             "waits until the wall cuts it: run the command directly, or queue it without "
+             "--wait", 2)
     try:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
@@ -1376,6 +1442,15 @@ def cmd_gate(args) -> int:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _own_entry(root, env) -> dict | None:
+    """fw5 R5: the entry of this state root that `$CLAUDE_SESSION_GATE_JOB` names, or None."""
+    from . import gate
+    mark = env.get(gate.JOB_MARK) or ""
+    if not gate.ID.match(mark):
+        return None
+    return next((e for e in gate.entries(root) if e["id"] == mark), None)
 
 
 def cmd_reconcile(args) -> int:
@@ -1637,9 +1712,12 @@ def build_parser() -> argparse.ArgumentParser:
     cm.set_defaults(func=cmd_commit)
 
     cp = sub.add_parser("checkpoint", help="mark a handoff-ready point")
+    cp.add_argument("paths", nargs="*",
+                    help="with --commit, each path to commit, as git takes it from the cwd")
     cp.add_argument("-m", "--message")
     cp.add_argument("-c", "--commit", action="store_true",
-                    help="git add -u (tracked files only) && git commit first")
+                    help="commit the named paths first, and nothing else (no add -u, no "
+                         "sweep): checkpoint --commit <paths...>")
     cp.add_argument("--respawn", action="store_true",
                     help="mark a RESPAWN close, the sitting's last act: the charter's "
                          "Next act must open on RESPAWN (needs --charter)")
@@ -1698,10 +1776,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "then claude_md_bytes (--since reads the rows only; a hook row has no time)")
     rp.set_defaults(func=cmd_report)
 
-    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close")
-    ch.add_argument("action", choices=["open", "check", "close"])
-    ch.add_argument("args", nargs="*", metavar="GOAL|FILE")
-    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close)")
+    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close; show "
+                                         "reads each repo's newest, writing nothing")
+    ch.add_argument("action", choices=["open", "check", "close", "show"])
+    ch.add_argument("args", nargs="*", metavar="GOAL|FILE|REPO")
+    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close; show: "
+                                               "under each REPO)")
+    ch.add_argument("--json", action="store_true",
+                    help="show: one object, agentik.charter/1, and nothing else on stdout")
     ch.add_argument("--exit", metavar="TEXT", help="the exit taken (close)")
     ch.add_argument("--continue", dest="cont", action="store_true",
                     help="open: adopt today's newest charter of the same suffix while under "

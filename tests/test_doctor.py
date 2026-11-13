@@ -52,7 +52,8 @@ def machine(tmp_path, monkeypatch):
     (install / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
         "SessionStart": [], "PreToolUse": [], "PostToolUse": [], "PostToolUseFailure": [],
         "PostToolBatch": [], "UserPromptSubmit": [], "Stop": [], "StopFailure": [], "SessionEnd": [],
-        "PreCompact": [], "PostModelSwitch": [], "InstructionsLoaded": []}}))   # wfg R7; g1 R1
+        "PreCompact": [], "PostModelSwitch": [], "InstructionsLoaded": [],   # wfg R7; g1 R1
+        "SubagentStop": []}}))                                                 # h4 R1
     plugins = [
         {"id": "session@agentik", "version": "2.0.0", "enabled": True,
          "installPath": str(install)},
@@ -244,6 +245,46 @@ def test_newest_session_when_the_variable_is_absent(machine):
     assert rep.ok and "newest session" in rep.checks[8].detail
 
 
+def _no_session(machine):
+    """The machine with a state root that holds no session and no session id."""
+    env = {k: v for k, v in machine.env.items() if k != "CLAUDE_CODE_SESSION_ID"}
+    env["XDG_STATE_HOME"] = str(machine.tmp / "bare-state")
+    return env
+
+
+def test_fr1_no_session_at_all_is_two_ok_notes(machine):
+    rep = doctor.run(_no_session(machine), machine.repo)
+    rows = {c.name: c for c in rep.checks}
+    for name in ("resolved", "meter"):
+        assert rows[name].ok and rows[name].note, rows[name]
+    assert "no session resolved yet" in rows["resolved"].detail
+    assert "no session to meter" in rows["meter"].detail
+    assert failing(rep) == [] and rep.ok
+
+
+def test_fr1_cli_doctor_exits_0_with_no_session(machine, monkeypatch, capsys):
+    for k, v in _no_session(machine).items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.chdir(machine.repo)
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "note resolved" in out and "note meter" in out
+    assert out.rstrip().endswith("doctor: green")
+
+
+def test_fr1_a_session_without_its_files_still_fails(machine):
+    # an id that names no session's files: as test_no_resolved_file, both stay red
+    env = {**_no_session(machine), "CLAUDE_CODE_SESSION_ID": "another"}
+    assert failing(doctor.run(env, machine.repo)) == ["resolved", "meter"]
+    # a session that resolved and was never metered: meter alone stays red
+    bare = {**machine.env, "XDG_STATE_HOME": str(machine.tmp / "bare-state"),
+            "CLAUDE_CODE_SESSION_ID": "sess-2"}
+    hooks.session_start({"session_id": "sess-2", "cwd": str(machine.repo)}, bare)
+    assert failing(doctor.run(_no_session(machine), machine.repo)) == ["meter"]
+
+
 def test_relay_absent_and_relay_off(machine):
     (machine.bin / "relay").unlink()
     assert failing(doctor.run(machine.env, machine.repo)) == ["relay"]
@@ -320,7 +361,7 @@ def test_hooks_json_is_the_shim_on_session_start_only():
     assert list(hooks_json["hooks"]) == list(doctor.HOOK_EVENTS) == [
         "SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
         "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd", "PreCompact",
-        "PostModelSwitch", "InstructionsLoaded"]
+        "PostModelSwitch", "InstructionsLoaded", "SubagentStop"]
     cmd = hooks_json["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert cmd == "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SessionStart"
     assert os.access(PLUGIN / "hooks/run", os.X_OK)
@@ -376,7 +417,8 @@ def test_skill_frontmatter():
 HOOK_TIMEOUTS = {"SessionStart": 10, "SessionEnd": 15, "UserPromptSubmit": 5,
                  "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5, "PostToolBatch": 5,
                  "Stop": 5, "StopFailure": 5, "PreCompact": 5, "PostModelSwitch": 5,
-                 "InstructionsLoaded": 5}      # g1 R1: the plugin's hook timeout
+                 "InstructionsLoaded": 5,      # g1 R1: the plugin's hook timeout
+                 "SubagentStop": 5}            # h4 R1: Stop's
 
 
 def test_every_hook_command_has_its_events_timeout():
@@ -396,8 +438,8 @@ def test_every_hook_command_has_its_events_timeout():
 
 S19_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
               "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
-              "PreCompact", "PostModelSwitch", "InstructionsLoaded"]
-# g1 adds InstructionsLoaded (R1); wfg adds PostModelSwitch (R7); S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
+              "PreCompact", "PostModelSwitch", "InstructionsLoaded", "SubagentStop"]
+# h4 adds SubagentStop (R1); g1 adds InstructionsLoaded (R1); wfg adds PostModelSwitch (R7); S20b adds PostToolUseFailure; the stale-call fix (2026-10-11) adds PostToolBatch; C1 adds
 # PreCompact (mod-r1 §6); S34 adds StopFailure (ruling 5)
 
 

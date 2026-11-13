@@ -386,7 +386,9 @@ def test_t6_the_continuation_names_the_lines(box):
     box.go([{"stream": "green.jsonl", "commit": True}], ["limit-row"], land=_land(box), gate=[OK])
     one, two, three = box.starts
     text = two["stdin"]
-    assert text == three["stdin"] and text.endswith(TAIL + "\n")
+    one_sha, two_sha = (a["sha"] for a in box.kind("accept")[:2])    # packet u3 R4: the sha's tree
+    assert f"in a fresh tree at {one_sha} after your turn" in text and one_sha != two_sha
+    assert text.replace(one_sha, two_sha) == three["stdin"] and text.endswith(TAIL + "\n")
     assert "`echo three` returned exit 0, last line \"three\"; it wants: reads four" in text
     assert "`false` returned exit 1, no output; it wants: exits 0" in text
     assert "`true`" not in text

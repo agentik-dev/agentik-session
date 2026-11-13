@@ -19,13 +19,15 @@ if [ -e "$f" ] && [ -f "$o" ] && [ -x "$o" ] && [ -n "$(/usr/bin/find "$f" -type
 # CLI refuses them too, PostToolBatch's exit 2 stops the agentic loop, and neither has
 # anything to say. StopFailure (a turn an API error ended) is fire-and-forget, as Stop;
 # InstructionsLoaded (packet g1) only logs, and Claude Code discards its output anyway.
+# SubagentStop (packet h4) is as Stop for a helper: its stdout is read as a decision and its
+# exit 2 holds the helper's stop, and an older CLI refuses it with exit 2.
 # PreCompact keeps the tool's stdout (its block) but never its exit: an
 # older CLI refuses `hook PreCompact` with exit 2, which would block every compaction, the
 # owner's typed /compact too. Other events keep the tool's exit (PreToolUse may block).
 # Measure (packet S49, Amendment 1): the start, empty if `date` fails. The CLI ends the row.
 export AGENTIK_SESSION_HOOK_T0="$(date +%s%N 2>/dev/null)"
 case "$1" in
-  Stop|StopFailure|InstructionsLoaded|PostToolUseFailure|PostToolBatch|PostModelSwitch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
+  Stop|StopFailure|SubagentStop|InstructionsLoaded|PostToolUseFailure|PostToolBatch|PostModelSwitch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
   PreCompact) "$tool" hook "$1"; exit 0 ;;
 esac
 exec "$tool" hook "$1"

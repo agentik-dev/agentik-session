@@ -234,7 +234,8 @@ RUNS = ['{n} charter open "g"', "{n} charter close --exit done",
         "cd /r && {n} charter --dir d open g", "{n} charter close h.md; ls"]
 
 
-VERB_FIRST = "a helper's one charter call is `agentik-session charter check <file>`, the verb first"
+VERB_FIRST = ("a helper's charter calls are `agentik-session charter check <file>` and "
+              "`charter show`, the verb first")                          # in2 R9
 
 
 def _bash(cmd, helper=True):

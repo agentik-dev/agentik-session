@@ -8,10 +8,16 @@ git takes it from the cwd. Refused, exit 2, before the index changes: no path, `
 whole tree (its top by any name), a path outside the repo, a path that is an untracked nested
 repo or holds one (git would add it as a gitlink), a path git would not add, a message file
 missing, unreadable or blank, an empty check, a merge, cherry-pick, revert or rebase under way,
-a detached HEAD, and named paths with nothing to commit. Then: the named paths' index entries
-are read, `git add -- <paths>`, the check in the repo's top, and on green
-`git commit --only -F <f> -- <paths>`, so a path someone else staged stays staged and out of the
-commit. The check is one string split by shlex and run with no shell; it goes through the gate
+a detached HEAD, and named paths with nothing to commit. Then (fw5 R1): the index file is
+copied to a witness in the git dir (`agentik-commit.witness`) and `git add -- <paths>` runs on
+that copy (`GIT_INDEX_FILE`), so no path of this call is in the shared index while its check runs
+and another writer's plain commit cannot take one; "nothing to commit" and `moved` are asked of
+the witness; the check runs in the repo's top, its environment as the caller's; on green, in the
+shared index, `git add -N` for each file the witness holds that the shared index lacks, then
+`git commit --only -F <f> -- <paths>`, which holds index.lock through its hooks, so a path someone
+else staged stays staged and out of the commit. The witness goes on every way out.
+
+The check is one string split by shlex and run with no shell; it goes through the gate
 (one job, its code `gate wait --strict`'s) when its first word is `make` or `gmake`, since the
 gate queue holds every `make` on the machine; any other check runs here, directly, its output on
 stderr. Stdout is one line, last:
@@ -25,25 +31,28 @@ stderr. Stdout is one line, last:
                                                 a red or a signal once HEAD moved to this
                                                 call's commit: nothing is restored
   commit <repo>: red <step> exit <code>, the index moved under the check: nothing is restored
-                                                another writer moved HEAD or the index during
-                                                the check: their state stands (a refusal reads
-                                                `red refused exit 2`)
+                                                another writer moved HEAD or the index between
+                                                the `add -N` and the commit: their state stands
   commit <repo>: red restore exit 1, the index as found is kept at <snapshot>
 
 One call at a time per work tree: a lock in its git dir is held from before the add until the
 line is printed, so the `ok` sha is the commit this call made; a second call waits up to the
 gate's wall.
 
-Before the add, HEAD's sha is read and the index file copied whole to the git dir
-(`agentik-commit.index`); right after the add, the index's entries (`ls-files -s -z`, so a
-stat-only refresh such as anyone's `git status` is no change). On every other failure (a red,
-a refusal after the add, any exception, SIGINT, SIGTERM, SIGHUP) the copy goes back over the
+Before the check nothing is written to the shared index, so a red check, a refusal or a signal
+there leaves it as found and reads `red check exit <code>` even when another writer committed
+meanwhile (fw5 R2). The span from the `add -N` to the commit alone is guarded: before the
+`add -N`, HEAD's sha is read and the index file copied whole to the git dir
+(`agentik-commit.index`); right after it, the index's entries (`ls-files -s -z`, so a
+stat-only refresh such as anyone's `git status` is no change). On every failure in that span (a
+red, any exception, SIGINT, SIGTERM, SIGHUP) the copy goes back over the
 index by git's protocol (`index.lock`, then a rename), under the lock, only when HEAD is that
 sha and the entries are those, asked again under index.lock: then the index is as it was found,
-a path someone staged earlier included. Otherwise another writer moved HEAD or the index during
-the check, and the old index over theirs would stage their work's reversal: nothing is written,
-the copy is dropped, the line says so, and stderr names this call's paths still staged with
-`git restore --staged -- <paths>`. A restore that cannot be made is `red restore`: the copy
+a path someone staged earlier included, and no intent-to-add entry is left. Otherwise another
+writer moved HEAD or the index in that span, and the old index over theirs would stage their work's reversal: nothing is written,
+the copy is dropped, this call's own `add -N` entries still intent-to-add leave the index
+(under index.lock, no other entry touched), the line says so, and stderr names this call's
+paths still staged or intent-to-add with `git restore --staged -- <paths>`. A restore that cannot be made is `red restore`: the copy
 stays, and a later call refuses until it is moved back or removed. SIGKILL is out of reach: the
 copy is the way back.
 """
@@ -69,12 +78,17 @@ DEVNULL = subprocess.DEVNULL
 LOCK = "agentik-commit.lock"         # in the git dir: one call at a time (round 1, F1)
 LOCK_RED = 124                       # a lock not had within the wall: `red lock exit 124`
 SNAP = "agentik-commit.index"        # in the git dir: the index file as found (F3, F4)
+WITNESS = "agentik-commit.witness"   # in the git dir: this call's add, never the shared index
 RESTORE_WAIT = 2.0                   # seconds a restore waits on another writer's index.lock
 MOVED = "the index moved under the check: nothing is restored"     # fold 2: another writer
 
 
 class Refused(Exception):
     """A refusal before the index changes (or with it restored): exit 2."""
+
+
+class Nothing(Refused):
+    """Nothing to commit in the named paths: a refusal `checkpoint --commit` records (fw5 R3)."""
 
 
 class Red(Exception):
@@ -125,15 +139,17 @@ def _held():
             signal.pthread_sigmask(signal.SIG_SETMASK, was)
 
 
-def _env() -> dict:
+def _env(index=None) -> dict:
     env = {k: v for k, v in os.environ.items()
            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     env["GIT_LITERAL_PATHSPECS"] = "1"
+    if index is not None:
+        env["GIT_INDEX_FILE"] = index   # the witness, for this git call alone (fw5 R1)
     return env
 
 
-def _git(cwd, *args, z=False, stdin=None):
-    p = subprocess.run(("git",) + args, cwd=cwd, env=_env(), input=stdin,
+def _git(cwd, *args, z=False, stdin=None, index=None):
+    p = subprocess.run(("git",) + args, cwd=cwd, env=_env(index), input=stdin,
                        stdin=None if stdin is not None else DEVNULL,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if z:
@@ -289,6 +305,67 @@ def _snapshot(index: str, snap: str) -> None:
         raise Refused(f"the index cannot be copied to {snap}: {err}") from None
 
 
+def _witness(index: str, witness: str) -> None:
+    """The shared index copied to the witness, which this call's add alone writes (fw5 R1); no
+    index, no witness: git starts one."""
+    _drop(witness)
+    try:
+        shutil.copy2(index, witness)
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        _drop(witness)
+        raise Refused(f"the index cannot be copied to {witness}: {err}") from None
+
+
+def _take(lock: str):
+    """`index.lock` taken by git's protocol (O_EXCL, up to RESTORE_WAIT behind another writer):
+    its fd, else why not."""
+    end = time.monotonic() + RESTORE_WAIT
+    while True:
+        try:
+            return os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:
+            if time.monotonic() >= end:
+                return f"{lock} exists: another git holds the index"
+            time.sleep(0.05)
+        except OSError as err:
+            return f"{lock}: {err}"
+
+
+def _intent(cwd: str, new: list, index=None) -> list:
+    """Of `new`, the entries still intent-to-add (top-relative): `diff-files` names a path as
+    added to the work tree only for such an entry."""
+    if not new:
+        return []
+    return _git(cwd, "diff-files", "--name-only", "-z", "--diff-filter=A", "--", *new, z=True,
+                index=index)[1]
+
+
+def _unadd(top: str, cwd: str, index: str, spare: str, new: list) -> None:
+    """Review 1, F1: when the index moved in the span, this call's own `add -N` entries still
+    intent-to-add leave it, and no other entry: under index.lock a copy (`spare`, the witness's
+    path) loses them and is renamed over the index. The lock not had: they stay, and
+    `_tell_moved` names them."""
+    if not new:
+        return
+    lock = index + ".lock"
+    fd = _take(lock)
+    if isinstance(fd, str):
+        return
+    try:
+        shutil.copy2(index, spare)
+        ita = _intent(cwd, new, spare)
+        if ita and _git(top, "update-index", "--force-remove", "--", *ita, index=spare)[0] == 0:
+            os.replace(spare, index)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+        _drop(spare)
+        _drop(lock)                     # ours: made O_EXCL above
+
+
 def _put_back(index: str, snap: str, unmoved=None):
     """The snapshot back over the index by git's own protocol: `index.lock` taken (O_EXCL, up to
     RESTORE_WAIT behind another writer), the snapshot's bytes and mtime written into it, renamed
@@ -298,17 +375,9 @@ def _put_back(index: str, snap: str, unmoved=None):
     if not os.path.exists(snap):
         return None                     # not taken: the add never ran
     lock = index + ".lock"
-    end = time.monotonic() + RESTORE_WAIT
-    while True:
-        try:
-            fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-            break
-        except FileExistsError:
-            if time.monotonic() >= end:
-                return f"{lock} exists: another git holds the index"
-            time.sleep(0.05)
-        except OSError as err:
-            return f"{lock}: {err}"
+    fd = _take(lock)
+    if isinstance(fd, str):
+        return fd
     try:
         if unmoved is not None and not unmoved():
             os.close(fd)
@@ -352,7 +421,18 @@ def _gate_check(top: str, argv: list, env, caller, wall) -> int:
         return 1
     gate.spawn_serve(root)
     print(f"commit-step: check queued {e['id']} in {top}", file=sys.stderr, flush=True)
-    rc, result = gate.wait(root, e["id"])
+    rc, result = 1, None
+    try:
+        rc, result = gate.wait(root, e["id"])
+    finally:
+        if result is None:              # fw5 R4: any way out with no result cancels the job
+            with _held():
+                try:
+                    gate.cancel(root, e["id"])
+                    said = f"commit-step: check {e['id']} cut"
+                except OSError as err:
+                    said = f"commit-step: check {e['id']} not cut: its mark: {err}"
+                print(said, file=sys.stderr, flush=True)
     if rc != 0 or result is None:
         return 1
     print(gate.wait_line(result), file=sys.stderr, flush=True)
@@ -394,7 +474,17 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
             caller = gate.resolve_caller(args, env)
         except gate.GateError as err:
             raise Refused(str(err)) from None
-    wall = gate._config(env)["wall"]
+    return _core(cwd, paths, argv, ("-F", msg), env, gated, caller, gate._config(env)["wall"])
+
+
+def commit_paths(cwd: str, paths: list, message: str, env) -> int:
+    """`checkpoint --commit <paths...>` (fw5 R3): the named paths through the core with no
+    check, `message` the commit's. Refused (Nothing for nothing to commit) as `commit`'s."""
+    from . import gate
+    return _core(cwd, paths, (), ("-m", message), env, False, None, gate._config(env)["wall"])
+
+
+def _core(cwd, paths, argv, msg, env, gated, caller, wall) -> int:
     top = _top(cwd)
     name = os.path.basename(top)
     with _signals():
@@ -410,33 +500,61 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
 
 def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
     index, snap = _git_path(top, "index"), _git_path(top, SNAP)
+    witness = _git_path(top, WITNESS)
     if os.path.lexists(snap):
         raise Refused(f"{snap} is the index as an earlier call found it, not put back: "
                       f"`mv {snap} {index}` puts it back, or remove it; then call again")
     _require_state(top)
     _require_paths(top, cwd, paths)
-    old, done = None, False             # HEAD before this call's `git commit`, once it runs
-    base, after = _head(top), None      # HEAD before the add; the entries right after it
     try:
-        _snapshot(index, snap)
-        code, _, err = _git(cwd, "add", "--", *paths)
-        after = _entries(top)
+        return _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall,
+                          index, snap, witness)
+    finally:
+        _drop(witness)                  # on every way out (fw5 R2)
+
+
+def _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall, index, snap,
+               witness) -> int:
+    """fw5 R1: the add, "nothing to commit" and `moved` on the witness, so no path of this call
+    is in the shared index while its check runs; then `add -N` for what the shared index lacks
+    and `commit --only`. FW4d's snapshot guards that span alone (R2)."""
+    old, done = None, False             # HEAD before this call's `git commit`, once it runs
+    base, after = None, None            # HEAD before the `add -N`; the entries right after it
+    new = []                            # the files this call's `add -N` names
+    try:
+        _witness(index, witness)
+        code, _, err = _git(cwd, "add", "--", *paths, index=witness)
         if code != 0:
             sys.stderr.write(err.decode(errors="replace"))
             raise Red("add", _code(code))
-        if _git(cwd, "diff", "--cached", "--quiet", "HEAD", "--", *paths)[0] == 0:
-            raise Refused("nothing to commit in the named paths")
-        code = _gate_check(top, argv, env, caller, wall) if gated else _direct_check(top, argv)
-        if code != 0:
-            raise Red("check", code)
-        if _git(cwd, "diff", "--quiet", "--", *paths)[0] != 0:
-            print("commit-step: a named path changed during the check; nothing committed",
-                  file=sys.stderr)
-            raise Red("moved", 1)
+        if _git(cwd, "diff", "--cached", "--quiet", "HEAD", "--", *paths, index=witness)[0] == 0:
+            raise Nothing("nothing to commit in the named paths")
+        if argv:
+            code = (_gate_check(top, argv, env, caller, wall) if gated
+                    else _direct_check(top, argv))
+            if code != 0:
+                raise Red("check", code)
+            if _git(cwd, "diff", "--quiet", "--", *paths, index=witness)[0] != 0:
+                print("commit-step: a named path changed during the check; nothing committed",
+                      file=sys.stderr)
+                raise Red("moved", 1)
+        _, held, _ = _git(cwd, "ls-files", "-z", "--", *paths, z=True, index=witness)
+        _, known, _ = _git(cwd, "ls-files", "-z", "--", *paths, z=True)
+        known = set(known)
+        new = [p for p in held if p not in known]
+        base = _head(top)
+        _snapshot(index, snap)
+        if new:
+            code, _, err = _git(cwd, "add", "-N", "--", *new)
+            if code != 0:
+                after = _entries(top)
+                sys.stderr.write(err.decode(errors="replace"))
+                raise Red("add", _code(code))
+        after = _entries(top)
         old = _head(top)
-        code, _, err = _git(cwd, "commit", "-q", "--only", "-F", msg, "--", *paths)
-        if code != 0:
-            sys.stderr.write(err.decode(errors="replace"))
+        code, said, err = _git(cwd, "commit", "-q", "--only", *msg, "--", *paths)
+        if code != 0:                   # git's reason on stdout ("nothing to commit") too
+            sys.stderr.write(err.decode(errors="replace") or said and said + "\n")
             raise Red("commit", _code(code))
         sha = _head(top)                # this call's commit: no other call holds the lock
         _drop(snap)
@@ -447,7 +565,8 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
         if done:
             raise
         with _held():
-            line = _failed(exc, top, cwd, name, paths, (base, after, old), index, snap)
+            line = _failed(exc, top, cwd, name, paths, (base, after, old), index, snap,
+                           (new, bool(argv), witness))
             if line:
                 print(line, flush=True)
         if isinstance(exc, (Red, Refused)) and line.startswith(f"commit {name}: red restore "):
@@ -462,25 +581,31 @@ def _drop(snap: str) -> None:
         os.unlink(snap)
 
 
-def _tell_moved(exc, step, code, top, cwd, paths, base) -> None:
-    """Stderr for the index that moved: what moved, and this call's paths still staged against
-    HEAD with the way to unstage them; the other writer's state is left as it stands."""
+def _tell_moved(exc, step, code, top, cwd, paths, base, new, checked) -> None:
+    """Stderr for the index that moved: what moved and when (after the check, in the span from
+    the `add -N` to the commit), and this call's paths still staged against HEAD or intent-to-add
+    (which `diff --cached` does not list) with the way to unstage them; the other writer's state
+    is left as it stands."""
     now = _head(top)
     what = (f"HEAD moved from {base or 'no commit'} to {now or 'no commit'}" if now != base
             else "another writer changed the index")
+    when = ("during the commit" if step == "commit"
+            else "between this call's `git add -N` and its commit")
+    when = f"after the check, {when}" if checked else when
     _, names, _ = _git(cwd, "diff", "--cached", "--name-only", "-z", "--", *paths, z=True)
+    names = sorted(set(names) | set(_intent(cwd, new)))
     if names:
         quoted = " ".join(shlex.quote(n) for n in names)
-        left = (f"this call's paths still staged: {', '.join(names)}; "
+        left = (f"this call's paths still staged or intent-to-add: {', '.join(names)}; "
                 f"`git -C {shlex.quote(top)} restore --staged -- {quoted}` unstages them")
     else:
-        left = "none of this call's paths is staged against HEAD"
+        left = "none of this call's paths is staged or intent-to-add"
     red = exc if isinstance(exc, Refused) else f"red {step} exit {code}"
-    print(f"commit-step: {red}; {what} during the check, so the index as found is not put back "
+    print(f"commit-step: {red}; {what} {when}, so the index as found is not put back "
           f"over it: {left}", file=sys.stderr, flush=True)
 
 
-def _failed(exc, top, cwd, name, paths, heads, index, snap):
+def _failed(exc, top, cwd, name, paths, heads, index, snap, span=((), False, None)):
     """On a failure: the commit stands when HEAD moved to it; else the snapshot goes back only
     when HEAD is still the one read before the add and the entries are those read after it
     (`after` None: the add itself was cut, HEAD alone is asked), since over another writer's
@@ -500,7 +625,10 @@ def _failed(exc, top, cwd, name, paths, heads, index, snap):
         why = MOVED if not unmoved() else _put_back(index, snap, unmoved)
     if why is MOVED:
         _drop(snap)                     # stale: putting it back is the harm
-        _tell_moved(exc, step, code, top, cwd, paths, base)
+        new, checked, spare = span
+        if spare:
+            _unadd(top, cwd, index, spare, new)     # review 1, F1: ours alone, never theirs
+        _tell_moved(exc, step, code, top, cwd, paths, base, new, checked)
         return f"commit {name}: red {step} exit {code}, {MOVED}"
     if why:
         tell = (f"commit-step: {exc if isinstance(exc, Refused) else f'red {step} exit {code}'}"
