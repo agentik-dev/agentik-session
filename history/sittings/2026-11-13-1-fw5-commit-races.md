@@ -3,7 +3,7 @@
 | item | value |
 |---|---|
 | goal | packet fw5 (`design/packets/fw5-commit-races.md`): R1 witness index, R2 what stands, R3 `checkpoint --commit <paths...>`, R4 a cut wait cancels its job, R5 no wait on the job's own key; phase 1 ends at the commits |
-| budget | builder: about 90 tool calls (build 1); the fix of review 1: about 90 more |
+| budget | builder: about 90 tool calls (build 1); the fix of review 1: about 90 more; phase 2: about 90 more |
 | pin | f1cbccd on main (alpha.94); worktree `.claude/worktrees/fw5-commit-races`, `.venv`, `.venv-floor` linked |
 | window | 200k |
 | agents | 0 |
@@ -27,8 +27,9 @@
 - decide, owner: none.
 
 ## Next act
-- Phase 1 and review 1's fix are done. Review 2 (the coordinator's read), then phase 2 in the landing order: main merged, the README's test count, the version alone last under `plugin/`, the gate's `make check` once.
+- None on the branch: phase 2 is done at the commits. The landing (`gate land`, its `make check` the one check), the push and the install are the coordinator's.
 
 ## Exit
+- Phase 2 at the commits: main 807013d merged (no code conflict), NICE n192 to n196, plugin 2.0.0-alpha.100 alone last under `plugin/`; nothing pushed, landed or installed, no gate job, no bare `make`. The sitting is closed.
 - Review 1's fix at the commits: F1 built, four tests (red at 2a9fa14), the seven named test files 328 green under both venvs; no gate job, no version bump.
 - Phase 1 at the commits: R1 to R5 built and the docs, the six named test files green under `.venv` and `.venv-floor`; no gate job, no version bump (the brief's amendments).
