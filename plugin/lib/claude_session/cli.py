@@ -138,7 +138,14 @@ def _fmt_value(v):
 
 
 def cmd_doctor(args) -> int:
-    rep = doctor.run()
+    try:
+        rep = doctor.run()
+    except doctor.NoCwd:           # review 2, R2-F3: one line, or the envelope's error
+        if args.json:
+            print(plug.dumps(plug.no_cwd("doctor")))
+        else:
+            print("agentik-session: doctor: the working directory is gone", file=sys.stderr)
+        return 2
     print(json.dumps(rep.as_dict(), indent=2) if args.json else doctor.render(rep))
     return 0 if rep.ok else 2
 
@@ -158,8 +165,12 @@ def cmd_describe(args) -> int:
         print(f"agentik-session: describe: no read {' '.join(words)[:60]!r}; say describe "
               "--json, or describe config --json [KEY]", file=sys.stderr)
         return 2
-    d, rc = plug.config_read(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(), os.environ,
-                             words[1] if len(words) > 1 else None)
+    try:
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    except FileNotFoundError:      # review 2, R2-F3
+        print(plug.dumps(plug.no_cwd("config")))
+        return 2
+    d, rc = plug.config_read(cwd, os.environ, words[1] if len(words) > 1 else None)
     print(plug.dumps(d))
     return rc
 

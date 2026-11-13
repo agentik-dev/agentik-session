@@ -382,12 +382,10 @@ _UNREAD = (resolver.ResolveError, OSError, RecursionError)
 
 
 def _why(e, env, cwd) -> str:
+    from .plug import _failure, layer_files, scrubbed   # plug imports this module
     if isinstance(e, resolver.ResolveError):
-        return str(e)
-    from .plug import _failure     # plug imports this module
-    rdir = resolver.repo_dir(cwd)
-    return _failure(e, [str(resolver._user_file(env)), str(rdir / "config.yaml"),
-                        str(rdir / "config.local.yaml")])
+        return scrubbed(str(e))    # review 2, R2-F1: no layer file's text
+    return _failure(e, layer_files(cwd, env))   # R2-F2: the paths picked without raising
 
 
 def _check_profiles(env, cwd) -> Check:
@@ -473,9 +471,9 @@ def _check_meter_hook(plugins, err) -> Check:
 
 
 def _check_config(env, cwd) -> tuple[Check, dict]:
-    path = resolver.repo_dir(cwd) / "config.yaml"
     sections: dict = {}
     try:
+        path = resolver.repo_dir(cwd) / "config.yaml"   # R2-F2: a folder above may refuse
         r = resolver.resolve(cwd, "doctor", env, overlay={})
         sections = r.sections
     except _UNREAD as e:
@@ -499,7 +497,11 @@ def _check_renamed(cwd, r_renamed) -> list:
     """agentik-r1 §6.3's warn rows: the repo's old folder (c4), the old section key (c6)."""
     rows = []
     old = Path(cwd) / resolver.OLD_REPO_DIR
-    if old.is_dir() and not old.is_symlink():
+    try:
+        here = old.is_dir() and not old.is_symlink()
+    except OSError:    # R2-F2: the folder above cannot be searched; `config` fails naming it
+        here = False
+    if here:
         new = Path(cwd) / resolver.REPO_DIR
         where = "read" if resolver.repo_dir(cwd) == old else f"unread, {new} wins"
         rows.append(Check("config-dir", True, f"{old} is the folder before the rename "
@@ -611,9 +613,16 @@ def _check_guard(env, cwd) -> Check:
     return Check("guard", True, detail)
 
 
+class NoCwd(Exception):
+    """The working directory is gone (review 2, R2-F3)."""
+
+
 def run(env=None, cwd=None) -> Report:
     env = os.environ if env is None else env
-    cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    try:
+        cwd = Path(cwd or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    except FileNotFoundError:
+        raise NoCwd() from None
     rep = Report()
     add = rep.checks.append
     add(_check_claude(env))

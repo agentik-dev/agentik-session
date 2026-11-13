@@ -19,7 +19,9 @@
 - [x] Build 3 (phase 2, from 6f76dc7), L1: the doctor's text withholds a refused line holding a secret, as `doctor --json` does (R1 amended for that detail); the secret test gains the four text reads
 - [x] Build 3, L2: with a user, repo or local file of mode 000 or a folder, `doctor --json` is §5's shape (`profiles` and `config` `fail`, `<file>: <why>`), the text one FAIL line each, exit 2; six cases, both forms
 - [x] Build 3, phase 2: main 3490c08 merged (`e3f9be1`, no conflict); review 1's ten NICE notes are n213 to n222 (S4); `scripts/stamp --base main` at the merge: alpha.104 -> alpha.105, count 4082 -> 4121 (the equation held), n141 to n150 moved to the overflow, the sidecar written
-- [ ] Build 3: the gate, once
+- [x] Build 3: gate 20261113-101206-1536 exit 2: `.venv` 4121 passed; `.venv-floor` 1 failed, `test_land3_stamp`'s fixture `git add -A` (`unable to create temporary file: Invalid argument`), 37 passed alone after
+- [x] Build 4 (fix of review 2), tests first, red at b5c7b0d: R2-F1 a parser's message names file, line and reason, never the line's text (`withheld` unconditional, `scrubbed` for a resolver message); R2-F2 a folder above a layer file that cannot be searched; R2-F3 a cwd that is gone (`no_cwd`, exit 2). One commit for the three (the builder's call bound)
+- [ ] Build 4: 2.0.0-alpha.106 by `scripts/stamp --base main` (main still 3490c08), alone in the last commit under `plugin/`; the gate once
 
 ## Handover
 - decide, owner: the coordinator (consumer: the packet's reader): the brief asks the contract's sections 2 to 7 copied whole into the packet; doclint holds a packet under 9,216 B, so §3 carries them condensed.
@@ -28,7 +30,7 @@
 
 
 ## Next act
-- Build 3: the gate job; a red is work.
+- The version commit (alpha.106 by the stamp), then the gate once; review 1's and 2's reproductions are rerun in build 4's record.
 
 ## Exit
 - Phase 1 done: R1 to R9 built, acceptance 1 to 15 green; review 1's three findings fixed; no version, no merge, no gate job.

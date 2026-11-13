@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -197,6 +198,11 @@ SECRET_FILES = {
     "misplaced": f"defaults:\n  effort: low\n  gate:\n    ntfy_topic: {SECRET}\n",
     "bad-line": f"gate:\n  ntfy_topic {SECRET}\n",
     "bad-flow": f"gate: {{wall: 900, ntfy_topic {SECRET}}}\n",
+    # review 2, R2-F1: the value on a line of its own, or split from its key by a break
+    "bad-own-line": f"gate:\n  ntfy_topic:\n    {SECRET}\n",
+    "bad-ff": f"gate:\n  ntfy_topic: a\f{SECRET} b\n",
+    "bad-fs": f"gate:\n  ntfy_topic: a\x1c{SECRET} b\n",
+    "bad-nel": f"gate:\n  ntfy_topic: a\x85{SECRET} b\n",
 }
 SECRET_READS = (("describe", "--json"), ("describe", "config", "--json"),
                 ("describe", "config", "--json", "gate.ntfy_topic"),
@@ -218,9 +224,9 @@ def test_a_secret_is_in_no_output(box, form):
                 assert part not in out and part not in err, (form, argv, extra, out, err)
     rc, d = config(box, "gate.ntfy_topic")
     if form.startswith("bad-"):
-        line = 2 if form == "bad-line" else 1      # the file and the line still named
+        line = {"bad-line": 2, "bad-flow": 1}.get(form, "")   # the file and the line named
         assert rc == 2 and d["error"]["code"] == "bad_file", d
-        assert d["error"]["message"].startswith(f"{u}: line {line}: "), d
+        assert d["error"]["message"].startswith(f"{u}: line {line}"), d
         return
     s = d["settings"][0]
     assert s["type"] == "secret" and s["key"] == "gate.ntfy_topic"
@@ -393,6 +399,121 @@ def test_doctor_with_a_file_it_cannot_read(box, layer, how):
     finally:
         if p.is_file():
             p.chmod(0o644)
+
+
+# ---- review 2, R2-F1: no message quotes a layer file's text, whatever the line holds --------
+
+_DRIVER = r"""
+import io, sys
+from contextlib import redirect_stderr, redirect_stdout
+from claude_session import cli
+for argv in sys.argv[1:]:
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            cli.main(argv.split())
+        except SystemExit:
+            pass
+        except BaseException as e:
+            print(repr(e), file=sys.stderr)
+    sys.stdout.write(out.getvalue() + "\n" + err.getvalue() + "\n")
+"""
+X = "{X}"
+BROKEN = ("gate:\n  ntfy_topic:\n    {X}\n", "gate:\n  ntfy_topic {X}\n",
+          "gate: {{ntfy_topic {X}}}\n", "gate: {{wall: 1, {X}}}\n",
+          "gate:\n  ntfy_topic: {X}\n  ntfy_topic: {X}\n", "gate:\n\tntfy_topic: {X}\n",
+          "gate:\n  ntfy_topic: \"{X}\n", "gate:\n  ntfy_topic: [{X}, [1]]\n",
+          "gate:\n  - {X}\n", "{X}\n", "gate:\n  ntfy_topic: '{X}' b\n",
+          "gate:\n  {X}: [1\n", "gate:\n    ntfy_topic: a\n  {X}\n") + tuple(
+          "gate:\n  ntfy_topic: a" + sep + "{X} b\n" for sep in "\f\v\x1c\x1d\x1e\x85 ")
+VERBS = tuple(" ".join(a) for a in SECRET_READS)
+
+
+@pytest.mark.parametrize("where", ["user", "repo"])
+def test_a_secret_in_any_broken_shape_is_in_no_output(box, where):
+    home, cwd = box
+    for shape in BROKEN:
+        text = shape.replace("{{", "{").replace("}}", "}").replace(X, SECRET)
+        if where == "user":
+            user_file(home, text)
+        else:
+            repo_file(cwd, "session:\n" + "".join("  " + ln + "\n" for ln in text.rstrip("\n").split("\n")))
+        for extra in ({}, {"CLAUDE_CODE_SESSION_ID": SID}):
+            p = subprocess.run([sys.executable, "-c", _DRIVER, *VERBS], cwd=str(cwd),
+                               env=_env(home, PYTHONPATH=str(ROOT / "plugin" / "lib"), **extra),
+                               capture_output=True, timeout=120)
+            both = p.stdout.decode(errors="replace") + p.stderr.decode(errors="replace")
+            assert "s3cr3t" not in both, (where, shape, extra, both)
+
+
+def test_a_parser_message_names_file_line_and_reason_alone(box):
+    home, _ = box
+    for shape in BROKEN:
+        u = user_file(home, shape.replace("{{", "{").replace("}}", "}").replace(X, "zz-mark"))
+        rc, d = config(box)
+        if rc == 2 and ": line " in d["error"]["message"]:
+            msg = d["error"]["message"]
+            assert msg.startswith(f"{u}: line ") and "zz-mark" not in msg, (shape, msg)
+            assert "'" not in msg and '"' not in msg, (shape, msg)
+
+
+# ---- review 2, R2-F2: a folder above a layer file that cannot be searched ------------------
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root searches a mode 000 folder")
+@pytest.mark.parametrize("where", ["home", "cwd"])
+def test_a_folder_that_cannot_be_searched(box, where):
+    home, cwd = box
+    user_file(home, "defaults:\n  effort: low\n")
+    repo_file(cwd, "session:\n  effort: low\n")
+    top = (home if where == "home" else cwd) / ".claude"
+    top.chmod(0)
+    try:
+        rc, out, err = sh(box, "describe", "config", "--json")
+        assert rc == 2 and "Traceback" not in err, (rc, err)
+        d = json.loads(out)
+        assert d["ok"] is False and d["error"]["code"] == "bad_file", d
+        assert d["error"]["message"].startswith(f"{top}/") and \
+            d["error"]["message"].endswith(": Permission denied"), d
+        rc, out, err = sh(box, "doctor", "--json")
+        assert rc == 2 and "Traceback" not in err, (rc, err)
+        d = json.loads(out)
+        assert d["ok"] is True and d["failed"] >= 1
+        assert any(c["status"] == "fail" and c["detail"].startswith(f"{top}/")
+                   and c["detail"].endswith(": Permission denied") for c in d["checks"]), d
+        rc, out, err = sh(box, "doctor")
+        assert rc == 2 and "Traceback" not in err, (rc, err)
+        assert any(ln.startswith("FAIL ") and f" {top}/" in ln for ln in out.splitlines()), out
+    finally:
+        top.chmod(0o755)
+
+
+# ---- review 2, R2-F3: a cwd that is gone ---------------------------------------------------
+
+def _in_gone(box, *argv):
+    home, cwd = box
+    gone = cwd / "gone"
+    gone.mkdir()
+    p = subprocess.run(["/bin/sh", "-c", 'cd "$1" && rmdir "$1" && shift && exec "$@"', "sh",
+                        str(gone), str(S), *argv], env=_env(home), capture_output=True,
+                       timeout=60)
+    return p.returncode, p.stdout.decode(), p.stderr.decode()
+
+
+def test_a_cwd_that_is_gone(box):
+    rc, out, err = _in_gone(box, "describe", "config", "--json")
+    assert rc == 2 and "Traceback" not in err, (rc, err)
+    d = json.loads(out)
+    assert list(d) == ["schema", "ok", "tool", "error"] and d["ok"] is False, d
+    assert d["schema"] == "agentik.config/1" and d["error"]["code"] == "no_cwd", d
+    rc, out, err = _in_gone(box, "doctor", "--json")
+    assert rc == 2 and "Traceback" not in err, (rc, err)
+    d = json.loads(out)
+    assert d["schema"] == "agentik.doctor/1" and d["ok"] is False, d
+    assert d["error"]["code"] == "no_cwd", d
+    rc, out, err = _in_gone(box, "doctor")
+    assert rc == 2 and "Traceback" not in err and out == "", (rc, out, err)
+    lines = [ln for ln in err.splitlines() if not ln.startswith("shell-init:")]   # bash's own
+    assert len(lines) == 1 and "working directory is gone" in lines[0], err
 
 
 # ---- review 1, R1-F3: every key is unique, of [a-z0-9_-] segments ----------------------------

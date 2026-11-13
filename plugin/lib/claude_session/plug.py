@@ -569,33 +569,59 @@ def _sid(env) -> str | None:
     return sid if sid and len(sid) >= 8 and resolver._SID.match(sid) else None
 
 
-_AT_LINE = re.compile(r"(\S+): line (\d+): ")
+_AT_LINE = re.compile(r": line (\d+): ")
 _QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
 
 
 def withheld(msg: str) -> str:
-    """The parser quotes the text of the line it refuses: withheld when that line holds a
-    secret's key (its value is on it), or when the line cannot be read again to tell. The
-    config read's error and the doctor read's details pass through it (review 1, R1-F1)."""
+    """A parser's message names the file, the line and the reason, and nothing of the line's
+    text, whatever it holds (review 2, R2-F1: a rule, not a pattern): what follows the reason,
+    the quoted line, key or item, is dropped. The config read's error and the doctor's
+    details, both forms, pass through it."""
     m = _AT_LINE.search(msg) if isinstance(msg, str) else None
     if not m:
         return msg
+    reason = re.split(r"""['"]""", msg[m.end():], maxsplit=1)[0].rstrip(": ")
+    return msg[:m.end()] + reason
+
+
+def scrubbed(msg: str) -> str:
+    """A resolver's message as a read prints it: a parser's as `withheld` gives it, and any
+    other with each quoted span (a value or name taken from a layer file) withheld."""
+    return _QUOTED.sub("(withheld)", withheld(msg))
+
+
+def _guarded(fn, arg, fallback):
+    """A path the resolver picks by asking the disk, or its unpicked form when a folder above
+    it cannot be searched (review 2, R2-F2)."""
     try:
-        text = Path(m.group(1)).read_text(errors="replace").splitlines()[int(m.group(2)) - 1]
-    except (OSError, IndexError, ValueError):
-        text = None
-    if text is not None and not any(k.rsplit(".", 1)[-1] in text for k in SECRETS):
-        return msg
-    return msg[:m.end()] + _QUOTED.sub("(withheld)", msg[m.end():])
+        return fn(arg)
+    except OSError:
+        return fallback
 
 
-def _error(e, files) -> dict:
-    msg = withheld(" ".join(str(e).split()).replace("\x1b", ""))
+def layer_files(cwd, env) -> list:
+    """The user, repo and local files, picked as resolve picks them, never raising."""
+    home = Path(env.get("HOME") or Path.home())
+    user = _guarded(resolver._user_file, env, home / ".claude" / "agentik" / "profiles.yaml")
+    rdir = _guarded(resolver.repo_dir, cwd, Path(cwd) / resolver.REPO_DIR)
+    return [str(user), str(rdir / "config.yaml"), str(rdir / "config.local.yaml")]
+
+
+def no_cwd(read: str) -> dict:
+    """The envelope's error when the working directory is gone (review 2, R2-F3)."""
+    return {"schema": f"agentik.{read}/1", "ok": False, "tool": TOOL,
+            "error": {"code": "no_cwd", "message": "the working directory is gone",
+                      "remedy": None}}
+
+
+def _error(msg, files, code=None) -> dict:
+    msg = scrubbed(" ".join(str(msg).split()).replace("\x1b", ""))
     named = any(p and p in msg for p in files) or \
         msg.split(":", 1)[0] in ("config.yaml", "config.local.yaml", "profiles.yaml")
     return {"schema": "agentik.config/1", "ok": False, "tool": TOOL,
-            "error": {"code": "bad_file" if named else "unresolved", "message": msg,
-                      "remedy": None}}
+            "error": {"code": code or ("bad_file" if named else "unresolved"),
+                      "message": msg, "remedy": None}}
 
 
 def _too_deep(paths) -> str | None:
@@ -629,11 +655,11 @@ def config_read(cwd, env, key: str | None = None) -> tuple[dict, int]:
         f = _Files(cwd, env, sid, launch, r)
         settings, warnings = _settings(f), _warnings(f)
     except (resolver.ResolveError, OSError, RecursionError) as e:
-        rdir, state = resolver.repo_dir(cwd), resolver.state_dir(env)
-        files = [str(resolver._user_file(env)), str(rdir / "config.yaml"),
-                 str(rdir / "config.local.yaml"), str(resolver.SHIPPED), str(state / "overlays")]
+        state = resolver.state_dir(env)
+        files = layer_files(cwd, env) + [str(resolver.SHIPPED), str(state / "overlays")]
         deep = files[:3] + ([str(state / "overlays" / f"{sid}.json")] if sid else [])
-        return _error(_failure(e, deep), files), 2
+        code = None if isinstance(e, resolver.ResolveError) else "bad_file"
+        return _error(_failure(e, deep), files, code), 2
     if key is not None:
         settings = [s for s in settings if s["key"] == key.lower()]
     return {"schema": "agentik.config/1", "ok": True, "tool": TOOL, "layers": f.layers(),
