@@ -62,6 +62,8 @@ class Repo:
             os.chmod(tree / rel, mode)
         git(tree, "add", *files)
         git(tree, "commit", "-qm", "work of " + name)
+        # land2 R3: line 1 of the merge file is `Merge <branch>: ` and text.
+        self.message.write_text("Merge %s: land the branch\n" % name)
         return git(tree, "rev-parse", "HEAD")
 
     def main(self):
