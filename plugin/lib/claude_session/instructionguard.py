@@ -442,8 +442,10 @@ def _mask(text: str) -> str:
                 quote = c
             elif c == "`":
                 tick = not tick
+            elif opened[-1:] == ["${"] and (c == ")" or (c == "(" and prev[:1] != "$")):
+                c = _MASK[c]              # r2 F1, F4: a bare paren in `${` is a word's
             elif c == "(" or (c == "{" and prev == "$"):
-                opened.append(prev + c if prev == "$" else c)
+                opened.append("$" + c if prev[:1] == "$" else c)
             elif c == "}" and opened[-1:] == ["${"]:
                 opened.pop()
             out.append(c)
@@ -451,7 +453,7 @@ def _mask(text: str) -> str:
                 start = (opened.pop() if opened and opened[-1] != "${" else None) != "$("
             else:
                 start = c in " \t\n;&|(<>"
-            prev = c
+            prev = "$$" if c + prev == "$$" else c    # `$$`, the pid, opens no `${`
             i += 1
             continue
         if quote == '"' and c == "\\" and i + 1 < n:

@@ -644,7 +644,49 @@ G5_R1_CLEAN = [
     ("echo x >CLAUDE.md#c", ["CLAUDE.md#c"])]
 
 
-@pytest.mark.parametrize("command,targets", G5_R1_CLEAN)
+# ---- g5 round 2: F1 and F4 a bare paren in `${`, F2 a `case` pattern's `)` in `$(`, F3 ----
+
+N = "\ncp a CLAUDE.md"
+G5_R2_WRITES = [
+    "name=${sig%%(*}\ncase $name in\n  foo) echo yes ;;  # don't care\nesac" + N,   # F1 a
+    "x=${l//[(]/}; case $x in a) echo 1;; esac # isn't" + N,                         # F1 b
+    "echo $${ # don't" + N,                                                          # F1 c
+    "v=${v#(}; v=${v%)}; case $v in a) echo 1;; esac # don't" + N,
+    "name=${sig%%\\(*}\ncase $name in\n  foo) echo yes ;;  # don't care\nesac" + N,  # control
+    "# strip the paren \\\nv=${v%)}" + N, "x=${l%% #*)}" + N, "v=${v%)}" + N]       # F4
+
+
+@pytest.mark.parametrize("command", G5_R2_WRITES)
+def test_g5_r2_a_paren_in_a_brace_or_a_pattern_hides_no_write(box, command):
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
+        [("write", str(box.repo / "CLAUDE.md"))], command
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+# Round 2's "probed and clean" lines under F1 and F2, and the fixes' neighbours: each reads as
+# at 40aee95 (`(...)#c` a comment, `$(...)#c` a word, as /bin/sh and /bin/bash read them).
+G5_R2_CLEAN = [(c + W, t) for c, t in [
+    ("echo $(echo $(echo a))#c", ["CLAUDE.md"]), ("echo $(echo $(echo a) b)#c", ["CLAUDE.md"]),
+    ("echo $(echo ')')#c", ["CLAUDE.md"]), ("echo $(echo \\))#c", ["CLAUDE.md"]),
+    ("echo $(echo \")\")#c", ["CLAUDE.md"]), ("echo $(( (1+2)*3 ))#c", ["CLAUDE.md"]),
+    ("echo $( (echo a) )#c", ["CLAUDE.md"]), ("echo $(a)$(b)#c", ["CLAUDE.md"]),
+    ("echo ${x:-$(echo a)}#c", ["CLAUDE.md"]), ("echo ${x:-$(echo a # b\n)} # c", []),
+    ("echo $(cat <<EOF\n)#\nEOF\n)#c", ["CLAUDE.md"]), ("(echo $(echo a))#c", []),
+    ("echo ${x:-\"}\"}", ["CLAUDE.md"]), ("echo ${x:-'}'}", ["CLAUDE.md"]),
+    ("echo ${x:-\\}}", ["CLAUDE.md"]), ("echo ${x:-${y:-a #b}}", ["CLAUDE.md"]),
+    ("echo ${x:-(none)}", ["CLAUDE.md"]), ("echo ${x:-(none)} #c", []),
+    ("echo `echo a # b`", ["CLAUDE.md"]), ("echo `echo a # b\necho c`", ["CLAUDE.md"]),
+    ("echo `a` `b #c`", ["CLAUDE.md"]), ("echo \"`echo a # b`\"", ["CLAUDE.md"]),
+    ("echo $$(echo a)#c", ["CLAUDE.md"]), ("echo $$${x #y}", ["CLAUDE.md"]),
+    ("echo ${x:-$((1+2))}", ["CLAUDE.md"]), ("(case x in x) echo a;; esac)#c", []),
+    ("echo $(echo case x)#c", ["CLAUDE.md"]),
+    ("case x in x) echo $(echo a)#c;; esac", ["CLAUDE.md"]),
+    ("echo $(case x in (x) echo;; esac)#c", ["CLAUDE.md"]),
+    ("echo `echo a # \\\\`; echo b", ["CLAUDE.md"])]]
+
+
+@pytest.mark.parametrize("command,targets", G5_R1_CLEAN + G5_R2_CLEAN)
 def test_g5_r1_the_probed_clean_lines_keep_their_result(box, command, targets):
     want = [("write", t if t.startswith("/") else str(box.repo / t)) for t in targets]
     assert instructionguard.bash_targets(command, str(box.repo), box.env) == want, command
