@@ -198,7 +198,19 @@ def test_line3_a_version_above_main_stays(box):
     box.commit("quince at alpha.9")
     p = box.stamp()
     assert p.returncode == 0, p.stderr
-    assert p.stdout.splitlines() == ["stamp: sidecar written", ok_line("2.0.0-alpha.9", 3)]
+    # review 1's L2: the Status lines' move has a line of its own though plugin.json stays
+    assert p.stdout.splitlines() == ["stamp: status version 2.0.0-alpha.7 -> 2.0.0-alpha.9",
+                                     "stamp: sidecar written", ok_line("2.0.0-alpha.9", 3)]
+    assert box.git("status", "--porcelain", "--", MANIFEST) == ""
+
+
+def test_review1_l2_a_status_version_move_alone_is_named(box):
+    box.set_status("2.0.0-alpha.5", 3)
+    box.commit("quince: Status lines a version behind")
+    p = box.stamp()
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.splitlines() == ["stamp: status version 2.0.0-alpha.5 -> 2.0.0-alpha.7",
+                                     "stamp: sidecar written", ok_line("2.0.0-alpha.7", 3)]
     assert box.git("status", "--porcelain", "--", MANIFEST) == ""
 
 
@@ -387,6 +399,65 @@ def test_line6_a_merge_that_took_mains_status_line_over_a_rendered_readme(box):
     assert p.returncode == 0, p.stderr
     assert p.stdout.splitlines() == ["stamp: sidecar written", ok_line("2.0.0-alpha.7", 4)]
     assert box.shasum_ok()
+
+
+def render_new_prose(box):
+    box.write(SOURCE, source_text(prose="New prose, by a made-up plugin."))
+    box.write(README, readme_text(prose="New prose, rendered."))
+    box.seal()
+    box.commit("quince: a render of new prose")
+
+
+def test_review1_f2_each_file_fresh_against_another_commit_is_red(box):
+    # P2a: HEAD renders both, then the README alone comes back from HEAD~1
+    render_new_prose(box)
+    box.git("checkout", "HEAD~1", "--", README)
+    before = box.snapshot()
+    p = box.stamp()
+    assert p.returncode == 1, (p.stdout, p.stderr)
+    assert p.stderr.splitlines() == [red_sidecar(README)]
+    assert box.snapshot() == before
+
+
+def test_review1_f2_a_merge_that_took_mains_readme_over_new_prose_is_red(box):
+    # P2c, the landing's shape: the merge keeps the branch's source and takes main's README
+    render_new_prose(box)
+    box.git("checkout", "-q", "main")
+    box.write(TESTS, pear_tests(("test_a", "test_b", "test_c", "test_d")))
+    box.set_status("2.0.0-alpha.7", 4)
+    box.commit("main: a test")
+    box.git("checkout", "-q", "quince")
+    box.git("merge", "-q", "--no-edit", "main", ok=1)
+    box.git("checkout", "main", "--", README, SIDECAR)
+    box.commit("Merge main into quince")
+    before = box.snapshot()
+    p = box.stamp()
+    assert p.returncode == 1, (p.stdout, p.stderr)
+    assert p.stderr.splitlines() == [red_sidecar(README)]
+    assert box.snapshot() == before
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root writes anywhere")
+def test_review1_f1_a_failed_write_leaves_every_file_and_exits_2(box):
+    box.write("plugin/lib/pear.py", "def pear():\n    return 2\n")
+    box.write(TESTS, pear_tests(("test_a", "test_b", "test_c", "test_d")))
+    box.commit("quince: a change and a test")
+    folder = box.repo / "design" / "readme"
+    folder.chmod(0o555)
+    try:
+        before = box.snapshot()
+        p = box.stamp()
+        after = box.snapshot()
+        temps = [str(q) for q in box.repo.rglob(".stamp-*")]
+    finally:
+        folder.chmod(0o755)
+    assert p.returncode == 2, (p.stdout, p.stderr)
+    lines = p.stderr.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("stamp: %s: " % SOURCE), lines
+    assert "Traceback" not in p.stderr and p.stdout == ""
+    assert after == before
+    assert box.read(MANIFEST) == manifest_text("2.0.0-alpha.7")
+    assert temps == []
 
 
 # 7: the NICE file's size.
