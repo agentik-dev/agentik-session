@@ -90,7 +90,8 @@ def test_dw1_install_cli_leaves_a_newer_door_byte_for_byte(tmp_path, home):
     assert door.read_text() == newer and "VERSION=0.2.0\n" in door.read_text()
     assert not [line for line in _said(r) if "door" in line], r.stdout
     # the rest of the install as before
-    assert os.readlink(_bins(home) / "claude-session") == "agentik-session"
+    from claude_session import install
+    assert os.readlink(_bins(home) / install.OLD_NAME) == "agentik-session"
     assert os.access(_bins(home) / "agentik-session", os.X_OK)
 
 
@@ -166,6 +167,7 @@ def _case(where, name):
     text = DOOR.read_text()
     here, there = where / "here" / "agentik", where / "bin" / "agentik"
     _put(here, text if name != "no line here" else _versioned(text, None))
+    there.parent.mkdir(parents=True)      # as `_locked_install` makes it before the door
     if name == "older" or name == "no line here":
         _put(there, _versioned(text, "0.0.9"), 0o700)
     elif name == "equal, other bytes":
@@ -176,7 +178,6 @@ def _case(where, name):
         _put(there, _versioned(text, None), 0o700)
     elif name == "a link":
         _put(where / "target", _versioned(text, "0.0.9"), 0o700)
-        there.parent.mkdir(parents=True, exist_ok=True)
         there.symlink_to(where / "target")
     return there, here
 

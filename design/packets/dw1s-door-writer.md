@@ -10,7 +10,7 @@
 | acceptance | §3; `tests/test_dw1_door.py` red at the pin, green after, under both venvs |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
 
-## 1. Why, and the code at the pin
+## 1. What the source says: why, and the code at the pin
 
 The `agentik` door is one `sh` file every tool carries and installs at `~/.local/bin/agentik`; it reads `VERSION=0.1.0` today and gains a rule at 0.2.0. The canonical install module (`agentik_install._door`) writes the door forward only. This tool's own `install._locked_install` calls `_write_door` unconditionally, at `install-cli` (and `make install`, which runs it) and again from the SessionStart refresh, so a tool one door behind puts the old door back. This row lands before any 0.2.0 door is installed.
 
@@ -24,7 +24,7 @@ The `agentik` door is one `sh` file every tool carries and installs at `~/.local
 - R6 the records say the install writes the door where none or an older one is there.
 - R7 phase 1 ends at the commits.
 
-## 3. Acceptance (each a test in a temp HOME, the bare env, a plugin copy; "a 0.2.0 door" is the plugin's door with its `VERSION=` line changed)
+## 3. Interfaces: the acceptance table (each a test in a temp HOME, the bare env, a plugin copy; "a 0.2.0 door" is the plugin's door with its `VERSION=` line changed)
 
 | # | line | at the pin |
 |---|---|---|
@@ -35,9 +35,13 @@ The `agentik` door is one `sh` file every tool carries and installs at `~/.local
 | 5 | one table (none, older, equal with other bytes, newer, no line there, no line here, a link) through `install._door` and `agentik_install._door`: the same file and the same return | `install._door` does not exist |
 | 6 | the three files green under both venvs, every test in the first two unchanged | first two: .venv 157 passed; .venv-floor 154 passed, 3 skipped |
 
-## 4. Choices inside the rulings
+## 4. Findings that name this row: the choices inside the rulings
 
-- (filled at the build)
+- `install._door` is the vendored function's body, word for word, over this module's `read_launcher` and `order`; `_locked_install` puts its line first in `pruned` after the prune's own lines are made, as the vendored one does.
+- The refresh is driven in acceptance 2 by `install.refresh(env)` in a child under `-I`, its `sys.path` at the plugin copy's `lib/`, since `_refresh` acts only for the plugin its own module was loaded from.
+- Acceptance 5's table runs in process: it imports `agentik_install` from this tree's `plugin/lib/` (on the suite's path by `conftest.py`), the canonical copy as vendored here.
+- The test names the old link by `install.OLD_NAME`, so the file needs no row in `.hygiene-allow`.
+- `RUNBOOK.md` did not name the door at `~/.local/bin`; it gains the clause, as `install-cli.md` and the module's docstring change their own. The README source does not say the install writes the door: unchanged.
 
 ## 5. Forbidden reads
 
