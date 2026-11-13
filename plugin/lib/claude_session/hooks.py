@@ -43,7 +43,7 @@ SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
 # a quoted or continued spelling reads as the plain one. Each regex has one repetition at most
 # and none nests, so the pass is linear in the command's length. A quoted mention that names
 # the launcher is denied too, and the helper rewords it.
-CHARTER_READS = ("check",)          # `charter`'s verbs that write nothing: never open, never close
+CHARTER_READS = ("check", "show")   # `charter`'s verbs that write nothing: never open, never close
 _LAUNCHER = re.compile(r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])")
 _CHARTER_WORD = re.compile(r"(?<![\w-])charter(?![\w.-])")
 _CHARTER_READ = re.compile(r"[ \t]+(?:" + "|".join(CHARTER_READS) + r")(?![\w.-])")
@@ -72,7 +72,8 @@ HELPER_CHARTER = _HelperCharter()
 HELPER_CHARTER_DENY = (
     "agentik-session: a helper's charter open or close would take or write its sitting's "
     "record (a helper's Bash carries its parent's session id). Write your charter by hand "
-    "(a helper's one charter call is `agentik-session charter check <file>`, the verb first), "
+    "(a helper's charter calls are `agentik-session charter check <file>` and `charter show`, "
+    "the verb first), "
     "and put a probe's own call to charter open or close in a script file run under a scratch "
     "state home.")
 
