@@ -1269,3 +1269,44 @@ def test_r2_r4_one_credit_a_word_and_command(box):
     found = instructionguard._strict(command, str(box.repo), box.env, 0, False, True, set())
     assert [(k, p) for k, p, _, _ in found] == [("write", str(box.tmp / "CLAUDE.md"))] * 2
     assert [w for _, _, w, _ in found].count(None) == 1      # the second state's: no credit
+
+
+# ---- review 2, R5 (F4): a run of loose pieces stands for a strict word only at its path -----
+# A redirect to a quoted name with a blank is listed by the loose reading as its first piece
+# only, so its want was left for another command's run of the same words in another folder.
+# Each line was denied at db19d51 and passed at 6aed3c5; shells write (`sub` stands for the
+# reviewer's `docs`, which this box gates).
+
+R5_F4 = [
+    ("cd sub; echo x > \"a CLAUDE.md\"; cd ..; bash -lc 'tee a CLAUDE.md'", ""),
+    ("echo x > \"a CLAUDE.md\"; cd {r} && bash -lc 'tee a CLAUDE.md'", "x"),
+    ("cd sub; echo x > \"a CLAUDE.md\"; cd ..; eval 'tee a CLAUDE.md' </dev/null", ""),
+    ("cd sub; echo x > \"a CLAUDE.md\"; cd ..; sh -ec 'tee a CLAUDE.md'", ""),
+    ("cd sub; python3 -c \"open('a CLAUDE.md','w')\"; cd ..; bash -lc 'tee a CLAUDE.md'", ""),
+    ("cd sub; echo x > \"a CLAUDE.md\"; cd ..; cat <(echo a)#c; tee a CLAUDE.md", ""),
+    ("cd sub && : > \"notes CLAUDE.md\" && cd .. && bash -lc 'tee -a notes CLAUDE.md'", ""),
+    ("cd sub; echo x > \"s/a/b/ CLAUDE.md\"; cd ..; bash -lc 'sed -i.bak s/a/b/ CLAUDE.md'", "")]
+R5_F4_CONTROLS = [
+    ("cd sub; cp x \"a CLAUDE.md\"; cd ..; bash -lc 'tee a CLAUDE.md'", ""),
+    ("cd sub; echo x > \"a CLAUDE.md\"; cd ..; bash -lc 'cp a CLAUDE.md'", ""),
+    ("cd sub; echo x > \"a .claude/edit-gates\"; cd ..; bash -lc 'rm -f a .claude/edit-gates'",
+     "")]
+
+
+@pytest.mark.parametrize("line,where", R5_F4 + R5_F4_CONTROLS)
+def test_r2_r5_f4_a_run_stands_for_a_word_only_at_its_path(box, line, where):
+    (box.repo / "sub").mkdir()
+    (box.tmp / "x").mkdir()
+    command = line.format(r=box.repo)
+    out = instructionguard.check(_bash(command, box.tmp / where if where else box.repo), box.env)
+    decision, reason = _decision(out)
+    assert decision == "deny", command
+    assert f"`{_gated_path(box, command)}`" in reason, command
+
+
+def test_r2_r5_the_run_in_the_words_folder_still_stands_for_it(box):
+    # g6's ordinary lines (brief 3's R8): the loose reading lists the word's pieces in the
+    # folder the strict reading judged it in, so they are spent
+    for command in ("sed -i '' 's/the CLAUDE.md file/x/' notes.md", "tee 'x CLAUDE.md' < a",
+                    "cd sub; rm -f \"a CLAUDE.md\""):
+        assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command

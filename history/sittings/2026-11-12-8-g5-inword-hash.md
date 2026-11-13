@@ -22,7 +22,8 @@
 - [x] build 4 R2 (F1): loose skips a reserved word anywhere (db19d51); strict lets `time -p` in the run
 - [x] build 4 R3 (F2): loose splits at an `&` whose `<` or `>` is escaped (the second form)
 - [x] build 4 R4 (F3): one credit a word and command, the followed state's
-- [ ] build 4 R5 (F4): a run of pieces keyed by the path, as db19d51's credit
+- [x] build 4 R5 (F4): a run stands for a word only where its folder resolves it to the word's path
+- [ ] build 4 checks (probes, fuzz, replay)
 - [ ] build 4 records: packet §3f, NICE rows for review 2's leads and F6
 - [ ] phase 2, on the coordinator's word
 

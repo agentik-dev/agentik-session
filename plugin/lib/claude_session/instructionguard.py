@@ -958,17 +958,20 @@ def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
     did not judge in the same place (g6 R2); None when there is none it can resolve."""
     loose = _loose(command)
     judged: dict = {}
-    spent = _spent(loose, found)
-    for kind, path, word, at in found:
+    owns, at = [cwd], []                  # r1 R4: each `cd` resolved once, each target once
+    for kind, word, moves, _ in loose:
+        for c in (moves or ())[len(owns) - 1:]:
+            owns.append(_resolve(c, owns[-1], env) if c is not None and owns[-1] else None)
+        at.append(owns[len(moves)] if moves is not None else cwd)
+    spent = _spent(loose, at, found, cwd, env)
+    for kind, path, word, _ in found:
         if kind in ("write", "remove") and path is not None and word and len(word.split()) < 2:
             judged[kind, path] = judged.get((kind, path), 0) + 1
-    owns, left = [cwd], []                # r1 R4: each `cd` resolved once, each target once
+    left = []
     for i, (kind, word, moves, _) in enumerate(loose):
         if i in spent:
             continue
-        for c in (moves or ())[len(owns) - 1:]:
-            owns.append(_resolve(c, owns[-1], env) if c is not None and owns[-1] else None)
-        own = owns[len(moves)] if moves is not None else cwd
+        own = at[i]
         key = (kind, _resolve(word, own or cwd, env))
         if key[1] is not None and judged.get(key):
             judged[key] -= 1
@@ -999,22 +1002,29 @@ _RUN_CAP = 16                             # r1 R3: a word of more pieces stands 
 _LOOSE_BOUND = 4096                       # r1 R4: loose targets left times folders, at most
 
 
-def _spent(loose: list, found: list) -> set:
+def _spent(loose: list, at: list, found: list, cwd, env) -> set:
     """The loose targets a strict word with a blank stands for (r1 R3): only whole, every piece
     in order, one command's targets of its kind, each loose target once; a word whose pieces
-    the loose reading did not list together stands for none, so no piece is left to spend."""
+    the loose reading did not list together stands for none, so no piece is left to spend.
+    A run stands for it only where the run's folder (`at`) resolves the run to the path the
+    strict reading judged, as db19d51's credit was keyed by the path (r2 R5)."""
     want: dict = {}
+    shapes: set = set()
     for kind, path, word, _ in found:
         pieces = tuple(word.split()) if path is not None and word else ()
         if 1 < len(pieces) < _RUN_CAP and kind in ("write", "remove"):
-            want[kind, pieces] = want.get((kind, pieces), 0) + 1
+            want[kind, pieces, path] = want.get((kind, pieces, path), 0) + 1
+            shapes.add((kind, pieces))
     spent: set = set()
-    for k in sorted({len(p) for _, p in want}):
+    for k in sorted({len(p) for _, p in shapes}):
         for i in range(len(loose) - k + 1):
             run = loose[i:i + k]
-            key = (run[0][0], tuple(r[1] for r in run))
-            if want.get(key) and run[0][3] == run[-1][3] and all(r[0] == key[0] for r in run) \
-                    and not spent.intersection(range(i, i + k)):
+            shape = (run[0][0], tuple(r[1] for r in run))
+            if shape not in shapes or run[0][3] != run[-1][3] or \
+                    any(r[0] != shape[0] for r in run) or spent.intersection(range(i, i + k)):
+                continue
+            key = shape + (_resolve(" ".join(shape[1]), at[i] or cwd, env),)
+            if want.get(key):
                 want[key] -= 1
                 spent.update(range(i, i + k))
     return spent
