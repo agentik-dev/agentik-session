@@ -44,7 +44,8 @@
 
 ## 4. Findings that name this row
 
-- None yet.
+- R4 changes the order the hygiene stubs see: `--help` is probed before the check (and again before the merge), so `test_land.py`'s two order lists and `test_land_range.py`'s r1 and r6 change for R4 (the range stub passes a `<sha>..<commit>` scan), beside the R2 and R3 changes the brief allows.
+- The README source sat at 16380 of its 16384 B ceiling: the gate queue section's wait bullet was tightened to hold the `gate land` line (16381 B); `key` and the stdout-line clause stay in the RUNBOOK.
 
 ## 5. Forbidden reads
 
