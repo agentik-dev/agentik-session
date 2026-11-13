@@ -402,6 +402,19 @@ def snapshot(where):
     return where / "agentik-commit.index"
 
 
+def lock_at_commit(monkeypatch, gd):
+    """fw5 R2: the restore guards the span from the `add -N` to the commit alone, so a red
+    commit that leaves index.lock behind stands for another git holding the index then."""
+    real = verb._git
+
+    def fake(cwd, *args, **k):
+        if args[:1] == ("commit",):
+            (gd / "index.lock").touch()
+            return 1, "", b""
+        return real(cwd, *args, **k)
+    monkeypatch.setattr(verb, "_git", fake)
+
+
 def test_fw4d_r1_f3_a_restore_that_cannot_be_made_is_its_own_red(repo, monkeypatch):
     """F3 (p02): an index.lock present when the red restores. The line names the snapshot, the
     exit is not 0, the snapshot stays and is the index as found; the next call refuses on it."""
@@ -410,10 +423,11 @@ def test_fw4d_r1_f3_a_restore_that_cannot_be_made_is_its_own_red(repo, monkeypat
     git(repo.path, "add", "b.txt")
     repo.write("a.txt", "mine\n")
     before, head, gd = repo.index(), repo.head(), repo.path / GITDIR
-    rc, out, err = repo.commit("a.txt", check="sh -c 'touch .git/index.lock; exit 3'")
+    lock_at_commit(monkeypatch, gd)
+    rc, out, err = repo.commit("a.txt")
     assert (rc, out) == (1, "commit scratch: red restore exit 1, the index as found is kept at "
                             f"{snapshot(gd)}\n"), err
-    assert "red check exit 3" in err and repo.head() == head
+    assert "red commit exit 1" in err and repo.head() == head
     os.unlink(str(gd / "index.lock"))
     rc, out, err = repo.commit("b.txt")
     refused(repo, rc, out, err, str(snapshot(gd)))
@@ -433,7 +447,8 @@ def test_fw4d_r1_f3_in_a_linked_worktree_the_snapshot_is_its_own_git_dir(repo, m
     rc, out, _ = repo.commit("a.txt", check="sh -c 'exit 3'")
     assert (rc, out) == (3, "commit wt: red check exit 3\n") and git(wt, "ls-files", "-s") == before
     assert not snapshot(gd).exists() and (gd / "agentik-commit.lock").exists()
-    rc, out, _ = repo.commit("a.txt", check=f"sh -c 'touch {gd}/index.lock; exit 3'")
+    lock_at_commit(monkeypatch, gd)
+    rc, out, _ = repo.commit("a.txt")
     assert (rc, out) == (1, f"commit wt: red restore exit 1, the index as found is kept at "
                             f"{snapshot(gd)}\n")
     os.unlink(str(gd / "index.lock"))
@@ -550,14 +565,15 @@ def next_plain_commit(repo):
 
 def test_fw4d_r2_another_writers_commit_during_a_red_check_stands(repo):
     """The probe (fw4d-probe/probe.sh): the check commits b.txt with plain git, then reds. The
-    index as found is not put back over the newer HEAD, so b.txt is no reversal staged against
-    it, the line says the index moved, and the next plain commit keeps the other writer's b.txt."""
+    shared index was never written before the check (fw5 R2), so the line is the check's red,
+    b.txt is no reversal staged against the newer HEAD, a.txt is in no commit, and the next
+    plain commit keeps the other writer's b.txt."""
     repo.write("a.txt", "mine\n")
     head = repo.head()
     rc, out, err = repo.commit("a.txt", check=f"sh -c '{THEIRS} && exit 1'")
-    assert (rc, out) == (1, MOVED.format("check exit 1")), err
+    assert (rc, out) == (1, "commit scratch: red check exit 1\n"), err
     assert repo.head() != head and git(repo.path, "show", "HEAD:b.txt") == "theirs"
-    assert "b.txt" not in staged(repo) and "mv " not in err
+    assert staged(repo) == [] and took(repo, "HEAD") == "b.txt" and "mv " not in err
     assert not snapshot(repo.path / GITDIR).exists()
     next_plain_commit(repo)
     assert git(repo.path, "show", "HEAD:b.txt") == "theirs"
@@ -565,14 +581,14 @@ def test_fw4d_r2_another_writers_commit_during_a_red_check_stands(repo):
 
 
 def test_fw4d_r2_another_writers_staging_during_a_red_check_stays(repo):
-    """Another writer only stages c.txt during a red check: it stays staged, this call's a.txt
-    too (nothing is restored), and stderr names a.txt and the way to unstage it."""
+    """Another writer only stages c.txt during a red check: it stays staged, and this call's
+    a.txt was never staged in the shared index (fw5 R2), so there is nothing to unstage."""
     repo.write("a.txt", "mine\n")
     head = repo.head()
     rc, out, err = repo.commit("a.txt", check="sh -c 'echo c > c.txt && git add c.txt && exit 1'")
-    assert (rc, out) == (1, MOVED.format("check exit 1")), err
-    assert repo.head() == head and staged(repo) == ["a.txt", "c.txt"]
-    assert "restore --staged -- a.txt" in err and "mv " not in err
+    assert (rc, out) == (1, "commit scratch: red check exit 1\n"), err
+    assert repo.head() == head and staged(repo) == ["c.txt"]
+    assert "restore --staged" not in err and "mv " not in err
     assert not snapshot(repo.path / GITDIR).exists()
 
 
@@ -594,7 +610,8 @@ def test_fw4d_r2_a_status_refresh_during_a_red_check_restores_as_found(repo):
 
 def test_fw4d_r2_sigterm_after_another_writers_commit_restores_nothing(repo):
     """SIGTERM to the verb during a check that another writer's commit ran in: exit 128+15,
-    the line says the index moved, the other writer's b.txt stands in HEAD and in the index."""
+    no line (a signal before the commit, the shared index never written: fw5 R2), the other
+    writer's b.txt stands in HEAD and in the index."""
     pidf = repo.path / GITDIR / "checkpid"
     repo.write("a.txt", "mine\n")
     head = repo.head()
@@ -608,7 +625,7 @@ def test_fw4d_r2_sigterm_after_another_writers_commit_restores_nothing(repo):
         if pidf.exists() and pidf.read_text().strip():
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int(pidf.read_text()), signal.SIGKILL)      # the check, if it outlived
-    assert (p.returncode, out) == (143, MOVED.format("signal exit 143")), err
+    assert (p.returncode, out) == (143, ""), err
     assert repo.head() != head and git(repo.path, "show", "HEAD:b.txt") == "theirs"
     assert "b.txt" not in staged(repo) and not snapshot(repo.path / GITDIR).exists()
     next_plain_commit(repo)

@@ -12,7 +12,7 @@
 - [x] the pin measured by `tests/test_fw5.py` (15 failed, 3 passed at f1cbccd)
 - [x] the packet
 - [x] tests first committed (red at f1cbccd: 15 failed, 3 passed)
-- [ ] R1 and R2 (commit.py), test_fw4d's round-2 tests changed for R2
+- [x] R1 and R2 (commit.py; the core split as `_core`, `commit_paths` for R3); test_fw4d changed for R2: the three round-2 tests (another writer's commit, staging, SIGTERM: the plain `red check` line or none) and the two r1_f3 tests (the restore that cannot be made now reached by a red commit holding index.lock)
 - [ ] R3 (cli.py checkpoint), test_cli's checkpoint `-c` tests changed
 - [ ] R4 (commit.py `_gate_check`, gate.py runner)
 - [ ] R5 (cli.py `cmd_gate`)
@@ -22,7 +22,7 @@
 - decide, owner: none.
 
 ## Next act
-- R1 and R2.
+- R3.
 
 ## Exit
 - (open)
