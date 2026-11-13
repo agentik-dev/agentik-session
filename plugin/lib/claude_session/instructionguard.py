@@ -375,7 +375,7 @@ _OPS = re.compile(r"&>>|&>|>>|>\||>&|<&|<<<|<>|<<|>|<|\|\||&&|;;&|;;|;&|\|&|[;&|
 _MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operator
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
-_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>]|\Z)")
+_KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>`]|\Z)")
 _TICK_END = re.compile(r"(?:[^\\`]|\\[\\`]|\\)*")    # r2 F3: `\`` ends no comment in backticks
 _LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
@@ -418,13 +418,14 @@ def _heredocs(text: str):
     return "\n".join(out), bodies
 
 
-def _mask(text: str) -> str:
+def _mask(text: str, bash3: bool = False) -> str:
     """The text with each quoted or backslashed paren replaced by a private character, so the
     lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
     outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
     A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
     ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1).
-    A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2)."""
+    A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
+    `bash3`: bash 3.2's reading, which opens no `${` inside a `$(`."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
     cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
@@ -449,7 +450,7 @@ def _mask(text: str) -> str:
                 tick = not tick
             elif opened[-1:] == ["${"] and (c == ")" or (c == "(" and prev[:1] != "$")):
                 c = _MASK[c]              # r2 F1, F4: a bare paren in `${` is a word's
-            elif c == "(" or (c == "{" and prev == "$"):
+            elif c == "(" or (c == "{" and prev == "$" and not (bash3 and "$(" in opened)):
                 opened.append("$" + c if prev[:1] == "$" else c)
                 cases.append(0)
             elif c == "}" and opened[-1:] == ["${"]:
@@ -459,19 +460,23 @@ def _mask(text: str) -> str:
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
                 if cases[-1] or not opened:    # r2 F2: a `case` pattern's `)` closes nothing
                     start = True
+                    if cases[-1] and tick:     # nor is it a subshell's edge in backticks
+                        out[-1] = _MASK[c]
                 else:
                     cases.pop()
                     start = opened.pop() != "$("
                 cmd = start
             else:
-                if start and c not in " \t\n;&|(<>":      # a word starts: a command's first?
+                if c == "`":                   # a command starts inside backticks
+                    cmd = tick
+                elif start and c not in " \t\n;&|(<>":    # a word starts: a command's first?
                     m = _KEY.match(text, i) if cmd else None
                     w = m.group() if m else ""
                     cases[-1] += (w == "case") - (w == "esac" and cases[-1] > 0)
                     cmd = w in _LEAD
                 elif c in ";&|(<>\n":
                     cmd = c not in "<>"
-                start = c in " \t\n;&|(<>"
+                start = c in " \t\n;&|(<>" or (c == "`" and tick)
             prev = "$$" if c + prev == "$$" else c    # `$$`, the pid, opens no `${`
             i += 1
             continue
@@ -487,11 +492,11 @@ def _mask(text: str) -> str:
     return "".join(out)
 
 
-def _commands(text: str):
+def _commands(text: str, bash3: bool = False):
     """Simple commands: (words, the words after a write redirection), in order; a subshell's
     `(` and `)` as (`(`, None) and (`)`, None). A paren that ends a `case` pattern, or opens
     one, is no subshell's edge (r2 F2); a quoted or escaped one is a word (r2 F1)."""
-    lex = shlex.shlex(_mask(text), posix=True, punctuation_chars=_PUNCT)
+    lex = shlex.shlex(_mask(text, bash3), posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -603,17 +608,22 @@ def _git(args: list, cwd, env, found: list) -> None:
         found.append(("remove", _resolve(p, gcwd, env)))
 
 
-def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
+def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False) -> list:
     """[(`write` or `remove`, a path or None)] in the line's order, then (`split`, None) where
-    `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3)."""
+    `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3).
+    Where bash 3.2 reads a `${` inside a `$(` otherwise, its reading's targets follow (g5 r2)."""
     text, bodies = _heredocs(command)
     found, here, subshells, pushed, read = [], cwd, [], [], []
+    other = (not bash3 and "${" in text and "$(" in text and
+             _mask(text, True) != _mask(text))
     try:
-        for c in _commands(text):
+        for c in _commands(text, bash3):
             read.append(c)
     except ValueError:
         if all(outs is None for _, outs in read):
-            raise
+            if not other:
+                raise
+            return bash_targets(command, cwd, env, depth, True) + [("split", None)]
         read.append(("split", "split"))
     for words, outs in read:
         if words == "split":
@@ -670,6 +680,11 @@ def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
                 codes.append(args[args.index("-c") + 1])
             for code in codes:
                 found += [("write", _resolve(s, here, env)) for s in _py_literals(code) if s]
+    if other:                             # the two readings' targets, each once
+        try:
+            found += [f for f in bash_targets(command, cwd, env, depth, True) if f not in found]
+        except ValueError:
+            pass
     return found
 
 

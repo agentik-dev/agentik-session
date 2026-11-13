@@ -658,13 +658,19 @@ G5_R2_WRITES = [
     "v=$(case x in\n x)# don't\n echo a;;\nesac)" + N,
     "echo $(if true; then case x in x)# don't\necho;; esac; fi)" + W,
     "echo `echo a # \\`x\\` `; echo b # use `cp` here don't" + N,                    # F3
-    "echo `echo a # x `; echo b # use `cp` here don't" + N]
+    "echo `echo a # x `; echo b # use `cp` here don't" + N,
+    "x=$(${v%) cp a CLAUDE.md\n)", "$(${v%%) cp a CLAUDE.md\n)",                    # bash 3.2
+    "$(${v%% case x in x) cp a CLAUDE.md\n # say \"hi${s%%(*}$((1+2)) # use `cp`",
+    "x=$(echo ${v%)}); echo ok" + W, "x=$(echo ${v//)/}) && cp a CLAUDE.md",          # zsh
+    "${v#(}`case $x in a)case x in (x)`#" + N, "x=`case $x in a) echo;; esac`" + W,    # ticks
+    "echo `case $x in a) echo;; esac`" + N]
 
 
 @pytest.mark.parametrize("command", G5_R2_WRITES)
 def test_g5_r2_a_paren_in_a_brace_or_a_pattern_hides_no_write(box, command):
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
-        [("write", str(box.repo / "CLAUDE.md"))], command
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    want = ("write", str(box.repo / "CLAUDE.md"))      # a `$(`: bash 3.2's reading may add one
+    assert (want in found if "$(" in command else found == [want]), (command, found)
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
 

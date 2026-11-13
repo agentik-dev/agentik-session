@@ -19,6 +19,7 @@
 - [x] phase 1c R1, R2 (R2-F1, R2-F4): a bare paren in `${` is masked; `$${` opens no `${`
 - [x] phase 1c R3 (R2-F2): a `case` pattern's `)` closes no bracket: `_mask` counts each bracket's open `case`s at a command's start (after `;`, `&`, `|`, `(`, a newline or a lead word); `_commands` reads a `case` after a lead word too
 - [x] phase 1c R4 (R2-F3): an escaped backtick does not end a comment in backticks
+- [x] phase 1c beyond the four, found by fuzzing pin, 40aee95 and the head against sh, bash, zsh, dash: bash 3.2 opens no `${` inside a `$(`, so `bash_targets` adds that reading's targets where it differs; a `case` pattern's `)` in backticks is no subshell's edge
 - [ ] phase 1c R6: the packet's §3b, this record
 - [ ] phase 2, on the coordinator's word: merge main after mt1, the next alpha, README and sidecar, the gate once
 
