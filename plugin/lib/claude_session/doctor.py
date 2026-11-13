@@ -640,8 +640,9 @@ def run(env=None, cwd=None) -> Report:
 
 
 def render(rep: Report) -> str:
+    from .plug import withheld     # build 3, L1: the text withholds a secret as the read does
     lines = [f"{('note' if c.note else 'warn' if c.warn else 'ok  ') if c.ok else 'FAIL'} "
-             f"{c.name:<12} {c.detail}"
+             f"{c.name:<12} {withheld(c.detail)}"
              for c in rep.checks]
     failed = [c.name for c in rep.checks if not c.ok]
     lines.append("doctor: green" if rep.ok else "doctor: failing: " + ", ".join(failed))

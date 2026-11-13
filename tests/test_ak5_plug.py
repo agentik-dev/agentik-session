@@ -202,7 +202,9 @@ SECRET_READS = (("describe", "--json"), ("describe", "config", "--json"),
                 ("describe", "config", "--json", "gate.ntfy_topic"),
                 ("describe", "config", "--json", "GATE.NTFY_TOPIC"), ("describe",),
                 ("doctor", "--json"), ("status", "--json"), ("gate", "status", "--json"),
-                ("unattended", "status", "--json"))
+                ("unattended", "status", "--json"),
+                # build 3, L1: the text form of each read the plug touches withholds it too
+                ("doctor",), ("status",), ("gate", "status"), ("unattended", "status"))
 
 
 @pytest.mark.parametrize("form", sorted(SECRET_FILES))
