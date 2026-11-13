@@ -126,3 +126,21 @@ def test_an_unknown_profile_on_the_line_reads_as_at_the_pin(box):
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
     assert p.returncode == 1
     assert p.stderr.decode().startswith("error: unknown profile 'zz-nope'. Known: ")
+
+
+# ---- R5: the respeak of seven summaries (design/15 §5.3) ------------------------------------
+
+def test_the_respoken_summaries():
+    from claude_session import plug
+    assert plug.SUMMARIES["permission_mode"] == (
+        "What Claude Code may do without asking, as `start` sets it for the session.")
+    assert plug.SUMMARIES["lane"] == (
+        "Where the work runs: the seat, the local model for subagents, or the local model alone.")
+    assert plug.SUMMARIES["tiers.*.model"] == "The model a subagent in this role runs on."
+    assert plug.SUMMARIES["tiers.*.effort"] == "The effort a subagent in this role runs at."
+    assert plug.SUMMARIES["pacing.fallback"] == (
+        "The seconds the session waits on a pending subagent before it wakes on its own.")
+    # kept: `admission.mix` decides no fit, and `reconcile.record` names where records go
+    assert plug.SUMMARIES["admission.*"] == (
+        "Read by the admission module; `agentik session rules` says how it binds.")
+    assert plug.SUMMARIES["reconcile.*"] == "Read by the reconciler's detectors each time they run."

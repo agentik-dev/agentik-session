@@ -45,14 +45,16 @@ SUMMARIES = {
     "profile": "The role this session runs as; it fills every field no layer above it sets.",
     "model": "The model the main thread starts on.",
     "effort": "The reasoning effort the session starts at.",
-    "permission_mode": "The permission mode `start` hands Claude Code.",
+    "permission_mode": "What Claude Code may do without asking, as `start` sets it for the "
+                       "session.",
     "posture": "What the budget guard does at a ceiling: off, signal, ask or deny.",
-    "lane": "Where the work runs: the seat, the local model for helpers, or the local model alone.",
+    "lane": "Where the work runs: the seat, the local model for subagents, or the local model "
+            "alone.",
     "ceilings.context": "The context, in tokens, this sitting is metered against.",
     "ceilings.turns": "The turns this sitting is metered against.",
     "checkpoint_at": "The share of a ceiling at which the CHECKPOINT line is printed.",
-    "tiers.*.model": "The model a helper in this role runs on.",
-    "tiers.*.effort": "The effort a helper in this role runs at.",
+    "tiers.*.model": "The model a subagent in this role runs on.",
+    "tiers.*.effort": "The effort a subagent in this role runs at.",
     "charter.dir": "The folder, under the repo, that holds a sitting's charters.",
     "charter.required": "Whether a session is told when no charter is open today.",
     "pacing.meter_line_minutes": "The minutes between the meter's lines while the zone is clear; "
@@ -78,9 +80,12 @@ SUMMARIES = {
     "priority.enabled": "Whether the session is given the priority levels S1 to S4.",
     "priority.levels.*": "The words the session is given for this priority level.",
     "pacing.enabled": "Whether the session is given the pacing rules.",
-    "pacing.fallback": "The seconds of the one fallback wakeup armed while a helper is pending.",
+    "pacing.fallback": "The seconds the session waits on a pending subagent before it wakes on "
+                       "its own.",
     "pacing.waiting": "The wakes in a row with nothing changed after which a wait is STALLED.",
+    # row ss2, R5: kept, since `admission.mix` is advice on the week's spend and decides no fit
     "admission.*": "Read by the admission module; `agentik session rules` says how it binds.",
+    # row ss2, R5: kept, since `reconcile.record` names where its records are written
     "reconcile.*": "Read by the reconciler's detectors each time they run.",
     "gate.ntfy_url": "The server a gate job's notice is sent to.",
 }
