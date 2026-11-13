@@ -396,7 +396,8 @@ def scan_message(repo, tree, full, ours, merged, message):
     note("merge-file: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
     code = run(tree, script, "--require-private", "--commits", span)
     if code != 0:
-        raise Red("merge-file", code, "the merge message of %s fails the scan" % message)
+        raise Red("merge-file", code, "scripts/hygiene exit %d on the merge message; see its stderr "
+                  "above (%s)" % (code, message))
 
 
 def require_sha(repo, branch, sha):
