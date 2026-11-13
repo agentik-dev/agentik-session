@@ -1101,3 +1101,62 @@ def test_r5_f5_the_loose_reading_takes_a_dup_redirects_word(box):
     assert instructionguard.loose_targets("echo x >&CLAUDE.md; echo y >& b") == [
         ("write", "CLAUDE.md"), ("write", "b")]
     assert instructionguard.loose_targets("echo x >&2; echo y >&-; echo z >& 1; a 2>&1") == []
+
+
+# ---- review 2, R1 (F5): the strict reading's product is bounded; a line past it is denied ---
+
+def _fill(unit, size):
+    out, n = [], 0
+    while sum(map(len, out)) < size:
+        out.append(unit.replace("N", str(n)))
+        n += 1
+    return "".join(out)
+
+
+def _ifs(k, word="cd dN"):
+    return "".join("if false; then %s; fi; " % word.replace("N", str(i)) for i in range(k))
+
+
+R1_F5 = {
+    "nested-3kb": _ifs(4) + "bash -c '" + _ifs(4, "cd eN") + _fill("echo x > fN; ", 3000) + "'",
+    "nested-3kb-cp": (_ifs(4) + "bash -c '" + _ifs(4, "cd eN") + _fill("echo x > fN; ", 3000)
+                      + "'; cp a CLAUDE.md"),
+    "four-forms-2kb": ("while false; do cd d0; done; until true; do cd d1; done; "
+                       "false && { cd d2; }; ! cd d3; bash -c '" + _ifs(4, "cd eN")
+                       + _fill("echo x > fN; ", 2000) + "'"),
+    "fifteen-30kb": _ifs(15) + _fill("echo x > fN; ", 30000),
+    # one path, judged again in each folder state of an inner line read in each outer state
+    "nested-100kb-one-path": (_ifs(15) + "bash -c '" + _ifs(15, "cd eN")
+                              + _fill("echo x > a; ", 100000) + "'")}
+
+
+@pytest.mark.parametrize("name", list(R1_F5))
+def test_r2_r1_f5_each_shape_returns_in_time(box, name):
+    command = R1_F5[name]
+    assert len(command) > {"nested-3kb": 3200, "nested-3kb-cp": 3240, "four-forms-2kb": 2200,
+                           "fifteen-30kb": 30000, "nested-100kb-one-path": 100000}[name]
+    began = time.monotonic()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert time.monotonic() - began < 2.0
+    assert _decision(out)[0] == "deny"            # each is past the bound, so none passes unread
+
+
+def test_r2_r1_a_line_past_the_strict_bound_is_denied(box, monkeypatch):
+    """The paths judged on one line, an inner `-c` line's and every folder state's included,
+    are counted as the reading goes; past `_STRICT_BOUND` the line is denied, never passed."""
+    command = "if false; then cd d; fi; bash -c 'echo x > a; echo x > b'"   # 2 states x 2
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+    monkeypatch.setattr(instructionguard, "_STRICT_BOUND", 3)
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out)[0] == "deny"
+    with pytest.raises(instructionguard._Bound):
+        instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert not issubclass(instructionguard._Bound, ValueError)   # never the loose reading's
+    monkeypatch.setattr(instructionguard, "_STRICT_BOUND", 4)
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+    command = "if false; then cd d; fi; bash -c 'echo x > a; echo x > a'"   # 1 path, 2 states
+    monkeypatch.setattr(instructionguard, "_STRICT_READS", 3)          # 4 judgements
+    assert _decision(instructionguard.check(_bash(command, box.repo), box.env))[0] == "deny"
+    monkeypatch.setattr(instructionguard, "_STRICT_READS", 4)
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+

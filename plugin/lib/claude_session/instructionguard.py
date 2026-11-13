@@ -665,28 +665,69 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
     return [(k, p) for k, p, _, _ in _strict(command, cwd, env, depth, bash3, ticks, set())]
 
 
-def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set) -> list:
-    """`bash_targets` with each target's word and the folder it was read in (g6 R2):
-    [(kind, path, word, folder)]; each folder the reading stood in goes in `stood`."""
+class _Bound(Exception):
+    """r2 R1: the strict reading judged past a bound on one line; `path` is the target it
+    stopped at. Never a ValueError, which would leave the line to the loose reading."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        self.path = path
+
+
+class _Paid:
+    """r2 R1: one line's strict reading so far, inner lines and other readings included: its
+    judgements (targets times folder states), the distinct paths they named, and each text it
+    split, kept so a `-c` line read in many folders is split once (the same words each time)."""
+    __slots__ = ("n", "paths", "parsed")
+
+    def __init__(self):
+        self.n, self.paths, self.parsed = 0, set(), {}
+
+
+def _parse(command: str, bash3: bool, ticks: bool) -> tuple:
+    """(text, heredoc bodies, the other readings to try, the commands read, the ValueError
+    that stopped the reading or None): what `_strict` reads before it stands in a folder."""
     text, bodies = _heredocs(command)
-    found, subshells, read = [], [], []
+    first = ticks and not bash3
+    m0 = _mask(text) if first else ""
+    other = [r for r in ((True, True), (False, False)) if first and _mask(text, *r) != m0]
+    read, err = [], None
+    try:
+        for c in _commands(text, bash3, ticks):
+            read.append(c)
+    except ValueError as e:
+        err = e
+    return text, bodies, other, read, err
+
+
+def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set,
+            paid: _Paid | None = None) -> list:
+    """`bash_targets` with each target's word and the folder it was read in (g6 R2):
+    [(kind, path, word, folder)]; each folder the reading stood in goes in `stood`. Past
+    `_STRICT_READS` judgements or `_STRICT_BOUND` distinct paths on the line it raises
+    `_Bound`, counted as it reads (r2 R1)."""
+    paid = _Paid() if paid is None else paid
+    if (command, bash3, ticks) not in paid.parsed:
+        paid.parsed[command, bash3, ticks] = _parse(command, bash3, ticks)
+    text, bodies, other, read, err = paid.parsed[command, bash3, ticks]
+    found, subshells = [], []
     st, fa = [(cwd, ())], 0                # r1 R1: (folder, pushd stack) states; st[0] is
                                            # a0055da's, st[fa] follows every `cd` (db19d51's)
 
     def add(kind, word, at):
-        found.append((kind, _resolve(word, at, env), word, at))
-    first = ticks and not bash3
-    m0 = _mask(text) if first else ""
-    other = [r for r in ((True, True), (False, False)) if first and _mask(text, *r) != m0]
-    try:
-        for c in _commands(text, bash3, ticks):
-            read.append(c)
-    except ValueError:
+        path = _resolve(word, at, env)
+        paid.n += 1                       # r2 R1: a line it cannot afford to read is denied
+        if (kind, path) not in paid.paths:
+            paid.paths.add((kind, path))
+        if paid.n > _STRICT_READS or len(paid.paths) > _STRICT_BOUND:
+            raise _Bound(path or word)
+        found.append((kind, path, word, at))
+    if err is not None:
         if all(outs is None for _, outs in read):
-            if not _others(command, cwd, env, depth, other, found, stood):
-                raise
+            if not _others(command, cwd, env, depth, other, found, stood, paid):
+                raise err
             return found + [("split", None, None, None)]
-        read.append(("split", "split"))
+        read = read + [("split", "split")]
     for words, outs in read:
         if words == "split":
             found.append(("split", None, None, None))
@@ -730,12 +771,14 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
             st, fa = _states(st + moved, len(st) + fa) if lead else _states(moved, fa)
             continue
         for h in heres:
-            _judge(name, args, plain, h, mine, env, depth, stood, add, found)
-    _others(command, cwd, env, depth, other, found, stood)  # the readings' targets, each once
+            _judge(name, args, plain, h, mine, env, depth, stood, add, found, paid)
+    _others(command, cwd, env, depth, other, found, stood, paid)  # each reading's targets once
     return found
 
 
 _CAP_STATES = 16                          # r1 R1: a line's folder states, at most
+_STRICT_BOUND = 4096                      # r2 R1: distinct paths the strict reading judges
+_STRICT_READS = 65536                     # r2 R1: its judgements, a path judged again included
 
 
 def _move(name: str, args: list, s: tuple, env) -> tuple:
@@ -757,13 +800,13 @@ def _states(st: list, fa: int):
     return order, order.index(follow)
 
 
-def _judge(name, args, plain, here, mine, env, depth, stood, add, found) -> None:
+def _judge(name, args, plain, here, mine, env, depth, stood, add, found, paid) -> None:
     """Adds the targets of one command, its words read in `here`."""
     if name in _SHELLS and "-c" in args and depth == 0:
         i = args.index("-c")
         if i + 1 < len(args):
             try:
-                found += _strict(args[i + 1], here, env, depth + 1, False, True, stood)
+                found += _strict(args[i + 1], here, env, depth + 1, False, True, stood, paid)
             except ValueError:            # g6 R6: the inner line is unread, the outer judged
                 found.append(("split", None, None, None))
     elif name == "tee":
@@ -800,13 +843,14 @@ def _judge(name, args, plain, here, mine, env, depth, stood, add, found) -> None
                     add("write", s, here)
 
 
-def _others(command: str, cwd, env, depth: int, other: list, found: list, stood: set) -> int:
+def _others(command: str, cwd, env, depth: int, other: list, found: list, stood: set,
+            paid: _Paid) -> int:
     """Adds to `found` each other reading's targets it lacks; how many readings read the line."""
     read = 0
     for r in other:
         try:
             have = {f[:2] for f in found}
-            found += [f for f in _strict(command, cwd, env, depth, *r, stood)
+            found += [f for f in _strict(command, cwd, env, depth, *r, stood, paid)
                       if f[:2] not in have]
             read += 1
         except ValueError:
@@ -982,6 +1026,8 @@ def _bash_gated(payload: dict, env):
         found, raised = _strict(command, cwd, env, 0, False, True, stood), False
     except ValueError:                    # an open quote: the loose reading alone (g6 R2)
         found, raised = [], True
+    except _Bound as b:                   # r2 R1: past the bound, denied unread
+        return b.path, STRICT
     cache: dict = {}
     unresolved = split = False
     seen: set = set()
