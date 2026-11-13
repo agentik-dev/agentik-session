@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
-from .instructionguard import _SHELLS, _commands     # packet u3 R5: the hook's reader
+from .shellreader import _SHELLS, _commands, _substituted  # packet u3 R5: the hook's reader
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -710,20 +710,6 @@ def unbounded(shell: str, depth: int = 0) -> str:
                 if why:
                     return why
     return ""
-
-
-def _substituted(word: str) -> list:
-    """Round 1 F3: the texts of a word's `$(...)`, which the reader keeps inside one word when
-    it is quoted, each to its closing paren by count; an unclosed one runs to the word's end."""
-    out, i = [], word.find("$(")
-    while i >= 0:
-        k, n = i + 2, 1
-        while k < len(word) and n:
-            n += {"(": 1, ")": -1}.get(word[k], 0)
-            k += 1
-        out.append(word[i + 2:k - 1] if n == 0 else word[i + 2:])
-        i = word.find("$(", k)
-    return out
 
 
 def unbounded_item(lines: list) -> str | None:
