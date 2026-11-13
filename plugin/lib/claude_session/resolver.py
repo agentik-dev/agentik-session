@@ -344,26 +344,38 @@ def _tier_layers(shipped, user, name, repo_s, local_s, launch, ov_sub, where) ->
     return out
 
 
-def _bad_key(origin: str, role: str) -> str:
+def _bad_key(origin: str, role: str, field: str = "model") -> str:
     if origin.endswith(": tiers"):
-        return f"{origin}.{role}.model"
-    return origin if origin.endswith("session.subagents") else f"{origin}.tiers.{role}.model"
+        return f"{origin}.{role}.{field}"
+    return origin if origin.endswith("session.subagents") else f"{origin}.tiers.{role}.{field}"
+
+
+def _known(field: str, x) -> bool:
+    """A layer's model names a family; its effort is one of tiers.EFFORTS."""
+    return tiermod.family(x) is not None if field == "model" else x in tiermod.EFFORTS
 
 
 def _tiers(layers, unknown: list) -> tuple[dict, dict]:
     """(the table, {role: the origin of its model}) from _tier_layers' list. A layer's model
-    that names no family is dropped, the role keeping the lower layer's, and its key joins
-    `unknown` (mt1 R2-F1: a typo never fails resolution)."""
+    that names no family or is null, and its effort outside tiers.EFFORTS or null, is
+    dropped where it stands, the role keeping the lower layer's, and its key joins `unknown`
+    (mt1 R2-F1, R3-F1, R3-F4: a typo never fails resolution). A role with no value is
+    skipped, unnamed."""
     table: dict = {}
     origins: dict = {}
     for origin, layer in layers:
         layer = dict(layer)
         for r, v in list(layer.items()):
-            m = v if isinstance(v, str) else v.get("model") if isinstance(v, dict) else None
-            if r in tiermod.ROLES and m is not None and tiermod.family(m) is None:
-                if _bad_key(origin, r) not in unknown:
-                    unknown.append(_bad_key(origin, r))
-                layer[r] = ({k: x for k, x in v.items() if k != "model"}
+            if r not in tiermod.ROLES or not isinstance(v, (str, dict)):
+                continue
+            bad = [f for f in ("model", "effort")
+                   if (f in v and not _known(f, v[f]) if isinstance(v, dict)
+                       else f == "model" and not _known(f, v))]
+            for f in bad:
+                if _bad_key(origin, r, f) not in unknown:
+                    unknown.append(_bad_key(origin, r, f))
+            if bad:
+                layer[r] = ({k: x for k, x in v.items() if k not in bad}
                             if isinstance(v, dict) else None)
         table = tiermod.merge(table, layer)
         for r, v in layer.items():
