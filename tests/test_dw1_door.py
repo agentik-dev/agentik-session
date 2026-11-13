@@ -8,6 +8,7 @@ Never this tree's plugin, never the real `~/.local`.
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -138,6 +139,50 @@ def test_dw1_install_cli_leaves_a_door_with_no_version(tmp_path, home):
     assert door.read_text() == bare
     assert _said(r)[:1] == ["the door %s has no version to compare (None there, %s here); left alone"
                             % (door, _ours())], r.stdout
+
+
+# ---- review 1: a door that is not a file, a byte the locale cannot print ------------------
+
+def test_dw1_install_cli_leaves_a_fifo_at_the_door_and_never_opens_it(tmp_path, home):
+    """F1: a FIFO there is never opened, so the install cannot block on it."""
+    door = _bins(home) / "agentik"
+    door.parent.mkdir(parents=True)
+    os.mkfifo(str(door))
+    plugin = _plugin(tmp_path)
+    p = subprocess.Popen([str(plugin / "bin" / "agentik-session"), "install-cli"], env=_bare(home),
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=home,
+                         start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
+        pytest.fail("install-cli hung on a FIFO at the door's path")
+    r = subprocess.CompletedProcess(p.args, p.returncode, out, err)
+    assert r.returncode == 0, r.stderr
+    assert stat.S_ISFIFO(door.lstat().st_mode)
+    assert _said(r)[:1] == ["the door %s has no version to compare (None there, %s here); left alone"
+                            % (door, _ours())], r.stdout
+    from claude_session import install
+    assert os.readlink(_bins(home) / install.OLD_NAME) == "agentik-session"
+    assert os.access(_bins(home) / "agentik-session", os.X_OK)
+
+
+def test_dw1_install_cli_says_a_byte_in_the_door_escaped(tmp_path, home):
+    """F2: a VERSION value ending in byte 0xff, under a UTF-8 locale: the line shows it escaped."""
+    door = _bins(home) / "agentik"
+    door.parent.mkdir(parents=True)
+    body = _versioned(DOOR.read_text(), "0.2.0").encode().replace(b"VERSION=0.2.0\n", b"VERSION=0.2.0\xff\n")
+    door.write_bytes(body)
+    door.chmod(0o755)
+    r = subprocess.run([str(_plugin(tmp_path) / "bin" / "agentik-session"), "install-cli"],
+                       env=_bare(home, LANG="en_US.UTF-8"), capture_output=True, timeout=60, cwd=home)
+    out, err = r.stdout.decode("utf-8", "backslashreplace"), r.stderr.decode("utf-8", "backslashreplace")
+    assert r.returncode == 0 and "Traceback" not in err, err
+    assert door.read_bytes() == body
+    said = out.splitlines()[1:2]
+    assert said == ["the door %s has no version to compare (0.2.0\\xff there, %s here); left alone"
+                    % (door, _ours())], out
 
 
 # ---- acceptance 2: the SessionStart refresh ------------------------------------------------
