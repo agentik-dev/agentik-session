@@ -12,7 +12,9 @@ from test_land import LandCase
 # $LAND_ORDER with the first argument past --require-private.
 RECORD = "#!/bin/sh\necho \"$*\" >> \"$LAND_ORDER.argv\"\n"
 # A copy that knows the flag: --help names it; the range scan exits with the given code.
+# land2 R4: the merge message's scan, a range <sha>..<commit>, is in the argv alone and passes.
 NEW = (RECORD + "[ \"$1\" = --require-private ] && shift\n"
+       "case $2 in refs/heads/main..*|'') ;; *) exit 0 ;; esac\n"
        "echo \"hygiene${1:+ $1}\" >> \"$LAND_ORDER\"\n"
        "case $1 in --help) echo 'usage: hygiene [--json] [--commits RANGE]'; exit 0 ;;\n"
        "--commits) echo \"$2\" > \"$LAND_ORDER.range\"; exit %d ;; esac\nexit 0\n")
@@ -36,8 +38,9 @@ class TestRange(LandCase):
         p = self.land("work", sha)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout, "land scratch: ok %s, main readied\n" % sha)
-        self.assertEqual(self.ran(), ["check", "hygiene", "hygiene", "--help",
-                                      "hygiene", "--commits"])
+        # land2 R4: --help before the check and after the range, for the message's scan.
+        self.assertEqual(self.ran(), ["hygiene", "--help", "check", "hygiene", "hygiene", "--help",
+                                      "hygiene", "--commits", "hygiene", "--help"])
         with open(self.order + ".range") as fh:
             self.assertEqual(fh.read().strip(), "refs/heads/main..%s" % sha)
         self.assertEqual(self.git("rev-list", "--parents", "-n1", "main").split()[1:],
@@ -79,8 +82,9 @@ class TestRange(LandCase):
         sha = self.branch("work", {"scripts/hygiene": NEW % 0})
         p = self.land("work", sha)
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(self.argv(), ["", "--help", "--require-private --commits "
-                                       "refs/heads/main..%s" % sha])
+        # land2 R4: the message's scans (<sha>..<commit>) and their --help aside.
+        calls = [a for a in self.argv() if a != "--help" and sha + ".." not in a]
+        self.assertEqual(calls, ["", "--require-private --commits refs/heads/main..%s" % sha])
 
 
 if __name__ == "__main__":
