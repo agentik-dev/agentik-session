@@ -24,9 +24,13 @@
 - [x] R1-F3: a profile name from the environment or a caller prints as at the pin; only a name read from a file is withheld
 - [x] N1: a threshold's error says `is not a number` or `is below 0`, never the value
 - [x] NICE: review 1's notes are n223 to n231 (S4); n152 to n159, the oldest S4 rows, moved to the overflow for recordlint's bound
-- [ ] The restamp at alpha.108; the gate
+- [x] db08331: the save test builds the old folder's name from the resolver (the tree's hygiene scan, group renamed)
+- [x] Suites before the stamp: .venv 4183 passed, 2 failed (test_readme's count, the stamp's); .venv-floor 4037 passed, 127 skipped, 0 failed (its test_readme ran after the stamp landed)
+- [x] Stamp 2af1704: alpha.108 in place leaves plugin-version-check red (plugin/ changed after the version moved), so 2.0.0-alpha.109 as the repo's fix rounds did (ak5's review 2 fix, S53); 4165 -> 4185 tests; test_readme and test_describe_json pass alone after it, both venvs
+- [ ] The gate once, last, on this commit
 
 ## Handover
+- decide, owner: the coordinator: alpha.109 here and ss1-zero's alpha.107; the merge's restamp sets the number. NICE n223 to n231 and the overflow move of n152 to n159 may meet main's rows at the merge.
 - The reconciler's own ConfigError quotes a `reconcile.thresholds` value (`is {v!r}`) from a layer file; outside R1's parse-or-resolve error and these tests' shapes, left for NICE_TO_HAVE.
 - A later merge of main (ss1-zero takes alpha.107) is the coordinator's.
 
@@ -34,4 +38,4 @@
 - The gate's result goes to the coordinator; landing is theirs.
 
 ## Exit
-- Done: R1 to R5 built, the suite run under both venvs, alpha.108 stamped; the gate runs once on the stamp's commit.
+- Done: R1 to R5 built (build 1); review 1's F1, F2, F3 and N1 fixed, its other notes NICE n223 to n231, alpha.109 stamped; the gate runs once on the charter's commit, after this one.
