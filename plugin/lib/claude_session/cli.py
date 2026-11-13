@@ -188,7 +188,7 @@ def cmd_status(args) -> int:
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
-        if args.json and isinstance(band, dict) and band.get("window") == admission.NO_WINDOW:
+        if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
             d = {**d, "band": {"window": band["window"], **({"demand": dem} if isinstance(dem, dict) else {})}}
         facts = _admission_facts(band)          # pl1 R3: what left the prompt line
@@ -206,7 +206,8 @@ def cmd_status(args) -> int:
             line = admission.band_status(band)
             if line:
                 print(line)
-            mix = admission.mix_status(facts.get("mix"))
+            from datetime import datetime, timezone
+            mix = admission.mix_status(facts.get("mix"), datetime.now(timezone.utc))   # F2
             if mix:                             # pl1 R3: each family's share, the next family
                 print(mix)
             if "mode" in facts:

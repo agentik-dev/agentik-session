@@ -213,3 +213,38 @@ def test_pl1_4_rules_name_status_for_the_next_family(monkeypatch):
     assert "the family `agentik session status` names (its `mix:` line's `next`)" in text
     assert "band line's `next`" not in text
     assert "`reset now` is the owner's Fable reset in Settings" in text      # no other rule moved
+
+
+# ---- review 1: F1, the band of a five-hour login with no reading yet; F2, a passed `until` ----
+
+def test_pl1_r1_f1_the_band_of_a_five_hour_login_with_no_reading_is_status_s(metered):
+    """S51's entry: `window: five_hour`, no P, no ceiling, a `demand`; the line drew the band at
+    the pin (`5h no reading · … · band best to HH:MM`); now `status` and `--json` hold it."""
+    plain_text = run("status")[1]
+    plain = json.loads(run("status", "--json")[1])
+    b = {**owner_state(mix=False), "window": "five_hour", "P": None, "peak": None, "ceiling": None}
+    until = datetime.fromisoformat(b["demand"]["until"])
+    assert admission.band_line(b).startswith("5h no reading · 7d 61% · ")
+    assert "band" not in admission.band_line(b) and "best" not in admission.band_line(b)
+    write_band(b)
+    tail = run("status")[1][len(plain_text):].splitlines()
+    assert tail == [f"band: best to {until:%H:%M}", "admission mode: observe"]
+    got = json.loads(run("status", "--json")[1])
+    assert got == {**plain, "band": {"window": "five_hour", "demand": b["demand"]},
+                   "admission": {"mode": "observe"}}
+
+
+def test_pl1_r1_f2_a_passed_until_prints_no_deadline(metered):
+    plain = run("status")[1]
+    now = datetime.now(UTC)
+    b = owner_state(now)
+    b["mix"] = {**b["mix"], "resets_left": 2,
+                "until": (now - timedelta(hours=2)).isoformat(timespec="seconds")}
+    write_band(b)
+    tail = run("status")[1][len(plain):]
+    assert "mix: fable 33/50 · opus 27/50 · next fable · resets 2\n" in tail
+    assert " by " not in tail
+    ahead = (now + timedelta(days=2)).replace(microsecond=0)
+    b["mix"]["until"] = ahead.isoformat()
+    write_band(b)
+    assert f"resets 2 by {ahead:%a} {ahead:%H:%M}\n" in run("status")[1]

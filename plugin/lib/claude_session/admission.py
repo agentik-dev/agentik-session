@@ -1717,12 +1717,23 @@ def _band_to(b: dict, now: datetime):
     return f"{name} to {_band_when(d['until'], u, _band_base(b, now))}"
 
 
+def draws_week(b) -> bool:
+    """Does `band_line` draw this entry by `_line_none`, the line that carried the band until
+    pl1: a `none` entry, or a `five_hour` one with no five-hour figure and no ceiling (packet
+    S51, `5h no reading`)? `status` shows the band for exactly these (pl1 review 1, F1)."""
+    if not isinstance(b, dict):
+        return False
+    return b.get("window") == NO_WINDOW or (
+        b.get("window") == "five_hour" and _real(b.get("P")) is None
+        and _real(b.get("ceiling")) is None)
+
+
 def band_status(b, now: datetime | None = None):
-    """`status`'s line on a `none` band with a `demand` it can draw: `band: avoid to 11:00;
-    next good 23:00, best 16:00`, a `next` listed only when present and in the future; None
-    otherwise, so a `five_hour` band leaves `status` as it was."""
+    """`status`'s line on a band `draws_week` takes, with a `demand` it can draw: `band: avoid
+    to 11:00; next good 23:00, best 16:00`, a `next` listed only when present and in the
+    future; None otherwise, so a five-hour band with a figure leaves `status` as it was."""
     now = now or datetime.now(timezone.utc)
-    if not isinstance(b, dict) or b.get("window") != NO_WINDOW:
+    if not draws_week(b):
         return None
     to = _band_to(b, now)
     if to is None:

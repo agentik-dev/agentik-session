@@ -18,9 +18,11 @@
 - [x] the suite at eac393b plus act 6: .venv 3445 passed but test_readme's count (fixed by act 6); .venv-floor four chunks green but the count and the floor's import error (both fixed); test_pl1 + test_readme 74 passed under each venv
 - [x] acceptance at the pin: tests/test_pl1_prompt_line.py 9 failed, 6 passed (the prompt hook's zone cases held at the pin) on the pin's tree
 
+- [x] review 1's fix: F1 `admission.draws_week` behind `band_status` and `status --json`'s band; F2 `cmd_status` passes the time to `mix_status`; two tests red at bda42c3, green after; the named files 318 passed under each venv; L1 to L3 are NICE n160 to n162; n103 to n106, the oldest S4 rows, moved to `history/NICE-overflow.md` for recordlint's bound
+
 ## Handover
 - Phase 2 (bump, gate job, merge) waits on the coordinator's word.
-- decide, owner: acceptance 5 and R1 meet at the resets count: R1 keeps `resets <n>`, the mix's own figure, so with the mix off the line lacks it; built as "equal less `resets <n>`". Consumer: the hq coordinator.
+- Acceptance 5's fork ruled as built (review 1): the line with the mix off reads as with it on, less `resets <n>`.
 - The mod's tests (`claude plugin test plugin`) did not run here; `session.ts` was loaded under node 26 and drew all 78 fixture lines equal.
 
 ## Next act
