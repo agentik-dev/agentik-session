@@ -278,3 +278,19 @@ def test_a_threshold_value_is_withheld(box):
     assert p.returncode == 2 and MARK not in err, err
     assert "session.reconcile.thresholds.eff.idle is not a number; a threshold is a number, " \
            "0 or more" in err, err
+
+
+def test_a_reconcile_key_name_from_a_file_is_withheld(box):
+    """R1-F2's kind in the reconciler's own check: a key's name is the file's text."""
+    home, cwd = box
+    (cwd / "t.json").write_text('{"repos": []}')
+    repo_file(cwd, f"session:\n  reconcile:\n    tree: t.json\n    {TOPIC}: 1\n"
+                   f"    thresholds: {{{TOPIC}: 1}}\n    read: {{{TOPIC}: 1}}\n")
+    p = subprocess.run([str(S), "reconcile"], cwd=str(cwd), env=_env(home),
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    err = p.stderr.decode()
+    assert p.returncode == 2 and MARK not in err, err
+    for line in ("session.reconcile: a key (withheld) is not a key (",
+                 "session.reconcile.thresholds: a key (withheld) is not a detector (",
+                 "session.reconcile.read: a key (withheld) is not a key ("):
+        assert line in err, err

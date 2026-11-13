@@ -287,13 +287,26 @@ def _profiles(shipped: dict, user: dict) -> tuple[dict, dict]:
     return defaults, profiles
 
 
-def _models(shipped: dict, user: dict) -> dict:
-    """The models table: the shipped one, the user's entries over it."""
+def _models(shipped: dict, user: dict, user_path: Path) -> dict:
+    """The models table: the shipped one, the user's entries over it. A bad entry names its
+    file and the section and withholds the key, a layer file's text (ss2 R1-F2); the parser
+    keeps no line for a key."""
     table = {**(shipped.get("models") or {}), **(user.get("models") or {})}
     for k, v in table.items():
         if not isinstance(v, int) or isinstance(v, bool) or v <= 0:
-            raise ResolveError(f"models.{k} must be a positive integer (a window in tokens)")
+            src = user_path if k in (user.get("models") or {}) else SHIPPED
+            raise ResolveError(f"{src}: models: a key (withheld) must be a positive integer "
+                               "(a window in tokens)")
     return table
+
+
+def _respawn_keys(body, path) -> None:
+    """ss2 R1-F2: a `respawn` key that is none of RESPAWN_KEYS is a layer file's text, so
+    the file and the section are named and the key withheld."""
+    rs = body.get("respawn") if isinstance(body, dict) else None
+    if isinstance(rs, dict) and any(k not in RESPAWN_KEYS for k in rs):
+        raise ResolveError(f"{path}: respawn: a key (withheld) is not a respawn key "
+                           f"({', '.join(RESPAWN_KEYS)})")
 
 
 def _window_ceilings(shipped: dict, user: dict, name: str, explicit: list) -> dict:
@@ -515,7 +528,8 @@ def _validate(s: dict) -> None:
         raise ResolveError("respawn must be a mapping of " + ", ".join(RESPAWN_KEYS))
     for k, v in rs.items():
         if k not in RESPAWN_KEYS:
-            raise ResolveError(f"respawn.{k} is not a respawn key ({', '.join(RESPAWN_KEYS)})")
+            raise ResolveError("respawn: a key (withheld) is not a respawn key "   # ss2 R1-F2
+                               f"({', '.join(RESPAWN_KEYS)})")
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise ResolveError(f"respawn.{k} must be a non-negative integer")
     try:
@@ -579,6 +593,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
                        renamed)
 
     ov_path = state_dir(env) / "overlays" / f"{session_id}.json"
+    ov_src = ov_path if overlay is None else "the overlay"
     if overlay is None:
         try:
             raw = ov_path.read_bytes()
@@ -610,6 +625,15 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}
+    ub = [user.get("defaults"), (user.get("profiles") or {}).get(name)]
+    try:                                    # ss2 R1-F2: which file holds a stray respawn key
+        for b in ub:
+            _respawn_keys(b, "")
+        up = SHIPPED
+    except ResolveError:
+        up = _user_file(env)
+    files = {"profiles.yaml": up, "launch": up, "config.yaml": rdir / "config.yaml",
+             "config.local.yaml": rdir / "config.local.yaml"}
     for layer, secs in (
             ("profiles.yaml", _split(_merge(defaults, own), "profiles.yaml", unknown)),
             ("config.yaml", repo_s),
@@ -617,6 +641,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
             ("launch", _split(own, "launch", unknown) if profile else {})):
         for s, body in secs.items():
             if s == "session":
+                _respawn_keys(body, files[layer])
                 body = _normalized(body, unknown, layer)
             sections[s] = _merge(sections[s], body)
 
@@ -627,6 +652,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         k = OVERLAY_RENAMES.get(k, k)
         if k in SESSION_KEYS:
             ov_session[k] = v
+    _respawn_keys(ov_session, ov_src)
     ov_session = _normalized(ov_session, unknown, "overlay")
     sections["session"] = _merge(sections["session"], ov_session)
     sections["session"]["profile"] = name
@@ -643,7 +669,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         ("config.yaml", repo_s.get("session") or {}),
         ("config.local.yaml", local_s.get("session") or {}),
         ("overlay", ov_session)])
-    table = _models(shipped, user)
+    table = _models(shipped, user, _user_file(env))
     session_model = session_model if isinstance(session_model, str) else None
     configured = models.configured(env, cwd)
     engine = models.engine_window(session_dir(state_dir(env), str(session_id)))

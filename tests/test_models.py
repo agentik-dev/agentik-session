@@ -201,7 +201,7 @@ def test_the_user_extends_the_models_table(world):
 
 
 @pytest.mark.parametrize("layer,text,msg", [
-    ("user", "models:\n  opus: big\n", "models.opus"),
+    ("user", "models:\n  opus: big\n", "models: a key"),     # ss2 R1-F2: the name withheld
     ("repo", "session:\n  ceilings_1m: {context: 0}\n", "ceilings_1m.context"),
     ("local", "session: {ceilings: 5}\n", "ceilings must be a mapping"),
 ])

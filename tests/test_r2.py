@@ -84,7 +84,8 @@ CONFIG_REDS = {
     "every-23": ("tree: suite.json\nevery: 23\n", ["session.reconcile.every", "floor is 24"]),
     "tree-missing": ("tree: nowhere.json\n", ["session.reconcile.tree", "nowhere.json"]),
     "no-tree": ("window: 14\n", ["session.reconcile.tree"]),
-    "unknown-key": ("tree: suite.json\ncadence: 24\n", ["session.reconcile.cadence"]),
+    "unknown-key": ("tree: suite.json\ncadence: 24\n",     # ss2 R1-F2: the name withheld
+                    ["session.reconcile: a key (withheld) is not a key"]),
     "detector": ("tree: suite.json\ndetectors: [live.nothing]\n",
                  ["session.reconcile.detectors", "live.nothing"]),
     "threshold": ("tree: suite.json\nthresholds:\n  eff.idle: -1\n",
@@ -522,7 +523,7 @@ def test_r2_fold_due_at_exactly_every_and_the_newest_record_counts(tmp_path, mon
 @pytest.mark.parametrize("body,rc,word", [
     ("thresholds: {eff.idle: 0}", 0, None),
     ("window: 0", 2, "session.reconcile.window"),
-    ("read: {bogus: 1}", 2, "session.reconcile.read.bogus"),
+    ("read: {bogus: 1}", 2, "session.reconcile.read: a key (withheld)"),   # ss2 R1-F2
 ])
 def test_r2_fold_config_edges(body, rc, word, tmp_path, monkeypatch):
     hq = hq_world(tmp_path, f"tree: suite.json\n{body}\n")

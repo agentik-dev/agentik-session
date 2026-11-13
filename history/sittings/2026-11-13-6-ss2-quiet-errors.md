@@ -20,7 +20,7 @@
 ## Fix of review 1 (R1-F1, R1-F2, R1-F3, N1; other notes to NICE)
 - [x] Tests first, edaba2f: 20 red at 5a0eeb0 (the commit says 23; 20 is the count)
 - [x] R1-F1: `_save_tier` reads the file inside its `try` as UTF-8 and passes both parse errors through `resolver.withheld`; VERBS hold every `--save` form
-- [ ] R1-F2: a key's name read from a file withheld (models, respawn, the reconciler's keys)
+- [x] R1-F2: a key's name read from a file withheld: `models` and `respawn` name the file and the section (the parser keeps no line for a key), and the reconciler's three key-name lines; four tests' pins moved (test_resolver, test_models, test_r2 twice)
 - [ ] R1-F3: a profile name from the environment or a caller prints as at the pin
 - [ ] N1: a threshold's value never printed
 - [ ] NICE rows for N2 to N8; the restamp at alpha.108; the gate
