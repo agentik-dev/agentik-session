@@ -23,7 +23,8 @@
 - [x] R1-F2: a key's name read from a file withheld: `models` and `respawn` name the file and the section (the parser keeps no line for a key), and the reconciler's three key-name lines; four tests' pins moved (test_resolver, test_models, test_r2 twice)
 - [x] R1-F3: a profile name from the environment or a caller prints as at the pin; only a name read from a file is withheld
 - [x] N1: a threshold's error says `is not a number` or `is below 0`, never the value
-- [ ] NICE rows for N2 to N8; the restamp at alpha.108; the gate
+- [x] NICE: review 1's notes are n223 to n231 (S4); n152 to n159, the oldest S4 rows, moved to the overflow for recordlint's bound
+- [ ] The restamp at alpha.108; the gate
 
 ## Handover
 - The reconciler's own ConfigError quotes a `reconcile.thresholds` value (`is {v!r}`) from a layer file; outside R1's parse-or-resolve error and these tests' shapes, left for NICE_TO_HAVE.
