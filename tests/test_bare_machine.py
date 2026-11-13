@@ -477,8 +477,12 @@ def test_old_format_and_unknown_key_state_through_the_tools_verbs(box, tmp_path)
     _seed_state(box, old)
     state = box.t / ".local" / "state"
     assert list(state.rglob("meter.json")) and list(state.rglob("resolved.json"))
-    plain = _readers_run(box)                       # the old format, read by this version
+    first = _readers_run(box)                       # the old format, read by this version
     assert not watch.exists(), watch.read_text()
+    # The first pass's writers run after its `status`: `admission record` rewrites the old
+    # band.json, `demand` and all. The rule is set by a pass that reads what they wrote.
+    plain = _readers_run(box)
+    assert {k: v[0] for k, v in first.items()} == {k: v[0] for k, v in plain.items()}
     for path in sorted(state.rglob("*")):
         if path.is_file() and path.suffix in (".json", ".jsonl"):
             path.write_text(_future_text(path))

@@ -97,7 +97,9 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
   let x: any = null
   try { x = measure === null ? null : JSON.parse(measure) } catch { x = null }
   const facts = lineFacts(m, x)
-  let line = `session: ${facts ? `${facts} · ` : ''}ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)} · ${note ?? m.zone}`
+  // Packet pl1 R2: the zone's word is said unless it is `clear`; `status` keeps `zone clear`.
+  const zone = note ?? (m.zone === 'clear' ? null : m.zone)
+  let line = `session: ${facts ? `${facts} · ` : ''}ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)}${zone === null ? '' : ` · ${zone}`}`
   if (respawn) line += ' · respawn marked'
   const age = Math.floor((nowMs - Date.parse(String(m.ts))) / 1000)
   if (Number.isFinite(age) && age > STALE_S) line += ` · ${age}s old`
@@ -108,8 +110,8 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
 // `agentik-session admission` rewrites <state>/admission/band.json after the ledger's lock,
 // under band.lock, at every record and admit; the band draws it under the session's line.
 // This is the twin of Python's band_line (one fixture in session.test.ts pins both): a part
-// with no figure is left out, `observe` is last while the mode is, and the age past 120 s
-// follows it; the reset reads `week resets HH:MM (h:mm), 5h HH:MM` when band.json's bound is
+// with no figure is left out, no mode's word (packet pl1 R1: `status` says it), and the age
+// past 120 s last; the reset reads `week resets HH:MM (h:mm), 5h HH:MM` when band.json's bound is
 // the seven-day one: `until` the weekly reset, resetsAt the five-hour one.
 const ISO = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/
 const fig = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null
@@ -154,34 +156,21 @@ const weekday = (v: string): string | null => {
   return WEEKDAYS[(z + Math.floor(z / 4) - Math.floor(z / 100) + Math.floor(z / 400) + MONTH_SHIFT[m - 1] + d) % 7]
 }
 
-// The line's last parts in either mode: `observe`, then the age past STALE_S.
+// The line's last part: the age past STALE_S (no mode's word since packet pl1 R1).
 const lineEnd = (b: any, nowMs: number): string[] => {
-  const parts = b.mode === 'observe' ? ['observe'] : []
+  const parts: string[] = []
   const a = wall(b.at)
   const age = a ? Math.floor((nowMs - a[2]) / 1000) : NaN
   if (Number.isFinite(age) && age > STALE_S) parts.push(`${age}s old`)
   return parts
 }
 
-// The band's part on a `none` entry (packet S44), the twin of Python's _band_to: `avoid to
-// 11:00` within 24 hours of `at` (else now), else `best to Sun 20:00`; null with no band, a
-// stamp `wall` or `weekday` refuses, or an `until` not after now: band.json is written only
-// at a record or an admit, so an idle login's can be past its end.
-const bandTo = (b: any, nowMs: number): string | null => {
-  const d = b.demand
-  if (!d || typeof d !== 'object') return null
-  const u = wall(d.until), day = u ? weekday(String(d.until)) : null
-  if (typeof d.band !== 'string' || !d.band || !u || !day || u[2] <= nowMs) return null
-  const a = wall(b.at)
-  return `${d.band} to ${u[2] - (a ? a[2] : nowMs) <= 86400000 ? '' : `${day} `}${u[0]}:${u[1]}`
-}
-
-// The mix's parts after the 7d part (packet S53 ruling 6, NICE n15), the twin of Python's
-// _mix_part: `mix fable 31/50`, a part a family with a budget, then `next opus` (or `reset
-// now`), then `resets 2` with ` by Ddd HH:MM` while `until` is ahead; `mix no reading` with
-// no points or budgets; nothing with no mix. Rounded as _pct is, floor(x + 0.5), all digits
-// past 1e21; it never throws, so a malformed mix leaves the line as it was.
-const MIX_ORDER = ['fable', 'opus', 'sonnet', 'haiku']
+// The mix's parts after the 7d part (packet S53 ruling 6, NICE n15, as pl1 R1 left it), the
+// twin of Python's _mix_part: `reset now` while the mix says so, then `resets 2` with ` by Ddd
+// HH:MM` while `until` is ahead; nothing with no mix, no points or no budgets. The shares,
+// `next <family>` and `mix no reading` are `status`'s since pl1. Rounded as _pct is,
+// floor(x + 0.5), all digits past 1e21; it never throws, so a malformed mix leaves the line
+// as it was.
 const isMap = (v: unknown): boolean => !!v && typeof v === 'object' && !Array.isArray(v)
 const pctOf = (n: number): string => {
   const r = Math.floor(n + 0.5)
@@ -191,28 +180,22 @@ export const mixPart = (mx: any, nowMs: number): string[] => {
   try {
     if (!isMap(mx)) return []
     const pts = own(mx, 'points'), bud = own(mx, 'budgets')
-    if (!isMap(pts) || !isMap(bud)) return ['mix no reading']
-    const out: string[] = []
-    for (const f of MIX_ORDER) {
-      const b = fig(own(bud, f))
-      if (b !== null) out.push(`${f} ${pctOf(fig(own(pts, f)) ?? 0)}/${pctOf(b)}`)
-    }
-    const nxt = own(mx, 'next')
-    out.push(own(mx, 'reset') === true ? 'reset now'
-      : `next ${typeof nxt === 'string' && MIX_ORDER.includes(nxt) ? nxt : 'none'}`)
+    if (!isMap(pts) || !isMap(bud)) return []
+    const out: string[] = own(mx, 'reset') === true ? ['reset now'] : []
     const left = fig(own(mx, 'resets_left')), until = own(mx, 'until')
     const u = wall(until), day = u ? weekday(String(until)) : null
     let tail = left !== null ? `resets ${pctOf(left)}` : ''
     if (u && day && u[2] > nowMs) tail = `${tail} by ${day} ${u[0]}:${u[1]}`.trim()
     if (tail) out.push(tail)
-    return [`mix ${out[0]}`, ...out.slice(1)]
+    return out
   } catch {
     return []
   }
 }
 
 // A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
-// `resetsAt`, both the week's, then the band's. No countdown, ceiling, room or deferred.
+// `resetsAt`, both the week's; the band's word is `status`'s since pl1. No countdown, ceiling,
+// room or deferred.
 // `head` is `5h no reading` on a five-hour login's week (packet S51).
 const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
   const parts = [head]
@@ -226,8 +209,6 @@ const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
       break
     }
   }
-  const to = bandTo(b, nowMs)
-  if (to) parts.push(`band ${to}`)
   if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
   return [...parts, ...lineEnd(b, nowMs)]
 }
