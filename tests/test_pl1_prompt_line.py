@@ -133,3 +133,65 @@ def test_pl1_5_the_mix_still_counts_and_advises():
     m = owner_state()["mix"]
     assert admission.mix_status(m) == "mix: fable 33/50 · opus 27/50 · next fable · resets 1"
     assert "spend mix" in rules.render({"admission": {"mix": {"shares": {"opus": 1}}}})
+
+
+# ---- acceptance 3: `status` shows what left the line; `--json` holds it under new keys ----
+
+def run(*argv):
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    from claude_session import cli
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            rc = cli.main(list(argv))
+        except SystemExit as e:
+            rc = e.code if isinstance(e.code, int) else 1
+    return rc, out.getvalue(), err.getvalue()
+
+
+@pytest.fixture
+def metered(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    monkeypatch.delenv("CLAUDE_SESSION_CONFIG", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    e = dict(os.environ)
+    root = Path(__file__).resolve().parent.parent
+    hooks.session_start({"session_id": SID, "cwd": str(repo)}, e)
+    hooks.post_tool_use({"session_id": SID,
+                         "transcript_path": str(root / "tests/fixtures/meter/under-80.jsonl")}, e)
+
+
+def test_pl1_3_status_shows_the_mix_the_next_family_the_band_and_the_mode(metered):
+    rc, plain, _ = run("status")
+    assert rc == 0 and plain.splitlines()[0].startswith("session ")
+    assert " zone " in plain.splitlines()[0]                  # status keeps the zone's word
+    b = owner_state()
+    write_band(b)
+    rc, out, _ = run("status")
+    assert rc == 0 and out.startswith(plain)
+    until = datetime.fromisoformat(b["demand"]["until"])
+    assert out[len(plain):].splitlines() == [
+        f"band: best to {until:%H:%M}",
+        "mix: fable 33/50 · opus 27/50 · next fable · resets 1",
+        "admission mode: observe",
+    ]
+
+
+def test_pl1_3_status_json_holds_them_under_new_keys(metered):
+    plain = json.loads(run("status", "--json")[1])
+    assert "admission" not in plain and "band" not in plain
+    b = owner_state()
+    write_band(b)
+    got = json.loads(run("status", "--json")[1])
+    assert got == {**plain, "band": {"window": "none", "demand": b["demand"]},
+                   "admission": {"mode": "observe", "mix": b["mix"]}}
+    assert got["admission"]["mix"]["next"] == "fable"
+
+
+def test_pl1_3_status_with_the_mix_off_says_no_mix(metered):
+    plain = run("status")[1]
+    write_band(owner_state(mix=False))
+    tail = run("status")[1][len(plain):]
+    assert "mix:" not in tail and tail.endswith("admission mode: observe\n")
