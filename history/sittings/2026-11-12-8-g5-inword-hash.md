@@ -28,7 +28,7 @@
 - Named `-8`: u3's branch holds `2026-11-12-7-u3-loop-lines.md`.
 
 ## Next act
-- g6's loose reading on this branch (brief-2), on the coordinator's word; then one review, pin to head.
+- g6's loose reading on this branch from a0055da, ordered by the coordinator, not started: this builder passed its tool-call bound at phase 1d's end. A fresh builder takes it: the g6 brief's R1 to R8 with the coordinator's amendments (pin a0055da; R2 accounts a strict word only where it resolved to the loose path in the call's folder, else tries the call's folder; each round 3 line and lead a test; rerun round 3's command and 2 x 100k fuzz vs the five commits).
 
 ## Exit
 Phase 1d landed: R3-F1 to F7 denied but F6 b (left to g6); waits on the coordinator.
