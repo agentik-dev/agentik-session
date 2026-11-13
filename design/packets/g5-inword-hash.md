@@ -76,3 +76,44 @@ The rule: a line a shell runs as a write of a gated file, denied at the pin, `d2
 - R3-F6 a: a comment's closing backtick was the copy's destination; now a lone closing backtick is dropped and one at a word's end stripped, never into a `cd`. F6 b is the loose reading's.
 - R3-F7: the comment's backtick is searched on its own line: 60 KB in one pair 0.012 s (3.6 s at `f1f012e`).
 - Left, each passing at `f1f012e` too: R3-F6 b; `cd docs#c` (the guard trusts a `cd`); a comment at the third escaped level; a few token-fuzz lines with a `#` comment or a `${` paren in backticks. All for the loose reading.
+
+## 3d. g6: the loose second reading (brief g6 R1 to R8; build 2 on this branch)
+
+The owner, 2026-11-12: "fix all of these findings in the next session". g6's part is this
+section, not a packet file of its own: one branch, one packet, one phase 2. Pin `a0055da`.
+
+- R4 to R6, the strict reader: `_WRITE_WORD` is tried on the joined text too; `then`, `do`,
+  `else`, `elif`, `if`, `while`, `until`, `{` and `!` are skipped as a wrapper is; an inner `-c`
+  line that cannot be split gives the `split` mark and the outer commands are judged.
+- R1: `loose_targets(text)`, pure: `(write or remove, word)` pairs, no list, no folder. It joins
+  backslash-newlines, splits at `;&|(){}`, a newline and a backtick (none after a backslash),
+  reads no quote, comment or heredoc; lists a write redirect's word (not `->`, `=>`, `>&N`) and
+  the targets of `tee`, `sed -i`, `perl -i`, `cp`, `mv`, `install`, `rm`, `unlink` and git's
+  three, its words ending at a blank then `#`.
+- R2, as amended: the strict reading names each target's word and folder. A strict word, split
+  at its blanks, stands for one loose target of its kind only where it resolves to the same
+  path; one resolved to nothing stands for none; a raise stands for none. The loose target's
+  own folder is the call's, moved by a `cd` or `pushd` only where the text before the target
+  holds no paren, brace, backtick, `#`, backslash, `<<`, lone `|` or `&`, or reserved word (the
+  amendment's (a) alone denies `cd /tmp/box && cp a CLAUDE.md`, acceptance 3). A target left
+  over is resolved against the call's folder, its own and each folder the strict reading stood
+  in: a gated path, or a list's removal, is denied. One that cannot be resolved passes.
+- R3: the loose refusal is a `deny` with its own reason; `guard.jsonl` says which reading denied.
+
+Acceptance (`tests/test_g2b_gates.py`, through the hook; baseline measured at `a0055da` with the
+four shells, a stub `cp` that prints nothing):
+
+1. g6's 19 lines, n131's and n138's: denied. At `a0055da`: 18 pass; `echo $(case x in x) echo
+   a;; esac)#c; cp a CLAUDE.md`, ``echo ${x:-`echo a # don't`}; cp a CLAUDE.md`` and n161's
+   `$'\' #'` line are denied by the strict reading already.
+2. g6's three lines after a read: denied. At `a0055da`: pass.
+3. g6's ten ordinary lines: pass, as at `a0055da`.
+4. The price, each a named test, denied by the loose reading. At `a0055da`: pass.
+5. The replay of the designer's 415,408 lines: at most 60 newly refused, none a read or a
+   `git add`; counts only leave the scratch folder.
+6. Round 3's lines (R3-F1 to F6 with F6 b, leads 1 to 5): each denied by one reading or the
+   other. At `a0055da`: all but F6 b and leads 2 to 5 denied, by the strict reading.
+7. With the loose reading off, the strict reading's results are `a0055da`'s but for what R5
+   and R6 newly read; with both on, no line a shell runs as a gated write that `8153e52`,
+   `d2f89d9`, `40aee95`, `f1f012e` or `a0055da` denied passes (round 3's command, two
+   generators of 100,000 lines each, new seeds).
