@@ -382,6 +382,7 @@ _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _WRAPPERS = frozenset({"sudo", "env", "command", "exec", "nohup", "time", "builtin", "nice"})
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_CDS = frozenset({"cd", "pushd", "popd"})      # in backticks, no move of the line's folder
 _PY = re.compile(r"python[0-9.]*\Z")
 _SED_I = re.compile(r"-[nErsuz]*i|--in-place")
 _PERL_I = re.compile(r"-[pnlaws0]*i")
@@ -660,10 +661,11 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
                 here, pushed = None, []
             continue
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
-        words = [w for w in words if not _PH_RE.match(w)]
+        words = [w if w.strip("`") in _CDS else w.strip("`") for w in words    # r3 F6: a tick
+                 if not _PH_RE.match(w) and w.strip("`")]        # at a word's end is the line's
         for o in outs:
-            if not _PH_RE.match(o):
-                found.append(("write", _resolve(o, here, env)))
+            if not _PH_RE.match(o) and o.strip("`"):
+                found.append(("write", _resolve(o.strip("`"), here, env)))
         while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
                          or (words[0].startswith("-") and len(words) > 1)):
             words = words[1:]
