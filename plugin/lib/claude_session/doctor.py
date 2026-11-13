@@ -376,13 +376,27 @@ def _sibling_absent(plugins, name: str) -> bool:
     return not (p and p.get("enabled"))
 
 
+# Build 3, L2: a layer file that cannot be opened, or nests past the parser, is a failed
+# check naming the file and why, as the config read names it; never a traceback.
+_UNREAD = (resolver.ResolveError, OSError, RecursionError)
+
+
+def _why(e, env, cwd) -> str:
+    if isinstance(e, resolver.ResolveError):
+        return str(e)
+    from .plug import _failure     # plug imports this module
+    rdir = resolver.repo_dir(cwd)
+    return _failure(e, [str(resolver._user_file(env)), str(rdir / "config.yaml"),
+                        str(rdir / "config.local.yaml")])
+
+
 def _check_profiles(env, cwd) -> Check:
     try:
         _, profiles = resolver.load_profiles(env)
         for name in profiles:
             resolver.resolve(cwd, "doctor", env, profile=name, overlay={})
-    except resolver.ResolveError as e:
-        return Check("profiles", False, str(e))
+    except _UNREAD as e:
+        return Check("profiles", False, _why(e, env, cwd))
     return Check("profiles", True, f"{len(profiles)} resolve: " + ", ".join(profiles))
 
 
@@ -464,8 +478,8 @@ def _check_config(env, cwd) -> tuple[Check, dict]:
     try:
         r = resolver.resolve(cwd, "doctor", env, overlay={})
         sections = r.sections
-    except resolver.ResolveError as e:
-        return Check("config", False, str(e)), sections
+    except _UNREAD as e:
+        return Check("config", False, _why(e, env, cwd)), sections
     if not path.exists():
         return Check("config", True, f"no {path}; the defaults"), sections
     detail = f"{path} parses, profile {sections['session']['profile']}"
@@ -477,7 +491,7 @@ def _check_config(env, cwd) -> tuple[Check, dict]:
 def _renamed(env, cwd) -> list:
     try:
         return resolver.resolve(cwd, "doctor", env, overlay={}).renamed
-    except resolver.ResolveError:
+    except _UNREAD:
         return []
 
 
@@ -505,7 +519,7 @@ def _check_subagent_model(env, sections, cwd=None) -> Check | None:
         try:
             sections = resolver.resolve(cwd or os.getcwd(), "doctor", env, profile=prof,
                                         overlay={}).sections
-        except resolver.ResolveError:
+        except _UNREAD:
             return None
     want = ((((sections.get("session") or {}).get("tiers") or {}).get("build")) or {}).get("model")
     if not have or not want or have == want:

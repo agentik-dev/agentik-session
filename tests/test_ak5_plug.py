@@ -359,6 +359,42 @@ def test_a_file_that_cannot_be_read_is_bad_file(box, case):
             p.chmod(0o644)
 
 
+# ---- build 3, L2: the doctor read with a layer file it cannot read is §5's shape, no traceback
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode 000 file")
+@pytest.mark.parametrize("layer", ["user", "repo", "local"])
+@pytest.mark.parametrize("how", ["mode-000", "folder"])
+def test_doctor_with_a_file_it_cannot_read(box, layer, how):
+    home, cwd = box
+    p = {"user": home / ".claude" / "agentik" / "profiles.yaml",
+         "repo": cwd / ".claude" / "agentik" / "config.yaml",
+         "local": cwd / ".claude" / "agentik" / "config.local.yaml"}[layer]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if how == "folder":
+        p.mkdir()
+    else:
+        p.write_text(("defaults:\n" if layer == "user" else "session:\n") + "  effort: low\n")
+        p.chmod(0)
+    why = "Is a directory" if how == "folder" else "Permission denied"
+    try:
+        rc, out, err = sh(box, "doctor", "--json")
+        assert rc == 2 and "Traceback" not in err, (rc, err)
+        d = json.loads(out)
+        assert d["schema"] == "agentik.doctor/1" and d["ok"] is True and d["tool"] == "session"
+        st = [c["status"] for c in d["checks"]]
+        assert d["failed"] == st.count("fail") and d["warned"] == st.count("warn")
+        named = [c for c in d["checks"] if c["detail"] == f"{p}: {why}"]
+        assert named and all(c["status"] == "fail" for c in named), d["checks"]
+        rc_text, text, err = sh(box, "doctor")
+        assert rc_text == rc and "Traceback" not in err, (rc_text, err)
+        lines = text.splitlines()
+        assert any(ln.startswith("FAIL ") and ln.endswith(f" {p}: {why}") for ln in lines), text
+        assert lines[-1].startswith("doctor: failing: ")
+    finally:
+        if p.is_file():
+            p.chmod(0o644)
+
+
 # ---- review 1, R1-F3: every key is unique, of [a-z0-9_-] segments ----------------------------
 
 def test_keys_are_unique_and_a_key_out_of_the_set_is_warned(box):
