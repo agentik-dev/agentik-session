@@ -1345,6 +1345,13 @@ def cmd_gate(args) -> int:
     if verb == "serve":
         return gate.serve(root)
     if verb == "wait":
+        own = _own_entry(root, env)
+        target = next((e for e in gate.entries(root) if e["id"] == args.id), None)
+        if own and target and not gate.result_path(root, args.id).exists() \
+                and gate.entry_key(target) == gate.entry_key(own):
+            _die(f"gate wait: this is gate job {own['id'][:40]}; {args.id[:40]} is queued on its "
+                 "own repo and waits behind it until the wall cuts it: wait from outside the "
+                 "job", 2)
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
@@ -1358,6 +1365,12 @@ def cmd_gate(args) -> int:
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
+    own = _own_entry(root, env) if args.wait else None
+    if own and os.path.isdir(args.repo) \
+            and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
+        _die(f"gate run: this is gate job {own['id'][:40]}; a job queued here on its own repo "
+             "waits until the wall cuts it: run the command directly, or queue it without "
+             "--wait", 2)
     try:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
@@ -1375,6 +1388,15 @@ def cmd_gate(args) -> int:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _own_entry(root, env) -> dict | None:
+    """fw5 R5: the entry of this state root that `$CLAUDE_SESSION_GATE_JOB` names, or None."""
+    from . import gate
+    mark = env.get(gate.JOB_MARK) or ""
+    if not gate.ID.match(mark):
+        return None
+    return next((e for e in gate.entries(root) if e["id"] == mark), None)
 
 
 def cmd_reconcile(args) -> int:

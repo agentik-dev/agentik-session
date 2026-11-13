@@ -15,7 +15,7 @@
 - [x] R1 and R2 (commit.py; the core split as `_core`, `commit_paths` for R3); test_fw4d changed for R2: the three round-2 tests (another writer's commit, staging, SIGTERM: the plain `red check` line or none) and the two r1_f3 tests (the restore that cannot be made now reached by a red commit holding index.lock)
 - [x] R3 (cli.py `cmd_checkpoint`, the parser's `paths`); test_cli changed for R3: `test_checkpoint_help_names_tracked_only` and `test_checkpoint_commit_stages_tracked_only` (renamed for the paths), and four respawn tests that ran `-c` with no path (s19's helper refusal and its control, s22's tracked and untracked charter) now name their paths
 - [x] R4 (commit.py `_gate_check` writes the mark in a `finally`, the signals held; gate.py `cancel`, `cancel_path`, `_step` closes a marked entry unrun, `_reap` cuts a marked child as the wall does, `_finish` and `_sweep_marks` drop marks); test_gate, test_fw2, test_fw4c, test_fw4d, test_s47 green (240)
-- [ ] R5 (cli.py `cmd_gate`)
+- [x] R5 (cli.py `cmd_gate`, `_own_entry`): `gate run --wait` of the job's own key and `gate wait` of a queued id of that key exit 2; the six named test files green under `.venv-floor` (175)
 - [ ] docs (README, RUNBOOK, SKILL.md, the checkpoint command, help) and the four NICE rows out
 
 ## Handover
@@ -23,7 +23,7 @@
 - decide, owner: none.
 
 ## Next act
-- R5.
+- The docs (README and its source, RUNBOOK, SKILL.md, the checkpoint command) and the four NICE rows out.
 
 ## Exit
 - (open)
