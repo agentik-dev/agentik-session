@@ -14,7 +14,7 @@
 - [x] act 3: R2 to R4: the part, `open`'s line, the four warnings; acceptance 6 green; four tests of `test_charter.py` that pin `open`'s text take the part
 - [x] act 4: R5 to R8: `show`, its object and its text view; acceptance 1 to 8 and 10 green
 - [x] act 5: R9: the hook's read and the denial's sentence; acceptance 9 green; `test_n33.py`'s `VERB_FIRST` takes the new sentence
-- [x] act 6: R10: the docstring, the parser's help, the skill's "The charter", the RUNBOOK's charter paragraphs and helper sentence, NICE n191 (24,532 B); recordlint and doclint exit 0
+- [x] act 6: R10: the docstring, the parser's help, the skill's "The charter", the RUNBOOK's charter paragraphs and helper sentence, NICE n191 (24,532 B); recordlint, doclint (the packet trimmed to 9,179 B of 9,216) and hygiene exit 0; the built `check` passes this charter, exit 0
 - [x] acceptance 11: the five files 296 passed under `.venv` and under `.venv-floor`; the tests that read the skill, the RUNBOOK or the charter (753) green under both but the docs case, fixed after
 
 ## Handover

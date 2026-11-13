@@ -6,16 +6,14 @@
 | pin | `148fde3` on main (2.0.0-alpha.98). Worktree `.claude/worktrees/in2-charter-show`, branch `in2-charter-show`; `.venv`, `.venv-floor` linked from the main checkout. No version bump in phase 1 |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make`, no gate job in phase 1; no `claude`; no test reads live state or writes the live home; no relay verb; a line naming `charter` with a word but `check` runs from a script file under a temp state home |
 | may touch | `plugin/lib/claude_session/{charter.py,cli.py,hooks.py}` (cli: `cmd_charter` and the parser; hooks: `CHARTER_READS`, `HELPER_CHARTER_DENY`), `plugin/skills/session/SKILL.md`, `RUNBOOK.md`, `NICE_TO_HAVE.md` (one row), `tests/test_in2_charter_show.py` (new), `tests/{test_charter.py,test_fw1a.py,test_rules.py,test_n33.py}` where one pins `open`'s text or the denial's; this packet and the charter |
-| verify | phase 1: `python -m pytest -q` under `.venv` and `.venv-floor` on the new file and the four named; phase 2, on the coordinator's word: the gate queue's `make check` |
+| verify | phase 1: `pytest -q` under `.venv` and `.venv-floor` on the new file and the four named; phase 2: the gate queue's `make check` |
 | acceptance | §3; `tests/test_in2_charter_show.py` green under both venvs (red at the pin) |
 | budget | about 90 tool calls, `claude-opus-5-5` |
 
 ## 1. What the source says: the code at the pin
 
-- `charter.py` knows six parts; `check_text` refuses the missing ones but While waiting; `warnings` adds While waiting's shape warnings whatever pacing says, and `_near_miss` names a heading that differs by case or a tail. `open` writes four `##` parts.
-- `cli.cmd_charter` takes `open`, `check`, `close`; the parser's `action` has those three choices, so `charter show` exits 2 with argparse's `invalid choice: 'show' (choose from 'open', 'check', 'close')`.
-- `hooks.CHARTER_READS` is `("check",)`: a helper's Bash that names `charter show` is denied.
-- No file of the tool names `Waits on the owner`.
+- `charter.py` knows six parts; `warnings` adds While waiting's shape warnings whatever pacing says, `_near_miss` a heading off by case or a tail; `open` writes four `##` parts. No file names `Waits on the owner`.
+- The parser's `action` is `open`, `check`, `close`: `charter show` is argparse's `invalid choice`, exit 2. `hooks.CHARTER_READS` is `("check",)`.
 
 ### The owner's words
 
@@ -23,7 +21,7 @@ None bind this row. hq design/17's row in2: the owner's inbox joins reads the to
 
 ### The ledger
 
-No `DECISIONS.md` at the pin. Cited: hq entry 6 (the 3.9 floor, the standard library alone) and hq entry 37 (made-up names).
+No ledger at the pin. Cited: hq entry 6 (the 3.9 floor, stdlib alone), entry 37 (made-up names).
 
 ## 2. Rulings (brief in2)
 
@@ -62,21 +60,18 @@ Each a case of `tests/test_in2_charter_show.py`, through `cli.main`, in temp rep
 
 ## 4. Findings that name this row: the choices inside the rulings
 
-- A hand line is read by hand, not by a regex, so the read is linear: it opens `- hand: `, ends in a backtick, the backtick before that has `; ` before it, and both `<what>` and `<command>` hold something past blanks. A line's trailing blanks are cut first, as While waiting's are.
-- `waits[].line` is the line's 1-based number in the file.
-- The near-miss heading warns only when the exact part is absent, as While waiting's does.
-- "Newest" picks by name among every entry of the folder, so an entry of that name that cannot be read (a folder, no permission) is `unreadable`; a folder that is missing or cannot be listed is `no charter`.
-- `skipped[].repo` is the real path; the text view names a repo by its folder's name, and the `skipped` lines are a last block after a blank line, names joined by `, `.
-- `--json` prints the object with an indent of 2.
-- Each REPO's folder resolves as `check`'s rules do (`resolver.resolve` from the REPO, the session id or `unsaved`, the launch profile); an absolute `--dir` is taken as is.
-- `--continue` and `--replace` with `show` keep their refusals (exit 2).
-- Old tests changed: `test_charter.py`'s `test_close_appends_one_line`, `test_s21_open_seeds_the_handover_line`, `test_s21_open_seeds_nothing_with_priority_off`, `test_s40_open_writes_the_section` (they pin `open`'s text); `test_n33.py`'s `VERB_FIRST` (the denial's sentence). `test_fw1a.py` and `test_rules.py` unchanged.
+- A hand line is read by hand, linear: `- hand: `, a last backtick, the one before it after `; `, `<what>` and `<command>` not blank; trailing blanks cut first, as While waiting's.
+- `waits[].line` is the file's line number. The near-miss warns only with the exact part absent, as While waiting's.
+- "Newest" picks by name among every entry, so one that cannot be read (a folder) is `unreadable`; a folder missing or unlistable is `no charter`.
+- `skipped[].repo` is the real path; the text view names folders, the `skipped` lines a last block, names joined by `, `. `--json` is indented 2.
+- A REPO's folder resolves as `check`'s rules do (the session id or `unsaved`, the launch profile); an absolute `--dir` is taken as is.
+- Old tests changed: `test_charter.py`'s `test_close_appends_one_line`, `test_s21_open_seeds_the_handover_line`, `test_s21_open_seeds_nothing_with_priority_off`, `test_s40_open_writes_the_section` (`open`'s text); `test_n33.py`'s `VERB_FIRST` (the denial).
 - NICE n191 (S4): the README names neither the part nor `show`.
 
 ## 5. Forbidden reads
 
-No transcript, no live state root, no file under `~/.claude`, no hq checkout, no relay ledger.
+No transcript, no live state root, no file under `~/.claude`, no hq checkout.
 
 ## 6. Report
 
-The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the choices made, what was not done; phase 2 on the coordinator's word.
+To the hq coordinator: the branch tip, the acceptance table at the pin and now, the choices, what was not done.
