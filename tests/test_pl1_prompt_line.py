@@ -2,6 +2,8 @@
 owner's tidied line through the prompt hook (R1); no zone word for `clear` (R2); the facts
 that left are `status`'s (R3); the pacing text points there (R4); the mix off reads as on (R5).
 Every state here is made up, under the per-test temp HOME conftest gives."""
+from __future__ import annotations
+
 import json
 import os
 import re
