@@ -15,15 +15,15 @@
 - [x] Act 3: R1 to R5 in `install.py` (`_door`, its line first in `pruned`); R6 in `RUNBOOK.md` and `install-cli.md`; the README source unchanged
 - [x] R7 proofs: the three files, .venv 170 passed; .venv-floor 167 passed, 3 skipped; test_install.py and test_bare_machine.py unchanged; compileall, scripts/doclint, scripts/hygiene exit 0
 - [x] Fix 1, tests: review 1's F1 (a FIFO at the door) and F2 (a 0xff byte, UTF-8 locale) in `tests/test_dw1_door.py`, red at 8636055 under both venvs (a hang; a traceback, exit 1)
-- [ ] Fix 1, the change: `_door` opens only a regular file; the line's values escaped
-- [ ] Fix 1, records: the packet's review 1 section; the R7 proofs again
+- [x] Fix 1, the change: `_door` opens only a regular file; the line's values escaped to ASCII; the two tests green under both venvs
+- [ ] Fix 1, records: the packet's §7; the R7 proofs again
 
 ## Handover
 - Phase 2 (bump, gate job) waits on the coordinator's word.
 - Phase 2 renders the README: its status line counts 3432 tests and the suite now collects 3445 (13 new); `test_readme.py`'s status-line test is red until then.
 
 ## Next act
-- Fix 1: the change in `install._door`, then the packet's section.
+- Fix 1: the packet's §7 and this record.
 
 ## Exit
 - Phase 1 built and proven; review 1's fix in flight.

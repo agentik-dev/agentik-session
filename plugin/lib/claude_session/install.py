@@ -234,17 +234,20 @@ def _door(path, door):
     dw1s): absent or older, it is written; equal or newer, it stays byte for byte; a link, or a
     VERSION line here or there that does not read as a version, leaves it alone. None, or the
     line that says why it stayed. This module's own readers: `agentik_install` is not always
-    beside a package installed by pip."""
+    beside a package installed by pip. What is not a regular file there (a FIFO, a directory) is
+    never opened: it has no version. The line's values are escaped to ASCII, so any byte prints."""
     if not os.path.lexists(path):
         _write_door(path, door)
         return None
     if os.path.islink(path):
         return "the door %s is a link; left alone" % path
-    theirs = (read_launcher(path) or {}).get("version")
+    theirs = (read_launcher(path) or {}).get("version") if os.path.isfile(path) else None
     ours = (read_launcher(door) or {}).get("version")
     a, b = order(theirs), order(ours)
     if a is None or b is None:
-        return "the door %s has no version to compare (%s there, %s here); left alone" % (path, theirs, ours)
+        shown = [v and v.encode("utf-8", "surrogateescape").decode("ascii", "backslashreplace")
+                 for v in (theirs, ours)]
+        return "the door %s has no version to compare (%s there, %s here); left alone" % (path, shown[0], shown[1])
     if b > a:
         _write_door(path, door)
     return None
