@@ -1,0 +1,251 @@
+"""Packet g8a-reader-parts: the reader's new parts, one walk of a line's commands.
+
+1 the commands of a line, past wrappers, reserved words and substitutions; 2 a shell's script at
+level 1; 3 data read as no command; 4 the parts not read, each by its kind; 5 the folder a
+command runs in; 6 the words around a substitution kept with their command; 7 git's global
+options; 8 real shells run the lines and call what the reader names; 9 the gates and the make
+rule read the same commands; 10 the quoted-substitution cutter is gone.
+"""
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from claude_session.shellreader import Cmd, Unread, commands, git_words
+from claude_session import shellreader, unattended
+
+ROOT = Path(__file__).resolve().parents[1]
+G = "git add -A"
+HERE = "/g8/repo"
+ENV = {"HOME": "/g8/home"}
+
+T1 = ["{G}", "/usr/bin/git add -A", "X=1 {G}", "env -i X=1 {G}", "sudo -u bob {G}",
+      "nice -n 5 {G}", "command {G}", "exec {G}", "time -p {G}", "({G})", "{{ {G}; }}",
+      "if true; then {G}; fi", "for f in a; do {G}; done", "true && {G}", "! {G}",
+      "echo $({G})", "echo \"$({G})\"", "x=\"$({G})\"", "echo `{G}`", "x=`{G}`",
+      "echo \"a `{G}` b\"", "echo \"$(echo \"$({G})\")\"", "cat < \"$({G})\"",
+      "x=\"$(case a in a) {G};; esac)\"", "n=\"$(grep -c ')' f.txt)\"; {G}",
+      "echo `echo \\`{G}\\``", "cat <<EOF\nsee `{G}`\nEOF", "cat <<EOF\n$({G})\nEOF"]
+T2 = ["bash -c '{G}'", "bash -lc '{G}'", "bash -c -e '{G}'", "bash -o pipefail -c '{G}'",
+      "/bin/zsh -c '{G}'", "BASH -c '{G}'", "ksh -c '{G}'", "bash <<EOF\n{G}\nEOF",
+      "bash -s <<'EOF'\n{G}\nEOF", "sh -eu <<EOF\n{G}\nEOF"]
+T3 = ["echo '{G}'", "echo \"{G}\"", "git commit -m \"{G}\"", "echo ok # {G}", "echo '$({G})'",
+      "echo \"\\$({G})\"", "echo '`{G}`'", "grep -r \"{G}\" .", "cat <<EOF\n{G}\nEOF",
+      "cat <<'EOF'\nsee `{G}`\nEOF", "bash run.sh <<EOF\n{G}\nEOF", "command -v git",
+      "xargs {G}", "find . -exec {G} {{}} +", "timeout 5 {G}", "runner -- bash -c '{G}'"]
+T4 = [("eval '{G}'", "eval"), ("env -S '{G}'", "eval"), ("bash -c \"bash -c '{G}'\"", "below"),
+      ("bash -c 'bash <<EOF\n{G}\nEOF'", "below"), ("echo '{G}' | sh", "piped"),
+      ("bash <<< '{G}'", "piped"), ("cat <<EOF | sh\n{G}\nEOF", "piped"),
+      ("echo \"it's\" '{G}", "split")]
+
+
+def _read(line):
+    return commands(line, HERE, ENV)
+
+
+def _adds(cmds):
+    return [c for c in cmds if c.name == "git" and "add" in c.args]
+
+
+# ---- 1, 2, 3, 4: what a line runs, and what it does not -----------------------------------
+
+@pytest.mark.parametrize("shape", T1, ids=[str(i) for i in range(len(T1))])
+def test_1_the_commands(shape):
+    cmds, unread = _read(shape.format(G=G))
+    gits = [c for c in cmds if c.name == "git"]
+    assert len(gits) == 1, cmds
+    assert gits[0].args == ["add", "-A"] and gits[0].level == 0, gits
+    assert unread == [], unread
+    assert all(isinstance(c, Cmd) for c in cmds)
+
+
+@pytest.mark.parametrize("shape", T2, ids=[str(i) for i in range(len(T2))])
+def test_2_level_one(shape):
+    cmds, unread = _read(shape.format(G=G))
+    assert cmds[0].name.lower() in ("bash", "zsh", "ksh", "sh") and cmds[0].level == 0, cmds
+    gits = [c for c in cmds if c.name == "git"]
+    assert len(gits) == 1 and gits[0].args == ["add", "-A"] and gits[0].level == 1, cmds
+    assert unread == [], unread
+
+
+@pytest.mark.parametrize("shape", T3, ids=[str(i) for i in range(len(T3))])
+def test_3_no_command(shape):
+    cmds, unread = _read(shape.format(G=G))
+    assert _adds(cmds) == [] and unread == [], (cmds, unread)
+
+
+def test_3_the_commit_is_one_git():
+    cmds, _ = _read("git commit -m \"{G}\"".format(G=G))
+    assert [c.name for c in cmds] == ["git"]
+    assert git_words(cmds[0].args)[1] == "commit"
+
+
+@pytest.mark.parametrize("shape,why", T4, ids=[str(i) for i in range(len(T4))])
+def test_4_unread(shape, why):
+    cmds, unread = _read(shape.format(G=G))
+    assert _adds(cmds) == [], cmds
+    assert len(unread) == 1 and unread[0].why == why, unread
+    assert G in unread[0].text and isinstance(unread[0], Unread)
+
+
+def test_4_the_texts():
+    assert _read("cat run.sh | bash")[1] == [Unread("piped", "cat run.sh")]
+    assert _read("eval \"$X\"")[1] == [Unread("eval", "$X")]
+
+
+# ---- 5, 6: the folder, and words kept whole ------------------------------------------------
+
+def _gits(line):
+    return [c for c in _read(line)[0] if c.name == "git"]
+
+
+def test_5_the_folder():
+    assert _gits("cd /g8/x && " + G)[0].heres[0] == "/g8/x"
+    assert _gits("cd \"$T\" && " + G)[0].heres == [None]
+    assert _gits("(cd /g8/x); " + G)[0].heres[0] == HERE
+    assert _gits("if t; then cd /g8/x; fi; " + G)[0].heres == ["/g8/x", HERE]
+    inner = _gits("bash -c 'cd /g8/x && " + G + "'")
+    assert inner[0].heres[0] == "/g8/x" and inner[0].level == 1
+    two = _gits("echo \"$(cd /g8/x && " + G + ")\"; " + G)
+    assert [g.heres[0] for g in two] == ["/g8/x", HERE]
+
+
+def test_6_words_kept_whole():
+    cmds, _ = _read("git commit -m \"$(cat <<'EOF'\nfix -a\nEOF\n)\" -a")
+    gits = [c for c in cmds if c.name == "git"]
+    assert len(gits) == 1 and len(gits[0].args) == 4 and gits[0].args[-1] == "-a", cmds
+    assert [c.name for c in cmds].count("cat") == 1
+    cmds, _ = _read("echo a$(" + G + ")b c")
+    echo = [c for c in cmds if c.name == "echo"]
+    assert len(echo) == 1 and len(echo[0].args) == 2, cmds
+    assert len(_adds(cmds)) == 1 and not [c for c in cmds if c.name == "b"]
+    cmds, _ = _read("T=$(mktemp -d); " + G)
+    assert [c.name for c in cmds] == ["", "mktemp", "git"], cmds
+    assert cmds[0].pre == ["T=$(mktemp -d)"]
+    cmds, _ = _read("rm -rf \"$(mktemp -d)\"/x")
+    rm = [c for c in cmds if c.name == "rm"]
+    assert len(rm) == 1 and len(rm[0].args) == 2 and "$(" in rm[0].args[1], cmds
+
+
+# ---- 7: git's global options ------------------------------------------------------------
+
+@pytest.mark.parametrize("args,want", [
+    ("-C /g8/x add -A", ([("-C", "/g8/x")], "add", ["-A"])),
+    ("-c a.b=c add -A", ([("-c", "a.b=c")], "add", ["-A"])),
+    ("--no-pager add -A", ([("--no-pager", None)], "add", ["-A"])),
+    ("--namespace n add -A", ([("--namespace", "n")], "add", ["-A"])),
+    ("--git-dir=/g8/x/.git --work-tree /g8/x add -A",
+     ([("--git-dir=/g8/x/.git", None), ("--work-tree", "/g8/x")], "add", ["-A"])),
+    ("-C a -C b status", ([("-C", "a"), ("-C", "b")], "status", [])),
+])
+def test_7_git_words(args, want):
+    assert git_words(args.split()) == want
+
+
+def test_7_no_words():
+    assert git_words([]) == ([], "", [])
+
+
+# ---- 8: real shells ----------------------------------------------------------------------
+
+SHELLS = ("/bin/bash", "/bin/zsh", "/bin/sh")
+STUBS = ("git", "rm", "make")
+# a runner's command a shell does run (R4 passes it knowingly); a first program the box lacks
+# or must not run (sudo; a git named by path; `env -i`, which drops the box's PATH; a login
+# shell, whose profile puts the system's folders first)
+LEFT_OUT = {"xargs {G}", "find . -exec {G} {{}} +", "timeout 5 {G}", "runner -- bash -c '{G}'",
+            "sudo -u bob {G}", "/usr/bin/git add -A", "env -i X=1 {G}", "bash -lc '{G}'"}
+
+
+def _box(tmp_path):
+    stubs, work = tmp_path / "bin", tmp_path / "work"
+    stubs.mkdir()
+    work.mkdir()
+    log = tmp_path / "calls.txt"
+    for name in STUBS:
+        p = stubs / name
+        p.write_text('#!/bin/sh\nprintf "%%s\\n" "%s $*" >> "%s"\n' % (name, log))
+        p.chmod(0o755)
+    return stubs, work, log
+
+
+def _run(shell, line, box):
+    stubs, work, log = box
+    if log.exists():
+        log.unlink()
+    out = subprocess.run([shell, "-c", line], cwd=str(work), capture_output=True, text=True,
+                         timeout=30, env={"PATH": "%s:/usr/bin:/bin" % stubs,
+                                          "HOME": str(work)})
+    calls = log.read_text().splitlines() if log.exists() else []
+    err = out.stderr.lower()
+    if out.returncode and not calls and ("syntax" in err or "parse error" in err
+                                         or "not found" in err or "unexpected" in err):
+        return None
+    return calls
+
+
+def _shells():
+    return [s for s in SHELLS if os.path.exists(s)]
+
+
+def test_8_real_shells(tmp_path):
+    box = _box(tmp_path)
+    ran = 0
+    for shape in T1 + T2:
+        if shape in LEFT_OUT:
+            continue
+        line = shape.format(G=G)
+        want = sorted(" ".join([c.name] + c.args) for c in _read(line)[0] if c.name in STUBS)
+        for shell in _shells():
+            calls = _run(shell, line, box)
+            if calls is None:
+                continue
+            ran += 1
+            assert sorted(calls) == want, (shell, line, calls, want)
+    for shape in T3[:-4]:
+        line = shape.format(G=G)
+        for shell in _shells():
+            calls = _run(shell, line, box)
+            if calls is None:
+                continue
+            ran += 1
+            assert not [c for c in calls if " add " in c + " "], (shell, line, calls)
+            if line.startswith("git commit"):
+                assert len(calls) == 1 and calls[0].startswith("git commit"), calls
+    assert ran >= 60, ran
+
+
+# ---- 9: the gates and the make rule read the same ------------------------------------------
+
+def test_9_the_gates_read_the_same():
+    gated = HERE + "/CLAUDE.md"
+    for shape in T1 + T2:
+        line = shape.replace("git add -A", "cp a CLAUDE.md").format(G="cp a CLAUDE.md")
+        found = [p for _, p in shellreader.bash_targets(line, HERE, ENV)]
+        assert gated in found, (line, found)
+    for shape in T3:
+        line = shape.format(G="cp a CLAUDE.md")
+        found = [p for _, p in shellreader.bash_targets(line, HERE, ENV)]
+        assert gated not in found, (line, found)
+
+
+def test_9_the_make_rule_reads_the_same():
+    held = [s for s in T1 + T2 + [s for s, _ in T4] if "{G}" in s]
+    for shape in held:
+        line = shape.format(G="make x")
+        assert unattended.unbounded(line), line
+    assert unattended.unbounded("cat <<EOF\nmake x\nEOF") == ""
+    assert unattended.unbounded("echo 'make x'") == ""
+
+
+# ---- 10: the cutter is gone --------------------------------------------------------------
+
+def test_10_no_cutter():
+    hits = []
+    for top in ("plugin", "tests"):
+        for p in sorted((ROOT / top).rglob("*.py")):
+            for n, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+                if "_substituted" in ln:
+                    hits.append((p.name, n))
+    assert len(hits) == 1 and hits[0][0] == "test_g8a_reader.py", hits
