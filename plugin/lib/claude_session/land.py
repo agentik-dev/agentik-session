@@ -229,10 +229,14 @@ def merge_result(repo, ours, full):
 
 
 def require_no_overlap(repo, full, branch):
-    """The merged tree: a merge that would not conflict, that makes <sha>'s own tree, whose paths
+    """(main, the merged tree), main read first: a merge that would not conflict, that makes
+    <sha>'s own tree, whose paths
     hold no dirty path and no untracked file on the main checkout, or Red with nothing changed.
     The paths are the difference from main to the merge's own tree, so a directory-rename target
     counts; --no-renames lists a rename as its delete and its add, so both its paths do."""
+    code, ours = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if code != 0:
+        raise Red("main", note="cannot read " + MAIN)
     code, tree, conflicted = merge_result(repo, MAIN, full)
     if code == 1:
         raise Red("merge", 1, "the merge would conflict, nothing begun:\n" + "\n".join(conflicted))
@@ -262,7 +266,18 @@ def require_no_overlap(repo, full, branch):
     hit = sorted(path for path in written if stands_untracked(repo, path, tracked))
     if hit:
         raise Red("main", note="on main, untracked, and written by the merge:\n" + "\n".join(hit))
-    return tree
+    return ours, tree
+
+
+def require_main_unmoved(repo, ours, full, branch):
+    """Main is still the commit the last merged-tree read began from: anything that took time
+    since, the message's scan above all, cannot have slipped a commit under the merge."""
+    _, now = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if now != ours:
+        _, log = read(repo, "log", "--oneline", "%s..%s" % (ours, MAIN))
+        raise Red("sha", note="main moved from %s to %s during the last reads, so the merge would "
+                  "hold what no check ran on:\n%s\nmerge main into %s, land its new head"
+                  % (ours, now or "nothing", log, branch))
 
 
 def stands_untracked(repo, path, tracked):
@@ -367,14 +382,14 @@ def require_merge_text(message, branch):
         raise Red("merge-file", note="line 2 of %s is not blank: %s" % (message, lines[1]))
 
 
-def scan_message(repo, tree, full, merged, message):
+def scan_message(repo, tree, full, ours, merged, message):
     """The merge's message through the worktree's hygiene, when its --help names --commits: the
     merge commit made as a dangling object, scanned as the range <sha>..<that commit>. It writes
     one object and no ref, and touches neither main's index nor its files."""
     script = os.path.join(tree, "scripts", "hygiene")
     if not os.path.lexists(script) or not takes_commits(tree, script):
         return
-    code, commit = read(repo, "commit-tree", merged, "-p", MAIN, "-p", full, "-F", message)
+    code, commit = read(repo, "commit-tree", merged, "-p", ours, "-p", full, "-F", message)
     if code != 0 or not commit:
         raise Red("merge-file", note="git commit-tree exit %d: no merge commit to scan" % code)
     span = "%s..%s" % (full, commit)
@@ -541,9 +556,9 @@ def land(repo, branch, sha, message):
     at("sha")
     full = require_sha(repo, branch, sha)
     at("main")
-    merged = require_no_overlap(repo, full, branch)
+    ours, merged = require_no_overlap(repo, full, branch)
     at("merge-file")
-    scan_message(repo, tree, full, merged, message)
+    scan_message(repo, tree, full, ours, merged, message)
 
     at("check")
     note("check: make check in " + tree)
@@ -572,12 +587,14 @@ def land(repo, branch, sha, message):
     require_sha(repo, branch, sha)
     at("main")
     require_main(repo)
-    merged = require_no_overlap(repo, full, branch)
+    ours, merged = require_no_overlap(repo, full, branch)
     at("worktree")
     tree = require_worktree(worktrees(repo), branch)
     at("merge-file")
     require_merge_text(message, branch)
-    scan_message(repo, tree, full, merged, message)
+    scan_message(repo, tree, full, ours, merged, message)
+    at("sha")
+    require_main_unmoved(repo, ours, full, branch)
     at("merge")
     note("merge: %s into main in %s" % (full, repo))
     merge(repo, full, message)
