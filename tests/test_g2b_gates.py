@@ -1090,3 +1090,14 @@ def test_r4_a_line_past_the_bound_is_denied_by_the_loose_reading(box, monkeypatc
 def test_r4_the_redirect_digits_cannot_backtrack():
     assert instructionguard._LOOSE_REDIR.pattern.startswith(r"(?<!\d)\d*")
     assert instructionguard.loose_targets("echo 12>x 3>&1") == [("write", "x")]
+
+
+# ---- review 1, R5 (F5): the loose reading takes `>&` before a word ------------------------
+
+def test_r5_f5_the_loose_reading_takes_a_dup_redirects_word(box):
+    command = "echo a # don't\ncd sub#c\necho x >&CLAUDE.md"
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", LOOSE_REASON.format(box.repo / "CLAUDE.md"))
+    assert instructionguard.loose_targets("echo x >&CLAUDE.md; echo y >& b") == [
+        ("write", "CLAUDE.md"), ("write", "b")]
+    assert instructionguard.loose_targets("echo x >&2; echo y >&-; echo z >& 1; a 2>&1") == []

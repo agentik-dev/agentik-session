@@ -20,7 +20,8 @@
 - [x] build 3 R2 (F1): `then`, `do`, `else`, `elif`, `if`, `while`, `until`, `{`, `!` are skipped only as a command's first words, in both readings; after an assignment or a wrapper each is a word; F1's 12 lines denied by the strict reading, neither reading follows their `cd`
 - [x] build 3 R3 (F2): a strict word stands for a loose target only whole: a word with a blank stands for the loose targets only where one command lists every piece of it in order, each once (the reviewer's "never by its pieces" alone denied g6's ordinary `sed -i '' 's/the CLAUDE.md file/x/' notes.md`); F2's four lines denied by the strict reading (R1), review 1's lead 2 (two lines, no R5 word) now denied by the loose reading
 - [x] build 3 R4 (F4): each `cd` of the loose reading resolved once, each loose target once, targets left times folders at most 4,096, past it the line is denied with the loose reading's refusal (naming its first target); `(?<!\d)\d*`; F4's shapes: 6 KB 7.76 s to 0.02 s, 20 KB of digits 3.78 s to 0.03 s, the `if` line 8.70 s to 0.01 s (denied), 100 KB over 25 s to 0.18 s
-- [ ] build 3 R5 (F5), then the records (§3e, NICE)
+- [x] build 3 R5 (F5): `_LOOSE_W` takes `>&` before a word that is not a digit or `-`, and `_LOOSE_SEP` no longer splits at the `&` of `>&` or `<&`; F5's line denied by the loose reading
+- [ ] build 3 checks (the sweep, the fuzz, seven, the replay), then the records (§3e, NICE)
 - [ ] phase 2, on the coordinator's word
 
 ## Handover

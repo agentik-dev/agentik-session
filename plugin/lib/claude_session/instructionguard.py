@@ -816,8 +816,9 @@ def _others(command: str, cwd, env, depth: int, other: list, found: list, stood:
 
 # ---- g6: the loose reading, a second reading that no quote, comment or heredoc can hide ----
 
-_LOOSE_SEP = re.compile(r"(?<!\\)[;&|\n(){}`]")
-_LOOSE_W = re.compile(r"(?<![-=])(?:&>>|&>|>>|>\||>)[ \t]*([^\s;&|<>(){}`]+)")
+_LOOSE_SEP = re.compile(r"(?<!\\)(?:[;|\n(){}`]|(?<![<>])&)")   # r1 R5: no split in `>&`
+_LOOSE_W = re.compile(r"(?<![-=])(?:&>>|&>|>>|>\||>&(?=[ \t]*[^\s\d-])|>)[ \t]*"
+                      r"([^\s;&|<>(){}`]+)")         # r1 R5: `>&` before a word
 _LOOSE_REDIR = re.compile(r"(?<!\d)\d*(?:&>>|&>|>>|>\||>&|<<<|<<-?|<&|<>|>|<)[ \t]*[^\s;&|<>(){}`]*")
 _LOOSE_COMMENT = re.compile(r"(?:^|[ \t])#")
 _LOOSE_SKIP = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "eval"})
