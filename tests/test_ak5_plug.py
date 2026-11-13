@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import cli, gate, hooks, install, resolver
+from claude_session import cli, doctor, gate, hooks, install, resolver
 
 ROOT = Path(__file__).resolve().parents[1]
 S = ROOT / "plugin" / "bin" / "agentik-session"
@@ -97,8 +97,9 @@ def test_describe_json(box):
     assert "hook" not in names and names[:3] == ["start", "config", "doctor"]
     assert "describe" in names
     assert {"claude", "git"} <= {n["name"] for n in d["needs"] if n["kind"] == "program"}
-    assert {n["name"] for n in d["needs"] if n["kind"] == "plugin"} == \
-        {"decisions@agentik", "respeak@agentik", "relay@agentik"}
+    plugins = [n for n in d["needs"] if n["kind"] == "plugin"]
+    assert len(plugins) == 3 and all(n["optional"] and n["why"] for n in plugins)
+    assert [n["name"] for n in plugins] == [f"{x['name']}@agentik" for x in doctor.SIBLINGS]
     assert took < 1.0
 
 

@@ -65,7 +65,8 @@ SUMMARIES = {
     "plugins": "The plugins `start` loads into the session.",
     "notes": "The words `start` adds to the session's system prompt.",
     "builders.model": "Not read by this tool: the model a sitting's builders are meant to run on.",
-    "builders.max_concurrent": "Not read by this tool: how many builders a sitting may run at once.",
+    "builders.max_concurrent": "Not read by this tool: how many builders a sitting may run at "
+                               "once.",
     "push": "Read by the relay's guard: `never`, or the owner's quoted words that allow a push.",
     "device": "Read by the relay's guard: `never`, or the owner's quoted words that allow a device "
               "write.",
@@ -197,11 +198,11 @@ class _Files:
         self.shipped = str(resolver.SHIPPED)
         self.user = str(resolver._user_file(env))
         rdir = resolver.repo_dir(cwd)
-        self.repo, self.local = str(rdir / "config.yaml"), str(rdir / "config.local.yaml")
+        self.repo, self.local_file = str(rdir / "config.yaml"), str(rdir / "config.local.yaml")
         self.overlay = (str(resolver.state_dir(env) / "overlays" / f"{sid}.json")
                         if sid else None)
         self.text, self.doc = {}, {}
-        for p in (self.shipped, self.user, self.repo, self.local):
+        for p in (self.shipped, self.user, self.repo, self.local_file):
             try:
                 self.text[p] = Path(p).read_text(encoding="utf-8")
                 self.doc[p] = _dict(load(self.text[p]))
@@ -240,7 +241,7 @@ class _Files:
                  "travels": True},
                 {"name": "repo", "path": self.repo, "present": self.present(self.repo),
                  "travels": False},
-                {"name": "local", "path": self.local, "present": self.present(self.local),
+                {"name": "local", "path": self.local_file, "present": self.present(self.local_file),
                  "travels": False},
                 {"name": "launch", "path": None, "present": bool(self.launch), "travels": False},
                 {"name": "session", "path": self.overlay, "present": self.present(self.overlay),
@@ -251,13 +252,13 @@ class _Files:
 
     # -- the session section's keys, R4's order --
     def session_rows(self, key: tuple) -> list:
-        us, rp, lc = self.doc[self.user], self.doc[self.repo], self.doc[self.local]
+        us, rp, lc = self.doc[self.user], self.doc[self.repo], self.doc[self.local_file]
         docs = [("default", self.sd, self.shipped, ("defaults",)),
                 ("user-defaults", self.ud, self.user, ("defaults",)),
                 ("profile", self.sp, self.shipped, ("profiles", self.name)),
                 ("user", self.up, self.user, ("profiles", self.name)),
                 ("repo", _dict(rp.get("session")), self.repo, ("session",)),
-                ("local", _dict(lc.get("session")), self.local, ("session",))]
+                ("local", _dict(lc.get("session")), self.local_file, ("session",))]
         if key == ("profile",):
             return self._profile_rows(us, rp, lc)
         out = []
@@ -279,7 +280,7 @@ class _Files:
         if isinstance(self.ud.get("profile"), str) and self.ud["profile"]:
             out.append(self._row("user-defaults", self.ud["profile"], self.user,
                                  ("defaults", "profile")))
-        for layer, doc, path in (("repo", rp, self.repo), ("local", lc, self.local)):
+        for layer, doc, path in (("repo", rp, self.repo), ("local", lc, self.local_file)):
             v = _dict(doc.get("session")).get("profile")
             if v:
                 out.append(self._row(layer, v, path, ("session", "profile")))
@@ -291,7 +292,7 @@ class _Files:
     def ceiling_rows(self, field: str) -> list:
         k = self.ckey
         keys = ("ceilings",) + ((k,) if k != "ceilings" else ())
-        rp, lc = self.doc[self.repo], self.doc[self.local]
+        rp, lc = self.doc[self.repo], self.doc[self.local_file]
         out = []
         for layer, doc, path, pre, ks in (
                 ("default", self.sd, self.shipped, ("defaults",), (k,)),
@@ -299,7 +300,7 @@ class _Files:
                 ("user-defaults", self.ud, self.user, ("defaults",), keys),
                 ("user", self.up, self.user, ("profiles", self.name), keys),
                 ("repo", _dict(rp.get("session")), self.repo, ("session",), keys),
-                ("local", _dict(lc.get("session")), self.local, ("session",), keys),
+                ("local", _dict(lc.get("session")), self.local_file, ("session",), keys),
                 ("session", self.ov, self.overlay, None, keys)):
             got = None
             for ck in ks:
@@ -336,7 +337,7 @@ class _Files:
         return None
 
     def tier_rows(self, role, field, now) -> list:
-        us, rp, lc = self.doc[self.user], self.doc[self.repo], self.doc[self.local]
+        us, rp, lc = self.doc[self.user], self.doc[self.repo], self.doc[self.local_file]
         out = []
 
         def add(layer, *cands):
@@ -350,7 +351,7 @@ class _Files:
                                        ("profiles", self.name)))
         add("user", self._tier_body(self.up, role, field, self.user, ("profiles", self.name)),
             self._tier_body({"tiers": us.get("tiers")}, role, field, self.user, ()))
-        for layer, doc, path in (("repo", rp, self.repo), ("local", lc, self.local)):
+        for layer, doc, path in (("repo", rp, self.repo), ("local", lc, self.local_file)):
             s = _dict(doc.get("session"))
             add(layer, self._tier_body({"subagents": s.get("subagents")}, role, field, path,
                                        ("session",)),
@@ -437,7 +438,7 @@ def _change(f, key, path, layer, value) -> tuple[dict, bool]:
                 "note": "It changes no running session; without --save the word is this "
                         "session's alone."}, False
     file = {"user-defaults": f.user, "user": f.user, "repo": f.repo,
-            "local": f.local}.get(layer, f.user)
+            "local": f.local_file}.get(layer, f.user)
     if key.startswith("gate."):
         file, where = f.user, ("gate",) + path
     elif key.startswith("tiers."):
@@ -445,7 +446,7 @@ def _change(f, key, path, layer, value) -> tuple[dict, bool]:
     else:
         if path[0] == "ceilings":
             path = (f.ckey,) + path[1:]
-        where = (("session",) if file in (f.repo, f.local) else ("profiles", f.name)) + path
+        where = (("session",) if file in (f.repo, f.local_file) else ("profiles", f.name)) + path
     note = None
     if key in sessionconfig.IN_SESSION_EQUIVALENT:
         cmd = sessionconfig.IN_SESSION_EQUIVALENT[key].format(value="VALUE")
@@ -520,7 +521,7 @@ def _settings(f) -> list:
 
 def _warnings(f) -> list:
     out, seen = [], set()
-    by = {"config.yaml": f.repo, "config.local.yaml": f.local, "overlay": f.overlay}
+    by = {"config.yaml": f.repo, "config.local.yaml": f.local_file, "overlay": f.overlay}
     for u in f.r.unknown:
         where, sep, rest = u.partition(": ")
         if not sep or where == "launch":
