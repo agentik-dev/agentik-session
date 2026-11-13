@@ -20,7 +20,7 @@
 - [x] review 1's fix, tests first: F1 (the `add -N` span), the moved line asserted, git's reason on stdout; red at 2a9fa14 (4 failed)
 - [x] review 1's fix: `_take` (index.lock, out of `_put_back`), `_intent`, `_unadd` and `_tell_moved` (commit.py), git's stdout reason on stderr; the seven named test files 328 green under `.venv` and `.venv-floor`
 - [x] review 1's records: the packet's section 7 (F1, the ruling, the `checkout --` sentence); NICE n169 to n173, renumbered n192 to n196 in phase 2, for leads 1 to 3, 5 to 7 and 10 (4, 9 and 11 built; 8 needs no change)
-- [ ] phase 2: main merged, the version, the gate's `make check` once
+- [x] phase 2: main 807013d merged (dda80cf; NICE n192 to n196), the version alpha.100 and 3958 tests (this commit); the gate's `make check` is the landing's
 
 ## Handover
 - Choice: a modified tracked charter passes `--respawn` with `--commit` only when the line names it (or a directory over it); before, `-c` took it by its sweep.
