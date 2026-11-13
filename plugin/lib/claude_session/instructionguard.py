@@ -444,13 +444,14 @@ def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
                 continue
             if c == "#" and start and opened[-1:] != ["${"]:
                 nl = text.find("\n", i)
-                k = text.find("`", i) if tick else -1     # r3 F4: escaped or not
-                if 0 <= k and (nl < 0 or k < nl):
+                nl = n if nl < 0 else nl
+                k = text.find("`", i, nl) if tick else -1    # r3 F4: escaped or not; F7: on
+                if k >= 0:                                    # the comment's line alone
                     while text[k - 1] == "\\":          # an escaped one: read from its
                         k -= 1                            # backslashes, so `tick` holds
                     i = k
                 else:
-                    i = nl if nl >= 0 else n
+                    i = nl
                 continue
             if c in "'\"":
                 quote = c

@@ -17,7 +17,7 @@
 - [x] 1d R4 (R3-F4): a comment in backticks ends at the first backtick, escaped or not, read again from the backslashes before it; F4 without `; echo b`: `[]` at f1f012e, `[(write, None)]` after R4
 - [x] 1d R5 (R3-F5): `_KEY` takes a backslash-newline after `case`
 - [x] 1d R6 (R3-F6 a): backticks stripped from the ends of a command's words and its redirects' (an empty one dropped), but a word that would become `cd`, `pushd` or `popd` keeps them (R8: `\`cd docs\`` moves no folder); F4 without `; echo b`: the write after R6
-- [ ] 1d R7 (R3-F7): a comment's end searched to its newline only
+- [x] 1d R7 (R3-F7): a comment's backtick searched to its newline only; 60 KB in one backtick pair 0.012 s (.venv), 0.017 s (floor); f1f012e 3.6 s
 - [ ] 1d: packet §3c, this record; three guard files green under `.venv`, `.venv-floor`
 - [ ] phase 2, on the coordinator's word, after g6's loose reading on this branch
 
