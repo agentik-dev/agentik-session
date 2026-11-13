@@ -195,3 +195,19 @@ def test_pl1_3_status_with_the_mix_off_says_no_mix(metered):
     write_band(owner_state(mix=False))
     tail = run("status")[1][len(plain):]
     assert "mix:" not in tail and tail.endswith("admission mode: observe\n")
+
+
+# ---- acceptance 4: the pacing text names `agentik session status` for the next family ----
+
+def test_pl1_4_rules_name_status_for_the_next_family(monkeypatch):
+    from claude_session import resolver
+    p = resolver._user_file(os.environ)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("defaults:\n  admission:\n    mix:\n      shares:\n        fable: 3\n        opus: 1\n")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    rc, out, _ = run("rules")
+    text = " ".join(out.split())
+    assert rc == 0 and "spend mix" in text
+    assert "the family `agentik session status` names (its `mix:` line's `next`)" in text
+    assert "band line's `next`" not in text
+    assert "`reset now` is the owner's Fable reset in Settings" in text      # no other rule moved
