@@ -13,9 +13,11 @@ import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
-               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store)
+               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store,
+               tiers)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -69,12 +71,36 @@ def _positive_int(v: str) -> int:
     return int(v)
 
 
+def _on_line(args, flag: str) -> bool:
+    """claude's arguments name `flag` (`--model x` or `--model=x`)."""
+    return any(str(a) == flag or str(a).startswith(flag + "=") for a in args or ())
+
+
+def profile_flags(model, effort, args) -> list:
+    """mt1 R7: the profile's `--model` and `--effort` for a start whose claude arguments
+    name no `--model`; one on the line wins, and with it the profile passes neither."""
+    if _on_line(args, "--model"):
+        return []
+    out = ["--model", model] if model else []
+    if effort and not _on_line(args, "--effort"):
+        out += ["--effort", effort]
+    return out
+
+
 def cmd_start(args) -> int:
-    configs = sessionconfig.load_configs()
-    cfg = configs.get(args.config)
+    try:
+        _, known = resolver.load_profiles(os.environ)
+        cfg = sessionconfig.from_profile(args.config, os.getcwd(), os.environ) \
+            if args.config in known else None
+    except resolver.ResolveError as e:
+        _die(str(e), 2)
     if not cfg:
-        _die(f"unknown configuration {args.config!r}. Known: "
-             f"{', '.join(sorted(configs))}  (agentik session config list)")
+        _die(f"unknown profile {args.config!r}. Known: "
+             f"{', '.join(known)}  (agentik session profile)")
+    if _on_line(args.claude_args, "--model"):           # mt1 R7: the line's model wins
+        cfg.model = cfg.effort = None
+    elif _on_line(args.claude_args, "--effort"):
+        cfg.effort = None
     here = launch.depth(os.environ)
     if here is None:
         _die(f"{launch.DEPTH_VAR}={os.environ[launch.DEPTH_VAR]!r} is not a depth; "
@@ -374,9 +400,12 @@ def cmd_rules(args) -> int:
     section = _session_section(cwd)
     fsid = sessionconfig.session_id()
     seat = admission._session_config(os.environ, fsid) if fsid else {}   # F4: one seat
-    word = fill.line(sessionconfig.load_overlay(), seat, os.environ,
-                     datetime.now(timezone.utc))                 # packet FW1b R4
-    sys.stdout.write(rules.render(section, life, fill=word))
+    now = datetime.now(timezone.utc)
+    ov = sessionconfig.load_overlay()
+    word = fill.line(ov, seat, os.environ, now)                  # packet FW1b R4
+    words = tiers.parts(ov, now)                                 # mt1 R4: while in force
+    sys.stdout.write(rules.render(section, life, fill=word)
+                     + "".join(w + "\n" for w in words))
     return 0
 
 
@@ -523,9 +552,10 @@ def cmd_profile(args) -> int:
     if not args.name:
         for name, body in profiles.items():
             eff = {**defaults, **(body or {})}
+            build = tiers.merge(defaults.get("tiers") or {}, (body or {}).get("tiers"))
             print(f"{name:<17} {str(eff.get('model')):<14} {str(eff.get('effort')):<7} "
-                  f"sub={str(eff.get('subagents')):<14} {str(eff.get('posture')):<7} "
-                  f"{eff.get('description') or ''}")
+                  f"build={str((build.get('build') or {}).get('model')):<14} "
+                  f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
         return 0
     if args.name not in profiles:
         _die(f"unknown profile {args.name!r}. Known: {', '.join(profiles)}")
@@ -534,6 +564,9 @@ def cmd_profile(args) -> int:
                              overlay={})
     except resolver.ResolveError as e:
         _die(str(e), 2)
+    print(f"# tiers ({args.name}, resolved here): role, model, effort")   # mt1 R3
+    for line in tiers.render(r.sections["session"]["tiers"]):
+        print("#" + line[1:])
     sys.stdout.write(dump({k: v for k, v in r.sections.items()}))
     return 0
 
@@ -586,34 +619,11 @@ def cmd_config(args) -> int:
             print(f"\nin force for THIS session only: {', '.join(sorted(live_ov))}")
         return 0
 
-    if args.action == "delete":
-        if not args.name:
-            _die("which configuration?")
-        if args.name not in configs:
-            _die(f"unknown configuration {args.name!r}")
-        del configs[args.name]
-        sessionconfig.save_configs(configs)
-        print(f"deleted {args.name}"
-              + (" (a shipped default of that name will reappear)"
-                 if args.name in {c.name for c in sessionconfig.DEFAULTS} else ""))
-        return 0
+    if args.action in ("delete", "new"):         # mt1 R2: the profiles are the one table
+        _die(f"config {args.action}: the configurations are the profiles now; add or change "
+             f"one under `profiles:` in {resolver._user_file(os.environ)}, or name one in a "
+             "repo's .claude/agentik/config.yaml (session: {profile: <name>})", 2)
 
-    if args.action == "new":
-        if not args.name:
-            _die("name the new configuration")
-        base = configs.get(args.From) if args.From else None
-        if args.From and not base:
-            _die(f"unknown configuration {args.From!r} to copy from")
-        from dataclasses import replace as _replace
-        cfg = _replace(base, name=args.name) if base else SessionConfig(name=args.name)
-        if args.description:
-            cfg.description = args.description
-        configs[args.name] = cfg
-        sessionconfig.save_configs(configs)
-        print(f"created {args.name}"
-              + (f" from {args.From}" if args.From else "")
-              + f"; adjust it with `agentik session set <key> <value> --config {args.name}`")
-        return 0
     return 0
 
 
@@ -739,12 +749,148 @@ def _fill_failed(word, e, sid, home):
          + ("; ".join(stands) if stands else "nothing stands, fill: off"), 2)
 
 
+def _until(raw):
+    """mt1 R4: `--until`'s zoned time, ahead of now, else a refusal; None when not given."""
+    from datetime import datetime, timezone
+    if raw is None:
+        return None
+    t = tiers.when(raw)
+    if t is None:
+        _die("--until takes an ISO time with its zone, as 2026-11-10T18:00-08:00", 2)
+    if t <= datetime.now(timezone.utc):
+        _die(f"--until names a time that has passed ({t.isoformat(timespec='seconds')})")
+    return t.isoformat(timespec="seconds")
+
+
+def _family_or_die(value: str) -> None:
+    if tiers.family(value) is None:
+        _die(f"{value[:40]!r} names no model family ({', '.join(tiers.ORDER)})", 2)
+
+
+def _layer_file(where: str) -> Path:
+    if where == "repo":
+        return resolver.repo_dir(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()) \
+            / "config.yaml"
+    return resolver._user_file(os.environ)
+
+
+def _save_tier(path: Path, role: str, model: str) -> None:
+    """mt1 R4's `--save`: the file's top-level `tiers:` block gains or changes `role`; every
+    other line, its comments among them, stays as it was."""
+    from .yamlsubset import load
+    text = path.read_text() if path.exists() else ""
+    try:
+        doc = load(text) if text.strip() else {}
+    except ValueError as e:
+        _die(f"{path}: {e}; nothing written", 2)
+    cur = doc.get("tiers") if isinstance(doc, dict) and isinstance(doc.get("tiers"), dict) \
+        else {}
+    table = tiers.merge(cur, {role: {"model": model}})
+    block = ["tiers:"] + [
+        f"  {r}: {{" + ", ".join(f"{k}: {v}" for k, v in table[r].items()) + "}"
+        for r in tiers.ROLES if r in table]
+    lines, out, skip = text.splitlines(), [], False
+    for ln in lines:
+        if skip and (not ln.strip() or ln[:1] in (" ", "\t")):
+            continue
+        skip = False
+        if ln.rstrip() == "tiers:" or ln.startswith("tiers:"):
+            out += block
+            block, skip = [], True
+            continue
+        out.append(ln)
+    out += block
+    new = "\n".join(out) + "\n"
+    try:
+        check = load(new)
+        tiers.merge({}, check.get("tiers"))
+    except ValueError as e:
+        _die(f"{path}: the edit would not parse ({e}); nothing written", 2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new)
+
+
+def _set_tier(args, key: str) -> int:
+    """mt1 R4: `set tier.<role> <model|off> [--until <zoned time>] [--save [user|repo]]`."""
+    from datetime import datetime, timezone
+    role = key.split(".", 1)[1]
+    if role not in tiers.ROLES:
+        _die(f"no tier {role!r}; the tiers are {', '.join(tiers.ROLES)}", 2)
+    if args.config:
+        _die("tier.<role> takes no --config: it is this session's, or with --save a layer's", 2)
+    if args.save:
+        if args.until is not None or args.value == "off":
+            _die("--save writes a layer file, which keeps no end and no `off`", 2)
+        _family_or_die(args.value)
+        path = _layer_file(args.save)
+        _save_tier(path, role, args.value)
+        print(f"tiers: {role} {args.value} (saved in {path}; the next session reads it)")
+        return 0
+    sid = sessionconfig.session_id()
+    if not sid:
+        _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is unset), so "
+             "there is no session to scope this to; --save writes a layer file")
+    cur = sessionconfig.load_overlay(sid).get(tiers.KEY)
+    cur = dict(cur) if isinstance(cur, dict) else {}
+    if args.value == "off":
+        if args.until is not None:
+            _die("--until goes with a model, never with off", 2)
+        cur.pop(role, None)
+    else:
+        _family_or_die(args.value)
+        cur[role] = {"model": args.value, "until": _until(args.until)}
+    sessionconfig.save_overlay({tiers.KEY: cur}, sid)
+    now = datetime.now(timezone.utc)
+    print("\n".join(tiers.parts({tiers.KEY: cur}, now)) or f"tiers: {role} as the profile")
+    return 0
+
+
+def _set_cap(args) -> int:
+    """mt1 R4: `set cap <model|off> [--until <zoned time>]`, this session's alone and never
+    saved; under a launcher a cap with an end is kept in the chain home for the successor."""
+    from datetime import datetime, timezone
+    from . import chain
+    if args.save or args.config:
+        _die("cap is this session's alone: --save and --config are refused, and no "
+             "profile or config layer keeps a cap", 2)
+    sid = sessionconfig.session_id()
+    if not sid:
+        _die("not inside a Claude Code session ($CLAUDE_CODE_SESSION_ID is unset), so "
+             "there is no session to scope a cap to")
+    name = _chain_name()
+    home = chain.home(resolver.state_dir(os.environ), name) if name else None
+    cur = sessionconfig.load_overlay(sid)
+    if args.value == "off":
+        if args.until is not None:
+            _die("--until goes with a model, never with off", 2)
+        if home is not None:
+            tiers.keep(home, sid, None)
+        cur.pop(tiers.CAP, None)
+        cur.pop("_updated_at", None)
+        sessionconfig.clear_overlay(sid)
+        sessionconfig.save_overlay(cur, sid)
+        print("cap: off")
+        return 0
+    _family_or_die(args.value)
+    v = {"model": args.value, "until": _until(args.until)}
+    sessionconfig.save_overlay({tiers.CAP: v}, sid)
+    if home is not None:
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tiers.keep(home, sid, v if v["until"] else None)
+    print(tiers.parts({tiers.CAP: v}, datetime.now(timezone.utc))[0])
+    return 0
+
+
 def cmd_set(args) -> int:
     key = args.key.replace("-", "_")
     if key == "fill":                       # packet FW1b R1: ahead of the field check
         return _set_fill(args)
+    if key == "cap":                        # mt1 R4
+        return _set_cap(args)
+    if key.startswith("tier."):
+        return _set_tier(args, key)
     if args.until is not None:
-        _die("--until goes with fill", 2)
+        _die("--until goes with fill, cap or tier.<role>", 2)
     # `set checkpoint 8` is the common case: one number for every zone.
     if key == "checkpoint" and args.value.isdigit():
         n = int(args.value)
@@ -769,18 +915,10 @@ def cmd_set(args) -> int:
              "change always applies to the session you are in "
              f"(currently '{sessionconfig.get_active() or 'balanced'}').")
 
-    if args.save:
-        cfg = configs.get(target)
-        if not cfg:
-            _die(f"unknown configuration {target!r}")
-        setattr(cfg, key, value)
-        try:
-            cfg.validate()
-        except ValueError as e:
-            _die(str(e))
-        configs[target] = cfg
-        sessionconfig.save_configs(configs)
-        print(f"{target}.{key} = {_fmt_value(value)}  (saved)")
+    if args.save:                           # mt1 R4: no configs.json is written
+        _die(f"--save keeps a tier alone (set tier.<role> <model> --save); {key} is a "
+             f"profile's field: change it under `profiles: {target}:` in "
+             f"{resolver._user_file(os.environ)}", 2)
     else:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
@@ -1095,6 +1233,22 @@ def _respawn_flag(key: str, raw: str) -> int:
     return int(raw)
 
 
+def run_args(cwd, env, claude_args) -> list:
+    """mt1 R7: the arguments every start of a chain sends: the resolved profile's `--model`
+    and `--effort` ahead of the owner's when theirs name no `--model` (on the seat lane
+    only: `run` starts claude itself, never the local lane's dispatcher)."""
+    from . import chain
+    try:
+        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
+                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+    except resolver.ResolveError as e:
+        _die(f"agentik-session run: {e}", 2)
+    s = r.sections["session"]
+    if (s.get("lane") or "seat") != "seat":
+        return list(claude_args)
+    return profile_flags(s.get("model"), s.get("effort"), claude_args) + list(claude_args)
+
+
 def cmd_run(args) -> int:
     """`agentik session run`: start claude, and restart it at each confirmed RESPAWN
     close (respawn-r1 §3). Every refusal before the first start exits 2 with one line."""
@@ -1119,19 +1273,20 @@ def cmd_run(args) -> int:
         _die(f"agentik-session run: {e}", 2)
     warnings = []
     gap = chain.prompt_gap(args.claude_args)
-    if gap is not None:                 # S31: warned, never refused; it may be meant
+    if gap is not None:                 # mt1 R7: refused (S31 warned): each restart would idle
         why = (f" ({gap} reads every argument after it as its value: write {gap}=<value>)"
                if gap else "")
-        warnings.append(f"warning: claude's arguments after -- carry no first prompt{why}, "
-                        "so every restart opens an idle session that waits for a person; "
-                        'give one: agentik session run -- "<first prompt>"')
-    minutes = chain.long_loop(args.claude_args) if gap is None else None   # no prompt, no /loop
+        _die(f"agentik-session run: claude's arguments carry no first prompt{why}, so every "
+             'restart would open an empty prompt; give one: agentik session run -- '
+             '"<first prompt>"', 2)
+    claude_args = run_args(cwd, env, args.claude_args)
+    minutes = chain.long_loop(args.claude_args)
     if minutes is not None:
         warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; a "
                         "/loop of 60 minutes or more asks its question (cloud or session) "
                         "before it arms, so every restarted sitting waits there: give an "
                         "interval under 60m, or none")
-    return chain.Chain(name, list(args.claude_args), resolver.state_dir(env),
+    return chain.Chain(name, claude_args, resolver.state_dir(env),
                        chain.Effects(), lambda: chain.guards(cwd, env, flags),
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
@@ -1418,11 +1573,12 @@ def build_parser() -> argparse.ArgumentParser:
     se = sub.add_parser("set", help="adjust a setting for this session only")
     se.add_argument("key")
     se.add_argument("value")
-    se.add_argument("--save", action="store_true",
-                    help="persist it to the configuration instead")
+    se.add_argument("--save", nargs="?", const="user", choices=["user", "repo"],
+                    help="with tier.<role>: write it to the user's profiles.yaml (the "
+                         "default) or the repo's .claude/agentik/config.yaml")
     se.add_argument("--config", metavar="NAME")
     se.add_argument("--until", metavar="TIME",
-                    help="with fill reset or fill opus, never with fill off: the zoned "
+                    help="with fill reset or fill opus, cap or tier.<role>: the zoned "
                          "ISO time the word ends at, as 2026-11-10T18:00-08:00")
     se.set_defaults(func=cmd_set)
 
