@@ -21,7 +21,8 @@
 - [x] build 4 (review 2's fix, packet §3f): R1 strict bound (65,536 judgements, 4,096 paths; a `-c` line split once); R2 loose skips a reserved word anywhere, strict lets `time -p` in; R3 split at an escaped `>&`/`<&`; R4 one credit a word and command; R5 a run keyed by the word's path; 572 guard tests green, both venvs
 - [x] build 4 checks vs eight commits (6aed3c5 too): hand lines and sweeps REGRESS 0; fuzz 2 x 100k (seeds 93111, 93112) REGRESS 0; loose off vs a0055da 80k: 0 deny to pass; NICE n179 to n185, seven S4 rows to the overflow
 - [x] phase 2 records: main 688bfbf merged; NICE n186 to n190, n174/n175/n183 mended, n113 to n129 to the overflow; packet §3a to §3f to `history/g5-inword-hash-rounds.md`
-- [ ] phase 2: the version commit (alpha.98), this record closed
+- [x] phase 2: version alpha.98, 3909 tests
+- [ ] this record closed
 
 ## Handover
 - Recordlint and doclint, red since db19d51, are green in phase 2.
@@ -31,7 +32,7 @@
 - decide, owner: the coordinator: acceptance 5's bound of 60 against the amendment's (a) and (b), which add 16 (72 in all); consumer: the review and phase 2.
 
 ## Next act
-- Phase 2: the version commit, then this record closed; the landing is the coordinator's.
+- Phase 2: this record closed; the landing is the coordinator's.
 
 ## Exit
 Review 3 closed; phase 2 in flight.
