@@ -46,6 +46,7 @@
 ## 4. Findings that name this row
 
 - None at the cut.
+- Review 1 (the coordinator's ruling; tests `test_review1_*`, each red at `3cd9f28`): F1, a write that failed part-way left `plugin.json` moved with a traceback and exit 1; the new files are staged beside their targets and replaced only once all are staged, an `OSError` unlinks the temps, puts back what was replaced, and is exit 2 `stamp: <file>: <error>`. F2, R5's freshness was asked file by file, so a README fresh against one commit and a source fresh against another got a sidecar; the pair is now fresh against one reference (the sidecar as it stands naming both, or one commit, HEAD or a parent, whose sidecar names both and from which each differs only in its Status line), else `red sidecar` naming each file fresh against none, or the README. L2 rides: `stamp: status version <old> -> <new>` names a Status lines' version move the version line does not. L1 (no own path while HEAD is the merge base) is the ruling as built. L4 to L7 are NICE n191 to n194 (n130, n133, n134 moved to the overflow for the bound).
 
 ## 5. Forbidden reads
 
