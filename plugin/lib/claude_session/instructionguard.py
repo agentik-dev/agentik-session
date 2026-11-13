@@ -818,7 +818,7 @@ def _others(command: str, cwd, env, depth: int, other: list, found: list, stood:
 
 _LOOSE_SEP = re.compile(r"(?<!\\)[;&|\n(){}`]")
 _LOOSE_W = re.compile(r"(?<![-=])(?:&>>|&>|>>|>\||>)[ \t]*([^\s;&|<>(){}`]+)")
-_LOOSE_REDIR = re.compile(r"\d*(?:&>>|&>|>>|>\||>&|<<<|<<-?|<&|<>|>|<)[ \t]*[^\s;&|<>(){}`]*")
+_LOOSE_REDIR = re.compile(r"(?<!\d)\d*(?:&>>|&>|>>|>\||>&|<<<|<<-?|<&|<>|>|<)[ \t]*[^\s;&|<>(){}`]*")
 _LOOSE_COMMENT = re.compile(r"(?:^|[ \t])#")
 _LOOSE_SKIP = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "eval"})
 _LOOSE_HARD = re.compile(r"[(){}`#\\]|<<|(?<![|&<>])[|&](?![|&>])")    # a `cd` past one: no move
@@ -908,18 +908,26 @@ def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
     for kind, path, word, at in found:
         if kind in ("write", "remove") and path is not None and word and len(word.split()) < 2:
             judged[kind, path] = judged.get((kind, path), 0) + 1
-    tried: set = set()
+    owns, left = [cwd], []                # r1 R4: each `cd` resolved once, each target once
     for i, (kind, word, moves, _) in enumerate(loose):
         if i in spent:
             continue
-        own = cwd
-        for c in moves or ():
-            own = _resolve(c, own, env) if c is not None and own else None
+        for c in (moves or ())[len(owns) - 1:]:
+            owns.append(_resolve(c, owns[-1], env) if c is not None and owns[-1] else None)
+        own = owns[len(moves)] if moves is not None else cwd
         key = (kind, _resolve(word, own or cwd, env))
         if key[1] is not None and judged.get(key):
             judged[key] -= 1
             continue
-        for f in dict.fromkeys([cwd, own] + sorted(f for f in stood if f)):
+        left.append((kind, word, own))
+    left = list(dict.fromkeys(left))
+    folders = list(dict.fromkeys([cwd] + sorted(f for f in stood if f)))
+    if len(left) * (len(folders) + 1) > _LOOSE_BOUND:   # a write it cannot afford to read
+        kind, word, own = left[0]
+        return _resolve(word, own or cwd, env) or word
+    tried: set = set()
+    for kind, word, own in left:
+        for f in dict.fromkeys([cwd, own] + folders):
             p = _resolve(word, f, env) if f else None
             if p is None or (kind, p) in tried:
                 continue
@@ -934,6 +942,7 @@ def _loose_gated(command: str, cwd, env, cache: dict, found: list, stood: set):
 
 
 _RUN_CAP = 16                             # r1 R3: a word of more pieces stands for none
+_LOOSE_BOUND = 4096                       # r1 R4: loose targets left times folders, at most
 
 
 def _spent(loose: list, found: list) -> set:

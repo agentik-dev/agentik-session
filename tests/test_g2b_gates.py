@@ -1053,3 +1053,40 @@ def test_r3_the_loose_reading_alone_spends_no_piece_of_a_word(box):
     found = [("write", str(box.repo / "CLAUDE.md"), "CLAUDE.md", str(box.repo))]   # whole: spent
     assert instructionguard._loose_gated("cp a CLAUDE.md", str(box.repo), box.env, {}, found,
                                          set()) is None
+
+
+# ---- review 1, R4 (F4): the loose reading's time is bounded; a line past the bound is denied --
+
+def _units(size):
+    out, n = [], 0
+    while sum(map(len, out)) < size:
+        out.append("(cd d%d; echo '> f%d'); " % (n, n))
+        n += 1
+    return "".join(out)
+
+
+R4_F4 = [_units(6 * 1024), _units(100 * 1024), "echo " + "1" * 20 * 1024 + " > /tmp/x",
+         "if false; then cd sub; fi; " + _units(6 * 1024) + "cp a CLAUDE.md"]
+
+
+@pytest.mark.parametrize("command", R4_F4, ids=["6kb", "100kb", "digits", "if-6kb-cp"])
+def test_r4_f4_each_shape_returns_in_time(box, command):
+    (box.repo / "sub").mkdir()
+    began = time.monotonic()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert time.monotonic() - began < 2.0
+    if command.endswith("CLAUDE.md"):
+        assert _decision(out)[0] == "deny"
+
+
+def test_r4_a_line_past_the_bound_is_denied_by_the_loose_reading(box, monkeypatch):
+    command = "cd a; cd b; echo '> x'; echo '> y'"                 # 2 targets, 4 folders
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}
+    monkeypatch.setattr(instructionguard, "_LOOSE_BOUND", 7)
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", LOOSE_REASON.format(box.repo / "a" / "b" / "x"))
+
+
+def test_r4_the_redirect_digits_cannot_backtrack():
+    assert instructionguard._LOOSE_REDIR.pattern.startswith(r"(?<!\d)\d*")
+    assert instructionguard.loose_targets("echo 12>x 3>&1") == [("write", "x")]
