@@ -65,8 +65,8 @@ Each a case of `tests/test_in2_charter_show.py`, through `cli.main`, in temp rep
 - "Newest" picks by name among every entry, so one that cannot be read (a folder) is `unreadable`; a folder missing or unlistable is `no charter`.
 - `skipped[].repo` is the real path; the text view names folders, the `skipped` lines a last block, names joined by `, `. `--json` is indented 2.
 - A REPO's folder resolves as `check`'s rules do (the session id or `unsaved`, the launch profile); an absolute `--dir` is taken as is.
-- Old tests changed: four of `test_charter.py` (`open`'s text), `test_n33.py`'s `VERB_FIRST` (the denial). NICE n191: the README.
-- Review 1 (fix): F1, `show` reads a regular file of at most 64 KiB opened `O_NONBLOCK`, else `unreadable`; F2, a `charter.dir` not a non-empty string is the default; L2, every Waits part is read, a second warns. The hook denies a writer chained after `show`. L1, L5, L6, L8: NICE n192 to n195.
+- Old tests changed: four of `test_charter.py` (`open`'s text), `test_n33.py`'s `VERB_FIRST` (the denial). NICE n204: the README.
+- Review 1 (fix): F1, `show` reads a regular file of at most 64 KiB opened `O_NONBLOCK`, else `unreadable`; F2, a `charter.dir` not a non-empty string is the default; L2, every Waits part is read, a second warns. The hook denies a writer chained after `show`. L1, L5, L6, L8: NICE n205 to n208.
 
 ## 5. Forbidden reads
 

@@ -16,10 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import cli, doctor, hooks, instructionguard, instructions, resolver
+from claude_session import cli, doctor, hooks, instructionguard, instructions, resolver, shellreader
 from test_doctor import machine  # noqa: F401  (the fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
+# g7: the gate's code is the guard and the reader it imports; each source scan reads both
+GUARD_SRC = [ROOT / "plugin" / "lib" / "claude_session" / f
+             for f in ("instructionguard.py", "shellreader.py")]
 SKILL = "decision" "s:instruct"            # spelled in two pieces for the hygiene scan
 SID = "g2b-sess-0001"
 TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -118,7 +121,7 @@ def test_1_each_edit_tool_on_a_listed_path_denies(box, tool, agent):
 
 
 def test_1_no_answer_is_ask(box):
-    src = (ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py").read_text()
+    src = "".join(p.read_text() for p in GUARD_SRC)
     assert '"ask"' not in src and "'ask'" not in src
     for p in _listed(box) + [box.repo / "notes.md", "relative", ""]:
         for tool in (*TOOLS, "Bash"):
@@ -283,8 +286,8 @@ def test_4_no_call_spawns_or_reads_argv(box, monkeypatch):
     assert _decision(instructionguard.check(_bash("echo >> CLAUDE.md", box.repo),
                                             box.env))[0] == "deny"
     assert instructionguard.check(_payload("Edit", box.repo / "x.py"), box.env) == {}
-    tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py")
-                     .read_text())
+    tree = ast.Module(body=[n for p in GUARD_SRC for n in ast.parse(p.read_text()).body],
+                      type_ignores=[])
     names = {getattr(n, "id", getattr(n, "attr", None)) for n in ast.walk(tree)}
     mods = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
             for a in n.names} | {n.module for n in ast.walk(tree)
@@ -352,8 +355,8 @@ def test_5_no_knob(box, monkeypatch):
     env = dict(box.env, AGENTIK_EDIT_GATES="0", AGENTIK_GUARD="off")
     assert _decision(instructionguard.check(_payload("Edit", box.repo / "CLAUDE.md"),
                                             env))[0] == "deny"
-    tree = ast.parse((ROOT / "plugin" / "lib" / "claude_session" / "instructionguard.py")
-                     .read_text())
+    tree = ast.Module(body=[n for p in GUARD_SRC for n in ast.parse(p.read_text()).body],
+                      type_ignores=[])
     caps = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
             and isinstance(n.value, str) and re.fullmatch(r"[A-Z][A-Z0-9]*(_[A-Z0-9]+)*", n.value)}
     assert caps <= {"HOME", "CLAUDE_CONFIG_DIR"}, caps
@@ -551,7 +554,7 @@ def test_r2_each_repro_denies(box, where, command):
 
 def test_r2_an_unmatched_paren_leaves_the_folder_unknown(box):
     command = "cd sub; ) ; printf x >> ../notes.md"
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == [("write", None)]
+    assert shellreader.bash_targets(command, str(box.repo), box.env) == [("write", None)]
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
     assert [r["decision"] for r in _log(box)] == ["open"]
 
@@ -566,7 +569,7 @@ G5_INWORD = ["echo x#y; cp a CLAUDE.md", "v=${TAG#v}; cp a CLAUDE.md", "echo $#;
 
 @pytest.mark.parametrize("command", G5_INWORD)
 def test_g5_an_inword_or_quoted_hash_hides_no_write(box, command):
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
+    assert shellreader.bash_targets(command, str(box.repo), box.env) == \
         [("write", str(box.repo / "CLAUDE.md"))], command
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
@@ -575,7 +578,7 @@ def test_g5_an_inword_or_quoted_hash_hides_no_write(box, command):
 @pytest.mark.parametrize("command", ["echo x #y; cp a CLAUDE.md", "# cp a CLAUDE.md",
                                      "echo x;#y\ncd docs; cp a CLAUDE.md\n#z"])
 def test_g5_a_comment_stays_one(box, command):
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     assert found == ([("write", str(box.repo / "docs" / "CLAUDE.md"))] if "docs" in command
                      else []), command
 
@@ -585,7 +588,7 @@ def test_g5_a_comment_stays_one(box, command):
     ("echo ${#a[@]} $# x", ["echo", "${#a[@]}", "$#", "x"]),
     ("echo \"x #y\" 'a#b' z", ["echo", "x #y", "a#b", "z"]), ("echo x #y z", ["echo", "x"])])
 def test_g5_the_words_read_back_whole(command, words):
-    assert [w for w, _ in instructionguard._commands(command)] == [words]
+    assert [w for w, _ in shellreader._commands(command)] == [words]
 
 
 # ---- g5 round 1: F1 `$(...)#`, F2 `${` and backticks, F3 a line that stops splitting, F4 ----
@@ -598,7 +601,7 @@ G5_R1_WRITES = ["echo $(echo a)#c" + W, "x=$(date +%s)#tag" + W, "echo $((1+2))#
 
 @pytest.mark.parametrize("command", G5_R1_WRITES)
 def test_g5_r1_a_hash_the_shell_reads_in_a_word_hides_no_write(box, command):
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
+    assert shellreader.bash_targets(command, str(box.repo), box.env) == \
         [("write", str(box.repo / "CLAUDE.md"))], command
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
@@ -606,7 +609,7 @@ def test_g5_r1_a_hash_the_shell_reads_in_a_word_hides_no_write(box, command):
 
 @pytest.mark.parametrize("command", ["(cd x) #c" + W, "(cd x)#c" + W])
 def test_g5_r1_a_hash_after_a_subshells_paren_is_a_comment(box, command):
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == [], command
+    assert shellreader.bash_targets(command, str(box.repo), box.env) == [], command
 
 
 @pytest.mark.parametrize("command", ["cp a CLAUDE.md; echo x#y\\", "cp a CLAUDE.md\necho x#'y"])
@@ -668,7 +671,7 @@ G5_R2_WRITES = [
 
 @pytest.mark.parametrize("command", G5_R2_WRITES)
 def test_g5_r2_a_paren_in_a_brace_or_a_pattern_hides_no_write(box, command):
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     want = ("write", str(box.repo / "CLAUDE.md"))      # a `$(`: bash 3.2's reading may add one
     assert (want in found if "$(" in command else found == [want]), (command, found)
     out = instructionguard.check(_bash(command, box.repo), box.env)
@@ -700,7 +703,7 @@ G5_R2_CLEAN = [(c + W, t) for c, t in [
 @pytest.mark.parametrize("command,targets", G5_R1_CLEAN + G5_R2_CLEAN)
 def test_g5_r1_the_probed_clean_lines_keep_their_result(box, command, targets):
     want = [("write", t if t.startswith("/") else str(box.repo / t)) for t in targets]
-    assert instructionguard.bash_targets(command, str(box.repo), box.env) == want, command
+    assert shellreader.bash_targets(command, str(box.repo), box.env) == want, command
 
 
 # ---- g5 round 3: R3-F1 to F7, the strict reader's six regressions and its timing ----------
@@ -725,7 +728,7 @@ G5_R3_WRITES = [
 
 @pytest.mark.parametrize("command", G5_R3_WRITES)
 def test_g5_r3_a_write_in_backticks_a_brace_or_a_pattern_is_read(box, command):
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     assert ("write", str(box.repo / "CLAUDE.md")) in found, (command, found)
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
@@ -734,7 +737,7 @@ def test_g5_r3_a_write_in_backticks_a_brace_or_a_pattern_is_read(box, command):
 def test_g5_r3_a_comment_in_one_backtick_pair_is_masked_in_linear_time(box):
     command = "x=" + B + "\n" + "# a comment\n" * (60 * 1024 // 12) + B + "; echo x > out.txt"
     began = time.monotonic()
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     assert time.monotonic() - began < 1.0
     assert found == [("write", str(box.repo / "out.txt"))]
 
@@ -767,14 +770,14 @@ G6_STRICT = [
 @pytest.mark.parametrize("command", G6_STRICT)
 def test_g6_r4_to_r6_the_strict_reading_reads_the_write(box, command):
     (box.repo / "sub").mkdir()
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     assert ("write", str(box.repo / "CLAUDE.md")) in found, found
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
 
 
 def test_g6_r6_an_unread_inner_line_marks_the_split(box):
-    found = instructionguard.bash_targets("bash -c \"echo 'x\"; echo y > a.txt", str(box.repo),
+    found = shellreader.bash_targets("bash -c \"echo 'x\"; echo y > a.txt", str(box.repo),
                                           box.env)
     assert found == [("split", None), ("write", str(box.repo / "a.txt"))]
 
@@ -915,7 +918,7 @@ def test_g6_r1_loose_targets_is_pure(monkeypatch, command, targets):
         raise AssertionError("the loose reading opened a file")
     monkeypatch.setattr(os.path, "isdir", boom)
     monkeypatch.setattr(os, "stat", boom)
-    assert instructionguard.loose_targets(command) == targets
+    assert shellreader.loose_targets(command) == targets
 
 
 def test_g6_a_100kb_line_is_read_in_time(box):
@@ -983,8 +986,8 @@ def test_r1_the_folders_are_bounded(box, strict_only):
     assert _denied(box, line)[0]
     assert time.monotonic() - began < 2.0
     st = [(str(box.repo / f"d{i}"), ()) for i in range(40)]
-    order, fa = instructionguard._states([(str(box.repo), ())] + st, 40)
-    assert len(order) == instructionguard._CAP_STATES and order[0] == (str(box.repo), ())
+    order, fa = shellreader._states([(str(box.repo), ())] + st, 40)
+    assert len(order) == shellreader._CAP_STATES and order[0] == (str(box.repo), ())
     assert order[fa] == st[-1]
 
 
@@ -1003,21 +1006,21 @@ def test_r2_f1_a_reserved_word_after_an_assignment_or_a_wrapper_is_a_word(box, c
     (box.repo / "sub").mkdir()
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(_gated_path(box, command))), command
-    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    found = shellreader.bash_targets(command, str(box.repo), box.env)
     assert all(p.startswith(str(box.repo) + os.sep) and "/sub/" not in p and
                not p.startswith("/tmp") for _, p in found), found
     # review 2's R2: the loose reading skips a reserved word wherever its loop meets it, as
     # db19d51 did (an inner line's first word), so it lists the write behind it
     assert any(w.endswith(("CLAUDE.md", "edit-gates")) for _, w, _, _ in
-               instructionguard._loose(command)), command
+               shellreader._loose(command)), command
 
 
 def test_r2_a_reserved_word_first_still_reads_the_cd(box):
     (box.repo / "sub").mkdir()
-    found = instructionguard.bash_targets("then cd sub; cp a CLAUDE.md", str(box.repo), box.env)
+    found = shellreader.bash_targets("then cd sub; cp a CLAUDE.md", str(box.repo), box.env)
     assert found == [("write", str(box.repo / "sub" / "CLAUDE.md")),
                      ("write", str(box.repo / "CLAUDE.md"))]
-    assert [t[:3] for t in instructionguard._loose("x=1 cd sub; cp a b")] == [
+    assert [t[:3] for t in shellreader._loose("x=1 cd sub; cp a b")] == [
         ("write", "b", ("sub",))]
 
 
@@ -1090,8 +1093,8 @@ def test_r4_a_line_past_the_bound_is_denied_by_the_loose_reading(box, monkeypatc
 
 
 def test_r4_the_redirect_digits_cannot_backtrack():
-    assert instructionguard._LOOSE_REDIR.pattern.startswith(r"(?<!\d)\d*")
-    assert instructionguard.loose_targets("echo 12>x 3>&1") == [("write", "x")]
+    assert shellreader._LOOSE_REDIR.pattern.startswith(r"(?<!\d)\d*")
+    assert shellreader.loose_targets("echo 12>x 3>&1") == [("write", "x")]
 
 
 # ---- review 1, R5 (F5): the loose reading takes `>&` before a word ------------------------
@@ -1100,9 +1103,9 @@ def test_r5_f5_the_loose_reading_takes_a_dup_redirects_word(box):
     command = "echo a # don't\ncd sub#c\necho x >&CLAUDE.md"
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", LOOSE_REASON.format(box.repo / "CLAUDE.md"))
-    assert instructionguard.loose_targets("echo x >&CLAUDE.md; echo y >& b") == [
+    assert shellreader.loose_targets("echo x >&CLAUDE.md; echo y >& b") == [
         ("write", "CLAUDE.md"), ("write", "b")]
-    assert instructionguard.loose_targets("echo x >&2; echo y >&-; echo z >& 1; a 2>&1") == []
+    assert shellreader.loose_targets("echo x >&2; echo y >&-; echo z >& 1; a 2>&1") == []
 
 
 # ---- review 2, R1 (F5): the strict reading's product is bounded; a line past it is denied ---
@@ -1148,18 +1151,18 @@ def test_r2_r1_a_line_past_the_strict_bound_is_denied(box, monkeypatch):
     are counted as the reading goes; past `_STRICT_BOUND` the line is denied, never passed."""
     command = "if false; then cd d; fi; bash -c 'echo x > a; echo x > b'"   # 2 states x 2
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
-    monkeypatch.setattr(instructionguard, "_STRICT_BOUND", 3)
+    monkeypatch.setattr(shellreader, "_STRICT_BOUND", 3)
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out)[0] == "deny"
-    with pytest.raises(instructionguard._Bound):
-        instructionguard.bash_targets(command, str(box.repo), box.env)
-    assert not issubclass(instructionguard._Bound, ValueError)   # never the loose reading's
-    monkeypatch.setattr(instructionguard, "_STRICT_BOUND", 4)
+    with pytest.raises(shellreader._Bound):
+        shellreader.bash_targets(command, str(box.repo), box.env)
+    assert not issubclass(shellreader._Bound, ValueError)   # never the loose reading's
+    monkeypatch.setattr(shellreader, "_STRICT_BOUND", 4)
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
     command = "if false; then cd d; fi; bash -c 'echo x > a; echo x > a'"   # 1 path, 2 states
-    monkeypatch.setattr(instructionguard, "_STRICT_READS", 3)          # 4 judgements
+    monkeypatch.setattr(shellreader, "_STRICT_READS", 3)          # 4 judgements
     assert _decision(instructionguard.check(_bash(command, box.repo), box.env))[0] == "deny"
-    monkeypatch.setattr(instructionguard, "_STRICT_READS", 4)
+    monkeypatch.setattr(shellreader, "_STRICT_READS", 4)
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
 
 
@@ -1266,7 +1269,7 @@ def test_r2_r4_f3_a_word_judged_in_two_states_is_one_credit(box, line, where):
 
 def test_r2_r4_one_credit_a_word_and_command(box):
     command = f"if false; then cd sub; fi; : > {box.tmp}/CLAUDE.md"
-    found = instructionguard._strict(command, str(box.repo), box.env, 0, False, True, set())
+    found = shellreader._strict(command, str(box.repo), box.env, 0, False, True, set())
     assert [(k, p) for k, p, _, _ in found] == [("write", str(box.tmp / "CLAUDE.md"))] * 2
     assert [w for _, _, w, _ in found].count(None) == 1      # the second state's: no credit
 

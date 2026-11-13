@@ -45,6 +45,7 @@ KEEP = 14 * 86400
 TAKE = 3
 DONE_SHOWN = 5
 CUT_WALL, CUT_DIED, CUT_LOCK = "wall cut", "runner died", "lock wait cut"
+CUT_CALLER, CALLER_EXIT = "caller cut", 130     # a cancel mark's cut (fw5 R4)
 MORE = "{n} more: agentik session gate status"
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name")
@@ -85,6 +86,30 @@ def entry_dir(root, gid: str) -> Path:
 
 def result_path(root, gid: str) -> Path:
     return entry_dir(root, gid) / "result.json"
+
+
+def cancel_path(root, gid: str) -> Path:
+    """The cancel mark of entry `gid` (fw5 R4): its caller left the wait with no result."""
+    return _queue(root) / f"{gid}.cancel"
+
+
+def cancel(root, gid: str) -> None:
+    """Write `gid`'s cancel mark, atomically. Only the runner acts on it: an entry not started
+    is closed unrun, a running one cut as the wall cuts; both read exit 130, `caller cut`."""
+    _mkdir(_queue(root))
+    _write_private(cancel_path(root, gid), "")
+
+
+def _sweep_marks(root) -> None:
+    """A mark whose entry is gone (its job ended before the mark landed) goes."""
+    try:
+        names = os.listdir(_queue(root))
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".cancel") and ID.match(name[:-7]) \
+                and not (_queue(root) / f"{name[:-7]}.json").exists():
+            _unlink(_queue(root) / name)
 
 
 def _inbox(root, sid: str) -> Path:
@@ -565,6 +590,7 @@ class _Child:
     started: float
     term_at: float | None = None
     kill_at: float | None = None
+    cut: str | None = None              # CUT_WALL or CUT_CALLER, once a cut began
 
 
 @dataclass
@@ -648,6 +674,7 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
               "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key"))}
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
     _unlink(_queue(root) / f"{gid}.json")
+    _unlink(cancel_path(root, gid))
     caller = e.get("caller")
     if isinstance(caller, str) and caller:
         try:
@@ -720,7 +747,9 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             if code is not None:
                 code = code if code >= 0 else 128 - code
                 _signal_group(c.proc.pid, signal.SIGKILL, fx)
-            elif now - c.started >= (c.e["wall"] if isinstance(c.e.get("wall"), int) else WALL):
+            elif cancel_path(root, c.e["id"]).exists() or now - c.started >= (
+                    c.e["wall"] if isinstance(c.e.get("wall"), int) else WALL):
+                c.cut = CUT_CALLER if cancel_path(root, c.e["id"]).exists() else CUT_WALL
                 c.term_at = now
                 if not _signal_group(c.proc.pid, signal.SIGTERM, fx):
                     c.kill_at = now
@@ -729,7 +758,8 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
                 _signal_group(c.proc.pid, signal.SIGKILL, fx)
                 c.kill_at = now
         elif c.proc.poll() is not None or now - c.kill_at >= fx.grace:
-            code, cut = 124, CUT_WALL
+            cut = c.cut or CUT_WALL
+            code = CALLER_EXIT if cut == CUT_CALLER else 124
         if code is not None:
             s.running.remove(c)
             _close(root, fx, cfg, c.e, code, c.started, cut, s)
@@ -784,6 +814,14 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
             _unlink(_queue(root) / f"{e['id']}.json")
+            return True
+    _sweep_marks(root)
+    for e in es:                                      # fw5 R4: a marked entry never starts
+        if cancel_path(root, e["id"]).exists():
+            now = fx.now()
+            s.seen.pop(e["id"], None)
+            _finish(root, fx, cfg, e, CALLER_EXIT, now, now, CUT_CALLER,
+                    note="its caller left the wait; not run")
             return True
     if not es:
         return False

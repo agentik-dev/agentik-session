@@ -30,7 +30,7 @@ Each command wraps one CLI verb.
 | `/session:status` | `/session:status --json` | this session's meter: context, turns, zone |
 | `/session:profile` | `/session:profile builder` | list the profiles, or show one resolved for this repo |
 | `/session:set` | `/session:set posture ask` | change one setting for this session |
-| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only |
+| `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit a.md` | mark a handoff-ready point; `--commit` takes the named paths alone |
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
 | `/session:gate` | `/session:gate --json` | the gate queue: running, queued, the last five done |
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.98`, rendered `2026-11-10`, `3909` tests in the suite.
+Status: version `v2.0.0-alpha.103`, rendered `2026-11-10`, `4015` tests in the suite.
 
 ## Credit
 
