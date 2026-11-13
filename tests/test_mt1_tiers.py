@@ -549,3 +549,92 @@ def test_r2_f4_a_shipped_launch_body_points_at_the_user_s_body(world, monkeypatc
     rc, _, err = run("set", "tier.build", "opus", "--save", "repo")
     uf = resolver._user_file(os.environ)
     assert rc == 1 and f"profiles.local-only.tiers in {uf}" in err, err
+
+
+# ---- round 3 (the refuter's R3-F1 and R3-F4, as the coordinator ruled) -------------------
+
+_R3_WHERE = ("user top", "user defaults", "user profile", "repo", "local")
+
+
+def _r3_write(world, where, inner):
+    """One layer's `lookup:` role holding `inner` (lines at four spaces), the repo at deny;
+    the key the doctor should name, less its field."""
+    def ind(n):
+        return "".join(" " * n + ln + "\n" for ln in inner.splitlines())
+    repo_file(world, "session:\n  posture: deny\n"
+              + ("tiers:\n  lookup:\n" + ind(4) if where == "repo" else ""))
+    uf = str(resolver._user_file(os.environ))
+    if where == "user top":
+        user_file("tiers:\n  lookup:\n" + ind(4))
+        return f"{uf}: tiers.lookup"
+    if where == "user defaults":
+        user_file("defaults:\n  tiers:\n    lookup:\n" + ind(6))
+        return f"{uf}: defaults.tiers.lookup"
+    if where == "user profile":
+        user_file("profiles:\n  frontier:\n    tiers:\n      lookup:\n" + ind(8))
+        return f"{uf}: profiles.frontier.tiers.lookup"
+    rdir = world / ".claude" / "agentik"
+    if where == "local":
+        (rdir / "config.local.yaml").write_text("tiers:\n  lookup:\n" + ind(4))
+        return f"{rdir / 'config.local.yaml'}: tiers.lookup"
+    return f"{rdir / 'config.yaml'}: tiers.lookup"
+
+
+def _r3_holds(world, field, lower, key):
+    """SessionStart resolves with its context, resolved.json keeps the lower layer's
+    `field`, `rules` exits 0, a `tier: lookup` sonnet spawn is denied against haiku, and the
+    doctor's config row names `key` (None: names no lookup key)."""
+    out = hooks.session_start({"session_id": SID, "cwd": str(world), "source": "startup",
+                               "model": "claude-opus-4-5"}, os.environ)
+    assert "profile 'frontier'" in out["hookSpecificOutput"]["additionalContext"]
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
+    doc = json.loads((sdir / "resolved.json").read_text())
+    assert doc["session"]["tiers"]["lookup"].get(field) == lower
+    assert doc["session"]["tiers"]["lookup"]["model"] == "haiku"
+    assert doc["session"]["posture"] == "deny"
+    rc, _, err = run("rules")
+    assert rc == 0, err
+    assert denied(spawn("tier: lookup\nfind it", "sonnet"))
+    from claude_session import doctor
+    detail = {c.name: c for c in doctor.run(cwd=world).checks}["config"].detail
+    if key is None:
+        assert "tiers.lookup" not in detail, detail
+    else:
+        assert key in detail, detail
+
+
+def _r3_lower(world, field):
+    repo_file(world, "session:\n  posture: deny\n")
+    v = resolved(world)["tiers"]["lookup"]
+    assert v["model"] == "haiku"
+    return v.get(field)
+
+
+@pytest.mark.parametrize("spelling", ["model:", "model: ~"])
+@pytest.mark.parametrize("where", _R3_WHERE)
+def test_r3_f1_a_null_model_is_unstated(world, where, spelling):
+    lower = _r3_lower(world, "model")
+    key = _r3_write(world, where, spelling)
+    _r3_holds(world, "model", lower, key + ".model")
+
+
+def test_r3_f1_a_role_with_no_value_is_skipped(world):
+    lower = _r3_lower(world, "model")
+    user_file("tiers:\n  lookup:\n")
+    repo_file(world, "session:\n  posture: deny\n")
+    _r3_holds(world, "model", lower, None)
+
+
+@pytest.mark.parametrize("spelling", ["effort: huge", "effort: 5", "effort:", "effort: ~"])
+@pytest.mark.parametrize("where", _R3_WHERE)
+def test_r3_f4_an_effort_outside_the_known_is_dropped(world, where, spelling):
+    lower = _r3_lower(world, "effort")
+    assert lower in tiers.EFFORTS
+    key = _r3_write(world, where, "model: haiku\n" + spelling)
+    _r3_holds(world, "effort", lower, key + ".effort")
+
+
+def test_r3_f4_a_known_effort_still_wins_and_set_refuses_a_bad_word(world):
+    user_file("tiers:\n  lookup:\n    model: haiku\n    effort: high\n")
+    assert resolved(world)["tiers"]["lookup"]["effort"] == "high"
+    assert run("set", "tier.lookup", "sonet")[0] == 2

@@ -20,6 +20,9 @@
 - [x] fix round 2 (hq `REFUTE-2026-11-12-mt1-r2.md`): tests aa476d5 (10 red at 731c398); R2-F1 a no-family model skipped and named; R2-F2 the five bodies state build opus; R2-F3 R2-F4 the messages; records; mat.py 68 of 768 differ from the pin (64 `local`, R1; 4 user `defaults.profile`, R3)
 - [x] phase 2: main merged (h3, alpha.91) on the coordinator's word; NICE n149 to n152 renumbered, n153 to n157 filed; alpha.92, 3400 tests; post-merge 21 files 1248 passed (.venv), 1245 passed 3 skipped (.venv-floor)
 - [x] the gate, once, last: 20261112-195001-1278 exit 0 in 13 min on 0de14d5 (3400 passed; floor 3274 passed, 105 skipped)
+- [ ] fix round 3 (hq `REFUTE-2026-11-12-mt1-r3.md`; fix builder, about 40 tool calls): tests first, 30 of 32 red at f713a6d
+- [ ] R3-F1 a null model unstated, R3-F4 an effort outside the known dropped, each named by the doctor; R3-F2 R3-F3 NICE rows
+- [ ] alpha.93 alone under `plugin/`; the gate once, last; the record closed
 
 ## Handover
 - decide, owner: whether `--save` on a non-tier key should write the user's `profiles.yaml` `profiles.<name>.<key>` (today refused, exit 2); consumer: the owner's `set ... --save` habit.
@@ -30,7 +33,7 @@
 - none
 
 ## Next act
-Done: the hand-back to the hq coordinator; the coordinator lands it.
+Fix round 3: the fix in `resolver.py` `_tiers`, then NICE rows, records, alpha.93, the gate.
 
 ## Exit
 - 2026-11-12: built; gate 20261112-173918-1238 ran on 212f74e (before the round-2 fixes); the next gate runs on the head
