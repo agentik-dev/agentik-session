@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
-from .shellreader import _Bound, commands  # packet g8a R9: the reader's one walk
+from .shellreader import _NEST, _SUB_OUT, _Bound, commands  # packet g8a R9: the one walk
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -671,30 +671,65 @@ WHY_MAKE = "a make runs only through the gate queue, and the land step runs the 
 _WORDS = re.compile(r"[\s;&|()<>'\"`$]+")
 
 
+_UNQUOTE = re.compile(r"\\\n|[\\'\"]")     # g8a r1 F1: as a shell spells a word
+
+
+def _make_word(words) -> str | None:
+    """The first of `words` that is a make name, by basename and case-blind."""
+    for w in words:
+        if os.path.basename(w).lower() in MAKES:
+            return os.path.basename(w)
+    return None
+
+
+def _make_in(text: str, depth: int) -> str | None:
+    """g8a r1 F1: the make word of a text the reader does not read, or None. The text is read
+    as a shell spells it: walked by the reader's own walk, every word of every command and every
+    text it does not read in turn (to `_NEST` texts deep; past it, `_Bound`); and, where the walk
+    cannot split it or wherever a word hides in a comment or a longer one, split after `\\`-NL,
+    `\\` and quotes come off and a substitution's output is read as empty."""
+    found = _make_word(_WORDS.split(_UNQUOTE.sub("", text.replace(_SUB_OUT, ""))))
+    if found:
+        return found
+    if depth > _NEST:
+        raise _Bound(text[:80])
+    cmds, unread = commands(text, None, {})
+    for c in cmds:
+        found = _make_word(c.pre + [c.name] + c.args)
+        if found:
+            return found
+    for u in unread:
+        found = u.why != "split" and _make_in(u.text, depth + 1)
+        if found:
+            return found
+    return None
+
+
 def unbounded(shell: str) -> str:
     """Why the line may not run, "" when it may: read through the reader's one walk
     (`shellreader.commands`, packet g8a R9), it is refused when the reader cannot split it (or
     reads past its bound), when a word of a command at any level, by basename and case-blind,
     is `make`, `gmake` or `gnumake` (round 1 F5), or when a text the reader does not read (an
     `eval`'s, a shell's below the first level, one piped into a shell, a shell's `-c` text
-    behind a runner, a heredoc's body read as no script) holds one as a word. A substitution
-    glued to the command word is read as empty (`$(true)make`)."""
+    behind a runner, a heredoc's body read as no script) holds one as a shell spells it (r1
+    F1, `_make_in`). A substitution glued to the command word is read as empty (`$(true)make`).
+    Nothing but this text comes out (r1 F4)."""
     try:
         cmds, unread = commands(shell, None, {})
-    except _Bound:
-        return f"the hook's reader cannot split it (past its bound), so it may run a make; {WHY_MAKE}"
-    for u in unread:
-        if u.why == "split":
+        if any(u.why == "split" for u in unread):
             return f"the hook's reader cannot split it, so it may run a make; {WHY_MAKE}"
-    for c in cmds:
-        for w in c.pre + [c.name] + c.args:
-            if os.path.basename(w).lower() in MAKES:
-                return f"it runs `{os.path.basename(w)}`; {WHY_MAKE}"
-    for u in unread:
-        for w in _WORDS.split(u.text):
-            if os.path.basename(w).lower() in MAKES:
-                return (f"it runs `{os.path.basename(w)}` in a text the reader does not read "
-                        f"({u.why}); {WHY_MAKE}")
+        found = None
+        for c in cmds:
+            found = _make_word(c.pre + [c.name] + c.args)
+            if found:
+                return f"it runs `{found}`; {WHY_MAKE}"
+        for u in unread:
+            found = _make_in(u.text, 1)
+            if found:
+                return (f"it runs `{found}` in a text the reader does not read ({u.why}); "
+                        f"{WHY_MAKE}")
+    except (_Bound, RecursionError):
+        return f"the hook's reader cannot split it (past its bound), so it may run a make; {WHY_MAKE}"
     return ""
 
 
