@@ -370,36 +370,83 @@ def _spawn_rule(payload: dict, env) -> str | None:
         return None
     ti = payload.get("tool_input")
     ti = ti if isinstance(ti, dict) else {}
-    if workflowguard.family(ti.get("model")) != "fable":
+    model = ti.get("model")
+    named = isinstance(model, str) and bool(model)      # h5 R1: the call outranks the file
+    if not named:
+        model = _agent_model(ti, payload, env)
+    if workflowguard.family(model) != "fable":
         return None
     parent = _session_family(payload, env)
     if parent == "fable":
         return None
+    runs = MODEL_UNKNOWN if parent is None else f"this one runs {parent}"
+    if not named:                                       # h5 R3: the type named it
+        return ("agentik-session: a Fable helper starts only under a Fable session: "
+                f"{runs}, and agent type {_token(ti.get('subagent_type'))} names "
+                f"{_token(model)}. Name model: 'opus' on the call.")
     return ("agentik-session: a Fable helper starts only under a Fable session: "
-            + (MODEL_UNKNOWN if parent is None else f"this one runs {parent}")
-            + ". Name model: 'opus', or use an agent type that names its own model.")
+            + runs + ". Name model: 'opus', or use an agent type that names its own model.")
+
+
+_TYPE_PART = r"[A-Za-z0-9._-]{1,64}"
+
+
+def _file_model(path: Path) -> tuple:
+    """(read, model) for an agent file: read False when it cannot be opened or decoded;
+    model the frontmatter's `model:` word, else None. Reads at most 8 KB; never raises."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            head = f.read(8192)
+    except (OSError, ValueError):                       # a decode error, a NUL in the path
+        return False, None
+    m = re.match(r"---\n(.*?)\n---", head, re.S)
+    got = re.search(r"^model:[ \t]*['\"]?([^'\"\s]+)", m.group(1), re.M) if m else None
+    return True, (got.group(1) if got else None)
+
+
+def _plugin_model(plugin: str, name: str, user: Path) -> str | None:
+    """h5 R2: the `model:` of `<installPath>/agents/<name>.md` over every install of
+    `<plugin>@<marketplace>` in `installed_plugins.json`, the family ranking highest in
+    `tiers.ORDER` first and a model naming no family last (the hook cannot tell which
+    install this session loaded, so it takes the worst); None when none is found."""
+    from . import tiers
+    plugins = _load_json(user / "plugins" / "installed_plugins.json").get("plugins")
+    found = []
+    for key, recs in (plugins.items() if isinstance(plugins, dict) else ()):
+        if not isinstance(key, str) or "@" not in key or key.partition("@")[0] != plugin:
+            continue
+        for rec in (recs if isinstance(recs, list) else ()):
+            where = rec.get("installPath") if isinstance(rec, dict) else None
+            if isinstance(where, str) and where:
+                model = _file_model(Path(where) / "agents" / f"{name}.md")[1]
+                if model:
+                    found.append(model)
+
+    def rank(m):
+        f = tiers.family(m)
+        return tiers.ORDER.index(f) if f in tiers.ORDER else len(tiers.ORDER)
+    return min(found, key=rank) if found else None
 
 
 def _agent_model(ti: dict, payload: dict, env) -> str | None:
     """The `model:` of the agent file the call's `subagent_type` names: the project's
-    `.claude/agents/<type>.md`, else the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`).
-    None for a plugin's agent (`plugin:name`), a missing file or no `model:` line."""
+    `.claude/agents/<type>.md`, else the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
+    for a plugin's type (`<plugin>:<name>`), its installs' (h5 R2). None for a missing
+    file, no frontmatter or no `model:` line; never raises on a read."""
     name = ti.get("subagent_type")
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
+    if not isinstance(name, str):
         return None
     cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR")
     user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
-    for base in ([Path(cwd) / ".claude"] if cwd else []) + [user]:
-        try:
-            with open(base / "agents" / f"{name}.md", encoding="utf-8") as f:
-                head = f.read(8192)
-        except (OSError, UnicodeDecodeError):
-            continue
-        m = re.match(r"---\n(.*?)\n---", head, re.S)
-        if not m:
-            return None
-        got = re.search(r"^model:[ \t]*['\"]?([^'\"\s]+)", m.group(1), re.M)
-        return got.group(1) if got else None
+    plug = re.fullmatch(f"({_TYPE_PART}):({_TYPE_PART})", name)
+    if plug:
+        return _plugin_model(plug.group(1), plug.group(2), user)
+    if not re.fullmatch(_TYPE_PART, name):
+        return None
+    for base in ([Path(cwd) / ".claude"] if isinstance(cwd, str) and cwd else []) + [user]:
+        read, model = _file_model(base / "agents" / f"{name}.md")
+        if read:
+            return model
     return None
 
 

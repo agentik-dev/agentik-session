@@ -185,12 +185,20 @@ def test_5_a_call_naming_fable_keeps_today_s_line(world):
 
 @pytest.mark.parametrize("text", [fm("opus"), fm("sonnet"), fm("inherit"),
                                   "---\nname: x\n---\nmodel: fable\n", "model: fable\nbody\n",
-                                  "", b"---\nmodel: \xff\xfe\n---\n"])
+                                  ""])
 def test_6_a_type_whose_file_names_no_fable_passes(world, text):
     parent(OPUS)
     agent(world.repo / ".claude", "plain", text)
     agent(world.cfg, "plain", fm("fable"))             # the project's file is read first
     assert call(world, {"subagent_type": "plain"}) == {}
+
+
+def test_6_a_project_file_that_cannot_be_decoded_falls_to_the_user_s_as_at_the_pin(world):
+    parent(OPUS)
+    agent(world.repo / ".claude", "plain", b"---\nmodel: \xff\xfe\n---\n")
+    assert call(world, {"subagent_type": "plain"}) == {}
+    agent(world.cfg, "plain", fm("fable"))
+    assert "agent type plain names fable" in reason(call(world, {"subagent_type": "plain"}))
 
 
 def test_6_a_built_in_type_and_no_type_pass(world):
