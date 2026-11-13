@@ -740,8 +740,10 @@ def test_g5_r3_a_comment_in_one_backtick_pair_is_masked_in_linear_time(box):
 
 
 # R8: the lines the fixes as proposed let pass, which f1f012e denied and the shells write.
-G5_R3_R8 = ["x=`case x in x)cd sub;; esac`" + W, "(cd sub;\\`case x in esaccase $x in a)  ;" + W[2:],
-            "(cd sub;`echo a`case x in x)" + N + ";", "echo `echo a # \\`x\\` don't`" + W]
+G5_R3_R8 = ["x=`case x in x)cd sub;; esac`" + W, "\\` cd sub" + W,
+            "(cd sub;\\`case x in esaccase $x in a)  ;" + W[2:],
+            "(cd sub;`echo a`case x in x)" + N + ";", "echo `echo a # \\`x\\` don't`" + W,
+            "(cd sub; echo ${x:-`echo a)`})" + W]
 
 
 @pytest.mark.parametrize("command", G5_R3_R8)

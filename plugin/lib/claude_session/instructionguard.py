@@ -480,8 +480,8 @@ def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
                 if cases[-1] or opened[-1:] in ([], ["`"]):    # r2 F2: nor a pattern's `)`
                     start = True
-                    if cases[-1] and tick and ticks:
-                        out[-1] = _MASK[c]
+                    if (cases[-1] and tick and ticks) or (opened and not cases[-1]):
+                        out[-1] = _MASK[c]     # R8: one that closes nothing in a `${`'s tick
                 else:
                     cases.pop()
                     start = opened.pop() != "$("
@@ -668,8 +668,11 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
                 here, pushed = None, []
             continue
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
-        words = [w if w.strip("`") in _CDS else w.strip("`") for w in words    # r3 F6: a tick
-                 if not _PH_RE.match(w) and w.strip("`")]        # at a word's end is the line's
+        words = [w for w in words if not _PH_RE.match(w)]
+        if words and not words[-1].strip("`"):
+            words.pop()                   # r3 F6: a lone closing backtick is no argument, and
+        words = [w if w.strip("`") in _CDS or not w.strip("`") else w.strip("`")
+                 for w in words]          # one at a word's end is the line's (R8: no `cd`)
         for o in outs:
             if not _PH_RE.match(o) and o.strip("`"):
                 found.append(("write", _resolve(o.strip("`"), here, env)))
