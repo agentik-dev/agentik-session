@@ -50,13 +50,13 @@ Round 1 (hq `history/sessions/REFUTE-2026-11-12-u3-r1.md`, slice `8153e52..4192b
 | id | level | finding | ruling | where |
 |---|---|---|---|---|
 | R1-F1 | blocks | a `-c` text read only when one-word dash flags sit before `-c`, and only the next word: `bash -o pipefail -c 'make check'` read bounded | once a word after a shell is `-c`, every later word of that command is a text | built, `36336a0` |
-| R1-F2 | blocks | the hook's reader drops what follows an in-word `#`: `echo x#y; make check` read bounded | row g5 mends `instructionguard._mask` on main; this row's tests in phase 2 | phase 2 |
+| R1-F2 | blocks | the hook's reader drops what follows an in-word `#`: `echo x#y; make check` read bounded | row g5 mends `instructionguard._mask` on main; this row's tests in phase 2 | tests `c829dfa`, on main's g5 |
 | R1-F3 | rides | a quoted `$(` is one word: `d="$(make -n x)"` read bounded | a word's `$(` text is a `-c` text, on the same depth count | built, `dee46c8` |
-| R1-F4 | NICE | R7's early word for a row its turn refuses for another reason | NICE n159 | filed |
-| R1-F5 | rides, part | `Make check`, `MAKE check`, `gnumake check` read bounded | the name case-blind, `gnumake` added; the other forms widen n158 | built, `c327e2e`; n158 |
-| R1-F6 | NICE | a directory-only ignore spelling leaves `.venv-floor` unlinked | NICE n160 | filed |
+| R1-F4 | NICE | R7's early word for a row its turn refuses for another reason | NICE n198 | filed |
+| R1-F5 | rides, part | `Make check`, `MAKE check`, `gnumake check` read bounded | the name case-blind, `gnumake` added; the other forms widen n197 | built, `c327e2e`; n197 |
+| R1-F6 | NICE | a directory-only ignore spelling leaves `.venv-floor` unlinked | NICE n199 | filed |
 
-Round 1's acceptance, at `4192be4` and now (`unbounded`, the review's lines): F1's six refused (were bounded), `bash -c 'echo hi'` and `bash -o pipefail -c 'echo hi'` pass; F3's two refused (were bounded), `echo "$(date)"` passes; `Make check`, `MAKE check`, `gnumake check` refused (were bounded); the repo's packets at `4192be4`, 161 lines, 14 refused, the same 14 both sides. Tests: `tests/test_u3.py::test_r1_*`, 4 red at `4192be4`.
+Round 1's acceptance, at `4192be4` and now (`unbounded`, the review's lines): F1's six refused (were bounded), `bash -c 'echo hi'` and `bash -o pipefail -c 'echo hi'` pass; F3's two refused (were bounded), `echo "$(date)"` passes; `Make check`, `MAKE check`, `gnumake check` refused (were bounded); the repo's packets at `4192be4`, 161 lines, 14 refused, the same 14 both sides. Tests: `tests/test_u3.py::test_r1_*`, 4 red at `4192be4`. Phase 2: F2's four lines refused, 2 tests red at `0163b2b`, green on main's g5; NICE rows renumbered after main's n196 (n158 to n160 are n197 to n199).
 
 ## 5. Forbidden reads
 
