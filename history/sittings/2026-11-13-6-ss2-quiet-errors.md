@@ -15,7 +15,15 @@
 - [x] R5: five of the seven sentences respoken; `admission.*` kept (`admission.mix` is advice on the week's spend, it decides no fit), `reconcile.*` kept (`reconcile.record` names where records are written, and `read.*` a reading pass). No test pinned an old one; a new test pins all seven
 - [x] Suite before the stamp: .venv 4162 passed, 3 failed; .venv-floor 4014 passed, 127 skipped, 3 failed. The three: test_readme's count twice (the stamp's), test_ak5_plug's describe_json under 1.0 s at load 16 to 20 (passes alone)
 - [x] Stamp: `scripts/stamp --base main --version 2.0.0-alpha.108`, 4131 -> 4165 tests, its four files alone, the last commit
-- [ ] The gate once, on the stamp's commit
+- [ ] The gate once, on the stamp's commit (the first build's job is left to run)
+
+## Fix of review 1 (R1-F1, R1-F2, R1-F3, N1; other notes to NICE)
+- [x] Tests first, edaba2f: 20 red at 5a0eeb0 (the commit says 23; 20 is the count)
+- [x] R1-F1: `_save_tier` reads the file inside its `try` as UTF-8 and passes both parse errors through `resolver.withheld`; VERBS hold every `--save` form
+- [ ] R1-F2: a key's name read from a file withheld (models, respawn, the reconciler's keys)
+- [ ] R1-F3: a profile name from the environment or a caller prints as at the pin
+- [ ] N1: a threshold's value never printed
+- [ ] NICE rows for N2 to N8; the restamp at alpha.108; the gate
 
 ## Handover
 - The reconciler's own ConfigError quotes a `reconcile.thresholds` value (`is {v!r}`) from a layer file; outside R1's parse-or-resolve error and these tests' shapes, left for NICE_TO_HAVE.

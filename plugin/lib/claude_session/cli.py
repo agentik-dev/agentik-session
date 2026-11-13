@@ -867,11 +867,11 @@ def _save_tier(path: Path, role: str, model: str) -> None:
     """mt1 R4's `--save`: the file's top-level `tiers:` block gains or changes `role`; every
     other line, its comments among them, stays as it was."""
     from .yamlsubset import load
-    text = path.read_text() if path.exists() else ""
-    try:
+    try:                                    # ss2 R1-F1: a file not UTF-8 is its own error
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
         doc = load(text) if text.strip() else {}
-    except ValueError as e:
-        _die(f"{path}: {e}; nothing written", 2)
+    except ValueError as e:                 # the file, the line and the reason, never the line
+        _die(f"{resolver.withheld(f'{path}: {e}')}; nothing written", 2)
     cur = doc.get("tiers") if isinstance(doc, dict) and isinstance(doc.get("tiers"), dict) \
         else {}
     table = tiers.merge(cur, {role: {"model": model}})
@@ -895,9 +895,10 @@ def _save_tier(path: Path, role: str, model: str) -> None:
         check = load(new)
         tiers.merge({}, check.get("tiers"))
     except ValueError as e:
-        _die(f"{path}: the edit would not parse ({e}); nothing written", 2)
+        why = resolver.withheld(f": {e}")[2:]
+        _die(f"{path}: the edit would not parse ({why}); nothing written", 2)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(new)
+    path.write_text(new, encoding="utf-8")
 
 
 def _set_tier(args, key: str) -> int:
