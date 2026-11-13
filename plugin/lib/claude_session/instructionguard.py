@@ -669,7 +669,9 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
     """`bash_targets` with each target's word and the folder it was read in (g6 R2):
     [(kind, path, word, folder)]; each folder the reading stood in goes in `stood`."""
     text, bodies = _heredocs(command)
-    found, here, subshells, pushed, read = [], cwd, [], [], []
+    found, subshells, read = [], [], []
+    st, fa = [(cwd, ())], 0                # r1 R1: (folder, pushd stack) states; st[0] is
+                                           # a0055da's, st[fa] follows every `cd` (db19d51's)
 
     def add(kind, word, at):
         found.append((kind, _resolve(word, at, env), word, at))
@@ -691,13 +693,14 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
             continue
         if outs is None:                  # r1 F1, r2 F3: a subshell's `cd` and pushd end with it
             if words == "(":
-                subshells.append((here, list(pushed)))
+                subshells.append((st, fa))
             elif subshells:
-                here, pushed = subshells.pop()
+                st, fa = subshells.pop()
             else:                         # a `)` with no `(`: the folder is unknown
-                here, pushed = None, []
+                st, fa = [(None, ())], 0
             continue
-        stood.add(here)
+        heres = list(dict.fromkeys([st[fa][0]] + [f for f, _ in st]))   # where a `cd` ran, first
+        stood.update(heres)
         mine = [bodies[int(m.group(1))] for m in map(_PH_RE.match, words) if m]
         words = [w for w in words if not _PH_RE.match(w)]
         if words and not words[-1].strip("`"):
@@ -706,63 +709,95 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
                  for w in words]          # one at a word's end is the line's (R8: no `cd`)
         for o in outs:
             if not _PH_RE.match(o) and o.strip("`"):
-                add("write", o.strip("`"), here)
-        while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
-                         or words[0] in _LEAD     # g6 R5: `then cd` is read (n138)
-                         or (words[0].startswith("-") and len(words) > 1)):
-            words = words[1:]
+                for h in heres:
+                    add("write", o.strip("`"), h)
+        lead, i = False, 0                # g6 R5: `then cd` is read (n138); r1 R2: a reserved
+        while i < len(words):             # word only as the command's first word
+            w = words[i]
+            if w in _LEAD:
+                lead = lead or w != "time"
+            elif not (_ASSIGN.match(w) or w in _WRAPPERS
+                      or (w.startswith("-") and i + 1 < len(words))):
+                break
+            i += 1
+        words = words[i:]
         if not words:
             continue
         name, args = os.path.basename(words[0]), words[1:]
         plain = [a for a in args if a and not a.startswith("-")]
-        if name in ("cd", "pushd"):
-            if name == "pushd":
-                pushed.append(here)
-            here = (_resolve(args[0], here, env) if len(args) == 1 else
-                    _tilde("~", env) if not args else None)
-        elif name == "popd":              # r1 F1: back to pushd's folder, else unknown
-            here = pushed.pop() if pushed and not args else None
-        elif name in _SHELLS and "-c" in args and depth == 0:
-            i = args.index("-c")
-            if i + 1 < len(args):
-                try:
-                    found += _strict(args[i + 1], here, env, depth + 1, False, True, stood)
-                except ValueError:        # g6 R6: the inner line is unread, the outer judged
-                    found.append(("split", None, None, None))
-        elif name == "tee":
-            for a in plain:
-                add("write", a, here)
-        elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
-                (name == "perl" and any(_PERL_I.match(a) for a in args)):
-            for a in plain:
-                add("write", a, here)
-        elif name in _TAKES:
-            srcs, dsts = _copy_like(name, args, here, env)
-            for d in dsts:
-                add("write", d, here)
-            if name == "mv":
-                for s in srcs:
-                    add("remove", s, here)
-        elif name in ("rm", "unlink"):
-            for a in plain:
-                add("remove", a, here)
-        elif name == "git":
-            chdirs, paths = _git_paths(args)
-            at = here
-            for d in chdirs:
-                at = _resolve(d, at, env)
-            for p in paths:
-                add("remove", p, at)
-        elif _PY.match(name):
-            codes = list(mine)
-            if "-c" in args and args.index("-c") + 1 < len(args):
-                codes.append(args[args.index("-c") + 1])
-            for code in codes:
-                for s in _py_literals(code):
-                    if s:
-                        add("write", s, here)
+        if name in _CDS:                  # r1 R1: behind a reserved word a `cd` may not run, so
+            moved = [_move(name, args, s, env) for s in st]    # it adds a folder, replaces none
+            st, fa = _states(st + moved, len(st) + fa) if lead else _states(moved, fa)
+            continue
+        for h in heres:
+            _judge(name, args, plain, h, mine, env, depth, stood, add, found)
     _others(command, cwd, env, depth, other, found, stood)  # the readings' targets, each once
     return found
+
+
+_CAP_STATES = 16                          # r1 R1: a line's folder states, at most
+
+
+def _move(name: str, args: list, s: tuple, env) -> tuple:
+    """The (folder, pushd stack) after one `cd`, `pushd` or `popd` (r1 F1: popd goes back to
+    pushd's folder, else to none)."""
+    f, pushed = s
+    if name == "popd":
+        return (pushed[-1], pushed[:-1]) if pushed and not args else (None, pushed)
+    to = _resolve(args[0], f, env) if len(args) == 1 else _tilde("~", env) if not args else None
+    return to, pushed + (f,) if name == "pushd" else pushed
+
+
+def _states(st: list, fa: int):
+    """`st` without repeats, at most `_CAP_STATES`, keeping the first and the `fa`th; fa's index."""
+    first, follow = st[0], st[fa]
+    rest = [x for x in dict.fromkeys(st) if x != first and x != follow]
+    keep = {first, follow, *rest[:_CAP_STATES - 2]}
+    order = [x for x in dict.fromkeys(st) if x in keep]
+    return order, order.index(follow)
+
+
+def _judge(name, args, plain, here, mine, env, depth, stood, add, found) -> None:
+    """Adds the targets of one command, its words read in `here`."""
+    if name in _SHELLS and "-c" in args and depth == 0:
+        i = args.index("-c")
+        if i + 1 < len(args):
+            try:
+                found += _strict(args[i + 1], here, env, depth + 1, False, True, stood)
+            except ValueError:            # g6 R6: the inner line is unread, the outer judged
+                found.append(("split", None, None, None))
+    elif name == "tee":
+        for a in plain:
+            add("write", a, here)
+    elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
+            (name == "perl" and any(_PERL_I.match(a) for a in args)):
+        for a in plain:
+            add("write", a, here)
+    elif name in _TAKES:
+        srcs, dsts = _copy_like(name, args, here, env)
+        for d in dsts:
+            add("write", d, here)
+        if name == "mv":
+            for s in srcs:
+                add("remove", s, here)
+    elif name in ("rm", "unlink"):
+        for a in plain:
+            add("remove", a, here)
+    elif name == "git":
+        chdirs, paths = _git_paths(args)
+        at = here
+        for d in chdirs:
+            at = _resolve(d, at, env)
+        for p in paths:
+            add("remove", p, at)
+    elif _PY.match(name):
+        codes = list(mine)
+        if "-c" in args and args.index("-c") + 1 < len(args):
+            codes.append(args[args.index("-c") + 1])
+        for code in codes:
+            for s in _py_literals(code):
+                if s:
+                    add("write", s, here)
 
 
 def _others(command: str, cwd, env, depth: int, other: list, found: list, stood: set) -> int:

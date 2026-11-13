@@ -923,3 +923,66 @@ def test_g6_a_100kb_line_is_read_in_time(box):
         began = time.monotonic()
         assert instructionguard.check(_bash(command, box.repo), box.env) == {}
         assert time.monotonic() - began < 2.0
+
+
+# ---- review 1 of g5-g6, R1: a `cd` behind a reserved word adds a folder, replaces none (F3) ---
+# Each line passed at db19d51 and was denied at a0055da; four shells write the gated file.
+
+R1_IF = "if false; then cd sub; fi; "
+R1_F3 = [R1_IF + w for w in (
+    "\\cp a CLAUDE.md", "cp a CLAU\"\"DE.md", "cp a 'CLAUDE'.md", "cp a ./\"CLAUDE.md\"",  # a, b
+    "cp a CLAUDE\\.md", "printf x >> CLAUDE.m'd'", "echo x >&CLAUDE.md",                 # b, c
+    "cp 'a # b' CLAUDE.md", "rm -f \"notes #2.md\" .claude/edit-gates",                  # d
+    "bash -c \"cp a CLAUDE.md\" x", "X=\"a b\" cp a CLAUDE.md",                          # e, f
+    "git -c user.name=\"A B\" rm -q .claude/edit-gates")] + [                            # g
+    "if [ -d nosuch ]; then cd nosuch; fi; \\cp -f a CLAUDE.md"]
+# the prefixes of the sweep (F3's nine, F1's), and the writes a0055da denies after each
+R1_PREFIXES = [
+    R1_IF, "for i in; do cd sub; done; ", "while false; do cd sub; done\n",
+    "if true; then :; else cd sub; fi; ", "if false; then :; elif true; then cd sub; fi; ",
+    "until true; do pushd sub; done; ", "if false; then cd /tmp; fi\n", "false && { cd sub; }; ",
+    "if false\nthen cd sub\nfi\n", "! cd sub; ", "x=1 then cd sub; ", "env else cd sub; ",
+    "command if cd sub; "]
+R1_WRITES = [w[len(R1_IF):] for w in R1_F3[:-1]] + [
+    "cp a CLAUDE.md", "cp -f a CLAUDE.md", "mv a CLAUDE.md", "install -m 644 a CLAUDE.md",
+    "tee -a CLAUDE.md < a", "sed -i '' s/a/b/ CLAUDE.md", "echo x > CLAUDE.md", ": >CLAUDE.md",
+    "echo x 2>/dev/null 1>CLAUDE.md", "rm .claude/edit-gates", "git rm -q .claude/edit-gates",
+    "python3 -c \"open('CLAUDE.md','w')\"", "cp -t . a/CLAUDE.md", "unlink .claude/edit-gates",
+    "cat a > x.tmp && mv x.tmp CLAUDE.md", "printf '%s\\n' x >> CLAUDE.md"]
+
+
+def _gated_path(box, command):
+    return box.repo / (".claude/edit-gates" if "edit-gates" in command else "CLAUDE.md")
+
+
+@pytest.mark.parametrize("command", R1_F3)
+def test_r1_f3_a_cd_that_may_not_run_leaves_the_folder_before_it(box, command):
+    (box.repo / "sub").mkdir()
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(_gated_path(box, command))), command
+
+
+def test_r1_the_property_with_the_loose_reading_off(box, strict_only):
+    """Built from parts: each prefix (its `cd` behind a reserved word may not run) before each
+    write `a0055da` denies; with the loose reading off every line is denied, and with no prefix
+    each write is the strict reading's (the table holds only what a0055da denies)."""
+    (box.repo / "sub").mkdir()
+    lines = [p + w for p in [""] + R1_PREFIXES for w in R1_WRITES]
+    assert len(lines) >= 300
+    passed = [c for c in lines if not _denied(box, c)[0]]
+    assert passed == []
+    # the folder the `cd` names is read too: there the write is not gated, the line passes
+    assert not _denied(box, "cd sub; cp a CLAUDE.md")[0]
+    assert not _denied(box, "printf x >> ../AGENTS.md")[0]          # the tree's: not gated
+    assert _denied(box, "if false; then cd sub; fi; printf x >> ../AGENTS.md")[0]   # sub's: gated
+
+
+def test_r1_the_folders_are_bounded(box, strict_only):
+    line = "".join("if false; then cd d%d; fi; " % i for i in range(40)) + "cp a CLAUDE.md"
+    began = time.monotonic()
+    assert _denied(box, line)[0]
+    assert time.monotonic() - began < 2.0
+    st = [(str(box.repo / f"d{i}"), ()) for i in range(40)]
+    order, fa = instructionguard._states([(str(box.repo), ())] + st, 40)
+    assert len(order) == instructionguard._CAP_STATES and order[0] == (str(box.repo), ())
+    assert order[fa] == st[-1]

@@ -2,7 +2,7 @@
 
 | item | value |
 |---|---|
-| goal | brief g5, S1, phases 1 to 1d (round 3's R3-F1 to F7); build 2: brief g6 R1 to R8 with the coordinator's amendments; packet `design/packets/g5-inword-hash.md` (§3c, §3d) |
+| goal | brief g5, S1, phases 1 to 1d (round 3's R3-F1 to F7); build 2: brief g6 R1 to R8 with the coordinator's amendments; build 3: the fix of review 1 (R1 to R10); packet `design/packets/g5-inword-hash.md` (§3c, §3d) |
 | budget | builder: about 90 tool calls per build |
 | pin | 8153e52 on main (alpha.91); phase 1d from f1f012e; g6 from a0055da; worktree `.claude/worktrees/g5-inword-hash`, `.venv`, `.venv-floor` linked |
 | window | 200k |
@@ -16,6 +16,8 @@
 - [x] tests moved: nine lines a0055da passed with an `open` line (an open quote, `cd $X`, `popd`, `cd -`, a stray `)`, a trailing `\`, `echo '>> CLAUDE.md'`) are now the loose reading's; with it off they pass as at a0055da (a test)
 - [x] g6 R8 records: head comment's g6 paragraph, RUNBOOK, NICE (n131, n132, n138, n161 closed; n162 S3, n163 S4); a0055da's 341 guard tests pass at the head with the loose reading off; 14 other files that read the guard or records: 690 passed (.venv)
 - [x] g6 checks: round 3's 27 lines at six commits, every write denied, REGRESS 0; fuzz 100k tokens (seed 9802) and 100k valid (seed 9902) vs 8153e52, d2f89d9, 40aee95, f1f012e, a0055da, a stub `cp` that prints nothing: REGRESS-with-a-shell 0 and 0; the replay of 415,408 lines: 72 newly refused, all by the loose reading, none a read or a `git add` (56 text the strict reading does not read as a write, 12 by the amendment's (b), 4 by its (a)): over the brief's 60 by the amendment's 16
+- [x] build 3 R1 (review 1's F3): a `cd`, `pushd` or `popd` behind a reserved word adds a folder state and replaces none; the first state moves as a0055da's, one follows every `cd` as db19d51's; at most 16; a test builds 392 lines from 13 prefixes (and none) and 28 writes a0055da denies: with the loose reading off, every one denied
+- [ ] build 3 R2 to R5 (F1, F2, F4, F5), then the records (§3e, NICE)
 - [ ] phase 2, on the coordinator's word
 
 ## Handover
@@ -25,6 +27,7 @@
 - decide, owner: the coordinator: acceptance 5's bound of 60 against the amendment's (a) and (b), which add 16 (72 in all); consumer: the review and phase 2.
 
 ## Next act
+- Build 3 goes on at the next unticked ruling, R2 to R5 then the records, each with its tests.
 - The review over the whole slice from 8153e52 with both readings on, then phase 2 on the coordinator's word.
 
 ## Exit
