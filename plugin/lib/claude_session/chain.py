@@ -270,7 +270,7 @@ def _json(path: Path):
         d = json.loads(path.read_bytes())
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):    # too deep to parse (round 1's F3)
         return {}
     return d if isinstance(d, dict) else {}
 
@@ -436,6 +436,21 @@ class Chain:
             self.fx.say(f"{self.name}: fill {v['word']} to {fill.wall(fill.when(v['until']))} "
                         "goes to the successor")
 
+    def _hand_cap(self, prev, sid) -> None:
+        """Packet mt1 R4, as `_hand_fill`: the cap the ending session held, its time still
+        ahead, goes into `sid`'s overlay and is said; any other copy is removed."""
+        from datetime import datetime, timezone
+        from . import tiers
+        try:
+            now = datetime.fromtimestamp(self.fx.now(), timezone.utc)
+            v = tiers.hand(self.home, self.state, prev, sid, now)
+        except OSError as e:
+            self.fx.say(f"{self.name}: the cap was not handed on ({e})")
+            return
+        if v:
+            self.fx.say(f"{self.name}: cap {v['model']} to {tiers.wall(tiers.when(v['until']))} "
+                        "goes to the successor")
+
     def run(self) -> int:
         try:
             self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -486,6 +501,7 @@ class Chain:
             start = self.fx.now()
             self._hand_state(prev, sid)
             self._hand_fill(prev, sid)
+            self._hand_cap(prev, sid)
             try:
                 proc = self.fx.spawn([program, "--session-id", sid, *args], child_env)
             except OSError as e:                 # A-F6: a stop line, never a traceback
@@ -679,7 +695,11 @@ class Chain:
         settle = self.g["settle"]
         marker, te = _json(sdir / hooks.MARKER) or {}, _json(sdir / hooks.TURN_ENDED) or {}
         written, ended = marker.get("written"), te.get("at")
-        if not (_num(written) and _num(ended)) or ended <= written or now - ended < settle:
+        # Compared, never subtracted, as `_opened` (NICE n56): a JSON integer past a float's
+        # range, in a file the hooks did not write, reads as not ready and never raises; an
+        # `ended` below AT_FLOOR (negative, -inf, huge negative) is no time (round 1's F2).
+        if (not (_num(written) and _num(ended)) or not AT_FLOOR <= ended
+                or ended <= written or not ended <= now - settle):
             return False
         act = _json(sdir / hooks.ACTIVITY)
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):

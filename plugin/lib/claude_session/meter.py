@@ -26,8 +26,10 @@ both (`window_source`, `limits_source`, e.g. `role:orchestrator window:1000000`)
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -170,7 +172,7 @@ def _scan(path: Path, st: dict, table=None, shared=None) -> dict | None:
     for raw in data[:end].splitlines():
         try:
             obj = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):    # too deep to parse (round 1's F3)
             continue
         if not isinstance(obj, dict):
             continue
@@ -301,17 +303,24 @@ def _limits(lim: dict, observed) -> tuple[dict, int | None, str, str]:
 # --- the session directory ------------------------------------------------------
 
 def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    """`text` to `path` through a temp name of this writer's own, 0600, in the same folder,
+    then the atomic replace (NICE n100): concurrent PostToolUse hooks never share a temp
+    file, so a lost race is one stale write, never an exception, and no temp is left."""
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def _load(path: Path) -> dict | None:
     try:
         d = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):     # too deep to parse: no parse (n99)
         return None
     return d if isinstance(d, dict) else None
 

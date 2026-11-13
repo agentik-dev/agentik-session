@@ -51,7 +51,7 @@
   - F3: `git worktree list --porcelain -z`, so a newline in a nested path is seen.
   - F5: a non-zero message scan's note names hygiene's code and points at its stderr; the step stays `merge-file`, so a hygiene with no private list now reds `merge-file exit 2` before the check where the pin gave `hygiene exit 2` after it.
   - F6: `git commit-tree`'s stderr reaches the log.
-  - F4 is NICE n149 (`unattended.py` is outside this packet); the builder's `worktree_dirt` note is n150; n77 leaves with this row.
+  - F4 is NICE n160 (`unattended.py` is outside this packet); the builder's `worktree_dirt` note is n161; n77 leaves with this row.
 - Round 2 (the coordinator's ruling; tests in `TestRound2`):
   - R2-F1, blocked: round 1's `blocks[1:]` skipped a main checkout sitting under the branch's worktree, which `worktree remove` then deleted; `nested()` reads every block but the branch's own (red at `52bcea4`).
   - R2-F2: `merge-tree`, both diffs, `ls-tree` and R2's log read the commit read as main, never the ref's name, so a main reset and restored during `merge-tree` is `red sha` (red at `52bcea4`). The window left, the last read then `git merge`, is accepted.

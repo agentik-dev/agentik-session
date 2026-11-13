@@ -226,7 +226,7 @@ def test_doctor_resolves_the_new_profiles(world):
     _, profiles = resolver.load_profiles(env)
     for name in ("orchestrator", "orchestrator-opus"):
         p = profiles[name]
-        assert (p["effort"], p["subagents"], p["posture"]) == ("xhigh", "opus", "signal")
+        assert (p["effort"], p.get("subagents"), p["posture"]) == ("high", None, "signal")
         assert p["builders"] == {"model": "opus", "max_concurrent": 3}
         assert p["charter"] == {"required": True} and "respawns" in p["description"]
 

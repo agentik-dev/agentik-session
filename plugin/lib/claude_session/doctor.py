@@ -481,6 +481,26 @@ def _check_renamed(cwd, r_renamed) -> list:
     return rows
 
 
+def _check_subagent_model(env, sections, cwd=None) -> Check | None:
+    """Packet mt1 R2: a row only when `CLAUDE_CODE_SUBAGENT_MODEL` is set and is not the
+    resolved `tiers.build` model here, so a spawn that names no model runs off the table.
+    Resolved with the launch profile the hooks use (round 1 F4); none when that fails."""
+    have = env.get("CLAUDE_CODE_SUBAGENT_MODEL")
+    prof = hooks.launch_profile(env)
+    if have and prof:
+        try:
+            sections = resolver.resolve(cwd or os.getcwd(), "doctor", env, profile=prof,
+                                        overlay={}).sections
+        except resolver.ResolveError:
+            return None
+    want = ((((sections.get("session") or {}).get("tiers") or {}).get("build")) or {}).get("model")
+    if not have or not want or have == want:
+        return None
+    return Check("subagents", True, f"CLAUDE_CODE_SUBAGENT_MODEL is {have[:40]}, the resolved "
+                 f"tiers.build is {want}: a spawn naming no model runs off the table; start "
+                 "the session with `agentik session start <profile>`", warn=True)
+
+
 def _check_git(env, sections, guarded: bool = True) -> Check:
     exe = _which("git", env)
     if not exe:
@@ -596,6 +616,9 @@ def run(env=None, cwd=None) -> Report:
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):
         add(row)                 # packet S44: only on a bad file
+    sub = _check_subagent_model(env, sections, cwd)
+    if sub:
+        add(sub)                 # mt1 R2: only when the variable is off the table
     follow = _check_follow(env)
     if follow:
         add(follow)              # sc2: last, and only while on

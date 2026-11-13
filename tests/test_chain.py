@@ -274,7 +274,8 @@ def test_s20a_refusals(case, fake, monkeypatch):
         held = open(lock, "a")
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        rc, _, err = _cli("run", "--chain", name, "--", "--model", "m", *extra)
+        rc, _, err = _cli("run", "--chain", name, "--", "--model", "m", *extra,
+                          *(["go"] if case == "lock-held" else []))   # mt1 R7: a prompt
     finally:
         if held:
             held.close()
@@ -611,41 +612,37 @@ def _fast_cli_chain(monkeypatch):
         *a, **{"poll": 0.05, "grace": 0.05, "kill_grace": 0.5, **kw}))
 
 
-def test_s31_no_prompt_warns_once_and_still_starts(fake, monkeypatch):
+def test_s31_no_prompt_is_refused(fake, monkeypatch):
+    # packet mt1 R7: S31's warning is now a refusal; each restart would open an empty prompt
     monkeypatch.setattr(C(), "on_tty", lambda: True)
-    _fast_cli_chain(monkeypatch)
-    fake.set(_sitting(fake), [["exit", 0]])
     rc, _, err = _cli("run", "--chain", "c1", "--floor", "0", "--settle", "0", "--",
                       "--model", "m")
-    assert rc == 0, err
-    s = fake.starts()
-    assert len(s) == 2 and s[0]["argv"][2:] == s[1]["argv"][2:] == ["--model", "m"]
-    warned = _idle_warnings(err)
-    assert len(warned) == 1, err                       # once at start, never per restart
-    assert 'agentik session run -- "<first prompt>"' in warned[0]
-    assert err.index(warned[0]) < err.index("ended on RESPAWN")
+    assert rc == 2 and fake.starts() == [], err
+    assert 'agentik session run -- "<first prompt>"' in err and len(err.splitlines()) == 1
 
 
-@pytest.mark.parametrize("args,warns", [
-    (["go on"], False),
-    (["--model", "opus", "go on"], False),
-    (["--model", "opus"], True),                       # opus is --model's value, not a prompt
+@pytest.mark.parametrize("args,sent", [
+    (["go on"], ["--model", "opus", "--effort", "high", "go on"]),   # mt1 R7: the profile's
+    (["--model", "opus", "go on"], ["--model", "opus", "go on"]),     # the line's wins
+    (["--model", "opus"], None),                       # opus is --model's value, not a prompt
 ])
-def test_s31_prompt_or_warning(args, warns, fake, monkeypatch):
+def test_s31_prompt_or_refusal(args, sent, fake, monkeypatch):
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     rc, _, err = _cli("run", "--chain", "c1", "--", *args)
+    if sent is None:
+        assert rc == 2 and fake.starts() == [], err
+        return
     assert rc == 0 and len(fake.starts()) == 1, err
-    assert fake.starts()[0]["argv"][2:] == args
-    assert len(_idle_warnings(err)) == (1 if warns else 0), err
+    assert fake.starts()[0]["argv"][2:] == sent
+    assert not _idle_warnings(err), err
 
 
 def test_s31_swallowed_loop_warns_only_idle(fake, monkeypatch):
     # The list option reads the /loop as its value, so there is no first prompt to call long.
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     rc, _, err = _cli("run", "--chain", "c1", "--", "--allowedTools", "Bash", "/loop 2h go")
-    assert rc == 0 and len(fake.starts()) == 1, err
-    warned = [l for l in err.splitlines() if l.startswith("warning:")]
-    assert len(warned) == 1 and warned == _idle_warnings(err), err
+    assert rc == 2 and fake.starts() == [], err          # mt1 R7: refused, never long-loop
+    assert "--allowedTools=<value>" in err and "60" not in err, err
 
 
 def test_s31_lock_held_refusal_stays_one_line(fake, monkeypatch):
@@ -654,7 +651,7 @@ def test_s31_lock_held_refusal_stays_one_line(fake, monkeypatch):
     lock.parent.mkdir(parents=True)
     with open(lock, "a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        rc, _, err = _cli("run", "--chain", "c1", "--", "--model", "m")
+        rc, _, err = _cli("run", "--chain", "c1", "--", "--model", "m", "go")
     assert rc == 2 and len(err.strip().splitlines()) == 1 and "lock" in err, err
 
 
@@ -679,9 +676,8 @@ def test_s31_prompt_gap(args, gap):
 def test_s31_list_option_names_the_fix(fake, monkeypatch):
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     rc, _, err = _cli("run", "--chain", "c1", "--", "--add-dir", "../x", "go on")
-    assert rc == 0 and len(fake.starts()) == 1, err
-    (w,) = _idle_warnings(err)
-    assert "--add-dir=<value>" in w, w
+    assert rc == 2 and fake.starts() == [], err          # mt1 R7: refused, the fix named
+    assert "--add-dir=<value>" in err, err
 
 
 # ---- the fix round: the adversaries' blocks and notes ---------------------------------
