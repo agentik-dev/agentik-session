@@ -19,7 +19,7 @@
 - [x] Fix 1, records: the packet's §7; the R7 proofs again: .venv 172 passed; .venv-floor 169 passed, 3 skipped; the first two files unchanged against main; compileall, scripts/doclint, scripts/hygiene exit 0
 
 - [x] Phase 2, act 1: main 9da7cf4 (alpha.95, NICE to n168) merged, clean: no conflict; the branch held no NICE row to renumber; recordlint held
-- [ ] Phase 2, act 2: a NICE row, S4: `scripts/plugin-description-bytes` wired into `check`
+- [x] Phase 2, act 2: NICE n169 (S4): `scripts/plugin-description-bytes` is not in `check`; n109 and n110, the oldest S4 rows, to the overflow under recordlint's bound; recordlint held, 72 rows
 - [ ] Phase 2, act 3: the version commit, plugin 2.0.0-alpha.96, README, its source and the sidecar
 - [ ] Phase 2, act 4: the proofs under both venvs and the lints
 
@@ -28,7 +28,7 @@
 - The vendored `agentik_install._door` still blocks on a FIFO and returns the raw byte: commons' to mend; no path of this repo but acceptance 5's test calls it, and that test keeps its seven shared cases.
 
 ## Next act
-- Phase 2, act 2: the NICE row.
+- Phase 2, act 3: the version commit.
 
 ## Exit
 - Phase 1 and review 1's fix built and proven; review 2 closed; phase 2 in flight.
