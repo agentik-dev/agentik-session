@@ -586,3 +586,65 @@ def test_g5_a_comment_stays_one(box, command):
     ("echo \"x #y\" 'a#b' z", ["echo", "x #y", "a#b", "z"]), ("echo x #y z", ["echo", "x"])])
 def test_g5_the_words_read_back_whole(command, words):
     assert [w for w, _ in instructionguard._commands(command)] == [words]
+
+
+# ---- g5 round 1: F1 `$(...)#`, F2 `${` and backticks, F3 a line that stops splitting, F4 ----
+
+W = "; cp a CLAUDE.md"
+G5_R1_WRITES = ["echo $(echo a)#c" + W, "x=$(date +%s)#tag" + W, "echo $((1+2))#c" + W,   # F1
+                "x=${l%% #*}" + W, "echo ${x:- #y}" + W, "echo `echo a #b`" + W,          # F2
+                "# note \\\ncp a CLAUDE.md", "echo x\\\n#y" + W]                          # F4
+
+
+@pytest.mark.parametrize("command", G5_R1_WRITES)
+def test_g5_r1_a_hash_the_shell_reads_in_a_word_hides_no_write(box, command):
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == \
+        [("write", str(box.repo / "CLAUDE.md"))], command
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+@pytest.mark.parametrize("command", ["(cd x) #c" + W, "(cd x)#c" + W])
+def test_g5_r1_a_hash_after_a_subshells_paren_is_a_comment(box, command):
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == [], command
+
+
+@pytest.mark.parametrize("command", ["cp a CLAUDE.md; echo x#y\\", "cp a CLAUDE.md\necho x#'y"])
+def test_g5_r1_the_commands_before_a_split_failure_are_judged(box, command):
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+@pytest.mark.parametrize("command", ["cp a CLAUDE.md \\", "echo 'a; cp a CLAUDE.md",
+                                     "cp a notes.md; echo x\\"])
+def test_g5_r1_a_line_that_cannot_be_judged_still_passes_with_one_open_line(box, command):
+    assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
+    assert [(r["decision"], r.get("why")) for r in _log(box)] == \
+        [("open", "the line cannot be split")]
+
+
+# The round's "probed and clean" lines: each keeps its result at d2f89d9 (checked against
+# /bin/sh and /bin/bash; `$((1#2))` and the `case` line read a write the shell does not run).
+G5_R1_CLEAN = [
+    ("cat <<EOF > /tmp/x\n# a\n#!/bin/sh\n# don't\nEOF\ncp a CLAUDE.md", ["/tmp/x", "CLAUDE.md"]),
+    ("echo $((1#2))" + W, ["CLAUDE.md"]), ("echo ${x##*/}" + W, ["CLAUDE.md"]),
+    ("echo ${x%#*}" + W, ["CLAUDE.md"]), ("echo ${x#\"#\"}" + W, ["CLAUDE.md"]),
+    ("echo ${#}" + W, ["CLAUDE.md"]), ("echo \\#" + W, ["CLAUDE.md"]), ("a=b#c" + W, ["CLAUDE.md"]),
+    ("echo {a,#b}" + W, ["CLAUDE.md"]), ("echo ''#b" + W, ["CLAUDE.md"]),
+    ("echo a\\ #b" + W, ["CLAUDE.md"]), ("echo a;#c" + W, []), ("true &&#c" + W, []),
+    ("echo a |#c" + W, []), ("echo a &#c" + W, []), ("(#c" + W, []), ("echo a\t#c" + W, []),
+    ("echo $(#c\necho a)" + W, ["CLAUDE.md"]), ("echo `#c`" + W, ["CLAUDE.md"]),
+    ("echo a #c\r\ncp a CLAUDE.md\r\n", ["CLAUDE.md"]), ("echo a\r#c" + W, ["CLAUDE.md"]),
+    ("echo a\x0b#c" + W, ["CLAUDE.md"]), ("echo a\x0c#c" + W, ["CLAUDE.md"]),
+    ("echo a\xa0#c" + W, ["CLAUDE.md"]), ("cp a CLAUDE.md #c", ["CLAUDE.md"]),
+    ("# don't\ncp a CLAUDE.md", ["CLAUDE.md"]), ("# (\ncp a CLAUDE.md", ["CLAUDE.md"]),
+    ("case $x in a) #c\ncp a CLAUDE.md;; esac", ["CLAUDE.md"]),
+    ("bash -c 'echo x#y; cp a CLAUDE.md'", ["CLAUDE.md"]),
+    ("sh -c 'echo x #y; cp a CLAUDE.md'", []), ("cp a CLAUDE.md#done", ["CLAUDE.md#done"]),
+    ("echo x >CLAUDE.md#c", ["CLAUDE.md#c"])]
+
+
+@pytest.mark.parametrize("command,targets", G5_R1_CLEAN)
+def test_g5_r1_the_probed_clean_lines_keep_their_result(box, command, targets):
+    want = [("write", t if t.startswith("/") else str(box.repo / t)) for t in targets]
+    assert instructionguard.bash_targets(command, str(box.repo), box.env) == want, command

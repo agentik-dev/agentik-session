@@ -418,23 +418,40 @@ def _heredocs(text: str):
 def _mask(text: str) -> str:
     """The text with each quoted or backslashed paren replaced by a private character, so the
     lexer never takes it for a subshell's edge (r2 F1); a comment, a `#` at a word's start
-    outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5)."""
+    outside quotes, is dropped up to its newline, so the lexer reads every other `#` (g5).
+    A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
+    ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1)."""
     out, i, n, quote, start = [], 0, len(text), None, True
+    opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
     while i < n:
         c = text[i]
+        if c == "\\" and text[i + 1:i + 2] == "\n" and quote != "'":
+            i += 2                        # r1 F4: the line goes on, the word too
+            continue
         if quote is None:
             if c == "\\" and i + 1 < n:
                 out += [c, _MASK.get(text[i + 1], text[i + 1])]
-                i, start = i + 2, False
+                i, start, prev = i + 2, False, ""
                 continue
-            if c == "#" and start:
-                j = text.find("\n", i)
-                i = n if j < 0 else j
+            if c == "#" and start and opened[-1:] != ["${"]:
+                ends = [j for j in (text.find("\n", i), text.find("`", i) if tick else -1)
+                        if j >= 0]
+                i = min(ends) if ends else n
                 continue
             if c in "'\"":
                 quote = c
+            elif c == "`":
+                tick = not tick
+            elif c == "(" or (c == "{" and prev == "$"):
+                opened.append(prev + c if prev == "$" else c)
+            elif c == "}" and opened[-1:] == ["${"]:
+                opened.pop()
             out.append(c)
-            start = c in " \t\n;&|()<>"
+            if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
+                start = (opened.pop() if opened and opened[-1] != "${" else None) != "$("
+            else:
+                start = c in " \t\n;&|(<>"
+            prev = c
             i += 1
             continue
         if quote == '"' and c == "\\" and i + 1 < n:
@@ -444,6 +461,7 @@ def _mask(text: str) -> str:
         if c == quote:
             quote = None
         out.append(_MASK.get(c, c))
+        prev = ""
         i += 1
     return "".join(out)
 
@@ -565,12 +583,21 @@ def _git(args: list, cwd, env, found: list) -> None:
 
 
 def bash_targets(command: str, cwd, env, depth: int = 0) -> list:
-    """[(`write` or `remove`, a path or None)] in the line's order; ValueError where `shlex`
-    cannot split it."""
+    """[(`write` or `remove`, a path or None)] in the line's order, then (`split`, None) where
+    `shlex` stops splitting after a command; ValueError where it cannot read the first (g5 r1 F3)."""
     text, bodies = _heredocs(command)
-    text = text.replace("\\\n", " ")
-    found, here, subshells, pushed = [], cwd, [], []
-    for words, outs in list(_commands(text)):
+    found, here, subshells, pushed, read = [], cwd, [], [], []
+    try:
+        for c in _commands(text):
+            read.append(c)
+    except ValueError:
+        if all(outs is None for _, outs in read):
+            raise
+        read.append(("split", "split"))
+    for words, outs in read:
+        if words == "split":
+            found.append(("split", None))
+            continue
         if outs is None:                  # r1 F1, r2 F3: a subshell's `cd` and pushd end with it
             if words == "(":
                 subshells.append((here, list(pushed)))
@@ -640,8 +667,11 @@ def _bash_gated(payload: dict, env) -> str | None:
         log(payload, env, "open", None, why="the line cannot be split")
         return None
     cache: dict = {}
-    unresolved = False
+    unresolved = split = False
     for kind, path in found:
+        if kind == "split":
+            split = True
+            continue
         if path is None:
             unresolved = True
             continue
@@ -651,7 +681,9 @@ def _bash_gated(payload: dict, env) -> str | None:
             lf = _removes_list(path, env, cache)
             if lf is not None:
                 return lf
-    if unresolved:                        # r1 F6: an unresolved target passes, with one line
+    if split:                             # g5 r1 F3: the rest of the line was not read
+        log(payload, env, "open", None, why="the line cannot be split")
+    elif unresolved:                      # r1 F6: an unresolved target passes, with one line
         log(payload, env, "open", None, why="a target cannot be resolved")
     return None
 
