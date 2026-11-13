@@ -207,7 +207,7 @@ def test_s53_f_a_helper_s_opus_turns_count_as_opus(tmp_path):
     st = _meter_state(tmp_path, sdir)
     prices = settings(shares={"fable": 1})["mix"]["prices"]
     fable = (1000 * 8 + 100 * 40 + 1_000_000 * 10) / 1e6              # cache_write 1.25 x 8
-    opus = (1000 * 5 + 100 * 25) / 1e6 + 5.0                           # the sidechain, the helper
+    opus = (1000 * 4 + 100 * 20) / 1e6 + 4.0               # the sidechain, the helper (h4 R4)
     assert meter.spend(st, prices) == {"fable": round(fable, 6), "opus": round(opus, 6)}
     user_mix(shares={"fable": 1, "opus": 1})
     rec(A, 40, NOW)
@@ -238,7 +238,7 @@ def test_s53_f2_the_week_survives_the_ledger_s_rotation():
     user_mix(shares={"fable": 3, "opus": 1}, resets=2)
     t = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
     by_state(A, {"fable": [0, 122500, 0, 0]})
-    by_state(B, {"opus": [0, 104000, 0, 0]})
+    by_state(B, {"opus": [0, 130000, 0, 0]})     # 2.6 USD at opus's 20 per MTok (h4 R4)
     rec(A, 75, t), rec(B, 75, t + timedelta(minutes=1)), rec(A, 26, t + timedelta(hours=1))
     assert band_file()["mix"]["points"] == {"fable": 0.0, "opus": 26.0}
     for h in (30, 60, 90):
@@ -296,7 +296,7 @@ def test_s53_f6_a_turn_counts_once_and_spend_never_falls(tmp_path):
     prices = settings(shares={"opus": 1})["mix"]["prices"]
     st: dict = {}
     meter.parse(p, st, session_id=A)
-    assert meter.spend(st, prices)["opus"] == round((1000 * 5 + 100 * 25) / 1e6, 6)
+    assert meter.spend(st, prices)["opus"] == round((1000 * 4 + 100 * 20) / 1e6, 6)   # h4 R4
     before = meter.spend(st, prices)["fable"]
     p.write_text(_turn(7, "claude-fable-5-2") + "\n")                # rewritten, shorter
     meter.parse(p, st, session_id=A)
