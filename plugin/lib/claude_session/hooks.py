@@ -951,7 +951,11 @@ def _first_meter(sdir: Path, tp, env) -> None:
         cfg, _ = sessionconfig.effective()
         limits, policy = meter.limits_for(sdir, env), _policy(cfg)
         st = meter.load_state(sdir)
-        m = meter.parse(tp, st, limits, policy, sdir.name) if tp else None
+        try:                                            # review 1 F2: a FIFO never blocks
+            regular = bool(tp) and stat.S_ISREG(os.stat(tp).st_mode)
+        except (OSError, ValueError):
+            regular = False
+        m = meter.parse(tp, st, limits, policy, sdir.name) if regular else None
         if m is None:
             if meter.load(sdir) is not None:
                 return

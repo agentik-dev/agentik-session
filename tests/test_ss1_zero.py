@@ -270,3 +270,21 @@ def test_review1_f1_no_meter_line_on_a_prompt_before_the_first_tool_call(env, re
     pin, now = runs
     assert now[0].encode() == pin[0].encode() and "session meter" not in now[0], now[0]
     assert now[1].encode() == pin[1].encode() and "session meter" in now[1], now[1]
+
+
+def test_review1_f2_a_fifo_transcript_is_absent_and_never_hangs_the_hook(env, repo, tmp_path):
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    try:
+        r = subprocess.run([sys.executable, "-m", "claude_session", "hook", "SessionStart"],
+                           input=json.dumps({"session_id": SID, "cwd": str(repo),
+                                             "transcript_path": str(fifo),
+                                             "hook_event_name": "SessionStart",
+                                             "source": "startup"}),
+                           capture_output=True, text=True, cwd=ROOT, env=env, timeout=15)
+    except subprocess.TimeoutExpired:
+        pytest.fail("SessionStart hung on a FIFO transcript")
+    assert r.returncode == 0 and r.stderr == "", r.stderr
+    assert hooks.START_METER in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    m = meter.load(sdir(env))
+    assert m["turns"] == 0 and m["zone"] == "clear" and m["transcript"]["path"] == str(fifo)
