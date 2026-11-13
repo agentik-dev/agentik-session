@@ -11,8 +11,8 @@
 ## Done-ness
 - [x] Acceptance 1 at the pin: `b92e4e0` an ancestor of main (exit 0), the four files' diff empty
 - [x] Packet committed
-- [ ] `tests/test_g8a_reader.py`, red at the pin
-- [ ] The reader (R2 to R8, R10, R11) with the old tests' edits
+- [x] `tests/test_g8a_reader.py`, red at the pin (its import fails)
+- [x] The reader (R2 to R8, R10's strict column) with g7's table: `_walk`, `commands`, `git_words`; only test 9's make half and test 10 red, the make rule's
 - [ ] The make rule (R9)
 - [ ] NICE rows (R12) and this record
 
@@ -20,7 +20,7 @@
 - none yet
 
 ## Next act
-- Write `tests/test_g8a_reader.py` and see it red.
+- The make rule: `unbounded` through `commands`; `_substituted` out.
 
 ## Exit
 - open
