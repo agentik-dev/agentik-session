@@ -50,3 +50,8 @@ No transcript, no live state root, no file under `~/.claude`, no hq checkout.
 ## 6. Report
 
 The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the choices made, what was not done.
+
+## 7. Review 1's fix (each a test in `tests/test_dw1_door.py`, red at `8636055`, green after)
+
+- F1: a door path that is not a link and not a regular file (a FIFO, a socket, a device, a directory) has no version to compare and is never opened, so `install-cli` and the refresh cannot block on a FIFO there; it is left alone with the "no version" line (`None there`), and the launcher and link are written. Acceptance 5's table keeps its seven cases: the vendored `_door` still blocks on a FIFO.
+- F2: the "no version" line carries its two values escaped to ASCII (the bytes as read, each byte past ASCII as `\xNN`), so a door's byte cannot fail the print under any locale; a `VERSION=0.2.0` plus byte 0xff door reads `(0.2.0\xff there, ...)`, exit 0.

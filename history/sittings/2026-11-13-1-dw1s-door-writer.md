@@ -16,14 +16,15 @@
 - [x] R7 proofs: the three files, .venv 170 passed; .venv-floor 167 passed, 3 skipped; test_install.py and test_bare_machine.py unchanged; compileall, scripts/doclint, scripts/hygiene exit 0
 - [x] Fix 1, tests: review 1's F1 (a FIFO at the door) and F2 (a 0xff byte, UTF-8 locale) in `tests/test_dw1_door.py`, red at 8636055 under both venvs (a hang; a traceback, exit 1)
 - [x] Fix 1, the change: `_door` opens only a regular file; the line's values escaped to ASCII; the two tests green under both venvs
-- [ ] Fix 1, records: the packet's §7; the R7 proofs again
+- [x] Fix 1, records: the packet's §7; the R7 proofs again: .venv 172 passed; .venv-floor 169 passed, 3 skipped; the first two files unchanged against main; compileall, scripts/doclint, scripts/hygiene exit 0
 
 ## Handover
 - Phase 2 (bump, gate job) waits on the coordinator's word.
-- Phase 2 renders the README: its status line counts 3432 tests and the suite now collects 3445 (13 new); `test_readme.py`'s status-line test is red until then.
+- Phase 2 renders the README: its status line counts 3432 tests and the suite now collects 3447 (15 new); `test_readme.py`'s status-line test is red until then.
+- The vendored `agentik_install._door` still blocks on a FIFO and returns the raw byte: commons' to mend; no path of this repo but acceptance 5's test calls it, and that test keeps its seven shared cases.
 
 ## Next act
-- Fix 1: the packet's §7 and this record.
+- None for this builder: review 2 and phase 2 on the coordinator's word.
 
 ## Exit
-- Phase 1 built and proven; review 1's fix in flight.
+- Phase 1 and review 1's fix built and proven; handed back to the coordinator.
