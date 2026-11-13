@@ -16,12 +16,14 @@ file. The profile *name* is taken from the highest layer that names one
 else `frontier`; its values form the base, and a named launch profile re-applies its own
 fields above the repo files.
 
-`tiers` (packet mt1) is layered apart, role by role: the shipped `defaults`, the profile
-(shipped, then the user's body of it), the user file's `tiers:` (and its `defaults.tiers`),
-the repo's (`config.yaml`, then `config.local.yaml`, each top-level `tiers:` or
-`session.tiers`). A layer's old `subagents` is read as its `tiers.build` model. The
-session's own words (`set tier.*`, `set cap`) are read against the clock by each reader
-(tiers.effective), never written here; `subagents` is written as `tiers.build`'s model.
+`tiers` (packet mt1) is layered apart, role by role, lowest first (mt1 round 1, F1 F2):
+the shipped `defaults`, the user's `defaults`, the shipped profile, the user's body of it,
+the user file's top-level `tiers:`, the repo's (`config.yaml`, then `config.local.yaml`,
+each its top-level `tiers:` alone: `session.tiers` is not read, F3), then, when the launch
+named the profile, its own body again (shipped, then the user's). A layer's old
+`subagents` is read as its `tiers.build` model. The session's own words (`set tier.*`,
+`set cap`) are read against the clock by each reader (tiers.effective), never written
+here; `subagents` is written as `tiers.build`'s model.
 
 The engine's measured window, else the model, decides the window, and the role
 the ceilings within it (models.py): the window is the engine's last reading for this
@@ -127,6 +129,7 @@ class Resolved:
     inputs: list = field(default_factory=list)       # [(path, sha256 | None)]
     unknown: list = field(default_factory=list)      # "layer: key", for doctor
     renamed: list = field(default_factory=list)      # "layer: agent-relay ...", for doctor
+    tier_origins: dict = field(default_factory=dict)  # {role: the layer its model is from}
 
     def as_dict(self) -> dict:
         return {"provider": self.provider, **self.sections,
@@ -233,9 +236,9 @@ def _repo_sections(doc: dict, layer: str, unknown: list) -> dict:
             continue
         if k == "session":
             for sk in v:
-                if sk not in SESSION_KEYS:
+                if sk not in SESSION_KEYS or sk == "tiers":     # mt1 r1 F3: one spelling
                     unknown.append(f"{layer}: session.{sk}")
-            v = {sk: sv for sk, sv in v.items() if sk in SESSION_KEYS}
+            v = {sk: sv for sk, sv in v.items() if sk in SESSION_KEYS and sk != "tiers"}
         out[k] = v
     return out
 
@@ -317,28 +320,44 @@ def _tier_layer(body) -> dict:
     return t
 
 
-def _tiers(shipped, user, name, repo_s, local_s, ov_sub=None) -> dict:
-    """The table for profile `name`, lowest first: the shipped defaults, the profile (the
-    shipped body, then the user's), the user's `defaults.tiers` and top-level `tiers:`, then
-    the repo's and the local file's (top-level `tiers:`, then `session.tiers`)."""
+def _tier_layers(shipped, user, name, repo_s, local_s, launch, ov_sub, where) -> list:
+    """[(origin, layer)] for profile `name`, lowest first (the module's docstring); `where`
+    names the user's, the repo's and the local file."""
     sp = (shipped.get("profiles") or {}).get(name)
     up = (user.get("profiles") or {}).get(name) if isinstance(user.get("profiles"), dict) \
         else None
     ud = user.get("defaults") if isinstance(user.get("defaults"), dict) else {}
-    layers = [(shipped.get("defaults") or {}).get("tiers") or {}, _tier_layer(sp),
-              _tier_layer(up), _tier_layer(ud), _tier_layer({"tiers": user.get("tiers")})]
-    for secs in (repo_s, local_s):
-        layers.append(_tier_layer({"tiers": secs.get("tiers")}))
-        layers.append(_tier_layer(secs.get("session")))
-    layers.append(_tier_layer({"subagents": ov_sub}))     # an overlay's old subagent_model
+    u = where["user"]
+    out = [("the shipped defaults", (shipped.get("defaults") or {}).get("tiers") or {}),
+           (f"{u}: defaults", _tier_layer(ud)),
+           (f"the shipped profile {name}", _tier_layer(sp)),
+           (f"{u}: profiles.{name}", _tier_layer(up)),
+           (f"{u}: tiers", _tier_layer({"tiers": user.get("tiers")}))]
+    for key, secs in (("repo", repo_s), ("local", local_s)):
+        sub = (secs.get("session") or {}).get("subagents")
+        out += [(f"{where[key]}: session.subagents", _tier_layer({"subagents": sub})),
+                (f"{where[key]}: tiers", _tier_layer({"tiers": secs.get("tiers")}))]
+    if launch:
+        out += [(f"the launch profile {name} (shipped)", _tier_layer(sp)),
+                (f"the launch profile {name} ({u}: profiles.{name})", _tier_layer(up))]
+    out.append(("this session's overlay", _tier_layer({"subagents": ov_sub})))
+    return out
+
+
+def _tiers(layers) -> tuple[dict, dict]:
+    """(the table, {role: the origin of its model}) from _tier_layers' list."""
     table: dict = {}
-    for layer in layers:
+    origins: dict = {}
+    for origin, layer in layers:
         table = tiermod.merge(table, layer)
+        for r, v in layer.items():
+            if isinstance(v, str) or isinstance(v, dict) and v.get("model") is not None:
+                origins[r] = origin
     try:
         tiermod.check(table)
     except ValueError as e:
         raise ResolveError(str(e)) from None
-    return table
+    return table, origins
 
 
 def user_profile(env) -> str | None:
@@ -562,7 +581,11 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     sections["session"]["profile"] = name
     sections.pop("tiers", None)
     merged = {k: sections["session"].get(k) for k in SESSION_KEYS}
-    merged["tiers"] = _tiers(shipped, user, name, repo_s, local_s, ov_session.get("subagents"))
+    where = {"user": str(_user_file(env)), "repo": str(rdir / "config.yaml"),
+             "local": str(rdir / "config.local.yaml")}
+    merged["tiers"], origins = _tiers(_tier_layers(shipped, user, name, repo_s, local_s,
+                                                   bool(profile), ov_session.get("subagents"),
+                                                   where))
     merged["subagents"] = merged["tiers"]["build"]["model"]       # mt1 R1's read alias
     _validate(merged)
     per = _window_ceilings(shipped, user, name, [
@@ -614,7 +637,8 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
                 "resolved_at": _iso(mtime),
                 "inputs": [{"path": p, "sha256": h} for p, h in inputs]}
     return Resolved(session_id=str(session_id), sections=sections,
-                    provider=provider, inputs=inputs, unknown=unknown, renamed=renamed)
+                    provider=provider, inputs=inputs, unknown=unknown, renamed=renamed,
+                    tier_origins=origins)
 
 
 def session_dir(state: Path, session_id: str) -> Path:

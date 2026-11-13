@@ -15,7 +15,9 @@
 - [x] version bump in its own commit: 2.0.0-alpha.90 (651b4db)
 - [x] records: RUNBOOK tiers section, README source 16380 B, sidecar by shasum, 3350 tests
 - [x] round 2 (the full local run, 10 red): READERS row, sc3 prompts, the help text, no-xhigh test, README hooks line
-- [ ] the gate, once, last
+- [x] fix round 1, phase 1 (hq `REFUTE-2026-11-12-mt1-r1.md`; fix builder, about 40 tool calls): tests first (50c7418, 21 red at d4b280e)
+- [ ] F1 F2 F3 (resolver), F4 (doctor), F3's save, F5, F7, F8, F10 (cli, tiers); NICE rows; packet §4 and RUNBOOK
+- [ ] phase 2, on the coordinator's word only: merge main, recount, version, then the gate once
 
 ## Handover
 - decide, owner: whether `--save` on a non-tier key should write the user's `profiles.yaml` `profiles.<name>.<key>` (today refused, exit 2); consumer: the owner's `set ... --save` habit.
@@ -25,7 +27,7 @@
 - none
 
 ## Next act
-The gate's `make check` on the branch tip, then the hand-back to the hq coordinator.
+Phase 1's fixes by finding, then the hand-back; wait for the coordinator's phase 2 message (h3 landed).
 
 ## Exit
 - 2026-11-12: built; gate 20261112-173918-1238 ran on 212f74e (before the round-2 fixes); the next gate runs on the head

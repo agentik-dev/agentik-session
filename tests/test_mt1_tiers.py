@@ -342,8 +342,12 @@ def test_r1_f1_a_launched_profile_re_applies_its_own_tiers(world):
     assert s["subagents"] == "local/default"
     assert sessionconfig.from_profile("local-only", world, dict(os.environ)).subagent_model \
         == "local/default"
-    rc, out, _ = run("start", "-n", "local-only")
-    assert rc == 0 and "CLAUDE_CODE_SUBAGENT_MODEL=local/default " in out
+    lane = world.parent / "bin" / "agentik-agents"         # the local lane's stub
+    lane.write_text("#!/bin/sh\nexit 0\n")
+    lane.chmod(0o755)
+    rc, out, err = run("start", "-n", "local-only")
+    assert rc == 0 and "CLAUDE_LOCAL_SUBAGENT=local/default " in out, err   # the lane's
+    assert "SUBAGENT_MODEL=opus" not in out
     assert resolved(world, "balanced")["tiers"]["build"]["model"] == "sonnet"   # its own body
     assert resolved(world, "balanced")["tiers"]["words"]["model"] == "opus"     # not its body
     user_file("profiles:\n  local-only:\n    tiers:\n      words: {model: haiku}\n")
