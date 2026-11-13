@@ -676,7 +676,8 @@ def unbounded(shell: str, depth: int = 0) -> str:
     """Why the line may not run, "" when it may: read with the hook's reader
     (`instructionguard._commands`), it is refused when the reader cannot split it, when a
     word of a simple command, by basename, is `make` or `gmake`, or when a shell's `-c` text
-    is, to depth SHELL_DEPTH."""
+    is, to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
+    every later word of that command is a text, whatever flags sit around it (round 1 F1)."""
     try:
         cmds = list(_commands(shell))
     except ValueError as e:
@@ -684,19 +685,21 @@ def unbounded(shell: str, depth: int = 0) -> str:
     for words, outs in cmds:
         if outs is None:                  # a subshell's edge
             continue
-        for i, w in enumerate(words):
+        shell_seen = texts = False
+        for w in words:
             name = os.path.basename(w)
             if name in MAKES:
                 return f"it runs `{name}`; {WHY_MAKE}"
-            if name not in _SHELLS or depth >= SHELL_DEPTH:
+            if depth >= SHELL_DEPTH:
                 continue
-            j = i + 1
-            while j < len(words) and words[j].startswith("-") and not _DASH_C.match(words[j]):
-                j += 1
-            if j + 1 < len(words) and _DASH_C.match(words[j]):
-                why = unbounded(words[j + 1], depth + 1)
+            if texts:
+                why = unbounded(w, depth + 1)
                 if why:
                     return why
+            elif shell_seen and _DASH_C.match(w):
+                texts = True
+            elif name in _SHELLS:
+                shell_seen = True
     return ""
 
 
