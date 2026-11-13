@@ -1,4 +1,4 @@
-.PHONY: help test test-floor venv-floor doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme
+.PHONY: help test test-floor venv-floor doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme stamp
 # The virtualenv first: `python3` and the scripts' shebangs resolve to it, never Apple's.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 # The newest installed respeak renderer, under either marketplace name.
@@ -61,6 +61,10 @@ hygiene:  ## the vendored copies' pins, then the public-hygiene scan (convention
 	scripts/hygiene
 plugin-version-check:  ## a change under plugin/ fails until plugin.json's version moves (GUIDE §7)
 	$(PYTHON) scripts/plugin-version-check
+# The landing's derived lines, after a branch merges main (hq design/19's land3); check never calls it.
+STAMP_BASE ?= main
+stamp:  ## after merging $(STAMP_BASE): plugin.json's version, the README's count, the sidecar, NICE rows past the bound; reds a merge whose count lost a test (STAMP_VERSION= names the version)
+	$(PYTHON) scripts/stamp --base "$(STAMP_BASE)"$(if $(STAMP_VERSION), --version "$(STAMP_VERSION)")
 validate:  ## claude plugin validate on the plugin (the marketplace is agentik-commons')
 	scripts/bounded --wall 60 -- claude plugin validate plugin/
 clean:
