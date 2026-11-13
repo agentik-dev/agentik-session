@@ -11,6 +11,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -316,3 +318,114 @@ def test_in2_docs_say_the_part_and_show():
         text = (root / rel).read_text()
         assert "## Waits on the owner" in text and "charter show" in text, rel
     assert "seven parts" in " ".join(charter.__doc__.split())
+
+
+# ---- Review 1 (build 2): F1, F2, L2 and the hook's chained payloads ----------------------
+
+_FIFOS: list = []
+
+
+def _show_bounded(*argv, limit=2.0):
+    """`show` in a thread, back within `limit` seconds or the test fails; a FIFO left
+    blocking is then opened for writing and closed, so the thread ends."""
+    got = {}
+    t = threading.Thread(target=lambda: got.update(r=run("charter", "show", *argv)),
+                         daemon=True)
+    start = time.monotonic()
+    t.start()
+    t.join(limit)
+    took = time.monotonic() - start
+    if t.is_alive():
+        for fifo in _FIFOS:
+            try:
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+        t.join(5)
+        pytest.fail(f"show did not return within {limit} s")
+    return got["r"], took
+
+
+@pytest.mark.parametrize("beside", [False, True], ids=["alone", "beside-a-good-repo"])
+def test_in2_r1_f1_a_fifo_newest_is_unreadable(box, beside):
+    repos = box / "repos"
+    fifo = repos / "quince" / "history" / "sittings" / "2026-11-14-1.md"
+    os.mkfifo(fifo)
+    _FIFOS.append(str(fifo))
+    argv = (["pear"] if beside else []) + ["quince", "--json"]
+    (rc, out, err), took = _show_bounded(*argv)
+    assert rc == 0 and took < 2.0, err
+    doc = json.loads(out)
+    assert doc["skipped"] == [{"repo": os.path.realpath(repos / "quince"), "why": "unreadable"}]
+    assert [r["name"] for r in doc["repos"]] == (["2026-11-13-1"] if beside else [])
+
+
+@pytest.mark.parametrize("kind", ["device-link", "over-the-bound"])
+def test_in2_r1_f1_a_device_or_a_huge_file_is_unreadable(box, kind):
+    repos = box / "repos"
+    newest = repos / "quince" / "history" / "sittings" / "2026-11-14-1.md"
+    if kind == "device-link":
+        os.symlink(os.devnull, newest)
+    else:
+        newest.write_bytes(b"x" * (getattr(charter, "SHOW_BOUND", 65536) + 1))
+    doc = _show("pear", "quince")
+    assert [r["name"] for r in doc["repos"]] == ["2026-11-13-1"]
+    assert doc["skipped"] == [{"repo": os.path.realpath(repos / "quince"), "why": "unreadable"}]
+
+
+def test_in2_r1_f1_check_still_reads_the_file_it_is_handed(box):
+    big = box / "repos" / "pear" / "big.md"
+    big.write_bytes(b"x" * (getattr(charter, "SHOW_BOUND", 65536) + 1))
+    rc, _, err = run("charter", "check", str(big))
+    assert rc == 2 and "ceiling" in err
+
+
+@pytest.mark.parametrize("value", ["5", "[a, b]", "''"], ids=["int", "list", "empty"])
+@pytest.mark.parametrize("beside", [False, True], ids=["alone", "beside-a-good-repo"])
+def test_in2_r1_f2_a_charter_dir_not_a_string_is_the_default(box, value, beside):
+    repos = box / "repos"
+    cfg = repos / "quince" / ".claude" / "agentik"
+    cfg.mkdir(parents=True)
+    (cfg / "config.yaml").write_text(f"session:\n  charter:\n    dir: {value}\n")
+    argv = (["pear"] if beside else []) + ["quince", "--json"]
+    rc, out, err = run("charter", "show", *argv)
+    assert rc == 0 and "Traceback" not in err, err
+    doc = json.loads(out)
+    assert doc["repos"][-1]["file"] == os.path.realpath(
+        repos / "quince" / "history" / "sittings" / "2026-11-13-1.md")
+    assert len(doc["repos"]) == (2 if beside else 1) and doc["skipped"] == []
+
+
+def test_in2_r1_l2_every_waits_part_is_read(box, monkeypatch):
+    pear = box / "repos" / "pear"
+    f = pear / "history" / "sittings" / "2026-11-13-1.md"
+    text = form(waits=("- none",)).replace(
+        "## Next act\n", "## Waits on the owner\n" + HAND + "\n\n## Next act\n")
+    f.write_text(text)
+    (w,) = _show(str(pear))["repos"][0]["waits"]
+    assert (w["line"], w["what"]) == (text.splitlines().index(HAND) + 1, "install the press")
+    two = "Waits on the owner has 2 parts: keep one '## Waits on the owner'"
+    assert _warns(text) == [two]
+    monkeypatch.chdir(pear)
+    assert run("charter", "check", str(f)) == (0, "", f"{f}: warning: {two}\n")
+    assert _warns(form()) == [SHAPE_W + PROSE]                         # one part: as before
+
+
+L = "agentik-session"
+
+
+@pytest.mark.parametrize("cmd", [
+    f"{L} charter show; {L} charter close",
+    f"{L} charter show && {L} charter open g",
+    f"{L} charter show | xargs {L} charter open",
+    f"{L} charter show\n{L} charter close",
+    f"{L} charter show $({L} charter open g)",
+], ids=["semicolon", "and", "pipe-xargs", "newline", "subst"])
+def test_in2_r1_the_hook_denies_a_writer_after_show(box, monkeypatch, cmd):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    assert not _denied(hooks.pre_tool_use(_bash(f"{L} charter show")))
+    assert not _denied(hooks.pre_tool_use(_bash(f"{L} charter show pear --json")))
+    out = hooks.pre_tool_use(_bash(cmd))
+    assert _denied(out), cmd
+    assert "`charter show`, the verb first" in out["hookSpecificOutput"][
+        "permissionDecisionReason"]
