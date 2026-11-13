@@ -1120,7 +1120,8 @@ def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
     if st is None:
         print(f"note: checkpoint --respawn: {path}: the charter's commit state is unknown "
               "(git status failed or timed out); the respawn goes on", file=sys.stderr)
-    elif st and st is not gitinfo._NOT_A_REPO and (st == "??" or not args.commit):
+    elif st and st is not gitinfo._NOT_A_REPO and (
+            st == "??" or not (args.commit and _named(path, getattr(args, "paths", None)))):
         _die(f"checkpoint --respawn: {path} is not committed; commit it first: "
              f"{_commit_line(path)}", 2)
     src = _state_check(args.state) if args.state else None
@@ -1199,7 +1200,27 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
     return "respawn marked; no launcher runs this sitting: print your start line and stop"
 
 
+CHECKPOINT_FORM = "checkpoint --commit <paths...> [-m <message>]"
+
+
+def _named(path: str, paths) -> bool:
+    """fw5 R3: `--commit` takes a modified charter only when its line names it, or a directory
+    holding it."""
+    real = os.path.realpath(path)
+    for p in paths or ():
+        q = os.path.realpath(p)
+        if real == q or real.startswith(q.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def cmd_checkpoint(args) -> int:
+    paths = list(getattr(args, "paths", None) or [])
+    if args.commit and not paths:
+        _die(f"checkpoint --commit commits the paths its line names and nothing else: "
+             f"{CHECKPOINT_FORM}", 2)
+    if paths and not args.commit:
+        _die(f"checkpoint: a path is committed only with --commit: {CHECKPOINT_FORM}", 2)
     mark = _respawn_check(args)
     cfg, _ = sessionconfig.effective()
     workdir = os.getcwd()
@@ -1211,21 +1232,18 @@ def cmd_checkpoint(args) -> int:
             _die("not a git repository, so there is nothing to commit")
         msg = args.message or ("checkpoint" if not sessionconfig.get_active()
                                else f"checkpoint ({cfg.name})")
-        # Tracked files only. `add -A` is repo-wide and would sweep up a
-        # plaintext .env, a tfstate, or an age key copied in for a test --
-        # the wind-down nudge makes an autonomous agent the likeliest caller.
-        subprocess.run(["git", "-C", workdir, "add", "-u"], check=False)
-        _, porcelain = gitinfo._git(workdir, "status", "--porcelain")
-        new_files = [l[3:] for l in porcelain.splitlines() if l.startswith("?? ")]
-        if new_files:
-            print(f"note: {len(new_files)} untracked file(s) NOT committed "
-                  f"({', '.join(new_files[:4])}{'…' if len(new_files) > 4 else ''}). "
-                  "Add them yourself if they belong in the repo.", file=sys.stderr)
-        r = subprocess.run(["git", "-C", workdir, "commit", "-m", msg],
-                           capture_output=True, text=True)
-        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
-            _die(f"commit failed: {(r.stderr or r.stdout).strip()}")
-        print((r.stdout or "").strip() or "nothing to commit")
+        # fw5 R3: the named paths alone, through `commit`'s core with no check (its witness,
+        # its lock, `commit --only`), so another writer's staged or edited file stays out.
+        from . import commit as core
+        try:
+            code = core.commit_paths(workdir, paths, msg, os.environ)
+        except core.Nothing:
+            print("nothing to commit")
+        except core.Refused as err:
+            _die(f"checkpoint --commit: {err}", 2)
+        else:
+            if code != 0:
+                _die(f"commit failed: exit {code}; nothing recorded")
     if not sessionconfig.save_overlay({hooks.COUNTER: 0,
                                        hooks.LAST_CHECKPOINT: time.time()}):
         _die("could not record the checkpoint (no session overlay path)")
@@ -1618,9 +1636,12 @@ def build_parser() -> argparse.ArgumentParser:
     cm.set_defaults(func=cmd_commit)
 
     cp = sub.add_parser("checkpoint", help="mark a handoff-ready point")
+    cp.add_argument("paths", nargs="*",
+                    help="with --commit, each path to commit, as git takes it from the cwd")
     cp.add_argument("-m", "--message")
     cp.add_argument("-c", "--commit", action="store_true",
-                    help="git add -u (tracked files only) && git commit first")
+                    help="commit the named paths first, and nothing else (no add -u, no "
+                         "sweep): checkpoint --commit <paths...>")
     cp.add_argument("--respawn", action="store_true",
                     help="mark a RESPAWN close, the sitting's last act: the charter's "
                          "Next act must open on RESPAWN (needs --charter)")
