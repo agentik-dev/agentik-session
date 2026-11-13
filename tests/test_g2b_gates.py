@@ -1006,8 +1006,10 @@ def test_r2_f1_a_reserved_word_after_an_assignment_or_a_wrapper_is_a_word(box, c
     found = instructionguard.bash_targets(command, str(box.repo), box.env)
     assert all(p.startswith(str(box.repo) + os.sep) and "/sub/" not in p and
                not p.startswith("/tmp") for _, p in found), found
-    if not command.startswith("\""):             # the loose reading follows no such `cd` either
-        assert {m for _, _, m, _ in instructionguard._loose(command)} == {()}, command
+    # review 2's R2: the loose reading skips a reserved word wherever its loop meets it, as
+    # db19d51 did (an inner line's first word), so it lists the write behind it
+    assert any(w.endswith(("CLAUDE.md", "edit-gates")) for _, w, _, _ in
+               instructionguard._loose(command)), command
 
 
 def test_r2_a_reserved_word_first_still_reads_the_cd(box):
@@ -1160,3 +1162,43 @@ def test_r2_r1_a_line_past_the_strict_bound_is_denied(box, monkeypatch):
     monkeypatch.setattr(instructionguard, "_STRICT_READS", 4)
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
 
+
+# ---- review 2, R2 (F1): the loose reading skips a reserved word wherever its loop meets it ---
+# (an inner line's first word, as db19d51 did); the strict reading lets `time -p` stand in the
+# run of reserved words. Each line was denied at db19d51 and passed at 6aed3c5; shells write.
+
+R2_F1_INNER = [
+    "bash -lc 'if cp a CLAUDE.md; then :; fi'", "bash -lc 'if ! cp a CLAUDE.md; then echo failed; fi'",
+    "bash -lc \"while ! cp a CLAUDE.md; do sleep 1; done\"", "bash -lc '! cp a CLAUDE.md'",
+    "bash -lc '! tee CLAUDE.md < a'", "bash -lc 'time ! cp a CLAUDE.md'", "sh -ec '! cp a CLAUDE.md'",
+    "zsh -fc 'if cp a CLAUDE.md; then :; fi'", "zsh -ic 'if cp a CLAUDE.md; then :; fi'",
+    "env bash -xc 'while cp a CLAUDE.md; do break; done'",
+    "bash -lc 'if rm -f .claude/edit-gates; then :; fi'", "bash -c 'bash -c \"! cp a CLAUDE.md\"'",
+    "bash -c 'sh -c \"if cp a CLAUDE.md; then :; fi\"'",
+    "env -i bash -c 'bash -c \"if cp a CLAUDE.md; then :; fi\"'",
+    "x=1 eval 'if cp a CLAUDE.md; then :; fi'", "FOO=1 eval '! rm -f .claude/edit-gates'",
+    "command eval '! cp a CLAUDE.md'", "builtin eval 'until cp a CLAUDE.md; do :; done'",
+    "eval -- 'if cp a CLAUDE.md; then :; fi'", "eval time ! cp a CLAUDE.md",
+    "eval 'time if cp a CLAUDE.md; then :; fi'", "cat <(echo a)#c; time ! cp a CLAUDE.md"]
+R2_F1_TIME = [
+    "time -p if cp a CLAUDE.md; then :; fi", "time -p ! cp a CLAUDE.md",
+    "time -p while cp a CLAUDE.md; do break; done", "time -p until cp a CLAUDE.md; do :; done",
+    "time -p if ! mv a CLAUDE.md; then :; fi", "time -p while ! rm -f .claude/edit-gates; do :; done",
+    "time -p if cd docs; then printf x >> ../CLAUDE.md; fi",
+    "time -p ! cd docs; printf x >> ../CLAUDE.md"]
+R2_F1_CONTROLS = [
+    "eval 'if cp a CLAUDE.md; then :; fi'", "sh -c 'if cp a CLAUDE.md; then :; fi'",
+    "bash -lc 'if true; then cp a CLAUDE.md; fi'", "bash -lc 'cp a CLAUDE.md'",
+    "time if cp a CLAUDE.md; then :; fi", "time -p cp a CLAUDE.md"]
+
+
+@pytest.mark.parametrize("command", R2_F1_INNER + R2_F1_TIME + R2_F1_CONTROLS)
+def test_r2_r2_f1_a_reserved_word_in_an_inner_line_or_after_time_p(box, command):
+    (box.repo / "docs").mkdir(exist_ok=True)
+    assert len(R2_F1_INNER + R2_F1_TIME) == 30
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    decision, reason = _decision(out)
+    assert decision == "deny", command
+    assert f"`{_gated_path(box, command)}`" in reason, command
+    if command in R2_F1_TIME:                     # the strict reading reads it
+        assert reason == REASON.format(_gated_path(box, command)), command

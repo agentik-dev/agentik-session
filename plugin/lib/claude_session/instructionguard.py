@@ -752,13 +752,15 @@ def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood:
             if not _PH_RE.match(o) and o.strip("`"):
                 for h in heres:
                     add("write", o.strip("`"), h)
-        lead, i = False, 0                # g6 R5: `then cd` is read (n138); r1 R2: a reserved
-        while i < len(words):             # word only as the command's first word
-            w = words[i]
-            if w in _LEAD and all(x in _LEAD for x in words[:i]):
-                lead = lead or w != "time"
-            elif not (_ASSIGN.match(w) or w in _WRAPPERS
-                      or (w.startswith("-") and i + 1 < len(words))):
+        lead, run, i = False, True, 0     # g6 R5: `then cd` is read (n138); r1 R2: a reserved
+        while i < len(words):             # word only in the command's first run of them, which
+            w = words[i]                  # r2 R2: `time`'s options stand inside
+            opt = w.startswith("-") and i + 1 < len(words)
+            if run and (w in _LEAD or (opt and "time" in words[:i])):
+                lead = lead or (w in _LEAD and w != "time")
+            elif _ASSIGN.match(w) or w in _WRAPPERS or opt:
+                run = False
+            else:
                 break
             i += 1
         words = words[i:]
@@ -898,12 +900,11 @@ def _loose(text: str) -> list:
                  if w]
         if plain and words and words[0] in _LOOSE_COND:
             plain_to = -1                         # a `cd` past a reserved word may not run
-        i = 0                                     # r1 R2: a reserved word only as the first
-        while i < len(words) and (_ASSIGN.match(words[i]) or words[i] in _WRAPPERS
-                                  or words[i] == "eval" or os.path.basename(words[i]) in _SHELLS
-                                  or (words[i] in _LOOSE_SKIP
-                                      and all(x in _LOOSE_SKIP for x in words[:i]))
-                                  or (words[i].startswith("-") and i + 1 < len(words))):
+        i = 0                                     # r2 R2: a reserved word wherever the loop
+        while i < len(words) and (_ASSIGN.match(words[i]) or words[i] in _WRAPPERS   # meets it,
+                                  or words[i] in _LOOSE_SKIP                    # as db19d51's
+                                  or os.path.basename(words[i]) in _SHELLS      # (an inner
+                                  or (words[i].startswith("-") and i + 1 < len(words))):  # line)
             i += 1
         words = words[i:]
         if not words:

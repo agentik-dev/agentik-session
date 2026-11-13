@@ -18,8 +18,9 @@
 - [x] g6 checks: round 3's 27 lines at six commits, every write denied, REGRESS 0; fuzz 100k tokens (seed 9802) and 100k valid (seed 9902) vs 8153e52, d2f89d9, 40aee95, f1f012e, a0055da, a stub `cp` that prints nothing: REGRESS-with-a-shell 0 and 0; the replay of 415,408 lines: 72 newly refused, all by the loose reading, none a read or a `git add` (56 text the strict reading does not read as a write, 12 by the amendment's (b), 4 by its (a)): over the brief's 60 by the amendment's 16
 - [x] build 3 (review 1's fix, packet §3e): R1 a `cd` behind a reserved word adds a folder state (at most 16); R2 a reserved word only first; R3 a blank word stands only whole; R4 loose time bounded (4,096 pairs); R5 `>&`; 491 guard tests green, both venvs
 - [x] build 3 checks vs the six commits: sweeps, hand lines, round 3's and g6's lines REGRESS 0; fuzz 2 x 100k (seeds 80611, 80612) REGRESS 0; loose off vs a0055da 80k lines: 0 deny to pass; replay 72 newly refused, the same 72; NICE n164 to n166
-- [ ] build 4 R1 (F5): the strict reading's product bounded
-- [ ] build 4 R2 to R5 (F1 to F4): each mend back to db19d51's reading
+- [x] build 4 R1 (F5, cf603ae): strict bound 65,536 judgements, 4,096 paths; a `-c` line split once
+- [x] build 4 R2 (F1): loose skips a reserved word anywhere (db19d51); strict lets `time -p` in the run
+- [ ] build 4 R3 to R5 (F2 to F4): each mend back to db19d51's reading
 - [ ] build 4 records: packet §3f, NICE rows for review 2's leads and F6
 - [ ] phase 2, on the coordinator's word
 
