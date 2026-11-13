@@ -380,6 +380,75 @@ def _spawn_rule(payload: dict, env) -> str | None:
             + ". Name model: 'opus', or use an agent type that names its own model.")
 
 
+def _agent_model(ti: dict, payload: dict, env) -> str | None:
+    """The `model:` of the agent file the call's `subagent_type` names: the project's
+    `.claude/agents/<type>.md`, else the user's (`CLAUDE_CONFIG_DIR`, else `~/.claude`).
+    None for a plugin's agent (`plugin:name`), a missing file or no `model:` line."""
+    name = ti.get("subagent_type")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
+        return None
+    cwd = payload.get("cwd") or env.get("CLAUDE_PROJECT_DIR")
+    user = Path(env.get("CLAUDE_CONFIG_DIR") or Path(env.get("HOME") or Path.home()) / ".claude")
+    for base in ([Path(cwd) / ".claude"] if cwd else []) + [user]:
+        try:
+            with open(base / "agents" / f"{name}.md", encoding="utf-8") as f:
+                head = f.read(8192)
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = re.match(r"---\n(.*?)\n---", head, re.S)
+        if not m:
+            return None
+        got = re.search(r"^model:[ \t]*['\"]?([^'\"\s]+)", m.group(1), re.M)
+        return got.group(1) if got else None
+    return None
+
+
+def _role_rule(payload: dict, env) -> tuple:
+    """Packet mt1 R6: (posture, line) when an Agent or Task call names its role by a line
+    `tier: <role>` in its prompt and its model (the call's, else its agent file's) ranks
+    above that role's in the session's table (resolved, with this session's `set tier.*`
+    and `set cap` words); else (posture, None). A call that names no role, or whose model or
+    session table is unknown, is left to the family rule. Never raises."""
+    try:
+        from datetime import datetime, timezone
+        from . import tiers
+        ti = payload.get("tool_input")
+        ti = ti if isinstance(ti, dict) else {}
+        role = tiers.role(ti.get("prompt"))
+        if role is None:
+            return None, None
+        sid = payload.get("session_id") or env.get("CLAUDE_CODE_SESSION_ID")
+        sdir = _session_dir(sid, env, fallback=False) if sid else None
+        s = (_load_json(sdir / "resolved.json").get("session") or {}) if sdir else {}
+        s = s if isinstance(s, dict) else {}
+        table = s.get("tiers")
+        if not isinstance(table, dict):
+            return s.get("posture"), None
+        ov = {} if sdir is None else _load_json(resolver.state_dir(env) / "overlays"
+                                                / f"{sdir.name}.json")
+        table = tiers.effective(table, ov, datetime.now(timezone.utc))
+        want = (table.get(role) or {}).get("model")
+        model = ti.get("model") if isinstance(ti.get("model"), str) and ti.get("model") \
+            else _agent_model(ti, payload, env)
+        if not tiers.above(model, want):
+            return s.get("posture"), None
+        return s.get("posture"), (
+            f"agentik-session: this spawn names tier: {role}, whose model is {want}, and "
+            f"runs {_token(str(model))}, above it. Name model: '{want}', or the role the "
+            "work is.")
+    except Exception:                                   # noqa: BLE001  (a check, never a crash)
+        return None, None
+
+
+def _warned(out: dict, warn: str | None) -> dict:
+    """`out` with the role check's warning (posture signal or ask) said beside it."""
+    if not warn:
+        return out
+    out = dict(out)
+    out["systemMessage"] = (out["systemMessage"] + " " if out.get("systemMessage") else "") + warn
+    return out
+
+
 def _deny(reason: str, note: str | None) -> dict:
     out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                   "permissionDecisionReason": reason}}
@@ -403,6 +472,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             "systemMessage": "agentik-session: denied a helper's charter open or close.",
         }
     tool = payload.get("tool_name") or ""
+    warn = None
     if tool in SPAWNING_TOOLS:       # wfd, wfg: any posture, a helper's too, no call opened
         try:
             line = _spawn_rule(payload, os.environ if env is None else env)
@@ -414,6 +484,11 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             return _deny(line, None)
         if line:
             return _deny(line, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+        posture, warn = _role_rule(payload, os.environ if env is None else env)   # mt1 R6
+        if warn and posture == "deny":
+            return _deny(warn, f"agentik-session: denied a {_token(tool)} spawn before launch.")
+        if posture not in ("signal", "ask"):
+            warn = None
     if tool in instructionguard.TOOLS:   # g2b: an edit or a Bash write of a gated file is refused
         try:
             guard = instructionguard.check(payload, os.environ if env is None else env)
@@ -422,13 +497,15 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         if guard:
             return guard             # a refused call opens none
     _open_call(payload, os.environ if env is None else env)
-    if tool not in SPAWNING_TOOLS or payload.get("agent_id"):
+    if tool not in SPAWNING_TOOLS:
         return {}
+    if payload.get("agent_id"):
+        return _warned({}, warn)
     cfg, zone = state(payload.get("session_id"), env)
     if cfg.posture in ("off", "signal"):
-        return {}                    # signalling happens on the prompt, not here
+        return _warned({}, warn)     # signalling happens on the prompt, not here
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
-        return {}
+        return _warned({}, warn)
 
     if cfg.posture == "deny" and zone in (RESERVE, EXHAUSTED):
         return {
@@ -442,7 +519,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "the rest is reserved for wrapping up."),
         }
 
-    return {
+    return _warned({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
@@ -451,7 +528,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
         }
-    }
+    }, warn)
 
 
 def _admission_line(sid=None) -> str | None:
@@ -479,6 +556,18 @@ def _fill_part(sid, session, env):
         return fill.part(fill.overlay(state, sid), session, env, datetime.now(timezone.utc))
     except Exception:  # noqa: BLE001 - the part never breaks a hook
         return None
+
+
+def _tiers_part(sid, env) -> str:
+    """`; tiers: build sonnet to Ddd HH:MM; cap: opus to Ddd HH:MM` while this session's
+    words are in force (mt1 R4), else ""; never raises."""
+    try:
+        from datetime import datetime, timezone
+        from . import fill, tiers
+        got = tiers.parts(fill.overlay(resolver.state_dir(env), sid), datetime.now(timezone.utc))
+        return "".join("; " + p for p in got)
+    except Exception:  # noqa: BLE001 - the part never breaks a hook
+        return ""
 
 
 def _lifetime(cwd, env, sid=None) -> tuple:
@@ -692,6 +781,7 @@ def session_start(payload: dict, env=None) -> dict:
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
+    line += _tiers_part(sid, env)                          # mt1 R4: the session's words
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
