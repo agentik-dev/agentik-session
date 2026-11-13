@@ -807,7 +807,7 @@ G6_A1 = [
     "echo $(case x in x) echo a;; esac)#c" + W, "cp a CLAUDE.md; bash -c \"echo 'x\"",
     "bash -c \"echo 'x\"" + W, "c\\\np a CLAUDE.md", "cat <<EOF \\\n| cp a CLAUDE.md\nbody\nEOF",
     "echo ${x:-`echo a # don't`}" + W, "echo x # <<EOF" + N, "cat <<EOF#c" + N,
-    "echo $'\\' #'" + N, "x=$((1<<2))\nprintf x >> CLAUDE.md",                     # n161, n132
+    "echo $'\\' #'" + N, "x=$((1<<2))\nprintf x >> CLAUDE.md",                     # n173, n132
     "bash -lc 'printf x >> CLAUDE.md'", "{ cd sub; printf x >> ../CLAUDE.md; }"]    # n131, n138
 G6_A2 = ["cat CLAUDE.md; cat <(echo a)#c" + W,
          "sed -i '' 's/the CLAUDE.md file/x/' notes.md; cat <(echo a)#c" + W,
