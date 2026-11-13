@@ -376,6 +376,16 @@ def _parse(command: str, bash3: bool, ticks: bool) -> tuple:
 
 def _strict(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set,
             paid: _Paid | None = None) -> list:
+    """`_strict_read`, past Python's own recursion limit `_Bound` too (g8a r1 F4: R2, nothing
+    but `_Bound` comes out, and every gate fails closed on it)."""
+    try:
+        return _strict_read(command, cwd, env, depth, bash3, ticks, stood, paid)
+    except RecursionError:
+        raise _Bound(command[:80]) from None
+
+
+def _strict_read(command: str, cwd, env, depth: int, bash3: bool, ticks: bool, stood: set,
+                 paid: _Paid | None = None) -> list:
     """`bash_targets` with each target's word and the folder it was read in (g6 R2):
     [(kind, path, word, folder)], `word` None where a folder state other than the followed
     one judged it again (r2 R4); each folder the reading stood in goes in `stood`. Past
@@ -564,7 +574,7 @@ def _here_scan(text: str):
         elif top == "d":
             if c == '"':
                 stack.pop()
-            elif text.startswith("$(", i) and not text.startswith("$((", i):
+            elif text.startswith("$(", i) and not _arith(text, i):
                 stack.append("u")
                 out.append("$(")
                 i, word = i + 2, True
@@ -587,7 +597,7 @@ def _here_scan(text: str):
             continue
         elif c in "'\"":
             stack.append("s" if c == "'" else "d")
-        elif text.startswith("$((", i):
+        elif _arith(text, i):             # r1 F3: arithmetic only where the shells read it
             stack.append("m")
             out.append("$((")
             i, word = i + 3, False
@@ -645,15 +655,26 @@ def _tick_end(text: str, i: int) -> int:
     return len(text)
 
 
-def _arith_end(text: str, i: int) -> int:
-    """The index past the `))` that closes a `$((` opened before `i`."""
-    d = 2
-    while i < len(text):
-        d += {"(": 1, ")": -1}.get(text[i], 0)
+def _arith_close(text: str, i: int):
+    """g8a r1 F3: the index past the `))` that closes a `$((` opened before `i` where bash and
+    zsh read it as arithmetic, its two closing parens adjacent; else None: `$((cmd) )` is a
+    substitution holding a subshell, and so is a `$((` that never closes (it refuses more)."""
+    d, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "(":
+            d += 1
+        elif c == ")":
+            if not d:
+                return i + 2 if text.startswith("))", i) else None
+            d -= 1
         i += 1
-        if d == 0:
-            return i
-    return len(text)
+    return None
+
+
+def _arith(text: str, i: int) -> bool:
+    """Whether the `$((` at `i` is arithmetic (`_arith_close`)."""
+    return text.startswith("$((", i) and _arith_close(text, i + 3) is not None
 
 
 def _brace_end(text: str, i: int, bash3: bool, depth: int) -> int:
@@ -666,8 +687,8 @@ def _brace_end(text: str, i: int, bash3: bool, depth: int) -> int:
         elif c == "'":
             j = text.find("'", i + 1)
             i = n if j < 0 else j + 1
-        elif text.startswith("$((", i):
-            i = _arith_end(text, i + 3)
+        elif _arith(text, i):
+            i = _arith_close(text, i + 3)
         elif text.startswith("$(", i):
             i = _sub_end(text, i + 2, bash3, depth + 1) + 1
         elif text.startswith("${", i):
@@ -702,8 +723,8 @@ def _sub_end(text: str, i: int, bash3: bool, depth: int) -> int:
         if c == "\\":
             i, word = i + 2, False
             continue
-        if text.startswith("$((", i):
-            i, word = _arith_end(text, i + 3), False
+        if _arith(text, i):
+            i, word = _arith_close(text, i + 3), False
             continue
         if text.startswith("$(", i):
             i, word = _sub_end(text, i + 2, bash3, depth + 1) + 1, False
@@ -751,6 +772,8 @@ def _subst(text: str, body: bool, bash3: bool, depth: int):
     the texts to walk)])
     (g8a R6): outside single quotes and comments, in double quotes too; a heredoc's body
     (`body`) knows no quote. `$((` holds none; in backticks one `\\` is taken off."""
+    if depth > _NEST:                     # r1 F4: arithmetic nested past the bound too
+        raise _Bound(text[:80])
     if "$(" not in text and "`" not in text:     # fix (b): no substitution, nothing to scan
         return text, []
     out, subs, i, n, quote, word = [], [], 0, len(text), None, True
@@ -769,10 +792,10 @@ def _subst(text: str, body: bool, bash3: bool, depth: int):
             out.append(text[i:i + 2])
             i, word = i + 2, False
             continue
-        if text.startswith("$((", i):     # arithmetic: no command, but a `$(` in it runs
-            j = _arith_end(text, i + 3)
+        if _arith(text, i):               # arithmetic: no command, but a `$(` in it runs
+            j = _arith_close(text, i + 3)
             subs.append((text[i:j], [t for _, ts in _subst(text[i + 3:j - 2], True, bash3,
-                                                            depth)[1] for t in ts]))
+                                                            depth + 1)[1] for t in ts]))
             out.append(_SUB_PH % (len(subs) - 1))
             i, word = j, False
             continue
@@ -924,12 +947,13 @@ def _walk(text: str, bodies: list, quoted: list, opers: list, st: list, fa: int,
             words.pop()                   # r3 F6: a lone closing backtick is no argument, and
         words = [w if w.strip("`") in _CDS or not w.strip("`") else w.strip("`")
                  for w in words]          # one at a word's end is the line's (R8: no `cd`)
-        i, lead, said = _head(words, {j for j, w in enumerate(raw) if _SUB_RE.fullmatch(w)})
+        i, lead, said = _head(words, {j for j, w in enumerate(raw)
+                                      if _SUB_RE.fullmatch(w) or w.strip('"') == _SUB_OUT})
         heres = list(dict.fromkeys([st[fa][0]] + [f for f, _ in st]))
         name = os.path.basename(words[i]) if i < len(words) else None
-        if name is not None and _SUB_RE.search(raw[i]):    # fix E1: a substitution glued to
-            left = _SUB_RE.sub("", raw[i]).strip("`")      # the command word is read as empty
-            name = os.path.basename(put(left)) if left else name
+        if name is not None and (_SUB_RE.search(raw[i]) or _SUB_OUT in raw[i]):
+            left = _SUB_RE.sub("", raw[i]).replace(_SUB_OUT, "").strip("`")   # fix E1, r1 F2:
+            name = os.path.basename(put(left)) if left else name    # read as empty, any level
         args, script, why, wtext, used, run = words[i + 1:], None, "", None, None, None
         if name is not None and name.lower() in _SHELLS5:
             kind, k = _script(args)
@@ -1015,12 +1039,16 @@ def commands(command: str, cwd, env) -> tuple:
         if not extra or k not in have:
             cmds.append(c)
             have.add(k)
-    for s in _walk(text, bodies, quoted, opers, [(cwd, ())], 0, env, 0, False, True, cache, 0,
-                   True):
-        take(s, False)
-    for r in other:
-        for s in _walk(text, bodies, quoted, opers, [(cwd, ())], 0, env, 0, *r, cache, 0, True):
-            take(s, True)
+    try:
+        for s in _walk(text, bodies, quoted, opers, [(cwd, ())], 0, env, 0, False, True, cache,
+                       0, True):
+            take(s, False)
+        for r in other:
+            for s in _walk(text, bodies, quoted, opers, [(cwd, ())], 0, env, 0, *r, cache, 0,
+                           True):
+                take(s, True)
+    except RecursionError:                # r1 F4: R2, nothing but `_Bound` comes out
+        raise _Bound(command[:80]) from None
     return cmds, unread
 
 

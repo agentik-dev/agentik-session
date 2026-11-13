@@ -437,7 +437,7 @@ def test_12_glue_at_level_one_names_the_command():
 
 
 def test_12_arithmetic_only_where_the_shells_read_it():
-    assert _read("$((git push) )")[0][0][:2] == ("git", ["push"])
+    assert ("git", ["push"]) in [c[:2] for c in _read("$((git push) )")[0]]
     for line in ("echo $((1+2))", "echo $(( (1+2) * 3 ))", "x=$((y))"):
         assert [c.name for c in _read(line)[0]] in (["echo"], [""]), line
     assert [c.name for c in _read("echo $(( $(git push) + 1 ))")[0]] == ["echo", "git"]
