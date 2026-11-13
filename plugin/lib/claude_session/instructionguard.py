@@ -376,6 +376,7 @@ _MASK = {"(": "", ")": ""}    # a quoted or escaped paren, never an operat
 _UNMASK = str.maketrans({v: k for k, v in _MASK.items()})
 _CASE_NEXT = frozenset({";;", ";&", ";;&"})
 _KEY = re.compile(r"(?:[a-z]+|!|\{)(?=[ \t\n;&|()<>]|\Z)")
+_TICK_END = re.compile(r"(?:[^\\`]|\\[\\`]|\\)*")    # r2 F3: `\`` ends no comment in backticks
 _LEAD = frozenset({"if", "then", "else", "elif", "while", "until", "do", "time", "!", "{"})
 _WRITE_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>", ">&"})
 _READ_OPS = frozenset({"<", "<&", "<<<", "<<"})
@@ -438,8 +439,8 @@ def _mask(text: str) -> str:
                 i, start, prev, cmd = i + 2, False, "", cmd and not start
                 continue
             if c == "#" and start and opened[-1:] != ["${"]:
-                ends = [j for j in (text.find("\n", i), text.find("`", i) if tick else -1)
-                        if j >= 0]
+                ends = [j for j in (text.find("\n", i), _TICK_END.match(text, i).end()
+                                    if tick else -1) if 0 <= j < n]
                 i = min(ends) if ends else n
                 continue
             if c in "'\"":
