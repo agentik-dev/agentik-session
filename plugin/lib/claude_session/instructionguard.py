@@ -1,11 +1,17 @@
-"""The edit gates (packet g2b; hq design/09 §7.2).
+"""The edit gates (packet g2b; hq design/09 §7.2; packet g4, hq design/12 §3.2).
 
-R1: a file is gated when a list names it: the checkout's tracked `.claude/edit-gates` (a path or
-glob a line, relative to the top level, the nearest folder above the target holding `.git`, a
-worktree's own; `#` a comment; a line with `..` or a leading `/` matches nothing) or the user's
-`edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or `~/`). Both list
-files are always gated. A target's absolute and real paths are both matched, case folded where
-the volume folds case. Every other file passes in silence, with no log line.
+R1: a file is gated when a list names it, in three layers: the checkout's tracked
+`.claude/edit-gates` (a path or glob a line, relative to the top level, the nearest folder above
+the target holding `.git`, a worktree's own; `#` a comment); g4, each folder's
+`<folder>/.claude/edit-gates` above the checkout (or above the file, in no checkout) and strictly
+inside the home folder, its lines relative to its folder, a folder inside a checkout holding
+none, a path in `<member>/.claude/worktrees/<n>/` matched as `<member>/<rel>`; and the user's
+`edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or `~/`). In a
+checkout's or a folder's list a line starting with `/` or `~`, or holding a `..` part, matches
+nothing. Every list file is always gated. One grammar in every layer (g4, F8): `*`, `?` and a
+bracket match within one path segment; a segment that is `**` matches any depth, none included;
+a line with no glob is one file. A target's absolute and real paths are both matched, case
+folded where the volume folds case. Every other file passes in silence, with no log line.
 
 R2: `Edit`, `Write`, `MultiEdit` and `NotebookEdit` of a gated file, and (g3) a Bash line that
 writes one, are denied in every permission mode and every run, with one reason that routes the
@@ -76,31 +82,44 @@ def user_dir(env) -> str:
     return os.path.join(_home(env), ".claude")
 
 
+def _lines_of(raw: bytes) -> list:
+    out = []
+    for line in raw.decode("utf-8", "replace").splitlines():
+        s = line.strip()
+        if s and not s.startswith("#"):
+            out.append(s)
+    return out
+
+
 def _read_list(path: str, cache: dict) -> list:
     if path not in cache:
         lines = []
         try:
             with open(path, "rb") as f:
-                raw = f.read(LIST_CAP)
-            for line in raw.decode("utf-8", "replace").splitlines():
-                s = line.strip()
-                if s and not s.startswith("#"):
-                    lines.append(s)
+                lines = _lines_of(f.read(LIST_CAP))
         except OSError:
             pass
         cache[path] = lines
     return cache[path]
 
 
+def _relative(s: str) -> str | None:
+    """A checkout's or a folder's line as it matches, or None for a line that matches nothing:
+    one starting with `/` or `~`, or holding a `..` part (g4 R4)."""
+    while s.startswith("./"):
+        s = s[2:]
+    if not s or s.startswith("/") or s.startswith("~") or ".." in s.split("/"):
+        return None
+    return s
+
+
+def _rel_lines(lf: str, cache: dict) -> list:
+    return [r for r in map(_relative, _read_list(lf, cache)) if r is not None]
+
+
 def repo_lines(top: str, cache: dict) -> list:
-    """The repo list's lines that can match: relative, no `..` part."""
-    out = []
-    for s in _read_list(os.path.join(top, ".claude", LIST), cache):
-        while s.startswith("./"):
-            s = s[2:]
-        if s and not s.startswith("/") and ".." not in s.split("/"):
-            out.append(s)
-    return out
+    """The repo list's lines that can match: relative, no `~` start, no `..` part."""
+    return _rel_lines(os.path.join(top, ".claude", LIST), cache)
 
 
 def _user_raw(env, cache: dict) -> list:
@@ -125,10 +144,116 @@ def _top(p: str, itself: bool = False) -> str | None:
         d = up
 
 
+def _segments(name: list, pat: list) -> bool:
+    memo: dict = {}                       # r1 F2: each (segment, part) answered once
+
+    def at(i: int, j: int) -> bool:
+        if (i, j) not in memo:
+            if j == len(pat):
+                r = i == len(name)
+            elif pat[j] == "**":          # any depth, none included
+                r = any(at(k, j + 1) for k in range(i, len(name) + 1))
+            else:
+                r = (i < len(name) and fnmatch.fnmatchcase(name[i], pat[j])
+                     and at(i + 1, j + 1))
+            memo[(i, j)] = r
+        return memo[(i, j)]
+    return at(0, 0)
+
+
 def _match(name: str, pat: str, fold: bool) -> bool:
+    """g4 R3, one grammar: `*`, `?` and a bracket stay in one segment, `**` alone is any depth,
+    a line with no glob is one file."""
     if fold:
         name, pat = name.casefold(), pat.casefold()
-    return name == pat or (bool(_GLOB & set(pat)) and fnmatch.fnmatchcase(name, pat))
+    return name == pat or (bool(_GLOB & set(pat))
+                           and _segments(name.split("/"), pat.split("/")))
+
+
+def _inside(a: str, b: str, fold: bool) -> bool:
+    """True when `a` is strictly inside `b`."""
+    if fold:
+        a, b = a.casefold(), b.casefold()
+    return a.startswith(b.rstrip("/") + "/") and a != b
+
+
+def _homes(env) -> set:
+    h = _home(env)
+    return {os.path.abspath(h), os.path.realpath(h)}
+
+
+def _in_home(p: str, homes: set, fold: bool) -> bool:
+    return any(_inside(p, h, fold) for h in homes)
+
+
+def _same(a: str, b: str, fold: bool) -> bool:
+    return a.casefold() == b.casefold() if fold else a == b
+
+
+def folder_lists(p: str, env, cache: dict, fold: bool = False, itself: bool = False) -> list:
+    """g4 R1: the folder lists that apply to `p` (to the folder `p`, with `itself`), nearest
+    first, each `(folder, its lines, the path its lines are matched against)`. The walk starts
+    above the checkout (above the member, for a path in `<member>/.claude/worktrees/<n>/`,
+    matched as `<member>/<rel>`), or above the file in no checkout, and stops below the home
+    folder; a folder inside a checkout holds no folder list. Only files that exist are read."""
+    homes = _homes(env)
+    if not _in_home(p, homes, fold):
+        return []
+    start, vp = (p if itself else os.path.dirname(p)), p
+    top = _top(p, itself)
+    if top is not None and _in_home(top, homes, fold):
+        start = os.path.dirname(top)
+        up = start
+        if (_same(os.path.basename(up), "worktrees", fold)
+                and _same(os.path.basename(os.path.dirname(up)), ".claude", fold)):
+            member = os.path.dirname(os.path.dirname(up))        # g4 R2: by its spelling
+            start, vp = os.path.dirname(member), member + p[len(top):]
+    dirs = []
+    d = start
+    while _in_home(d, homes, fold):
+        dirs.append(d)
+        d = os.path.dirname(d)
+    gits = [os.path.lexists(os.path.join(x, ".git")) for x in dirs]
+    out = []
+    for i, d in enumerate(dirs):
+        lf = os.path.join(d, ".claude", LIST)
+        if any(gits[i + 1:]) or not os.path.lexists(lf):
+            continue
+        out.append((d, _rel_lines(lf, cache), vp))
+    return out
+
+
+def _folder_list_at(p: str, env, fold: bool) -> str | None:
+    """g4 R5: the folder `d` when `p` is `<d>/.claude/edit-gates`, `d` strictly inside the home
+    folder and inside no checkout but its own; None otherwise."""
+    up = os.path.dirname(p)
+    if not (_same(os.path.basename(p), LIST, fold)
+            and _same(os.path.basename(up), ".claude", fold)):
+        return None
+    d = os.path.dirname(up)
+    homes = _homes(env)
+    if not _in_home(d, homes, fold):
+        return None
+    e = os.path.dirname(d)
+    while _in_home(e, homes, fold):
+        if os.path.lexists(os.path.join(e, ".git")):
+            return None
+        e = os.path.dirname(e)
+    return d
+
+
+def _folder_list_of(path: str, env) -> str | None:
+    """r1 F1: the folder whose list `path` names, by every spelling `gated()` reads: the
+    absolute spelling and the real path, each folded where the volume folds case."""
+    forms = list(dict.fromkeys((os.path.abspath(path), os.path.realpath(path))))
+    for fold in (False, True):
+        for p in forms:
+            if fold and not _case_blind(p):
+                continue
+            d = _folder_list_at(p, env, fold)
+            if d is not None:
+                return d
+    return None
 
 
 def _gated_form(p: str, env, cache: dict, fold: bool) -> bool:
@@ -137,6 +262,12 @@ def _gated_form(p: str, env, cache: dict, fold: bool) -> bool:
         rel = p[len(top):].lstrip("/")
         if _match(rel, REPO_LIST, fold) or any(_match(rel, pat, fold)
                                                for pat in repo_lines(top, cache)):
+            return True
+    if _folder_list_at(p, env, fold) is not None:
+        return True
+    for d, lines, vp in folder_lists(p, env, cache, fold):
+        rel = vp[len(d):].lstrip("/")
+        if any(_match(rel, pat, fold) for pat in lines):
             return True
     ud = user_dir(env)
     for u in {os.path.abspath(ud), os.path.realpath(ud)}:
@@ -211,6 +342,25 @@ def _removes_list(t: str, env, cache: dict) -> str | None:
                 lf = os.path.join(u, LIST)
                 if _under(lf, p, fold):
                     return lf
+            lf = _folder_list_removed(p, env, fold)
+            if lf is not None:
+                return lf
+    return None
+
+
+def _folder_list_removed(p: str, env, fold: bool) -> str | None:
+    """g4 R5: the folder list that removing `p` takes away, when `p` is the list or its
+    `.claude` folder (never the folder itself, as for a checkout) and the list exists."""
+    if _same(os.path.basename(p), ".claude", fold):
+        d = os.path.dirname(p)
+    elif (_same(os.path.basename(p), LIST, fold)
+          and _same(os.path.basename(os.path.dirname(p)), ".claude", fold)):
+        d = os.path.dirname(os.path.dirname(p))
+    else:
+        return None
+    lf = os.path.join(d, ".claude", LIST)
+    if os.path.lexists(lf) and _folder_list_at(lf, env, fold) is not None:
+        return lf
     return None
 
 
@@ -629,6 +779,14 @@ def gates_write(file: str, draft: str, expect, env, cwd: str, out, err) -> int:
     except OSError as e:
         err.write(f"{say}the draft cannot be read ({e.strerror}); nothing written\n")
         return 1
+    d_list = _folder_list_of(t, env)
+    if d_list is not None and not os.path.lexists(os.path.join(d_list, ".git")):
+        for s in _lines_of(new[:LIST_CAP]):       # g4 R4: a folder list's refused line
+            if _relative(s) is None:
+                err.write(f"{say}the draft's line `{s}` would match nothing in a folder's list "
+                          "(a line starting with `/` or `~`, or holding `..`); nothing "
+                          "written\n")
+                return 1
     real = os.path.realpath(t)
     try:
         with open(real, "rb") as f:
@@ -685,18 +843,27 @@ def gates_write(file: str, draft: str, expect, env, cwd: str, out, err) -> int:
 
 
 def listing(env, cwd: str) -> list:
-    """What is gated where `cwd` is: the checkout's list and the user's, each with its lines."""
+    """What is gated where `cwd` is, each list with its lines: the checkout's, each folder's from
+    the nearest up (g4 R6), the user's."""
     cache: dict = {}
     rows = []
-    top = _top(os.path.abspath(cwd), itself=True)
+    here = os.path.abspath(cwd)
+    top = _top(here, itself=True)
+    folders = folder_lists(here, env, cache, itself=True)
     if top is not None:
         lf = os.path.join(top, ".claude", LIST)
         lines = repo_lines(top, cache)
         state = "" if os.path.exists(lf) else ", absent"
         rows.append(f"{lf} (this checkout's list, itself gated{state}): {len(lines)} lines")
         rows += [f"  {s}" for s in lines]
+    elif folders:
+        rows.append("no checkout here: the folders' lists and the user's apply")
     else:
         rows.append("no checkout here: only the user's list applies")
+    for d, lines, _ in folders:
+        rows.append(f"{os.path.join(d, '.claude', LIST)} (a folder's list, its lines relative to "
+                    f"{d}, itself gated): {len(lines)} lines")
+        rows += [f"  {s}" for s in lines]
     lf = os.path.join(user_dir(env), LIST)
     lines = _user_raw(env, cache)
     state = "" if os.path.exists(lf) else ", absent"
@@ -707,8 +874,10 @@ def listing(env, cwd: str) -> list:
 
 def count_here(env, cwd) -> int:
     cache: dict = {}
-    top = _top(os.path.abspath(str(cwd)), itself=True)
-    return (len(repo_lines(top, cache)) if top else 0) + len(user_lines(env, cache))
+    here = os.path.abspath(str(cwd))
+    top = _top(here, itself=True)
+    folders = sum(len(lines) for _, lines, _ in folder_lists(here, env, cache, itself=True))
+    return (len(repo_lines(top, cache)) if top else 0) + folders + len(user_lines(env, cache))
 
 
 # ---- R4: the doctor's line --------------------------------------------------------------

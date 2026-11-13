@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Several plugins cooperate in unattended relay runs: a driver spawns builder sessions, each builder may spawn agents, and nobody watches the terminal. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter that says what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget, a swarm can fork past its means; with them, every session winds down at a known point and leaves a record a person can read.
+Plugins cooperate in unattended relay runs: a driver spawns builders, each may spawn agents, and nobody watches the terminal. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter saying what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget, a swarm can fork past its means; with them, each session stops at a known point and leaves a readable record.
 
 ## Install
 
@@ -62,7 +62,7 @@ CLI verbs (`agentik session --help`):
 | `reconcile` | `agentik session reconcile` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, refuses writes to gated files), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, refuses writes to files the checkout's, a folder's or the user's gate list names, `*` in one segment), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact. PreCompact blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
 ## Profiles
 
@@ -107,7 +107,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
 - `agentik session run` is the respawn chain. It starts `claude` with the same arguments each time, under a fresh `--session-id`. When a sitting's RESPAWN close is confirmed and its turn stood `settle` seconds with no helper call open, `run` ends it. It waits 10 s, writes a restart line and starts the next. It never compacts, resumes or restarts a crash. It holds a restart at the cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`); `status` names a hold, re-checked each poll. A `/loop` of 60m or more asks at every start, so `run` warns once.
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
-- `agentik session status` prints the meter in one line. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session (a resumed one: its last), written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured; another's are invisible to it.
+- `agentik session status` prints the one-line meter. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session (a resumed one: its last), written by the SessionEnd hook. `report --chains` prints a respawn chain's restart and stop lines instead. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured; another's are invisible to it.
 
 ## Priority and pacing
 
@@ -169,12 +169,12 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 - `make test`: the whole suite, with a fake `claude` on the PATH and no quota spent.
 - Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
-- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). It is bounded: one run per tree (`.check.lock`), a 1800 s wall, held off above load 4 x cores.
+- `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). Bounded: one run per tree (`.check.lock`), a 1800 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 
 ## Conventions shared with the sibling plugins
 
-`session`, `decisions`, `respeak` and `relay` each work alone; a shared set of conventions keeps them consistent.
+`session`, `decisions`, `respeak` and `relay` each work alone, under shared conventions.
 
 - `scripts/hygiene` (the public-hygiene scan) and `scripts/doclint` (the doc gate) are byte-identical across the four repos.
 - The README sidecar: `design/readme/rendered.sha256`, two `shasum -a 256` lines, written only by `make readme`.
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.86`, rendered `2026-11-10`, `3269` tests in the suite.
+Status: version `v2.0.0-alpha.89`, rendered `2026-11-10`, `3318` tests in the suite.
 
 ## Credit
 

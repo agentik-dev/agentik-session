@@ -350,7 +350,11 @@ test('while hasSurvey: neither line, and what next gives', async (t: any, on: an
 test('another mod\'s line is kept under the two', async (t: any, on: any) => {
   const other = { type: 'Text', props: {}, children: ['other: its own line'] }
   const tree: any = await lines(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND }, 120, false, other)
-  expect(texts(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_LINE, 'other: its own line'])
+  // The lines as drawn, top to bottom: from the 2.1.323 client the engine stacks the test's
+  // tree beside the band's own column (a column in a column), not through the band's `next`.
+  const flat = (n: any): any[] => n?.type === 'Text' ? [n.children[0]]
+    : Array.isArray(n?.children) ? (n.children as any[]).flatMap(flat) : [n]
+  expect(flat(tree)).toEqual(['session: ctx 62% · turns 31% · notice', BAND_LINE, 'other: its own line'])
 })
 
 // Fix round 1: the classic SessionStart hook makes the session dir after the module's

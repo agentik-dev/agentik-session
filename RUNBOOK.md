@@ -109,13 +109,30 @@ The doctor prints bytes and no ceiling: the ceilings of these files are the deci
 
 ### The edit gates
 
-A file is gated when a list names it: the checkout's tracked `.claude/edit-gates` (a path or
-glob a line, relative to the top level, the nearest folder above the target holding `.git`, so a
-worktree's own list applies; `#` a comment; a line with `..` or a leading `/` matches nothing),
-or the user's `edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or
-`~/`). Both list files are always gated. `agentik decisions render` and `answer` add the files
-they write to their scope's list; any other line is one the owner approves through the lane.
-`agentik session gates` prints both lists as they apply where it runs.
+A file is gated when a list names it. The lists are layered as the instruction files are:
+
+- the checkout's tracked `.claude/edit-gates`, relative to the top level (the nearest folder
+  above the target holding `.git`, so a worktree's own list applies);
+- a folder's `<folder>/.claude/edit-gates`, which covers every repo under that folder: each one
+  in a folder above the checkout (above the file, for a file in no checkout, such as a folder's
+  own `CLAUDE.md`) and strictly inside the home folder, its lines relative to its folder. A
+  folder inside a checkout holds no folder list, the home folder's own list is the user's, and
+  a path outside the home folder reads none. A path in `<member>/.claude/worktrees/<n>/` is
+  matched as `<member>/<rel>`, so `*/CLAUDE.md` gates a worktree's `CLAUDE.md` as it gates the
+  member's;
+- the user's `edit-gates` in `CLAUDE_CONFIG_DIR`, else `~/.claude` (its lines absolute or `~/`).
+
+A line is a path or a glob, `#` a comment. One grammar holds in every layer: `*`, `?` and a
+bracket match within one path segment, never `/`; a segment that is exactly `**` matches any
+depth, none included (`**/x.md` gates `x.md` and `a/b/x.md`, `hooks/**` everything under
+`hooks`); a line with no glob is one file. In a checkout's or a folder's list a line starting
+with `/` or `~`, or holding a `..` part, matches nothing. A line is the real path, never a
+tracked link's name, in every layer: a listed link guards only its own spelling (the user's
+list also matches the real path of a line with no glob). Every list file is gated with no
+line, its removal included. `agentik decisions render` and `answer` add the files they write to
+their scope's list; any other line is one the owner approves through the lane.
+`agentik session gates` prints the lists as they apply where it runs: the checkout's, each
+folder's from the nearest up, then the user's, each with its file and its lines' count.
 
 The PreToolUse hook denies an `Edit`, `Write`, `MultiEdit` or `NotebookEdit` of a gated file in
 every permission mode and every run, a helper's included; it never asks, since the `auto` mode
@@ -136,13 +153,15 @@ and its real spelling, in any case where the volume folds case.
 The lane's write: `agentik session gates write <file> --from <draft> --preview` prints the diff,
 the byte change and a hash and writes nothing; `--expect <hash>` writes the draft atomically,
 keeping the file's mode, and refuses a file or draft changed since, a changed line of a
-generated block, a `.json` draft that does not parse, and an ungated target.
+generated block, a `.json` draft that does not parse, and an ungated target. On a folder's
+list it also refuses a draft holding a line that would match nothing there (a line starting
+with `/` or `~`, or holding `..`); a checkout's list keeps the lane as it was.
 
 It has no knob: no profile key, session setting or variable opens a path. It fails open: an
 error lets the call through and writes an `open` line to the session's `guard.jsonl` (0600,
 64 KiB at most), where each refusal is logged too, a helper's by its `agent_id`. It spawns no
 process and reads no launch line. The doctor's `guard` row, after the `instructions` rows,
-says it is on, how many lines are gated here, and counts the refusals of the repo's newest
+says it is on, how many lines are gated here (the three layers' sum), and counts the refusals of the repo's newest
 logged session. Under `auto`, whether the lane may write inside a `.claude` folder is the
 owner's test (hq design/09 §7.2, step 7).
 
