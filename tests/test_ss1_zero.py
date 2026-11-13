@@ -288,3 +288,29 @@ def test_review1_f2_a_fifo_transcript_is_absent_and_never_hangs_the_hook(env, re
     assert hooks.START_METER in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
     m = meter.load(sdir(env))
     assert m["turns"] == 0 and m["zone"] == "clear" and m["transcript"]["path"] == str(fifo)
+
+
+def test_review1_f3_doctor_passes_a_zero_turn_meter_absent_or_not_yet_metered(env, repo,
+                                                                              tmp_path):
+    tp = tmp_path / "absent.jsonl"
+    start(env, repo, tp)
+    c = doctor._check_meter(env)                     # 1: the transcript absent
+    assert c.ok and "zone clear" in c.detail, c.detail
+    tp.write_text('{"type": "user", "message": {"content": "<placeholder>"}}\n')
+    c = doctor._check_meter(env)                     # 2: written, not yet metered
+    assert c.ok, c.detail
+    st = os.stat(tp)
+    os.utime(tp, (st.st_atime, st.st_mtime + 200))  # 3: past FRESH_S, no tool call yet
+    c = doctor._check_meter(env)
+    assert c.ok and "stale" not in c.detail, c.detail
+
+
+def test_review1_f3_a_metered_meter_still_goes_stale(env, repo, tmp_path):
+    tp = transcript(tmp_path, 4)
+    start(env, repo, tp)
+    with open(tp, "a") as f:
+        f.write("{}\n")
+    st = os.stat(tp)
+    os.utime(tp, (st.st_atime, st.st_mtime + 600))
+    c = doctor._check_meter(env)
+    assert not c.ok and "stale" in c.detail
