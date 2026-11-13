@@ -569,26 +569,10 @@ def _sid(env) -> str | None:
     return sid if sid and len(sid) >= 8 and resolver._SID.match(sid) else None
 
 
-_AT_LINE = re.compile(r": line (\d+): ")
-_QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
-
-
-def withheld(msg: str) -> str:
-    """A parser's message names the file, the line and the reason, and nothing of the line's
-    text, whatever it holds (review 2, R2-F1: a rule, not a pattern): what follows the reason,
-    the quoted line, key or item, is dropped. The config read's error and the doctor's
-    details, both forms, pass through it."""
-    m = _AT_LINE.search(msg) if isinstance(msg, str) else None
-    if not m:
-        return msg
-    reason = re.split(r"""['"]""", msg[m.end():], maxsplit=1)[0].rstrip(": ")
-    return msg[:m.end()] + reason
-
-
-def scrubbed(msg: str) -> str:
-    """A resolver's message as a read prints it: a parser's as `withheld` gives it, and any
-    other with each quoted span (a value or name taken from a layer file) withheld."""
-    return _QUOTED.sub("(withheld)", withheld(msg))
+# Row ss2: the two moved down to the resolver, so every print of its error is scrubbed at the
+# raise; the plug's names stay.
+withheld = resolver.withheld
+scrubbed = resolver.scrubbed
 
 
 def _guarded(fn, arg, fallback):

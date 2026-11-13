@@ -104,6 +104,28 @@ class ResolveError(ValueError):
     pass
 
 
+_AT_LINE = re.compile(r": line (\d+): ")
+_QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
+
+
+def withheld(msg: str) -> str:
+    """A parser's message names the file, the line and the reason, and nothing of the line's
+    text, whatever it holds (review 2, R2-F1: a rule, not a pattern): what follows the reason,
+    the quoted line, key or item, is dropped. A layer file's parse error is raised through it
+    (row ss2), and the config read's error and the doctor's details, both forms, pass it."""
+    m = _AT_LINE.search(msg) if isinstance(msg, str) else None
+    if not m:
+        return msg
+    reason = re.split(r"""['"]""", msg[m.end():], maxsplit=1)[0].rstrip(": ")
+    return msg[:m.end()] + reason
+
+
+def scrubbed(msg: str) -> str:
+    """A resolver's message as a read prints it: a parser's as `withheld` gives it, and any
+    other with each quoted span (a value or name taken from a layer file) withheld."""
+    return _QUOTED.sub("(withheld)", withheld(msg))
+
+
 class ShippedGone(ResolveError):
     """The shipped profiles.yaml is missing, so its frozen tree went (F8). A ResolveError, so
     a caller holds on it as on any config error (respawn-r1 §4)."""
@@ -198,7 +220,7 @@ def _parse(path: Path, raw: bytes, inputs: list) -> dict:
     try:
         doc = load(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as e:
-        raise ResolveError(f"{path}: {e}") from None
+        raise ResolveError(withheld(f"{path}: {e}")) from None     # row ss2: never the line
     return doc
 
 
@@ -583,7 +605,8 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
             or (ud.get("profile") if isinstance(ud.get("profile"), str) else None)
             or DEFAULT_PROFILE)
     if name not in profiles:
-        raise ResolveError(f"unknown profile {name!r}; known: {', '.join(profiles)}")
+        # row ss2: the name may be a layer file's text (session.profile), so it is withheld
+        raise ResolveError(f"unknown profile (withheld); known: {', '.join(profiles)}")
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}
