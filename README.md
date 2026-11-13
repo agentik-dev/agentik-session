@@ -29,7 +29,7 @@ Each command wraps one CLI verb.
 |---|---|---|
 | `/session:status` | `/session:status --json` | this session's meter: context, turns, zone |
 | `/session:profile` | `/session:profile builder` | list the profiles, or show one resolved for this repo |
-| `/session:set` | `/session:set posture ask` | change one setting for this session; `--save` keeps it |
+| `/session:set` | `/session:set posture ask` | change one setting for this session |
 | `/session:checkpoint` | `/session:checkpoint -m "act 2 landed" --commit` | mark a handoff-ready point; `--commit` stages tracked files only |
 | `/session:doctor` | `/session:doctor` | check the setup |
 | `/session:report` | `/session:report --since 2026-09-01` | the ledger, one row per ended session |
@@ -50,7 +50,7 @@ CLI verbs (`agentik session --help`):
 | `config` | `agentik session config show --resolved` |
 | `doctor` | `agentik session doctor --json` |
 | `profile` | `agentik session profile balanced` |
-| `set` | `agentik session set posture deny --save` |
+| `set` | `agentik session set tier.build haiku --save` |
 | `checkpoint` | `agentik session checkpoint -m "tests green"`; `agentik-session checkpoint --respawn --charter <file>` |
 | `status` | `agentik session status` |
 | `report` | `agentik session report --since 2026-09-01` |
@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.91`, rendered `2026-11-10`, `3335` tests in the suite.
+Status: version `v2.0.0-alpha.92`, rendered `2026-11-10`, `3400` tests in the suite.
 
 ## Credit
 
