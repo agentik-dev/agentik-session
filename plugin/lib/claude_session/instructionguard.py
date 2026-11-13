@@ -425,6 +425,7 @@ def _mask(text: str, bash3: bool = False) -> str:
     A word goes on after the `)` of a `$(`; no comment starts in a `${`, and one in backticks
     ends at the closing backtick; a backslash-newline is dropped outside single quotes (g5 r1).
     A bare paren in a `${` is a word's; a `case` pattern's `)` closes no bracket (g5 r2);
+    a backtick in a `${` is a bracket of its own, in which a paren is a command's (g5 r3);
     `bash3`: bash 3.2's reading, which opens no `${` inside a `$(`."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
@@ -448,6 +449,13 @@ def _mask(text: str, bash3: bool = False) -> str:
                 quote = c
             elif c == "`":
                 tick = not tick
+                if tick and opened[-1:] == ["${"]:    # r3 F2: in it a paren is a command's
+                    opened.append(c)
+                    cases.append(0)
+                elif not tick and c in opened:
+                    while opened.pop() != c:
+                        cases.pop()
+                    cases.pop()
             elif opened[-1:] == ["${"] and (c == ")" or (c == "(" and prev[:1] != "$")):
                 c = _MASK[c]              # r2 F1, F4: a bare paren in `${` is a word's
             elif c == "(" or (c == "{" and prev == "$" and not (bash3 and "$(" in opened)):
@@ -458,7 +466,7 @@ def _mask(text: str, bash3: bool = False) -> str:
                 cases.pop()
             out.append(c)
             if c == ")":                  # r1 F1: a `$(`'s `)` ends no word
-                if cases[-1] or not opened:    # r2 F2: a `case` pattern's `)` closes nothing
+                if cases[-1] or opened[-1:] in ([], ["`"]):    # r2 F2: nor a pattern's `)`
                     start = True
                 else:
                     cases.pop()
