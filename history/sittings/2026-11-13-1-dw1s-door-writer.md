@@ -20,7 +20,7 @@
 
 - [x] Phase 2, act 1: main 9da7cf4 (alpha.95, NICE to n168) merged, clean: no conflict; the branch held no NICE row to renumber; recordlint held
 - [x] Phase 2, act 2: NICE n169 (S4): `scripts/plugin-description-bytes` is not in `check`; n109 and n110, the oldest S4 rows, to the overflow under recordlint's bound; recordlint held, 72 rows
-- [ ] Phase 2, act 3: the version commit, plugin 2.0.0-alpha.96, README, its source and the sidecar
+- [x] Phase 2, act 3: the version commit, plugin 2.0.0-alpha.96, its own and last under plugin/; README and its source say alpha.96 and 3521 tests (collected at the head; source 16366 B), the sidecar by shasum; tests/test_readme.py 59 passed under .venv
 - [ ] Phase 2, act 4: the proofs under both venvs and the lints
 
 ## Handover
@@ -28,7 +28,7 @@
 - The vendored `agentik_install._door` still blocks on a FIFO and returns the raw byte: commons' to mend; no path of this repo but acceptance 5's test calls it, and that test keeps its seven shared cases.
 
 ## Next act
-- Phase 2, act 3: the version commit.
+- Phase 2, act 4: the proofs.
 
 ## Exit
 - Phase 1 and review 1's fix built and proven; review 2 closed; phase 2 in flight.
