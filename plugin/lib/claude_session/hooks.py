@@ -288,11 +288,17 @@ def _call(payload: dict, env) -> Path | None:
 
 def _open_call(payload: dict, env) -> None:
     """A helper's PreToolUse opens its call; the launcher's ready condition waits while
-    any call is open, so a call never closed holds the sitting. Never raises."""
+    any call is open, so a call never closed holds the sitting. The file holds `at` and,
+    when it is id-shaped, the helper's `agent_id`, which its SubagentStop reads (packet h4
+    R2). Never raises."""
     try:
         p = _call(payload, env)
         if p is not None:
-            store._write_private(p, json.dumps({"at": time.time()}))
+            aid = payload.get("agent_id")
+            doc = {"at": time.time()}
+            if isinstance(aid, str) and _SID.match(aid):
+                doc["agent_id"] = aid
+            store._write_private(p, json.dumps(doc))
     except Exception:                                   # noqa: BLE001
         pass
 
@@ -1113,6 +1119,37 @@ def pre_compact(payload: dict, env=None) -> dict:
     return {}
 
 
+def subagent_stop(payload: dict, env=None) -> dict:
+    """Packet h4 R2: a helper has ended, so every call it opened has ended, a call a
+    rejection ended included, which gets no Post. For a payload whose `agent_id` is
+    id-shaped and whose session's folder exists (the payload's id alone, never the
+    fallback), each regular file under `calls/` whose JSON object's `agent_id` is that id is
+    removed. Another helper's file, one with no `agent_id` (an older plugin's), one that does
+    not parse and a directory are left to the launcher's stale bound. It writes no stamp,
+    never raises, and says nothing: dispatch prints nothing for it (SILENT)."""
+    try:
+        aid = payload.get("agent_id")
+        if not isinstance(aid, str) or not _SID.match(aid):
+            return {}
+        sdir = _session_dir(payload.get("session_id"),
+                            os.environ if env is None else env, fallback=False)
+        if sdir is None or not sdir.is_dir():
+            return {}
+        cdir = sdir / CALLS
+        for name in os.listdir(cdir) if cdir.is_dir() else ():
+            if name.startswith("."):                    # a write in flight, as `_ready` skips
+                continue
+            p = cdir / name
+            try:
+                if stat.S_ISREG(os.lstat(p).st_mode) and _load_json(p).get("agent_id") == aid:
+                    p.unlink()
+            except Exception:                           # noqa: BLE001 - one file, never the rest
+                continue
+    except Exception:                                   # noqa: BLE001
+        pass
+    return {}
+
+
 def instructions_loaded(payload: dict, env=None) -> dict:
     """Packet g1 R1: one line in the session's `instructions.jsonl` for each instruction file
     Claude Code loads. The event cannot block and its output is discarded; dispatch prints
@@ -1134,6 +1171,7 @@ HANDLERS = {
     "pre-compact": pre_compact,
     "post-model-switch": post_model_switch,
     "instructions-loaded": instructions_loaded,
+    "subagent-stop": subagent_stop,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -1142,11 +1180,12 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
                  "PreCompact": pre_compact, "PostModelSwitch": post_model_switch,
-                 "InstructionsLoaded": instructions_loaded})
+                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
                     "post-model-switch", "PostModelSwitch",    # StopFailure: fire-and-forget
-                    "instructions-loaded", "InstructionsLoaded"})   # g1 R1: a log, no output
+                    "instructions-loaded", "InstructionsLoaded",    # g1 R1: a log, no output
+                    "subagent-stop", "SubagentStop"})     # h4 R1: read as a decision, as Stop
 # A passing PreCompact's raw stdout becomes the compaction's custom instructions: observed
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.

@@ -32,17 +32,17 @@ resolves to deny, even though Claude Code still reports success. Read section
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
    `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`,
-   `InstructionsLoaded`) through `hooks/run`, which execs
+   `InstructionsLoaded`, `SubagentStop`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
    live ones when they respawn or run `/reload-plugins`; a new session moves the launcher. With
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
-   on `Stop`, `StopFailure`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
+   on `Stop`, `StopFailure`, `SubagentStop`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
    `PostModelSwitch` and `PreCompact` (keeping
    PreCompact's stdout, its block; the others' streams go to `/dev/null`), so no turn end,
-   no helper's loop and no
+   no helper's loop or end and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
    fails its `plugin` line and names an event its CLI does not handle.
