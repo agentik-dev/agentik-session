@@ -429,11 +429,15 @@ def cmd_rules(args) -> int:
 
 
 def cmd_charter(args) -> int:
-    """The sitting's charter: open, check, close (the shape of D10)."""
+    """The sitting's charter: open, check, close (the shape of D10); show reads (in2)."""
     if getattr(args, "cont", False) and args.action != "open":
         _die(f"charter --continue is read only with open, not {args.action}", 2)
     if getattr(args, "replace", False) and args.action != "open":
         _die(f"charter --replace is read only with open, not {args.action}", 2)
+    if getattr(args, "json", False) and args.action != "show":
+        _die(f"charter --json is read only with show, not {args.action}", 2)
+    if args.action == "show":
+        return _charter_show(args)
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
@@ -519,6 +523,35 @@ def cmd_charter(args) -> int:
         # beside it, on stderr.
         print("note: add --state <file> to that checkpoint to hand the successor its state "
               "(optional; its shape is in RUNBOOK \"Restarting a sitting\")", file=sys.stderr)
+    return 0
+
+
+def _charter_show(args) -> int:
+    """Packet in2 R5 to R8: each REPO's newest charter, read and never written: no session
+    record, no resolved.json, no lock; `git` only to find the default REPO. Exit 0 whenever
+    the read ran."""
+    repos = list(args.args)
+    if not repos:
+        cwd = os.getcwd()
+        rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
+        repos = [top.strip() if rc == 0 and top.strip() else cwd]
+
+    def dir_of(repo: str) -> str:
+        if args.dir:
+            return args.dir
+        try:                                 # the repo's own session.charter.dir; writes nothing
+            section = resolver.resolve(repo, sessionconfig.session_id() or "unsaved",
+                                       os.environ, profile=hooks.launch_profile(os.environ)
+                                       ).sections["session"]
+        except Exception:                                   # noqa: BLE001
+            return charter.DEFAULT_DIR
+        return _charter_dir(section) if isinstance(section, dict) else charter.DEFAULT_DIR
+
+    doc = charter.show(repos, dir_of)
+    if args.json:
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+    else:
+        sys.stdout.write(charter.show_text(doc))
     return 0
 
 
@@ -1698,10 +1731,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "then claude_md_bytes (--since reads the rows only; a hook row has no time)")
     rp.set_defaults(func=cmd_report)
 
-    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close")
-    ch.add_argument("action", choices=["open", "check", "close"])
-    ch.add_argument("args", nargs="*", metavar="GOAL|FILE")
-    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close)")
+    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close; show "
+                                         "reads each repo's newest, writing nothing")
+    ch.add_argument("action", choices=["open", "check", "close", "show"])
+    ch.add_argument("args", nargs="*", metavar="GOAL|FILE|REPO")
+    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close; show: "
+                                               "under each REPO)")
+    ch.add_argument("--json", action="store_true",
+                    help="show: one object, agentik.charter/1, and nothing else on stdout")
     ch.add_argument("--exit", metavar="TEXT", help="the exit taken (close)")
     ch.add_argument("--continue", dest="cont", action="store_true",
                     help="open: adopt today's newest charter of the same suffix while under "

@@ -503,6 +503,97 @@ def open(dir, goal: str, section: dict, head: str | None,
     return path
 
 
+# ---- Packet in2: `charter show`, the read of a repo's newest charter, writing nothing ----
+
+SCHEMA = "agentik.charter/1"
+NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)(?:-[A-Za-z0-9._-]+)?\.md$")
+SHOW_PARTS = ("title", "table", "Done-ness", "Handover", "Waits on the owner",
+              "While waiting", "Next act")
+NO_DIR, NO_CHARTER, UNREADABLE = "not a directory", "no charter", "unreadable"
+
+
+def newest(dir) -> Path | None:
+    """R5: the entry of `dir` named `<date>-<n>.md` or `<date>-<n>-<suffix>.md` with the
+    greatest date, then the greatest n, then the last name; None with none or no folder."""
+    try:
+        names = os.listdir(dir)
+    except OSError:
+        return None
+    found = [(m.group(1), int(m.group(2)), name) for name in names
+             for m in (NAME.match(name),) if m]
+    return Path(dir) / max(found)[2] if found else None
+
+
+def read(repo, path) -> dict:
+    """R7: one repo's object for the charter at `path`. Raises OSError when unreadable."""
+    path = Path(path)
+    raw = path.read_bytes()
+    mtime = int(path.stat().st_mtime)
+    text = raw.decode("utf-8", "replace")
+    lines = text.splitlines()
+    heads = {line.rstrip() for line in lines}
+    title = next((m.group(3) for m in (TITLE_RE.match(l.rstrip()) for l in lines) if m), None)
+    present = {"title": title is not None, "table": bool(_table(lines))}
+    present.update((p, f"## {p}" in heads) for p in SHOW_PARTS[2:])
+    m = NAME.match(path.name)
+    part = waits(raw)
+    return {
+        "repo": os.path.realpath(repo), "file": os.path.realpath(path),
+        "name": path.name[:-len(".md")], "date": m.group(1), "n": int(m.group(2)),
+        "mtime": mtime, "closed": any(l.startswith(EXIT_MARK) for l in lines),
+        "title": title, "parts": [p for p in SHOW_PARTS if present[p]],
+        "refusals": check_text(raw), "next_act": next_act_line(text),
+        "waits": None if part is None else [
+            {"line": n, "what": hand[0] if hand else line, "command": hand[1] if hand else None}
+            for n, line in part if line != NONE for hand in (hand_line(line),)],
+    }
+
+
+def show(repos, dir_of) -> dict:
+    """R5 to R7: the object for each REPO, in order; `dir_of(repo)` names its charter folder
+    (relative to the repo, or absolute). A REPO is skipped as not a directory, no charter or
+    unreadable, and the read goes on. Reads only."""
+    doc = {"schema": SCHEMA, "ok": True, "repos": [], "skipped": []}
+    for repo in repos:
+        why = None
+        if not os.path.isdir(repo):
+            why = NO_DIR
+        else:
+            path = newest(os.path.join(repo, dir_of(repo)))
+            if path is None:
+                why = NO_CHARTER
+            else:
+                try:
+                    doc["repos"].append(read(repo, path))
+                except (OSError, ValueError):
+                    why = UNREADABLE
+        if why:
+            doc["skipped"].append({"repo": os.path.realpath(repo), "why": why})
+    return doc
+
+
+def show_text(doc: dict) -> str:
+    """R8: the plain view, one block a repo with a blank line between, the skipped last."""
+    blocks = []
+    for r in doc["repos"]:
+        w = r["waits"]
+        count = "no Waits part" if w is None else f"{len(w)} for the owner's hand"
+        out = [f"== {os.path.basename(r['repo'])}  {r['name']}  {count}"
+               + ("  closed" if r["closed"] else ""),
+               f"next  {r['next_act'] if r['next_act'] is not None else '(none)'}"]
+        out += [f"hand  {x['what']}; `{x['command']}`" if x["command"] is not None
+                else f"hand  {x['what']}  (no command)" for x in w or ()]
+        out += [f"form  {x}" for x in r["refusals"]]
+        blocks.append("\n".join(out))
+    reasons: dict = {}
+    for s in doc["skipped"]:
+        reasons.setdefault(s["why"], []).append(os.path.basename(s["repo"]))
+    if reasons:
+        blocks.append("\n".join(f"skipped ({why}): {', '.join(names)}"
+                                for why, names in reasons.items()))
+    return "\n\n".join(blocks) + "\n" if blocks else ""
+
+
 def exit_line(exit_text: str, meter: dict | None) -> str:
     text = _one_line(exit_text, 200) or "?"
     try:
