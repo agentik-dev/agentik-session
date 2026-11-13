@@ -4,9 +4,9 @@ SessionStart, once it has written resolved.json, writes the session's first mete
 PostToolUse's own parse and save (R1); a transcript absent or unreadable is zero turns, and a
 meter already on disk is replaced only by a parse that succeeded. Any failure there is
 swallowed and the context is the pin's, byte for byte (R2). The readers stand (R3): `status`,
-doctor's `meter` check and the module's `bandLine` read the meter as written. Each case in a
-temp HOME, a made-up session id and a temp repo; no `claude`. The band's line is drawn by
-the module itself under node, where node is (its name spelled in pieces, as test_band's)."""
+doctor's `meter` check read the meter as written; the module's `bandLine` over it (lines 2,
+3 and 8) is tested in test_mod.py, the one reader of the module's files. Each case in a temp
+HOME, a made-up session id and a temp repo; no `claude`."""
 import io
 import json
 import os
@@ -22,9 +22,7 @@ import pytest
 from claude_session import cli, doctor, hooks, meter, resolver
 
 ROOT = Path(__file__).resolve().parents[1]
-MOD = ROOT / "plugin" / "hooks" / ("session." + "ts")
 SID = "ss1-zero-sess-0000-1111"
-NO_METER = "session: no meter · agentik-session doctor"
 
 
 @pytest.fixture
@@ -73,42 +71,24 @@ def status():
     return rc, out.getvalue(), err.getvalue()
 
 
-def band(meter_text):
-    """The module's own `bandLine(meter, false, now)`, under node; skips without either."""
-    if not MOD.exists():
-        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("no node on PATH: the module's line is drawn by its own test")
-    js = ("const m = await import(process.argv[1]); const t = process.argv[2];"
-          "console.log(m.bandLine(t === '-' ? null : t, false, Date.now()))")
-    r = subprocess.run([node, "--input-type=module", "-e", js, MOD.as_uri(),
-                        "-" if meter_text is None else meter_text],
-                       capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    return r.stdout.strip()
-
-
 def zero_reads(env):
-    """Acceptance 1 and 2 over the meter written: `status` and the band."""
+    """Acceptance 1 over the meter written: `status` (the band's line: test_mod.py)."""
     rc, out, err = status()
     assert rc == 0, err
     line = out.splitlines()[0]
     assert "0.0% context" in line and "0.0% turns" in line and "zone clear" in line, line
-    drawn = band((sdir(env) / meter.METER).read_text())
-    assert "ctx 0% · turns 0%" in drawn and "doctor" not in drawn and "no meter" not in drawn, drawn
 
 
-# ---- acceptance 1, 2: an empty transcript --------------------------------------------
+# ---- acceptance 1: an empty transcript --------------------------------------------
 
-def test_1_2_an_empty_transcript_reads_zero_in_status_and_the_band(env, repo, tmp_path):
+def test_1_an_empty_transcript_reads_zero_in_status(env, repo, tmp_path):
     start(env, repo, transcript(tmp_path, 0))
     zero_reads(env)
 
 
 # ---- acceptance 3: a transcript that does not exist ------------------------------------
 
-def test_3_an_absent_transcript_reads_zero_in_status_and_the_band(env, repo, tmp_path):
+def test_3_an_absent_transcript_reads_zero_in_status(env, repo, tmp_path):
     gone = tmp_path / "not-yet.jsonl"
     start(env, repo, gone)
     zero_reads(env)
@@ -211,11 +191,7 @@ def test_7_doctor_finds_the_meter_ok_before_any_tool_call(env, repo, tmp_path):
     assert c.ok and "0.0% context, 0.0% turns, zone clear" in c.detail, c.detail
 
 
-# ---- acceptance 8 and R3: the readers' fault words stand -----------------------------------
-
-def test_8_no_meter_still_draws_no_meter():
-    assert band(None) == NO_METER
-
+# ---- R3: the readers' fault words stand (line 8: test_mod.py) -----------------------------------
 
 def test_r3_status_with_no_session_folder_still_exits_2(env):
     rc, _, err = status()
