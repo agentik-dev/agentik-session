@@ -33,9 +33,9 @@
 - R12: NICE n200, n201, n203 leave; n177 leaves if read; n197 shortened to what is left. The file stays under 24,576 B.
 - R13, the commits: this packet; `tests/test_g8a_reader.py`, red; the reader with the old tests' edits; the make rule; the NICE rows with the sitting record.
 
-## 3. Acceptance
+## 3. Interfaces: the acceptance table (brief g8a), with the pin's results
 
-Baselines at the pin, measured in this sitting (`PY` each of `.venv/bin/python`, `.venv-floor/bin/python`):
+The surface is R2's: `commands`, `Cmd`, `Unread`, `git_words`, `_Bound`. Baselines at the pin, measured in this sitting (`PY` each of `.venv/bin/python`, `.venv-floor/bin/python`):
 
 1. `git merge-base --is-ancestor b92e4e0 main` exits 0 and the four files' diff is empty: green before any work.
 2. `PY -m pytest -q tests/test_g8a_reader.py`: at the pin an import error; now all pass.
@@ -45,3 +45,15 @@ Baselines at the pin, measured in this sitting (`PY` each of `.venv/bin/python`,
 6. to 11. The differential, gate, make-rule, real-shell and cost probes of the brief, run in a scratch folder; their numbers are in the record.
 12. The module imports alone.
 13. `scripts/recordlint` exits 0; no row n200, n201, n203.
+
+## 4. Findings that name this row
+
+- NICE n177 (nested escaped backticks), n197 (what the make rule passes), n200 and n201 (`_substituted`'s paren count), n203 (`unbounded`'s docstring): R12.
+
+## 5. Forbidden reads
+
+- A relay ledger or a reference snapshot, whole; a replay line printed or kept outside the scratch folder (counts only in any record).
+
+## 6. Report
+
+- The sitting's record (`history/sittings/2026-11-13-6-g8a-reader-parts.md`): each acceptance line with the pin's result and this head's, the choices made inside the rulings, what differed from the brief and what was not verified.
