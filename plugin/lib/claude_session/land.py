@@ -153,15 +153,22 @@ def worktrees(repo):
     """`git worktree list`'s blocks as dicts, the main checkout first; Red when repo is not it."""
     if not os.path.isdir(repo):
         raise Red("repo", note="no such directory: " + repo)
-    code, out = read(repo, "worktree", "list", "--porcelain")
-    if code != 0:
+    # -z: each line ends in a NUL and a block in an empty one, so a newline in a path is a path's.
+    p = subprocess.run(("git", "worktree", "list", "--porcelain", "-z"), cwd=repo, stdin=DEVNULL,
+                       stdout=subprocess.PIPE, stderr=DEVNULL)
+    if p.returncode != 0:
         raise Red("repo", note="not a git repo: " + repo)
-    blocks = []
-    for block in out.split("\n\n"):
-        fields = dict((line.split(" ", 1) + [""])[:2] for line in block.splitlines())
-        blocks.append(fields)
-    if "bare" in blocks[0] or os.path.realpath(blocks[0]["worktree"]) != os.path.realpath(repo):
-        raise Red("repo", note="the main checkout is %s, not %s" % (blocks[0]["worktree"], repo))
+    blocks, fields = [], {}
+    for line in [os.fsdecode(f) for f in p.stdout.split(b"\0")] + [""]:
+        if line:
+            key, _, value = line.partition(" ")
+            fields[key] = value
+        elif fields:
+            blocks.append(fields)
+            fields = {}
+    top = blocks[0].get("worktree", "") if blocks else ""
+    if not top or "bare" in blocks[0] or os.path.realpath(top) != os.path.realpath(repo):
+        raise Red("repo", note="the main checkout is %s, not %s" % (top or "unknown", repo))
     return blocks
 
 
@@ -402,8 +409,8 @@ def scan_message(repo, tree, full, ours, merged, message):
     note("merge-file: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
     code = run(tree, script, "--require-private", "--commits", span)
     if code != 0:
-        raise Red("merge-file", code, "scripts/hygiene exit %d on the merge message; see its stderr "
-                  "above (%s)" % (code, message))
+        raise Red("merge-file", code, "scripts/hygiene exit %d on the merge message; see its "
+                  "stderr above (%s)" % (code, message))
 
 
 def require_sha(repo, branch, sha):
