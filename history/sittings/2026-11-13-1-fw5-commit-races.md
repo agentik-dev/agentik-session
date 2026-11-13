@@ -19,7 +19,7 @@
 - [x] docs (README and source, sidecar by `shasum`, RUNBOOK §checkpoint and §6, SKILL.md, the checkpoint command, help) and n71, n78, n81, n84 out of NICE; doclint and recordlint pass; the README's test count (3455, now 3473 collected) left for phase 2
 - [x] review 1's fix, tests first: F1 (the `add -N` span), the moved line asserted, git's reason on stdout; red at 2a9fa14 (4 failed)
 - [x] review 1's fix: `_take` (index.lock, out of `_put_back`), `_intent`, `_unadd` and `_tell_moved` (commit.py), git's stdout reason on stderr; the seven named test files 328 green under `.venv` and `.venv-floor`
-- [x] review 1's records: the packet's section 7 (F1, the ruling, the `checkout --` sentence); NICE n169 to n173 for leads 1 to 3, 5 to 7 and 10 (4, 9 and 11 built; 8 needs no change)
+- [x] review 1's records: the packet's section 7 (F1, the ruling, the `checkout --` sentence); NICE n169 to n173, renumbered n192 to n196 in phase 2, for leads 1 to 3, 5 to 7 and 10 (4, 9 and 11 built; 8 needs no change)
 - [ ] phase 2: main merged, the version, the gate's `make check` once
 
 ## Handover

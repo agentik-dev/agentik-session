@@ -57,4 +57,4 @@ The hand-back to the hq coordinator: the branch tip, the acceptance table at the
 
 - F1: when another writer moved the shared index between this call's `add -N` and a commit that then failed, the call left its intent-to-add entry there (a later `commit -a` took the new file) and stderr said none of its paths was staged.
 - Ruling: on that branch the call removes its own entries still intent-to-add, under index.lock and no other entry; `_tell_moved` names every path of the call still staged or intent-to-add with its `restore --staged` line and says the move came after the check, during the commit.
-- Another writer's `git checkout -- <path>` during the check now discards this call's change, which follows from R1: nothing of the call is staged while the check runs (NICE n171 holds the way back).
+- Another writer's `git checkout -- <path>` during the check now discards this call's change, which follows from R1: nothing of the call is staged while the check runs (NICE n194 holds the way back).
