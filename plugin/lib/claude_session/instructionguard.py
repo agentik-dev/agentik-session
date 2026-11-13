@@ -677,6 +677,7 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
             if not _PH_RE.match(o) and o.strip("`"):
                 found.append(("write", _resolve(o.strip("`"), here, env)))
         while words and (_ASSIGN.match(words[0]) or words[0] in _WRAPPERS
+                         or words[0] in _LEAD     # g6 R5: `then cd` is read (n138)
                          or (words[0].startswith("-") and len(words) > 1)):
             words = words[1:]
         if not words:
@@ -693,7 +694,10 @@ def bash_targets(command: str, cwd, env, depth: int = 0, bash3: bool = False,
         elif name in _SHELLS and "-c" in args and depth == 0:
             i = args.index("-c")
             if i + 1 < len(args):
-                found += bash_targets(args[i + 1], here, env, depth + 1)
+                try:
+                    found += bash_targets(args[i + 1], here, env, depth + 1)
+                except ValueError:        # g6 R6: the inner line is unread, the outer judged
+                    found.append(("split", None))
         elif name == "tee":
             found += [("write", _resolve(a, here, env)) for a in plain]
         elif (name == "sed" and any(_SED_I.match(a) for a in args)) or \
@@ -735,8 +739,9 @@ def _bash_gated(payload: dict, env) -> str | None:
     none the gate can read."""
     ti = payload.get("tool_input")
     command = ti.get("command") if isinstance(ti, dict) else None
-    if not isinstance(command, str) or not _WRITE_WORD.search(command):
-        return None
+    if not isinstance(command, str) or not (_WRITE_WORD.search(command) or
+                                            _WRITE_WORD.search(command.replace("\\\n", ""))):
+        return None                       # g6 R4: `c\` newline `p` is a `cp`
     cwd = payload.get("cwd")
     cwd = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and "\0" not in cwd else None
     try:

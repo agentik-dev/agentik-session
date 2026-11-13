@@ -750,3 +750,30 @@ G5_R3_R8 = ["x=`case x in x)cd sub;; esac`" + W, "\\` cd sub" + W,
 def test_g5_r3_the_lines_the_fixes_as_proposed_passed_stay_denied(box, command):
     out = instructionguard.check(_bash(command, box.repo), box.env)
     assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+# ---- g6 R4 to R6: the strict reader's three fixes (pin a0055da: each passed) --------------
+
+G6_STRICT = [
+    "c\\\np a CLAUDE.md",                                                            # R4
+    "if true; then cp a CLAUDE.md; fi", "for i in 1; do cp a CLAUDE.md; done",       # R5
+    "if false; then :; else cp a CLAUDE.md; fi", "{ cp a CLAUDE.md; }", "! cp a CLAUDE.md",
+    "while false; do :; done; until true; do :; done; if cp a CLAUDE.md; then :; fi",
+    "{ cd sub; printf x >> ../CLAUDE.md; }",                                         # n138
+    "cp a CLAUDE.md; bash -c \"echo 'x\"", "bash -c \"echo 'x\"; cp a CLAUDE.md",    # R6
+]
+
+
+@pytest.mark.parametrize("command", G6_STRICT)
+def test_g6_r4_to_r6_the_strict_reading_reads_the_write(box, command):
+    (box.repo / "sub").mkdir()
+    found = instructionguard.bash_targets(command, str(box.repo), box.env)
+    assert ("write", str(box.repo / "CLAUDE.md")) in found, found
+    out = instructionguard.check(_bash(command, box.repo), box.env)
+    assert _decision(out) == ("deny", REASON.format(box.repo / "CLAUDE.md")), command
+
+
+def test_g6_r6_an_unread_inner_line_marks_the_split(box):
+    found = instructionguard.bash_targets("bash -c \"echo 'x\"; echo y > a.txt", str(box.repo),
+                                          box.env)
+    assert found == [("split", None), ("write", str(box.repo / "a.txt"))]
