@@ -128,7 +128,7 @@ def test_an_unknown_profile_on_the_line_reads_as_at_the_pin(box):
     assert p.stderr.decode().startswith("error: unknown profile 'zz-nope'. Known: ")
 
 
-# ---- R5: the respeak of seven summaries (design/15 §5.3) ------------------------------------
+# ---- R5: seven summaries respoken (design/15 §5.3) -------------------------------------------
 
 def test_the_respoken_summaries():
     from claude_session import plug
