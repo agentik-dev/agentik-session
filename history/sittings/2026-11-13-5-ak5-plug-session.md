@@ -18,19 +18,18 @@
 - [x] Fix of review 1 (a second builder, from 4751b39), test first, one commit each: R1-F1 a secret's text in no output of the plug's reads (the change block, a parser error's quoted line in the config read and the doctor read); R1-F2 an unopenable or too-deep layer file is `bad_file`, exit 2; R1-F3 a key out of `[a-z0-9_-]` is skipped with an `unknown` warning, so keys are unique. The verify row's files plus test_hook_meter and test_isolation: 378 passed (.venv), 375 and 3 skipped (.venv-floor); doclint and hygiene 0
 - [x] Build 3 (phase 2, from 6f76dc7), L1: the doctor's text withholds a refused line holding a secret, as `doctor --json` does (R1 amended for that detail); the secret test gains the four text reads
 - [x] Build 3, L2: with a user, repo or local file of mode 000 or a folder, `doctor --json` is §5's shape (`profiles` and `config` `fail`, `<file>: <why>`), the text one FAIL line each, exit 2; six cases, both forms
-- [x] Build 3, phase 2: main 3490c08 merged (`e3f9be1`, no conflict); review 1's ten NICE notes are n213 to n222 (S4); `scripts/stamp --base main` at the merge: alpha.104 -> alpha.105, count 4082 -> 4121 (the equation held), n141 to n150 moved to the overflow, the sidecar written
-- [x] Build 3: gate 20261113-101206-1536 exit 2: `.venv` 4121 passed; `.venv-floor` 1 failed, `test_land3_stamp`'s fixture `git add -A` (`unable to create temporary file: Invalid argument`), 37 passed alone after
+- [x] Build 3, phase 2: main 3490c08 merged (`e3f9be1`, no conflict); review 1's ten NICE notes are n213 to n222 (S4); `scripts/stamp --base main` at the merge: alpha.104 -> alpha.105, count 4082 -> 4121 (the equation held), n141 to n150 moved to the overflow
+- [x] Build 3: gate 1536 exit 2: `.venv` 4121 passed; `.venv-floor` 1 failed, `test_land3_stamp`'s fixture `git add -A` (`unable to create temporary file`), 37 passed alone after
 - [x] Build 4 (fix of review 2), tests first, red at b5c7b0d: R2-F1 a parser's message names file, line and reason, never the line's text (`withheld` unconditional, `scrubbed` for a resolver message); R2-F2 a folder above a layer file that cannot be searched; R2-F3 a cwd that is gone (`no_cwd`, exit 2). One commit for the three (the builder's call bound)
-- [ ] Build 4: 2.0.0-alpha.106 by `scripts/stamp --base main` (main still 3490c08), alone in the last commit under `plugin/`; the gate once
+- [x] Close: two `.hygiene-allow` rows (plug.py `lan`, the plug test `sibling`), `hygiene --commits main..HEAD` 0; alpha.106 by `scripts/stamp --base main` (4131 tests), alone in the last commit under `plugin/`; the gate once, on the commit carrying this line
 
 ## Handover
 - decide, owner: the coordinator (consumer: the packet's reader): the brief asks the contract's sections 2 to 7 copied whole into the packet; doclint holds a packet under 9,216 B, so §3 carries them condensed.
 - `repo` and `plugin` are constants a test holds equal to the manifest: a JSON read in `plug.py` is a new reader `test_bare_machine.py` refuses, and that file is outside this row.
 - decide, owner: the coordinator (consumer: review 1): `tests/test_hook_meter.py` lies outside the brief's file list; its one line pinned `status --json` equal to meter.json, a status read's first key, which acceptance 15 lets change.
 
-
 ## Next act
-- The version commit (alpha.106 by the stamp), then the gate once; review 1's and 2's reproductions are rerun in build 4's record.
+- None on the branch: the gate's result goes to the coordinator; landing is theirs.
 
 ## Exit
-- Phase 1 done: R1 to R9 built, acceptance 1 to 15 green; review 1's three findings fixed; no version, no merge, no gate job.
+- Done: R1 to R9, reviews 1 and 2 fixed, main merged, alpha.106 stamped; the gate ran once on this record's commit.
