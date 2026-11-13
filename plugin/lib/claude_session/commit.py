@@ -380,7 +380,18 @@ def _gate_check(top: str, argv: list, env, caller, wall) -> int:
         return 1
     gate.spawn_serve(root)
     print(f"commit-step: check queued {e['id']} in {top}", file=sys.stderr, flush=True)
-    rc, result = gate.wait(root, e["id"])
+    rc, result = 1, None
+    try:
+        rc, result = gate.wait(root, e["id"])
+    finally:
+        if result is None:              # fw5 R4: any way out with no result cancels the job
+            with _held():
+                try:
+                    gate.cancel(root, e["id"])
+                    said = f"commit-step: check {e['id']} cut"
+                except OSError as err:
+                    said = f"commit-step: check {e['id']} not cut: its mark: {err}"
+                print(said, file=sys.stderr, flush=True)
     if rc != 0 or result is None:
         return 1
     print(gate.wait_line(result), file=sys.stderr, flush=True)
