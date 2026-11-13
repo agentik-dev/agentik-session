@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
+from .instructionguard import _SHELLS, _commands     # packet u3 R5: the hook's reader
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -660,6 +661,69 @@ def acceptance(text: str) -> list:
     if not out:
         raise AcceptanceError("no item")
     return out
+
+
+# Packet u3 R5: a line that runs make is refused before the row's stage (design/07 §2
+# item 4): a make runs only through the gate queue, and the land step runs the check.
+MAKES = ("make", "gmake")
+SHELL_DEPTH = 3                  # the shells' `-c` texts read, nested
+LINE_SHOWN = 80                  # R6: the line in the log, cut
+_DASH_C = re.compile(r"^-[A-Za-z]*c[A-Za-z]*\Z")
+WHY_MAKE = "a make runs only through the gate queue, and the land step runs the check"
+
+
+def unbounded(shell: str, depth: int = 0) -> str:
+    """Why the line may not run, "" when it may: read with the hook's reader
+    (`instructionguard._commands`), it is refused when the reader cannot split it, when a
+    word of a simple command, by basename, is `make` or `gmake`, or when a shell's `-c` text
+    is, to depth SHELL_DEPTH."""
+    try:
+        cmds = list(_commands(shell))
+    except ValueError as e:
+        return f"the hook's reader cannot split it ({e}), so it may run a make; {WHY_MAKE}"
+    for words, outs in cmds:
+        if outs is None:                  # a subshell's edge
+            continue
+        for i, w in enumerate(words):
+            name = os.path.basename(w)
+            if name in MAKES:
+                return f"it runs `{name}`; {WHY_MAKE}"
+            if name not in _SHELLS or depth >= SHELL_DEPTH:
+                continue
+            j = i + 1
+            while j < len(words) and words[j].startswith("-") and not _DASH_C.match(words[j]):
+                j += 1
+            if j + 1 < len(words) and _DASH_C.match(words[j]):
+                why = unbounded(words[j + 1], depth + 1)
+                if why:
+                    return why
+    return ""
+
+
+def unbounded_item(lines: list) -> str | None:
+    """Packet u3 R6: the first unbounded line as the log says it, its item, the line cut at
+    LINE_SHOWN and why; else None."""
+    for i, ln in enumerate(lines, 1):
+        why = unbounded(ln.shell)
+        if why:
+            return f"item {i} `{ln.shell[:LINE_SHOWN]}`: {why}"
+    return None
+
+
+def early_word(p: dict, repo: Path) -> str | None:
+    """Packet u3 R7: why the row's turn will refuse it for its acceptance cell, else None;
+    a packet the row's turn refuses for its path is left to that turn."""
+    real = _packet_file(repo, p["packet"])
+    if real is None:
+        return None
+    try:
+        lines = acceptance(Path(real).read_text(errors="replace"))
+    except OSError:
+        return None
+    except AcceptanceError as e:
+        return f"acceptance: {e}"
+    why = unbounded_item(lines)
+    return f"unbounded: {why}" if why else None
 
 
 def line_holds(ln: Line, exit_code, last: str) -> bool:
@@ -1368,6 +1432,11 @@ class _Run:
             self.log(f"{p['id']}: acceptance: {e}"[:300])
             self.row(p, "refused", "acceptance")
             return None
+        why = unbounded_item(lines)
+        if why:                                          # packet u3 R6
+            self.log(f"{p['id']}: unbounded: {why}")
+            self.row(p, "refused", "unbounded")
+            return None
         if self.max_rows is not None and self.spawned >= self.max_rows:
             return "max-rows"
         pin = _out(self.repo, "rev-parse", "--verify", "--quiet", "main^{commit}")
@@ -1512,6 +1581,10 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     for line in pending:
         N.log(line)
     fx.say(f"{nid}: {len(rows)} rows from {repo / QUEUE}; ledger {d / 'ledger.jsonl'}")
+    for p in rows:                                       # packet u3 R7: the early word
+        why = None if p["parked"] else early_word(p, repo)
+        if why:
+            fx.say(f"{p['id']}: its turn refuses it, {why}")
 
     def on_term(_sig, _frame):
         N.term = True

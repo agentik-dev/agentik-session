@@ -166,8 +166,8 @@ def test_r5_depth_three():
         for _ in range(n):
             s = "sh -c " + unattended.shlex.quote(s)
         return s
-    assert all(unattended.unbounded(nest(n)) for n in range(4))
-    assert unattended.unbounded(nest(4)) == ""                # past depth 3, not read
+    assert all(unattended.unbounded(nest(n)) for n in range(5))  # nest(4): a word at depth 3
+    assert unattended.unbounded(nest(5)) == ""                # a fourth -c text, not read
 
 
 # ---- R6, R7: the row refused before its stage (acceptance 6) ---------------------------
@@ -192,9 +192,9 @@ def test_a6_an_unbounded_row_is_refused_before_its_stage(box, monkeypatch):
     assert [s["cwd"] for s in box.starts] == [str(box.repo / ".claude" / "worktrees" / "max-row")]
     assert not ran.exists()
     early = [(s, spawned) for s, spawned in said if s.startswith("green-row:") and "unbounded" in s
-             and "refused" not in s.split(":", 2)[1]]
+             and s != "green-row: refused unbounded"]
     assert len(early) == 1 and early[0][1] is False
-    assert [s for s, _ in said if s.startswith("max-row:") and "refused" not in s] == ["max-row: built"]
+    assert [s.split()[1] for s, _ in said if s.startswith("max-row:")] == ["built"]
     log = (box.dir / "log").read_text()
     assert "green-row: unbounded: item 1 `make check; echo $?`: " in log
     assert len(_trees(box.repo)) == 2
