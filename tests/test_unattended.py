@@ -356,13 +356,22 @@ def test_a_dying_run_kills_its_child(box, monkeypatch):                 # F4
         seen.append(pgid)
         return ("h", 0.0, ())
     monkeypatch.setattr(unattended, "signals", die)
+    t0 = time.monotonic()
     with pytest.raises(RuntimeError):
         box.go([{"stream": "green.jsonl", "sleep": 60}], ["green-row"], poll=0.2)
+    assert time.monotonic() - t0 < 30                    # killed, not waited out (its 60 s)
     d = unattended.newest_run(dict(os.environ))
     stop = [json.loads(ln) for ln in (d / "ledger.jsonl").read_text().splitlines()][-1]
     assert stop["kind"] == "stop" and stop["reason"] == "error" and "the loop broke" in stop["error"]
-    with pytest.raises(ProcessLookupError):
-        os.killpg(seen[0], 0)                            # the child's group is gone
+    # NICE n86: a member of the killed group may not be reaped yet; ask until it is, bounded.
+    end = time.monotonic() + 5
+    while True:
+        try:
+            os.killpg(seen[0], 0)
+        except ProcessLookupError:
+            break                                        # the child's group is gone
+        assert time.monotonic() < end, "the child's group outlived the run by 5 s"
+        time.sleep(0.05)
 
 
 # ---- the refusals, the land step, the stops, the report -----------------------
