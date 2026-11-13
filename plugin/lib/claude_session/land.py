@@ -315,16 +315,27 @@ def require_worktree(blocks, branch):
     raise Red("worktree", note="no linked worktree has %s checked out" % branch)
 
 
+def under(path, tree):
+    """A parent of `path` is the directory `tree`, by device and inode: a case variant or a link
+    in either spelling is the same directory, and a sibling such as `<tree>-2` is not."""
+    parent, here = os.path.dirname(os.path.realpath(path)), None
+    while parent != here:
+        try:
+            if os.path.samefile(parent, tree):
+                return True
+        except OSError:
+            pass
+        parent, here = os.path.dirname(parent), parent
+    return False
+
+
 def nested(blocks, own, tree):
-    """Each other worktree whose directory is under `tree` (real paths), its status lines below
-    it or `clean`. A clone git does not list is not read."""
-    top = os.path.realpath(tree).rstrip(os.sep) + os.sep
+    """Each other linked worktree whose directory is under `tree`, its status lines below it or
+    `clean`. The main checkout never counts; a clone git does not list is not read."""
     found = []
-    for block in blocks:
+    for block in blocks[1:]:
         path = block.get("worktree", "")
-        if block is own or not path or not os.path.isdir(path):
-            continue
-        if not os.path.realpath(path).startswith(top):
+        if block is own or not path or not os.path.isdir(path) or not under(path, tree):
             continue
         p = subprocess.run(("git",) + STATUS, cwd=path, stdin=DEVNULL, stdout=subprocess.PIPE,
                            stderr=DEVNULL, universal_newlines=True, errors="replace")
