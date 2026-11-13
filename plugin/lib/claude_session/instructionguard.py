@@ -431,6 +431,7 @@ def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
     `ticks`: a pattern's `)` in backticks is masked into a word (r3 F1, R8: both are read)."""
     out, i, n, quote, start = [], 0, len(text), None, True
     opened, tick, prev = [], False, ""    # the open `(`, `$(` and `${`; inside backticks
+    esc = False                           # in backticks, inside an escaped pair of them
     cases, cmd = [0], True                # per bracket its open `case`s; at a command's start
     while i < n:
         c = text[i]
@@ -439,24 +440,27 @@ def _mask(text: str, bash3: bool = False, ticks: bool = True) -> str:
             continue
         if quote is None:
             if c == "\\" and i + 1 < n:
+                esc ^= tick and text[i + 1] == "`"
                 out += [c, _MASK.get(text[i + 1], text[i + 1])]
                 i, start, prev, cmd = i + 2, False, "", cmd and not start
                 continue
             if c == "#" and start and opened[-1:] != ["${"]:
                 nl = text.find("\n", i)
                 nl = n if nl < 0 else nl
-                k = text.find("`", i, nl) if tick else -1    # r3 F4: escaped or not; F7: on
-                if k >= 0:                                    # the comment's line alone
-                    while text[k - 1] == "\\":          # an escaped one: read from its
-                        k -= 1                            # backslashes, so `tick` holds
-                    i = k
-                else:
-                    i = nl
+                k = text.find("`", i, nl) if tick else -1     # r3 F7: on its line alone
+                while k >= 0:                 # r3 F4: in an escaped pair, the first backtick
+                    j = k                     # ends it, escaped or not, and is read again
+                    while text[j - 1] == "\\":  # from its backslashes; else the first
+                        j -= 1                # unescaped one (R8: `# \`x\`` is all comment)
+                    if esc or (k - j) % 2 == 0:
+                        break
+                    k = text.find("`", k + 1, nl)
+                i = j if k >= 0 else nl
                 continue
             if c in "'\"":
                 quote = c
             elif c == "`":
-                tick = not tick
+                tick, esc = not tick, False
                 if tick and opened[-1:] == ["${"]:    # r3 F2: in it a paren is a command's
                     opened.append(c)
                     cases.append(0)
@@ -520,6 +524,7 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True):
     lex.whitespace_split = True
     words, outs, expect = [], [], None
     cases: list = []                      # per open `case`: `head`, `pattern` or `body`
+    ticks = 0                             # the real backticks read so far
     for tok in lex:
         if tok and set(tok) <= set(_PUNCT):
             for op in _OPS.findall(tok):
@@ -541,13 +546,14 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True):
                     yield op, None                # a subshell's bounds: its folder ends at `)`
             continue
         raw, tok = tok, tok.translate(_UNMASK)    # in `raw` a backtick is a real one
+        ticks += raw.count("`")
         if expect is not None:
             if expect in _WRITE_OPS and not (expect == ">&" and (tok.isdigit() or tok == "-")):
                 outs.append(tok)
             expect = None
             continue
         if not outs and (tok == "case" and all(w in _LEAD for w in words) or
-                         raw.endswith("`case") and raw[:-4].count("`") % 2):
+                         raw.endswith("`case") and (ticks - raw[-4:].count("`")) % 2):
             cases.append("head")          # r3 F1: a `case` glued to its opening backtick too
         elif (not words and not outs and (tok == "esac" or raw.startswith("esac`"))
               and cases and cases[-1] != "head"):
