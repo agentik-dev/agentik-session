@@ -10,7 +10,7 @@
 
 ## Done-ness
 - [x] act 1: the packet and this charter
-- [ ] act 2: the failing tests, measured red at the pin
+- [x] act 2: the failing tests, measured red at the pin (13 failed of 13 under .venv)
 - [ ] act 3: R2 to R4: the part, `open`'s line, the four warnings; old tests that pin `open`'s text
 - [ ] act 4: R5 to R8: `show`, its object and its text view
 - [ ] act 5: R9: the hook's read and the denial's sentence
@@ -26,4 +26,4 @@
 - none
 
 ## Next act
-Act 2: write `tests/test_in2_charter_show.py` and run it at the pin.
+Act 3: the part, `open`'s line and the four warnings in `charter.py`.
