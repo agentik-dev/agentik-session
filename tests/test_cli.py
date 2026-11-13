@@ -83,7 +83,7 @@ def test_set_launch_key_does_not_promise_next_start():
 
 def test_set_config_without_save_is_refused():
     rc, _, err = run("set", "posture", "deny", "--config", "review")
-    assert rc == 1 and "--save" in err
+    assert rc == 1 and "profiles: review:" in err and "--save" not in err   # mt1 R2-F3
 
 
 def test_set_rejects_non_settable_and_invalid():
