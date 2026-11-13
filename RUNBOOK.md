@@ -598,11 +598,15 @@ type that names its own model.
   once and 1000 a run.
 
 A checkpoint is a commit or a durable record: run one and the session is
-handoff-ready at that moment. `agentik session checkpoint [-m MSG] [-c]`,
-where `-c` runs `git add -u` (tracked files only) and commits. It never
-stages untracked files: the wind-down nudge makes an autonomous agent the
-likeliest caller, and `add -A` would sweep up a plaintext `.env` or a
-tfstate. Untracked files are named on stderr so you can add them yourself.
+handoff-ready at that moment. `agentik session checkpoint [-m MSG]
+[--commit <paths...>]`: `--commit` commits the paths its line names and
+nothing else, through `commit`'s core (§6) with no check, so another
+writer's staged or edited file stays out (packet fw5, R3). There is no
+sweep: `--commit` with no path, or a path without `--commit`, exits 2
+naming the form, nothing committed or recorded; `commit`'s refusals exit 2
+the same way. Nothing to commit in the named paths prints `nothing to
+commit` and records; a red commit exits 1 and records nothing. With
+`--respawn`, a modified tracked charter passes only when the line names it.
 
 ### Priority and pacing
 
@@ -930,7 +934,13 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 `agentik session commit <paths...> --check <cmd> --message-file <f>` (packet
 FW4d) adds each named path, runs the check in the repo's top and commits on
 green with `git commit --only`, so a path someone else staged stays staged and
-out of the commit. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
+out of the commit. The add runs on a witness, a copy of the index in the git
+dir (`agentik-commit.witness`, by `GIT_INDEX_FILE` for that git call alone),
+so no path of the call is in the shared index while its check runs and
+another writer's plain `git commit` cannot take one (packet fw5, R1); the
+check's environment is the caller's. "Nothing to commit" and `moved` are asked
+of the witness; on green, `git add -N` for each new file the shared index
+lacks, then `commit --only`. The witness goes on every way out. Paths are literal (`GIT_LITERAL_PATHSPECS=1`: `a*` is no
 glob), as git takes them from the cwd. Stdout is one line, last:
 `commit <repo>: ok <sha>` (exit 0), or `red check exit <code>` (the check's
 code: 127 not found, 126 not runnable, 128+n a signal), `red moved exit 1` (a
@@ -941,15 +951,18 @@ code. One call at a time per work tree: a lock in its git dir
 wall, then `red lock exit 124`. Once HEAD has moved to this call's commit,
 nothing is restored: a red or a signal after it reads `red <step> exit
 <code>, the commit stands: <sha>` (`red signal exit 130` for SIGINT). Before
-the add HEAD's sha is read and the index file copied whole to
-`agentik-commit.index` in the git dir; right after the add, the index's
-entries (`git ls-files -s -z`: a stat-only refresh, anyone's `git status`,
-is no change). On every other failure (a red, a refusal after the add, an
-error, SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's
+the check nothing is written to the shared index, so a red check, a refusal
+or a signal there reads its own line (`red check exit <code>`) even when
+another writer committed meanwhile (fw5, R2). The span from the `add -N` to
+the commit alone is guarded: before the `add -N` HEAD's sha is read and the
+index file copied whole to `agentik-commit.index` in the git dir; right after
+it, the index's entries (`git ls-files -s -z`: a stat-only refresh, anyone's
+`git status`, is no change). On every failure in that span (a red, an error,
+SIGINT, SIGTERM, SIGHUP) the copy goes back over the index by git's
 own protocol (`index.lock`, then a rename) only when HEAD is that sha and
 the entries are those, asked again under `index.lock`; then the index is as
-it was found. Otherwise another writer moved HEAD or the index during the
-check, and the old index over theirs would stage their work's reversal:
+it was found, no intent-to-add entry left. Otherwise another writer moved
+HEAD or the index in that span, and the old index over theirs would stage their work's reversal:
 nothing is written, the copy is dropped, and the line reads `red <step>
 exit <code>, the index moved under the check: nothing is restored` (the
 red's own code; `red refused exit 2` for a refusal, `red signal exit 143`
@@ -970,4 +983,13 @@ over the index or removed. After a SIGKILL the copy is the way back.
   its first word is `make` or `gmake` it is one gate job in the repo, labelled
   `commit check` (its code `gate wait --strict`'s, its wait line on stderr),
   since the gate holds every `make` on the machine; any other check, a
-  `sh -c '...'` wrapper too, runs directly, its output on stderr.
+  `sh -c '...'` wrapper too, runs directly, its output on stderr. A call that
+  leaves the wait with no result (SIGINT, SIGTERM, an error) writes the job's
+  cancel mark, `gate/queue/<id>.cancel`, and says `commit-step: check <id>
+  cut` on stderr; the runner alone acts on it: an entry not started is closed
+  unrun, a running one is cut as the wall cuts, both exit 130, `cut` "caller
+  cut" (fw5, R4).
+- Inside a gate job (`$CLAUDE_SESSION_GATE_JOB` naming an entry of this state
+  root), `gate run --wait` on the job's own repo and `gate wait` on a queued id
+  of its key exit 2, nothing queued, since that job waits behind its caller
+  until the wall cuts it (fw5, R5); another repo or no `--wait` is as before.

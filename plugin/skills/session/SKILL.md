@@ -246,7 +246,7 @@ whole, as resolved.
 ```bash
 agentik-session doctor          # the setup, the plugin, its dependencies; exit 2 names the failing check
 agentik-session budget          # the zone and checkpoint cadence
-agentik-session checkpoint      # mark a handoff-ready point (`-m`, `--commit` stages tracked files only)
+agentik-session checkpoint      # mark a handoff-ready point (`-m`; `--commit <paths...>` commits the named paths alone, no sweep)
 agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, through Bash
 agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>, est on stderr
 agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
