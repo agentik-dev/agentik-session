@@ -202,7 +202,7 @@ class _Files:
         self.repo, self.local_file = str(rdir / "config.yaml"), str(rdir / "config.local.yaml")
         self.overlay = (str(resolver.state_dir(env) / "overlays" / f"{sid}.json")
                         if sid else None)
-        self.text, self.doc = {}, {}
+        self.text, self.doc, self.skipped = {}, {}, []    # skipped: leaves _keyable refuses
         for p in (self.shipped, self.user, self.repo, self.local_file):
             try:
                 self.text[p] = Path(p).read_text(encoding="utf-8")
@@ -473,6 +473,16 @@ def _setting(f, key, path, value, default, rows, src_path) -> dict:
                        for la, v, p, ln in rows]}
 
 
+_SEGMENT = re.compile(r"[a-z0-9_-]+\Z")
+
+
+def _keyable(path) -> bool:
+    """A leaf whose key is of the contract's segments, so no two leaves share a key (review 1,
+    R1-F3). `priority.levels` holds S1 to S4 alone (resolve drops the rest): lowered, as before."""
+    return path[:2] == ("priority", "levels") or all(
+        isinstance(k, str) and _SEGMENT.match(k) for k in path)
+
+
 def _settings(f) -> list:
     out = []
     s, now = f.session, datetime.now(timezone.utc)
@@ -497,6 +507,12 @@ def _settings(f) -> list:
         else:
             paths = [(k,)]
         for p in paths:
+            if not _keyable(p):
+                rows = f.session_rows(p)
+                f.skipped.append({"key": ".".join(p), "reason": "unknown", "value": None,
+                                  "path": rows[-1][2] if rows else None,
+                                  "line": rows[-1][3] if rows else None})
+                continue
             v = _get(s, p)[1]
             d = _get(f.default, p)[1] if k != "profile" else dfl
             out.append(_setting(f, ".".join(p), p, v, d, f.session_rows(p),
@@ -545,7 +561,7 @@ def _warnings(f) -> list:
         if (rest, path, line) not in seen:
             seen.add((rest, path, line))
             out.append(row)
-    return out
+    return out + f.skipped
 
 
 def _sid(env) -> str | None:

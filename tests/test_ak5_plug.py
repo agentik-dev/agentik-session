@@ -357,6 +357,30 @@ def test_a_file_that_cannot_be_read_is_bad_file(box, case):
             p.chmod(0o644)
 
 
+# ---- review 1, R1-F3: every key is unique, of [a-z0-9_-] segments ----------------------------
+
+def test_keys_are_unique_and_a_key_out_of_the_set_is_warned(box):
+    home, cwd = box
+    u = user_file(home, "defaults:\n  admission:\n    Mode: off\n    mode: on\n"
+                        "    a.b: 1\n    a:\n      b: 2\n")
+    r = repo_file(cwd, "session:\n  reconcile:\n    Stale: 3\n")
+    rc, d = config(box)
+    assert rc == 0 and d["ok"] is True
+    keys = [s["key"] for s in d["settings"]]
+    assert len(keys) == len(set(keys)), sorted(k for k in keys if keys.count(k) > 1)
+    seg = __import__("re").compile(r"[a-z0-9_-]+\Z")
+    assert all(seg.match(part) for k in keys for part in k.split(".")), keys
+    by = {s["key"]: s for s in d["settings"]}
+    assert by["admission.mode"]["value"] == "on" and by["admission.a.b"]["value"] == 2
+    assert by["admission.mode"]["source"] == {"layer": "user-defaults", "path": str(u), "line": 4}
+    assert {f"priority.levels.s{n}" for n in range(1, 5)} <= set(by)   # S1 to S4, as before
+    w = {(x["key"], x["path"], x["line"]) for x in d["warnings"] if x["reason"] == "unknown"}
+    assert {("admission.Mode", str(u), 3), ("admission.a.b", str(u), 5),
+            ("reconcile.Stale", str(r), 3)} <= w, d["warnings"]
+    s = one(box, "admission.mode")
+    assert s["value"] == "on"
+
+
 # ---- line 11: doctor --json -----------------------------------------------------------------
 
 def test_doctor_json(box):
