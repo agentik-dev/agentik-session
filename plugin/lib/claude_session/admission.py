@@ -1465,12 +1465,14 @@ def _load_carry(d: Path) -> dict:
 
 def _save_carry(d: Path, old: dict, out: dict, now: datetime) -> None:
     """mix.json: each login-week's carry, the week not past, MAX_ACCOUNTS newest, atomic and
-    0600, at most BAND_MAX bytes: past it the oldest weeks go until it fits (NICE n20); a
-    newest week past it alone is not written."""
+    0600, at most BAND_MAX bytes: past it the weeks go until it fits (NICE n20), the
+    other logins' first, oldest first, then this call's own (`out`), so the current login's
+    carry is the last to go (round 1's F1); a last week past it alone is not written."""
     c = {**old, **out}
     keep = sorted((k for k, v in c.items() if isinstance(v, dict)
                    and (w := _when(v.get("week"))) is not None and w > now),
                   key=lambda k: c[k]["week"])[-MAX_ACCOUNTS:]
+    drop = iter(sorted(keep, key=lambda k: k in out))    # stable: oldest first in each
     while True:
         text = json.dumps({k: c[k] for k in keep}, allow_nan=False) + "\n"
         if len(text) <= BAND_MAX:
@@ -1478,7 +1480,8 @@ def _save_carry(d: Path, old: dict, out: dict, now: datetime) -> None:
             return
         if len(keep) <= 1:
             return
-        keep = keep[1:]
+        gone = next(drop)
+        keep = [k for k in keep if k != gone]
 
 
 def _band_none(rows, now: datetime, settings: dict, tz, out: dict) -> dict:

@@ -140,10 +140,12 @@ def _entry(week: datetime, tag: str) -> dict:
     return {"week": admission._ts(week), "drops": [], "last": last, "spend": {}}
 
 
-def _fill(n: int, room: int) -> dict:
+def _fill(n: int, room: int, later: bool = False) -> dict:
     """`n` other logins' carries, each a week older than the next, whose text is `room`
-    bytes short of BAND_MAX."""
-    c = {f"login-{i:02d}": _entry(WEEK - timedelta(hours=24 + 6 * (n - i)), f"o{i:02d}")
+    bytes short of BAND_MAX; `later`: their weeks reset 2 to 7 hours after WEEK, the
+    current login's (round 1's F1)."""
+    c = {f"login-{i:02d}": _entry(WEEK + timedelta(hours=1 + (n - i)) if later
+                                  else WEEK - timedelta(hours=24 + 6 * (n - i)), f"o{i:02d}")
          for i in range(n)}
     short = admission.BAND_MAX - room - len(json.dumps(c) + "\n")
     assert short >= 0
@@ -164,14 +166,30 @@ def test_n20_save_carry_past_the_bound_drops_the_oldest_and_writes(tmp_path):
     assert list(kept) == order[-len(kept):]              # a suffix: the newest, kept
 
 
-def test_n20_a_reset_survives_rotation_with_the_carry_full(monkeypatch):
+def test_n20_past_the_bound_the_others_go_before_this_calls_own(tmp_path):
+    """Round 1's F1: the other logins' weeks reset later than the current one's; the
+    others go, oldest first, and the current login's carry is kept."""
+    now = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
+    old = _fill(6, 100, later=True)
+    new = {"current": _entry(WEEK, "cur")}
+    admission._save_carry(tmp_path, old, new, now)
+    p = tmp_path / admission.MIX_FILE
+    assert p.exists() and p.stat().st_size <= admission.BAND_MAX
+    kept = json.loads(p.read_text())
+    assert "current" in kept and len(kept) > 1
+    others = sorted(old, key=lambda k: old[k]["week"])
+    assert [k for k in kept if k != "current"] == others[-(len(kept) - 1):]
+
+
+@pytest.mark.parametrize("later", [False, True])
+def test_n20_a_reset_survives_rotation_with_the_carry_full(monkeypatch, later):
     p = resolver._user_file(os.environ)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("defaults:\n  admission:\n    mix:\n      shares:\n        fable: 3\n"
                  "        opus: 1\n      resets: 2\n")
     d = admission.directory(os.environ)
     d.mkdir(parents=True, exist_ok=True)
-    (d / admission.MIX_FILE).write_text(json.dumps(_fill(6, 50)) + "\n")
+    (d / admission.MIX_FILE).write_text(json.dumps(_fill(6, 50, later)) + "\n")
 
     def by_state(sid, by):
         sdir = config.state_dir(os.environ) / "sessions" / sid
