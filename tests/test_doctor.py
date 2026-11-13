@@ -42,6 +42,20 @@ def _exe(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
+def _installed(tmp_path, ps):
+    """The plugin list `claude plugin list --json` prints, and Claude Code's record of the
+    same installs (fk3 R2), each entry at scope `user`."""
+    (tmp_path / "plugins.json").write_text(json.dumps(ps))
+    rec = {}
+    for p in ps:
+        rec.setdefault(p["id"], []).append({"scope": "user", "version": p.get("version"),
+                                            "installPath": p.get("installPath") or str(
+                                                tmp_path / "cache" / p["id"])})
+    f = tmp_path / "home" / ".claude" / "plugins" / "installed_plugins.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"version": 2, "plugins": rec}))
+
+
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
     """A fake PATH that is green unless a test breaks one piece of it."""
@@ -61,7 +75,7 @@ def machine(tmp_path, monkeypatch):
         {"id": "respeak@agentik", "version": "0.6.0", "enabled": True},
         {"id": "relay@agentik", "version": "0.1.0", "enabled": True},
     ]
-    (tmp_path / "plugins.json").write_text(json.dumps(plugins))
+    _installed(tmp_path, plugins)
     _exe(bin_ / "claude", f'if [ "$1" = plugin ]; then /bin/cat {tmp_path}/plugins.json; exit 0; fi\n'
          'echo "--model --effort --tools --permission-mode '
          '--max-budget-usd --output-format --session-id"\n')  # --max-turns: unlisted
@@ -80,9 +94,8 @@ def machine(tmp_path, monkeypatch):
     m = M()
     m.env, m.repo, m.bin, m.plugins, m.tmp = env, repo, bin_, plugins, tmp_path
 
-    def set_plugins(ps):
-        (tmp_path / "plugins.json").write_text(json.dumps(ps))
-    m.set_plugins = set_plugins
+    m.set_plugins = lambda ps: _installed(tmp_path, ps)
+    m.home = tmp_path / "home"
     return m
 
 
@@ -207,7 +220,11 @@ def test_wrong_marketplace_is_not_the_sibling(machine):
     machine.set_plugins(ps)
     rep = doctor.run(machine.env, machine.repo)
     assert failing(rep) == []
-    assert next(c for c in rep.checks if c.name == "decisions").note
+    # fk3 R2, R4: a sibling installed alone from another marketplace stands; its id is in
+    # the check's `source`, never its detail.
+    c = next(c for c in rep.checks if c.name == "decisions")
+    assert c.status == "ok" and "elsewhere" not in c.detail
+    assert c.source["plugin"] == "decisions@elsewhere"
 
 
 def hook_line(env, repo):
@@ -662,3 +679,200 @@ def test_sc3_the_python_row_reads_the_launchers_interpreter(tmp_path):
     (tmp_path / ".local" / "bin" / "agentik-session").write_text('PYTHON="/gone/python"\nCODE="/x"\n')
     c = doctor._check_python(env, version, "/p")
     assert "the launcher runs /gone/python, which is gone" in c.detail and c.ok and c.warn
+
+
+# ---- fk3: the sibling check takes the suite's answer about which plugin stands -------------
+
+FORK = "respeak@acme-tools"
+OWN = {"id": "respeak@agentik", "version": "0.7.0", "enabled": True}
+
+
+def _src(tool="respeak", kind="plugin", plugin=FORK, version="0.12.6", found=True,
+         declared=None, seen=None, root=None):
+    return {"tool": tool, "kind": kind, "plugin": plugin, "version": version, "found": found,
+            "root": root or f"/cache/{plugin or tool}", "declared": declared,
+            "seen": seen if seen is not None else []}
+
+
+def _answer(*rows, schema="agentik.sources/1", ok=True):
+    return {"schema": schema, "ok": ok, "tool": "suite", "tools": list(rows)}
+
+
+def _suite(machine, body):
+    """A stub launcher at the suite's fixed place; `body` a dict prints as its answer."""
+    d = machine.home / ".local" / "bin"
+    d.mkdir(parents=True, exist_ok=True)
+    if isinstance(body, dict):
+        (machine.tmp / "answer.json").write_text(json.dumps(body))
+        body = f"/bin/cat {machine.tmp}/answer.json\n"
+    _exe(d / "agentik-suite", body)
+
+
+def _with(machine, *extra, drop="respeak@agentik"):
+    machine.set_plugins([p for p in machine.plugins if p["id"] != drop] + list(extra))
+
+
+def _named(rep, name="respeak"):
+    return next(c for c in rep.checks if c.name == name)
+
+
+def _line(rep, name="respeak"):
+    return next(ln for ln in doctor.render(rep).splitlines() if ln.split()[1] == name)
+
+
+def _dict(rep, name="respeak"):
+    return next(c for c in rep.as_dict()["checks"] if c["name"] == name)
+
+
+def _fork_stands(rep):
+    c = _named(rep)
+    assert (c.status, c.detail) == ("ok", "installed")
+    assert "acme" not in c.detail and "acme" not in (c.remedy or "")
+    assert f"{FORK} 0.12.6" in _line(rep)
+    assert _dict(rep)["source"]["plugin"] == FORK and _dict(rep)["source"]["kind"] == "plugin"
+    assert rep.ok
+
+
+def test_fk3_line1_the_suite_says_a_fork_stands_alone(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    _suite(machine, _answer(_src()))
+    _fork_stands(doctor.run(machine.env, machine.repo))
+
+
+def test_fk3_line2_absent_and_undecided(machine):
+    _with(machine)
+    _suite(machine, _answer(_src(kind="absent", plugin=None, version=None, found=False)))
+    c = _named(doctor.run(machine.env, machine.repo))
+    assert c.status == "note" and c.detail.startswith("not installed, optional: ")
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True}, drop=None)
+    seen = [{"plugin": "respeak@agentik", "version": "0.7.0", "scope": "user", "root": "/a"},
+            {"plugin": FORK, "version": "0.12.6", "scope": "user", "root": "/b"}]
+    _suite(machine, _answer(_src(kind="undecided", plugin=None, version=None, found=False,
+                                 seen=seen)))
+    rep = doctor.run(machine.env, machine.repo)
+    c = _named(rep)
+    assert c.status == "warn" and c.ok and "2 plugins" in c.detail
+    assert c.remedy == "agentik config suite.sources.respeak"
+    assert "acme" not in c.detail and "@agentik" not in c.detail
+    assert [s["plugin"] for s in _dict(rep)["source"]["seen"]] == ["respeak@agentik", FORK]
+    assert FORK in _line(rep) and "respeak@agentik 0.7.0" in _line(rep)
+
+
+def test_fk3_line2_a_line_naming_a_missing_plugin_or_a_gone_folder_warns(machine):
+    _with(machine)
+    decl = {"path": "/cfg/config.yaml", "line": 7}
+    for row in (_src(found=False, declared=decl),
+                _src(kind="folder", plugin=None, found=False, declared=decl, root="/gone")):
+        _suite(machine, _answer(row))
+        rep = doctor.run(machine.env, machine.repo)
+        c = _named(rep)
+        assert c.status == "warn" and "/cfg/config.yaml:7" in c.detail and "acme" not in c.detail
+        assert "/gone" not in c.detail
+    assert "/gone" in _line(rep)
+
+
+def test_fk3_a_folder_that_stands_is_installed(machine):
+    _with(machine)
+    _suite(machine, _answer(_src(kind="folder", plugin=None, root="/src/respeak", version="0.9.0",
+                                 declared={"path": "/cfg/config.yaml", "line": 3})))
+    rep = doctor.run(machine.env, machine.repo)
+    assert (_named(rep).status, _named(rep).detail) == ("ok", "installed")
+    assert "/src/respeak 0.9.0" in _line(rep)
+    assert _dict(rep)["source"]["declared"] == {"path": "/cfg/config.yaml", "line": 3}
+
+
+def test_fk3_line3_the_fork_not_enabled(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": False})
+    _suite(machine, _answer(_src()))
+    rep = doctor.run(machine.env, machine.repo)
+    c = _named(rep)
+    assert c.status == "note" and c.detail.startswith("installed, disabled, optional")
+    assert "acme" not in c.detail and f"{FORK} 0.12.6" in _line(rep)
+
+
+LIARS = {
+    "none": None,
+    "exit 2": "echo 'usage: agentik-suite describe' >&2\nexit 2\n",
+    "ok false": _answer(_src(kind="absent", plugin=None, found=False), ok=False),
+    "another schema": _answer(_src(kind="absent", plugin=None, found=False),
+                              schema="agentik.sources/2"),
+    "no json": "echo ok\n",
+    "a bad kind": _answer(_src(kind="whatever")),
+    "floods": "exec /usr/bin/yes '{\"schema\": \"agentik.sources/1\"}'\n",
+    "sleeps": "sleep 30\n",
+}
+
+
+@pytest.mark.parametrize("liar", sorted(LIARS))
+def test_fk3_line4_no_answer_reads_the_file(machine, monkeypatch, liar):
+    monkeypatch.setattr(doctor, "SOURCES_WALL", 1.0)
+    if LIARS[liar] is not None:
+        _suite(machine, LIARS[liar])
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    _fork_stands(doctor.run(machine.env, machine.repo))
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True}, drop=None)
+    c = _named(doctor.run(machine.env, machine.repo))
+    assert c.status == "note" and "not checked: say which with the suite's sources" in c.detail
+    assert "acme" not in c.detail
+    _with(machine)
+    c = _named(doctor.run(machine.env, machine.repo))
+    assert c.status == "note" and c.detail.startswith("not installed, optional: ")
+
+
+def test_fk3_line4_only_user_and_managed_scopes_count(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    f = machine.home / ".claude" / "plugins" / "installed_plugins.json"
+    rec = json.loads(f.read_text())
+    rec["plugins"][FORK][0]["scope"] = "project"
+    f.write_text(json.dumps(rec))
+    assert _named(doctor.run(machine.env, machine.repo)).detail.startswith("not installed")
+    rec["plugins"][FORK][0]["scope"] = "managed"
+    f.write_text(json.dumps(rec))
+    _fork_stands(doctor.run(machine.env, machine.repo))
+
+
+def test_fk3_line4_the_file_under_claude_config_dir(machine, tmp_path):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    cfg = tmp_path / "cfg"
+    (cfg / "plugins").mkdir(parents=True)
+    (machine.home / ".claude" / "plugins" / "installed_plugins.json").rename(
+        cfg / "plugins" / "installed_plugins.json")
+    _fork_stands(doctor.run(dict(machine.env, CLAUDE_CONFIG_DIR=str(cfg)), machine.repo))
+
+
+def test_fk3_line5_own_by_the_read_and_by_the_file(machine):
+    ps = [dict(p) for p in machine.plugins]
+    ps[2]["version"] = "0.7.0"
+    machine.set_plugins(ps)
+    for answer in (None, _answer(_src(kind="own", plugin="respeak@agentik", version="0.7.0"))):
+        if answer:
+            _suite(machine, answer)
+        rep = doctor.run(machine.env, machine.repo)
+        assert _named(rep).detail == "respeak@agentik 0.7.0 installed"
+        assert _named(rep).source is None and _dict(rep)["source"] is None
+
+
+def test_fk3_line7_the_launcher_starts_once_a_run(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    (machine.tmp / "answer.json").write_text(json.dumps(_answer(_src())))
+    _suite(machine, f"echo started >> {machine.tmp}/starts\n"
+                    f"/bin/cat {machine.tmp}/answer.json\n")
+    _fork_stands(doctor.run(machine.env, machine.repo))
+    assert (machine.tmp / "starts").read_text() == "started\n"
+
+
+def test_fk3_line7_a_sleeping_launcher_costs_one_wall(machine):
+    import time
+    assert doctor.SOURCES_WALL == 5.0
+    _suite(machine, "sleep 30\n")
+    t = time.monotonic()
+    rep = doctor.run(machine.env, machine.repo)
+    assert time.monotonic() - t < doctor.SOURCES_WALL + 1
+    assert _named(rep).detail == "respeak@agentik 0.6.0 installed" and rep.ok
+
+
+def test_fk3_a_liars_text_reaches_no_line_raw(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    _suite(machine, _answer(_src(version="0.12.6\x1b[2J")))
+    line = _line(doctor.run(machine.env, machine.repo))
+    assert "\x1b" not in line and FORK in line
