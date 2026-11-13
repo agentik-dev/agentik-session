@@ -389,9 +389,15 @@ def scan_message(repo, tree, full, ours, merged, message):
     script = os.path.join(tree, "scripts", "hygiene")
     if not os.path.lexists(script) or not takes_commits(tree, script):
         return
-    code, commit = read(repo, "commit-tree", merged, "-p", ours, "-p", full, "-F", message)
+    # Its stderr goes to the log: an unset identity or a NUL in the file reads its own reason.
+    sys.stderr.flush()
+    p = subprocess.run(("git", "commit-tree", merged, "-p", ours, "-p", full, "-F", message),
+                       cwd=repo, stdin=DEVNULL, stdout=subprocess.PIPE, stderr=sys.stderr,
+                       universal_newlines=True)
+    code, commit = p.returncode, p.stdout.strip()
     if code != 0 or not commit:
-        raise Red("merge-file", note="git commit-tree exit %d: no merge commit to scan" % code)
+        raise Red("merge-file", note="git commit-tree exit %d: no merge commit to scan; its "
+                  "reason is above" % code)
     span = "%s..%s" % (full, commit)
     note("merge-file: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
     code = run(tree, script, "--require-private", "--commits", span)
