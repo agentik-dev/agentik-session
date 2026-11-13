@@ -726,7 +726,18 @@ class TestAmendment2(LandCase):
         if during:
             during()
         os.killpg(p.pid, signal.SIGTERM)
-        out, err = p.communicate(timeout=30)
+        try:
+            p.wait(timeout=300)     # land's own end: its cleanup and its line
+        finally:
+            # Then the gate's SIGKILL at its grace's end, until the group is gone: on macOS a
+            # child a hook forks as the SIGTERM goes out can miss it and hold land's stderr.
+            for _ in range(200):
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):   # gone, or zombies only
+                    break
+                time.sleep(0.05)
+        out, err = p.communicate()
         return p.returncode, out, err
 
     def hook_that_stalls(self, hook):
