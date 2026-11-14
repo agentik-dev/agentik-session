@@ -33,4 +33,4 @@ Tests in `tests/test_ss4_quiet_values.py`; matrix exits at pin and head compared
 Look at main's head: if it is ss2's merge, merge main, renumber NICE rows, stamp the next alpha, the gate; else stamp the next alpha after the branch's and run the gate.
 
 ## Exit
-Built R1 to R6 and stamped; the hand-back at the tool-call bound, the gate job queued and not yet run. The .venv suite by hand was cut by its 590 s wall at 54%, all passing; `.venv-floor` passed the six touched files (491).
+Build 1: R1 to R6 built and stamped. Build 2: review 1's R1-F1 and R1-F2 fixed behind 16 tests red at c2622a2, stamped `2.0.0-alpha.111`; the gate runs once on this commit, its line in the build record. Phase 2 owed: main had not taken ss2 when the fixes landed. The commit scan flags a75051b (`sibling`, the old folder's name in a test line, fixed forward): an allow row is the coordinator's.
