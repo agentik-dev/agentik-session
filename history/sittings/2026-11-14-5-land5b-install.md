@@ -13,15 +13,16 @@
 ## Done-ness
 - [x] the packet and this charter
 - [x] the tests (`tests/test_land5b_install.py`), red at the pin: 50 failed of 50
-- [ ] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`
-- [ ] R9: SKILL.md's line; the stamp `2.0.0-alpha.122`, its files the last commit
+- [x] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`; 50 of 50 green under both venvs; the packet reshaped to doclint's six sections
+- [x] R9: SKILL.md's line
+- [ ] the stamp `2.0.0-alpha.122`, its files the last commit
 - [ ] both scans exit 0; `make check` once, last
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 
 ## Next act
-R1 to R8: `deliver.py`, then `publish.main`/`after_land` and `_gate_land`.
+The stamp `2.0.0-alpha.122` (its files alone, the last commit), then both scans and `make check` once through the gate queue.
 
 ## Exit
 (open)

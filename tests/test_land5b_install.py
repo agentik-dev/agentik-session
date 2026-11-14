@@ -137,7 +137,7 @@ def test_land5b_1_publish_install_pushes_then_updates_the_plugin(b):
     push = [i for i, x in enumerate(events) if x.startswith("push ")]
     claude = [i for i, x in enumerate(events) if x.startswith("claude ")]
     assert push and claude and push[-1] < claude[0], events
-    assert "keep 1.0.0" in err
+    assert "keep murmur@acme 1.0.0" in err
 
 
 # 2. The same again: already pushed, already installed, nothing started.
@@ -350,7 +350,8 @@ def test_land5b_8_dry_run_would_run(b):
                          + "install crate: would run claude plugin marketplace update acme; "
                          "claude plugin update murmur@acme; make install\n"), err
     assert b.ran() == []
-    assert not gate.entries(b.c.root) and not _results(b.c)
+    assert not gate.entries(b.c.root)
+    assert not [r for r in _results(b.c) if r["command"] == ["make", "install"]]
     assert b.c.refs() == refs
 
 

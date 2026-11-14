@@ -7,7 +7,7 @@
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make`; no `claude`; no test uses the live gate, state, home or process list, or pushes but to a bare repo in its temp folder; no relay verb, run or read but a stub's list |
 | may touch | `plugin/lib/claude_session/deliver.py` (new), `publish.py` (`main`, `after_land`, `USAGE`, the docstring's head), `cli.py` (`_gate_land`, `cmd_gate`, the `gate` parsers), `tests/test_land5b_install.py` (new), `plugin/skills/session/SKILL.md` (one line), this packet, `history/sittings/2026-11-14-5-land5b-install.md`; in the last commit alone, the stamp's files |
 | verify | `make check` by the gate queue, once, last |
-| acceptance | §4; `.venv/bin/python -m pytest -q tests/test_land5b_install.py`, and under `.venv-floor` |
+| acceptance | §3's table; `.venv/bin/python -m pytest -q tests/test_land5b_install.py`, and under `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
 
 ## 1. What the source says (baseline at `45b975d`)
@@ -29,11 +29,9 @@ After a push the coordinator installs by hand: it reads the process list for a r
 ## 3. Interfaces and choices
 
 - `deliver.py`: `relay_pid(text)` (R3 a), `hold(repo, root, env)` (the held text or None), `turn(arg, root, env, dry, would)` (one repo: its line, its code), `ids(env, n)`. `publish.main(..., install=False)` and `publish.after_land(..., install=False)` call `turn` after an ok publish line; `_gate_land` calls it after an ok land line where `--push` is not given.
-- Choices: on `--dry-run` a `would push` line reads as pushed, since the dry run shows the real one's commands; the hold is read before the versions (R6's order), so a held repo is held even where nothing would run; of several `N@M` ids of the user's scope, the first by name; a plugin.json with no `name`, or no id of the user's scope, is no plugin step; `already installed` starts no `make install` either (R7's "starts nothing"); no `claude` on PATH is `red install exit 127`; the job's wall is `gate.wall`, its label `install <name>`.
+- Choices: on `--dry-run` a `would push` line reads as pushed, since the dry run shows the real one's commands; the hold is read before the versions (R6's order), so a held repo is held even where nothing would run; of several `N@M` ids of the user's scope, the first by name; a plugin.json with no `name`, or no id of the user's scope, is no plugin step; `already installed` starts no `make install` either (R7's "starts nothing"); no `claude` on PATH is `red install exit 127`; the job's wall is `gate.wall`, its label `install <name>`. Notes go to stderr as `install-step: ...`; `claude` runs in the user's home, so no project's scope is read; where the installed version after the update is not plugin.json's, a note says so and the line still gives what the file reads. `gate land --install --dry-run` with no `--push` reads main as it stands before the landing.
 
-## 4. Acceptance
-
-`tests/test_land5b_install.py`: land5-publish's `Crate` (imported), a made-up home with `CLAUDE_CONFIG_DIR` under it, a `claude` stub that logs its argv and moves N's entry to plugin.json's version on `plugin update`, a `ps` stub, the gate's queue under the temp state root. At the pin every line is red (`unrecognized arguments`, exit 2).
+Acceptance, `tests/test_land5b_install.py`: land5-publish's `Crate` (imported), a made-up home with `CLAUDE_CONFIG_DIR` under it, a `claude` stub that logs its argv and moves N's entry to plugin.json's version on `plugin update`, a `ps` stub, the gate's queue under the temp state root. At the pin every line is red (`unrecognized arguments`, exit 2).
 
 | # | line |
 |---|---|
@@ -48,6 +46,14 @@ After a push the coordinator installs by hand: it reads the process list for a r
 | 9 | each of the five refused callers with `--install`: publish's refusal, no git, no `claude` |
 | 10 | `tests/test_land*.py` else unedited and green under both venvs; `make stamp`, `make check` once, green; both scans exit 0 |
 
-## 5. Report
+## 4. Findings that name this row
+
+None at the pin.
+
+## 5. Forbidden reads
+
+No transcript, live state root or gate result, live process list, file under `~/.claude` or relay ledger.
+
+## 6. Report
 
 The record the coordinator names; the merge line in it.
