@@ -19,13 +19,14 @@
 - [x] R5 the unknown profile's list: shipped names, then `and N more from <file>`
 - [x] R6 the sweep: `windows` key, checkpoint zone, `config show`'s list; n225, n226, n229 closed; n232 to n234 new
 - [x] the stamp `2.0.0-alpha.110` (4231 tests)
-- [ ] the gate, once, at the end; the commit scan
+- [x] the commit scan `main..HEAD`: exit 0
+- [ ] the gate: job `20261113-155829-1652` queued at position 21, running at hand-back
 
 ## Handover
 Tests in `tests/test_ss4_quiet_values.py`; matrix exits at pin and head compared by hand (744, equal).
 
 ## Next act
-The gate (`make check`), queued once; the commit scan; the record.
+Read the gate job's line (`agentik session gate wait 20261113-155829-1652 --strict --timeout 540`); a red is work. Then one adversary review (a secret).
 
 ## Exit
-(open)
+Built R1 to R6 and stamped; the hand-back at the tool-call bound, the gate job queued and not yet run. The .venv suite by hand was cut by its 590 s wall at 54%, all passing; `.venv-floor` passed the six touched files (491).
