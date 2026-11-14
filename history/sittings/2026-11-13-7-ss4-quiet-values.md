@@ -23,7 +23,8 @@
 - [x] the first gate job `20261113-155829-1652` (build 1)
 - [x] review 1 fix, R1-F1: `hooks._charter` names a non-word `charter.dir` by its kind (SessionStart, CHECKPOINT); 16 tests red at c2622a2; n235 filed, n160 to the overflow
 - [x] review 1 fix, R1-F2: a zone typed to `set checkpoint` prints (`validate(typed=)`)
-- [ ] phase 2 (merge main after ss2's landing) or the stamp after the branch's; the gate once
+- [x] the stamp `2.0.0-alpha.111` (4249 tests): main had not taken ss2 yet, so phase 2 is owed
+- [ ] the gate once
 
 ## Handover
 Tests in `tests/test_ss4_quiet_values.py`; matrix exits at pin and head compared by hand (744, equal).
