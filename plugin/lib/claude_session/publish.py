@@ -25,9 +25,10 @@ started or a relay sitting), or `CLAUDE_SESSION_PROFILE=builder` is `publish ?: 
 A repo's turn. S is the sha of `refs/heads/main`, read once at its start and used by every later
 step. `repo`: not the top of a main checkout. `main`: `land.require_main`'s reads (main checked
 out; no merge, cherry-pick, revert or rebase under way; nothing staged). `remote`: no
-`branch.main.remote`, a `branch.main.merge` other than `refs/heads/main`, or a remote whose name
-opens with `-`. R is `refs/remotes/<remote>/main`, read once with S: where it exists and S is R
-or its ancestor, nothing more runs and the line is `already pushed`. No fetch is ever made.
+`branch.main.remote`, a `branch.main.merge` other than `refs/heads/main`, a remote whose name
+opens with `-`, or one that is no name `git remote` lists (a path or a URL, review 1 lead 2).
+R is `refs/remotes/<remote>/main`, read once with S: where it exists and S is R or its
+ancestor, nothing more runs and the line is `already pushed`. No fetch is ever made.
 
 `proof`: S is proven checked green by a gate result under the state root (`<root>/gate/<id>/
 result.json`), the first of these that holds; a result that is no JSON object, or whose keys are
@@ -54,8 +55,9 @@ an executable file, it runs in the checkout, then `scripts/hygiene --require-pri
 <R's sha>..<S>` when its --help names `--commits` (as land's own step reads it), each one's
 output on stderr; a non-zero exit is the line's code. With no R, or a hygiene without
 `--commits`, the range is not scanned and the ok line ends `, range not scanned`. `push`: `git
-push <remote> <S>:refs/heads/main`, the sha and never main's name, never forced, never
-`--no-verify`, no other argument; git's lines on stderr, its exit the line's code. `--dry-run`
+push --no-follow-tags <remote> <S>:refs/heads/main` (so no tag rides it where `push.followTags`
+is set, review 1 lead 1), the sha and never main's name, never forced, never `--no-verify`, no
+other argument; git's lines on stderr, its exit the line's code. `--dry-run`
 runs every step but the push (the scans write nothing) and writes no ref.
 
 `gate land --push` refuses as the caller step above before it queues, as `land ?: red caller
@@ -207,6 +209,10 @@ def remote_of(repo):
                        "branch -u <remote>/main main")
     if remote.startswith("-"):
         raise land.Red("remote", note="branch.main.remote %r opens with -" % remote)
+    code, names = land.read(repo, "remote")
+    if code != 0 or remote not in names.splitlines():
+        raise land.Red("remote", note="branch.main.remote %r is no remote `git remote` lists (a "
+                       "path or a URL is refused): git remote add <name> <url>" % remote)
     code, merge = land.read(repo, "config", "--get", "branch.main.merge")
     if code != 0 or merge != MAIN:
         raise land.Red("remote", note="branch.main.merge is %s, not %s" % (merge or "unset", MAIN))
@@ -273,8 +279,8 @@ def turn(arg, root, dry=False):
         if dry:
             return "publish %s: would push %s to %s%s" % (name, s, remote, ending), 0
         step = "push"
-        note("push: git push %s %s:%s in %s" % (remote, s, MAIN, repo))
-        code = land.run(repo, "git", "push", remote, "%s:%s" % (s, MAIN))
+        note("push: git push --no-follow-tags %s %s:%s in %s" % (remote, s, MAIN, repo))
+        code = land.run(repo, "git", "push", "--no-follow-tags", remote, "%s:%s" % (s, MAIN))
         if code != 0:
             raise land.Red("push", code)
         return "publish %s: ok %s, pushed to %s%s" % (name, s, remote, ending), 0
