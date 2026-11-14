@@ -522,3 +522,15 @@ def test_gl1_7_a_writer_the_check_leaves_behind_cannot_hold_the_landing(tmp_path
     rc, out, log = crate.land()
     assert (rc, out) == (2, "land crate: red check exit 2, unrun wall\n"), log
     assert time.monotonic() - t < 5.5
+
+
+@pytest.mark.parametrize("tail,begin,want", [
+    (8, 0, [b"cd", b"ef", b""]),            # the TAIL opens inside `ab`: that line is dropped
+    (9, 0, [b"ab", b"cd", b"ef", b""]),     # the TAIL opens on `ab`: the line is whole
+    (8, 5, [b"b", b"cd", b"ef", b""]),      # the check began there: all of it is read
+], ids=["cut", "whole", "at-begin"])
+def test_gl1_f3_only_a_line_the_tail_cuts_is_dropped(tmp_path, monkeypatch, tail, begin, want):
+    log = tmp_path / "log"
+    log.write_bytes(b"pre\nab\ncd\nef\n")
+    monkeypatch.setattr(land, "TAIL", tail)
+    assert land.tail_lines(str(log), begin) == want

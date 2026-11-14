@@ -174,18 +174,23 @@ def log_size(log):
 
 def tail_lines(log, begin):
     """The log's lines from `begin`, its last TAIL bytes at most, as bytes, or None. A first
-    line the TAIL cut is not read."""
+    line the TAIL cut is not read: when the TAIL starts past `begin`, the byte before it is
+    read too, and the first line is dropped only when that byte is not a newline (review 1,
+    F3: a line that opens the TAIL is whole)."""
     try:
         with open(log, "rb") as fh:
             size = os.fstat(fh.fileno()).st_size
             at = max(begin, size - TAIL)
-            fh.seek(at)
-            lines = fh.read(size - at).split(b"\n")
+            edge = at > begin
+            fh.seek(at - edge)
+            data = fh.read(size - at + edge)
     except (OSError, ValueError):
         return None
-    if at > begin:
-        lines = lines[1:]
-    return lines
+    if edge:
+        cut = data[:1] != b"\n"
+        data = data[1:]
+    lines = data.split(b"\n")
+    return lines[1:] if edge and cut else lines
 
 
 def make_says(line):
