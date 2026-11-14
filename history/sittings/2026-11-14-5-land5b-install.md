@@ -15,7 +15,7 @@
 - [x] build 2: the packet's §7, this file current
 - [x] build 2: the tests of §7, red at `5dd358d`: 15 failed, 2 passed (the two not-red guards) of 17
 - [x] build 2: F1 (red tree), F2 (the Makefile's text at S), F3 (make install on each call): 59 of 67 green, F4, F6, F7's 8 red
-- [ ] build 2: F4, F6, F7
+- [x] build 2: F4, F6, F7: 67 of 67; the land files 381 passed (.venv), 257 passed 124 skipped (.venv-floor)
 - [ ] build 2: NICE n257 to n261 at S4
 - [ ] build 2: the stamp again, `2.0.0-alpha.122`, the last commit under `plugin/`
 - [ ] build 2: `make check` once, last, through the gate queue
@@ -26,7 +26,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-F4, F6, F7 in `deliver.py`.
+NICE n257 to n261, then the stamp.
 
 ## Exit
 Open.

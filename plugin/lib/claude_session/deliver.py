@@ -23,11 +23,15 @@ reads it, no fetch; a dry publish's `would push` line reads as pushed. Only S is
 (review 1, F1): main is checked out at S, every tracked file is S (publish's tree read) and no
 untracked file stands that git does not ignore, entries under `.claude/` aside (a checkout's
 worktrees live there); else `red tree`, the first path in a note. An ignored file is the
-machine's own, as it is for `make check`. The hold (R3), read after that, nothing of the repo installed while: a line of the process list names a
-relay `run`, `gate` or `plan` (`relay_pid`), or the list cannot be read; this tool's unattended
-state names a running row (`unattended.status`); the gate's queue holds an entry, running or
-queued, on the repo's key (the checkout or a worktree of it). Held, a note gives the command to
-repeat; there is no poll and no relay verb is run.
+machine's own, as it is for `make check`. The hold (R3), read after that, nothing of the repo
+installed while: a line of the process list names a relay `run`, `gate` or `plan`
+(`relay_pid`), or the list cannot be read; this tool's unattended state names a running row
+(`unattended.status`), or the newest run's ledger exists and cannot be read (review 1, F7);
+the gate's queue holds an entry, running or queued, on the repo's key (the checkout or a
+worktree of it). Held, a note gives the command to
+repeat; there is no poll and no relay verb is run. A version is printed only where it is one
+plain token of letters, digits, `.`, `+` and `-`, at most 64 long, else `?` (F4), so no file's
+text makes a second line.
 
 What is installed (R4), each command a note before it runs: (1) the plugin `<repo>/plugin/
 .claude-plugin/plugin.json` names, N, where Claude Code's installed-plugins file has an id
@@ -61,6 +65,7 @@ HOLDS = ("run", "gate", "plan")
 PROGRAMS = ("relay", "agent-" + "relay", "agentik-relay")    # its old name, spelt so
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")     # where `ps -E` starts a process's environment
 PART = re.compile(r"[a-z0-9][a-z0-9-]*\Z")          # a plugin id's name and its marketplace
+VERSION = re.compile(r"[A-Za-z0-9.+-]{1,64}\Z")     # a version printed as it is (F4)
 OWN = ("user", "managed", None)
 MAKEFILES = ("GNUmakefile", "makefile", "Makefile")     # make's own order
 PS_WALL = 10
@@ -72,6 +77,11 @@ class Red(Exception):
     def __init__(self, code, note=None):
         super().__init__(note or "")
         self.code, self.note = code, note
+
+
+def shown(version):
+    """The version as printed: one plain token, else `?` (review 1, F4)."""
+    return version if isinstance(version, str) and VERSION.match(version) else "?"
 
 
 def note(text):
@@ -126,6 +136,16 @@ def hold(repo, root, env):
         return "a relay run, pid %s" % pid
     from . import unattended
     try:
+        run = unattended.newest_run(env)
+        if run is not None:
+            try:
+                with open(os.path.join(str(run), "ledger.jsonl"), "rb"):
+                    pass
+            except FileNotFoundError:
+                pass
+            except OSError as err:      # it exists and cannot be read (review 1, F7)
+                return "the unattended run %s's ledger cannot be read (%s)" % (
+                    os.path.basename(str(run)), type(err).__name__)
         st = unattended.status(env, time.time())
     except Exception as err:        # unreadable: the safe side
         return "the unattended state cannot be read (%s)" % type(err).__name__
@@ -213,12 +233,12 @@ def ids(env, n):
 def plugin(repo, env):
     """None (no plugin step), or (N, M, old, wanted)."""
     doc = _json(os.path.join(repo, "plugin", ".claude-plugin", "plugin.json"))
-    n = doc.get("name")
-    if not isinstance(n, str) or not n:
+    if "name" not in doc:
         return None
-    if not PART.match(n):
-        raise Red(1, "plugin.json's name %r is not lowercase letters, digits and dashes, so "
-                     "it is never a command's word" % n[:60])
+    n = doc["name"]
+    if not isinstance(n, str) or not PART.match(n):    # present and no plain word (F6)
+        raise Red(1, "plugin.json's name %s is not lowercase letters, digits and dashes, so "
+                     "it is never a command's word" % repr(n)[:60])
     found = ids(env, n)
     if not found:
         note("no installed id %s@<marketplace> of the user's scope; no plugin step" % n)
@@ -324,23 +344,24 @@ def turn(arg, root, env, dry=False, would=False):
             steps.append("make install")
         if agreed and not steps:
             return "install %s: ok %s@%s %s, already installed" % (name, plug[0], plug[1],
-                                                                    plug[2]), 0
+                                                                    shown(plug[2])), 0
         if not steps:
             return "install %s: ok, nothing to install here" % name, 0
         if dry:
             return "install %s: would run %s" % (name, "; ".join(steps)), 0
         parts = [""]
         if agreed:
-            parts = [" %s@%s %s, already installed" % (plug[0], plug[1], plug[2])]
+            parts = [" %s@%s %s, already installed" % (plug[0], plug[1], shown(plug[2]))]
         elif plug:
             n, m, old, wanted = plug
             _claude(env, "plugin", "marketplace", "update", m)
             _claude(env, "plugin", "update", "%s@%s" % (n, m))
             new = dict(ids(env, n)).get("%s@%s" % (n, m))
             if wanted is not None and new != wanted:
-                note("the installed version is %s, not plugin.json's %s" % (new, wanted))
-            note("sessions started before this keep %s@%s %s" % (n, m, old))
-            parts = [" %s@%s %s to %s" % (n, m, old, new)]
+                note("the installed version is %s, not plugin.json's %s" % (shown(new),
+                                                                             shown(wanted)))
+            note("sessions started before this keep %s@%s %s" % (n, m, shown(old)))
+            parts = [" %s@%s %s to %s" % (n, m, shown(old), shown(new))]
         if make:
             _make_install(repo, root, env, name)
             parts.append(" make install")
