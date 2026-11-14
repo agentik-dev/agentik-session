@@ -397,22 +397,28 @@ def _clean(v):
 
 def _drain(p, wall: float, cap: int):
     """The child's stdout by the wall, or None (killed with its group) when it runs past the
-    wall, writes past the cap, or the pipe fails."""
+    wall, writes past the cap, or the pipe fails. The read ends when the child exits, with
+    what is buffered (review 1, F2): a background child that holds the pipe open costs no
+    wall."""
     deadline = time.monotonic() + wall
     buf = bytearray()
+    fd = p.stdout.fileno()
     try:
+        os.set_blocking(fd, False)
         with selectors.DefaultSelector() as sel:
             sel.register(p.stdout, selectors.EVENT_READ)
             while True:
                 left = deadline - time.monotonic()
                 if left <= 0 or len(buf) > cap:
                     raise TimeoutError
-                if not sel.select(left):
-                    continue
-                chunk = os.read(p.stdout.fileno(), 65536)
-                if not chunk:
-                    break
-                buf += chunk
+                exited = p.poll() is not None
+                if exited or sel.select(min(left, 0.05)):
+                    chunk = _buffered(fd, cap - len(buf) + 1)
+                    buf += chunk or b""
+                    if exited or chunk == b"":
+                        break
+        if len(buf) > cap:
+            raise TimeoutError
         p.wait(timeout=max(0.01, deadline - time.monotonic()))
     except (TimeoutError, subprocess.TimeoutExpired, OSError, ValueError):
         try:
@@ -428,6 +434,21 @@ def _drain(p, wall: float, cap: int):
     finally:
         p.stdout.close()
     return bytes(buf)
+
+
+def _buffered(fd: int, most: int):
+    """What the pipe holds now, up to `most` bytes, without waiting: b"" at its end, None when
+    it is empty and still open."""
+    got = bytearray()
+    while len(got) < most:
+        try:
+            chunk = os.read(fd, min(65536, most - len(got)))
+        except BlockingIOError:
+            return bytes(got) if got else None
+        if not chunk:
+            return bytes(got)
+        got += chunk
+    return bytes(got)
 
 
 def _suite_sources(env, cwd):
