@@ -254,7 +254,7 @@ def test_s19_respawn_layers(world, layers, want):
 @pytest.mark.parametrize("value,key", [
     ("{cap: -1}", "respawn.cap"), ('{floor: "x"}', "respawn.floor"),
     ("{settle: 1.5}", "respawn.settle"), ("{cap: true}", "respawn.cap"),
-    ("{cap: 1, colour: 2}", "respawn.colour"),
+    ("{cap: 1, colour: 2}", "respawn: a key"),      # ss2 R1-F2: the name withheld
 ], ids=["negative", "string", "float", "bool", "stray-key"])
 def test_s19_respawn_refuses_bad_values(world, value, key):
     world[2]("repo", "session:\n  respawn: {cap: 0}\n")

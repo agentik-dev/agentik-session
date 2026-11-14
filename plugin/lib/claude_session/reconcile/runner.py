@@ -105,7 +105,9 @@ def check(cwd, env, value=None) -> dict:
                           "over it)")
     if not isinstance(cfg, dict):
         raise ConfigError(f"{_PATH} must be a mapping of {', '.join(KEYS)}")
-    bad = [f"{_PATH}.{k} is not a key ({', '.join(KEYS)})" for k in cfg if k not in KEYS]
+    # ss2 R1-F2: a key's name is the layer file's text, so it is withheld
+    bad = [f"{_PATH}: a key (withheld) is not a key ({', '.join(KEYS)})"] \
+        if any(k not in KEYS for k in cfg) else []
     out = {**DEFAULTS, **{k: v for k, v in cfg.items() if k in KEYS}}
     tree, names = out.get("tree"), None
     if tree is None:
@@ -154,10 +156,11 @@ def check(cwd, env, value=None) -> dict:
         else:
             for k, v in th.items():
                 if k not in THRESHOLDS:
-                    bad.append(f"{_PATH}.thresholds.{k} is not a detector "
+                    bad.append(f"{_PATH}.thresholds: a key (withheld) is not a detector "
                                f"({', '.join(sorted(THRESHOLDS))})")
-                elif not _num(v) or v < 0:
-                    bad.append(f"{_PATH}.thresholds.{k} is {v!r}; a threshold is a number, "
+                elif not _num(v) or v < 0:          # ss2 N1: the reason, never the value
+                    why = "is not a number" if not _num(v) else "is below 0"
+                    bad.append(f"{_PATH}.thresholds.{k} {why}; a threshold is a number, "
                                "0 or more")
     rd = out.get("read")
     if rd is not None and not isinstance(rd, dict):
@@ -166,7 +169,7 @@ def check(cwd, env, value=None) -> dict:
     rd = {**READ_DEFAULTS, **(rd or {})}
     for k in list(rd):
         if k not in READ_KEYS:
-            bad.append(f"{_PATH}.read.{k} is not a key ({', '.join(READ_KEYS)})")
+            bad.append(f"{_PATH}.read: a key (withheld) is not a key ({', '.join(READ_KEYS)})")
         elif not _int(rd[k]) or rd[k] < 1:
             bad.append(f"{_PATH}.read.{k} must be a whole number, 1 or more")
     floor_ok = _int(rd.get("floor")) and _int(rd.get("every"))
