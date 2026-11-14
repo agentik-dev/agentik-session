@@ -14,7 +14,19 @@ there when present, then
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
 
-A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A
+A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A red
+check adds `, unrun lock|load|wall` (packet gl1, R5, as review 1 amended it) only when all three
+hold: the last line of its output that opens `bounded: ` is `bounded: stop: lock`, `... load` or
+`... wall`; every non-empty line after it is make's own, opening `make: *** ` or
+`make[<n>]: *** `; and make's first `*** [...] Error <n>` line after it carries the code
+`scripts/bounded` exits with for that stop, 2 for lock and load, 124 for the wall (no such line,
+no unrun). Then `scripts/bounded` refused the check or cut it at its wall, so it did not run to
+its end. Anything else is a plain red: a stop line in a failing test's captured output, a stop
+line with any other line after it, `bounded: nested stop: <why>` (an inner bound's). The code on the
+line is the step's, make's own. The check writes to this run's stderr as at the pin, and the
+lines are read from the job's own log (`main`'s `log`, the file that stderr is, by device and
+inode), from where the check began, its last 64 KiB, a first line the 64 KiB cut not read; with
+no such log the line is the pin's. A
 `scripts/hygiene` that predates `--commits`, its --help failing or not naming the flag, scans the
 tree alone: a note says so, and the ok line ends `, range not scanned`. The steps'
 own output and these notes go to stderr. In the job both streams reach the job's log, so the
@@ -87,12 +99,16 @@ REACHED = "usage"   # the step this run is at, for an error that is no Red
 STANDS = ""         # once main has moved, what any red says beside its line
 LEFT = ""           # what the land line adds when a cut leaves staged paths alone
 UNSCANNED = ""      # what the ok line adds when the repo's hygiene predates --commits
+STOPS = {b"bounded: stop: " + why.encode(): why for why in ("lock", "load", "wall")}  # gl1 R5
+CODES = {"lock": 2, "load": 2, "wall": 124}   # scripts/bounded's exit for each stop (gl1 R5)
+BOUNDED = b"bounded: "
+TAIL = 64 * 1024    # the most of the job's log a red check's stop line is looked for in
 
 
 class Red(Exception):
-    def __init__(self, step, code=1, note=""):
+    def __init__(self, step, code=1, note="", unrun=""):
         super().__init__(step)
-        self.step, self.code, self.note = step, code, note
+        self.step, self.code, self.note, self.unrun = step, code, note, unrun
 
 
 def on_cut(signum, frame):
@@ -139,6 +155,70 @@ def run(cwd, *argv):
         settle(child)
         raise
     return code if code >= 0 else 128 - code
+
+
+def log_size(log):
+    """The job's log's size when `log` is the file this run's stderr is, by device and
+    inode; else None, and no stop line is read."""
+    if not log:
+        return None
+    try:
+        sys.stderr.flush()
+        mine, there = os.fstat(sys.stderr.fileno()), os.stat(log)
+    except (OSError, ValueError):
+        return None
+    if (mine.st_dev, mine.st_ino) != (there.st_dev, there.st_ino):
+        return None
+    return there.st_size
+
+
+def tail_lines(log, begin):
+    """The log's lines from `begin`, its last TAIL bytes at most, as bytes, or None. A first
+    line the TAIL cut is not read: when the TAIL starts past `begin`, the byte before it is
+    read too, and the first line is dropped only when that byte is not a newline (review 1,
+    F3: a line that opens the TAIL is whole)."""
+    try:
+        with open(log, "rb") as fh:
+            size = os.fstat(fh.fileno()).st_size
+            at = max(begin, size - TAIL)
+            edge = at > begin
+            fh.seek(at - edge)
+            data = fh.read(size - at + edge)
+    except (OSError, ValueError):
+        return None
+    if edge:
+        cut = data[:1] != b"\n"
+        data = data[1:]
+    lines = data.split(b"\n")
+    return lines[1:] if edge and cut else lines
+
+
+def make_says(line):
+    """What make's own error line says after its `make: *** ` or `make[<n>]: *** `; else None."""
+    if line.startswith(b"make: *** "):
+        return line[len(b"make: *** "):]
+    head, sep, rest = line.partition(b"]: *** ")
+    return rest if sep and head.startswith(b"make[") and head[5:].isdigit() else None
+
+
+def make_error(said):
+    """The <n> of make's `[<target>] Error <n>`, or None."""
+    head, sep, n = said.rpartition(b"] Error ")
+    return int(n) if sep and said.startswith(b"[") and n.isdigit() else None
+
+
+def refused(log, begin):
+    """`lock`, `load` or `wall` when scripts/bounded stopped the check, else "" (gl1 R5): the
+    last line from `begin` that opens `bounded: ` is that stop's line, every non-empty line
+    after it is make's own, and make's first `Error <n>` after it is the stop's code."""
+    lines = tail_lines(log, begin) or []
+    at = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith(BOUNDED)), None)
+    why = STOPS.get(lines[at], "") if at is not None else ""
+    said = [make_says(x) for x in lines[at + 1:] if x] if why else [None]
+    if None in said:
+        return ""
+    codes = [n for n in map(make_error, said) if n is not None]
+    return why if codes and codes[0] == CODES[why] else ""
 
 
 def settle(child):
@@ -561,7 +641,7 @@ def resolve_repo(arg):
               % (os.path.join(code, arg), below))
 
 
-def land(repo, branch, sha, message):
+def land(repo, branch, sha, message, log=None):
     global UNSCANNED
     at("repo")
     blocks = worktrees(repo)
@@ -582,9 +662,10 @@ def land(repo, branch, sha, message):
 
     at("check")
     note("check: make check in " + tree)
+    begin = log_size(log)
     code = run(tree, "make", "check")
     if code != 0:
-        raise Red("check", code)
+        raise Red("check", code, unrun=refused(log, begin) if begin is not None else "")
     at("hygiene")
     script = os.path.join(tree, "scripts", "hygiene")
     if os.path.lexists(script):
@@ -635,7 +716,7 @@ def land(repo, branch, sha, message):
         raise Red("branch", code, branch + " stays")
 
 
-def main(argv):
+def main(argv, log=None):
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     signal.signal(signal.SIGTERM, on_cut)
@@ -650,13 +731,15 @@ def main(argv):
         name = os.path.basename(os.path.normpath(argv[0]))
         repo = resolve_repo(argv[0])
         name = os.path.basename(repo)
-        land(repo, argv[1], argv[2], os.path.abspath(argv[3]))
+        land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log)
     except Exception as err:
         red = err if isinstance(err, Red) else Red(REACHED, 1, "%s: %s" % (type(err).__name__, err))
         for text in (red.note, STANDS):
             if text:
                 note(text)
-        print("land %s: red %s exit %d%s" % (name, red.step, red.code, LEFT and ", " + LEFT), flush=True)
+        print("land %s: red %s exit %d%s%s" % (name, red.step, red.code,
+                                               red.unrun and ", unrun " + red.unrun,
+                                               LEFT and ", " + LEFT), flush=True)
         return red.code
     print("land %s: ok %s, main readied%s" % (name, argv[2], UNSCANNED and ", " + UNSCANNED),
           flush=True)
