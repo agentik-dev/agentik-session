@@ -12,8 +12,8 @@
 - [x] Build 1 (R1 to R13, 9b2c48c); fix of the read (a) to (d), E1, E2; replay and acceptance tables at the head
 - [x] Review 1's fix (d1fa778 red): F1 to F7 and N1 built; test 13 holds (a); grid 190 and replay rerun
 - [x] Phase 2: main e147e06 merged (n204 is n239), the allow row for e28379e, stamped 2.0.0-alpha.111, gate green
-- [ ] Review 2's fix: tests red at b8797f6 (F1 time, F2 memory, answers as b8797f6's `_braces`)
-- [ ] R2-F1 a linear scan for the brace pair; R2-F2 alternatives built one at a time, the cap met first
+- [x] Review 2's fix: tests red at b8797f6 in 2600b3b (F1 22.6, 14.9, 11.7 CPU s; F2 64 MB; answers as b8797f6's `_braces`)
+- [x] R2-F1 one scan of the word's pairs (`_brace_pairs`), no regex; R2-F2 alternatives built one at a time, the cap met first; 727 passed in each venv; 260,000 fuzz words answer as b8797f6
 - [ ] The stamp at alpha.111 again; the gate once, last; the scans
 
 ## Handover

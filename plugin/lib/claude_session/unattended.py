@@ -10,6 +10,7 @@ the 3.9 floor (hq entry 6); every effect is an `Fx` field, as `gate.py`'s.
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
@@ -674,20 +675,66 @@ _WORDS = re.compile(r"[\s;&|()<>'\"`$]+")
 _UNQUOTE = re.compile(r"\\\n|[\\'\"]")     # g8a r1 F1: as a shell spells a word
 
 
-_BRACE = re.compile(r"\{([^{}]*,[^{}]*)\}")
+def _brace_pairs(w: str) -> tuple:
+    """g8a r2 F1: the brace pairs of `w`, in one pass: each `{` whose next brace is a `}` with a
+    comma between, as the sorted lists of their starts and their ends."""
+    starts, ends, start, comma = [], [], -1, False
+    for k, ch in enumerate(w):
+        if ch == "{":
+            start, comma = k, False
+        elif ch == ",":
+            comma = True
+        elif ch == "}":
+            if start >= 0 and comma:
+                starts.append(start)
+                ends.append(k)
+            start = -1
+    return starts, ends
 
 
 def _braces(w: str) -> list:
     """g8a r1 F5: a word's brace expansions (`{ma,}ke` is `make` and `ke`), innermost first,
-    at most 256 words and 1024 steps."""
-    todo, out = [w], []
+    at most 256 words and 1024 steps.
+
+    r2 F1, F2: a word waiting is held as `(x, k, s)`, where `x[k:]` is `w[s:]` and `x[:k]`
+    holds no whole pair; so its leftmost pair is the one across `k` or `w`'s first pair from
+    `s`, and `w`'s pairs are found once, by one scan. A brace's alternatives are built one at a
+    time, last first, as they are taken, so the cap is met before more are built."""
+    starts, ends = _brace_pairs(w)
+
+    def pair(x, k, s):
+        o = max(x.rfind("{", 0, k), x.rfind("}", 0, k))     # x[:k]'s last brace
+        if o >= 0 and x[o] == "{":
+            c = [p for p in (w.find("{", s), w.find("}", s)) if p >= 0]
+            c = min(c) if c else -1                          # w[s:]'s first brace
+            if c >= 0 and w[c] == "}" and (x.find(",", o + 1, k) >= 0 or w.find(",", s, c) >= 0):
+                return o, k + c - s
+        n = bisect.bisect_left(starts, s)
+        return (starts[n] + k - s, ends[n] + k - s) if n < len(starts) else None
+
+    def alternatives(x, i, j, k, s):
+        head, group, s2, end = x[:i], x[i + 1:j], s + j + 1 - k, j - i - 1
+        while True:
+            c = group.rfind(",", 0, end)
+            a = group[c + 1:end]
+            yield head + a + w[s2:], i + len(a), s2
+            if c < 0:
+                return
+            end = c
+
+    todo, out = [iter(((w, 0, 0),))], []
     for _ in range(1024):
-        if not todo or len(out) >= 256:
+        item = None
+        while todo and item is None and len(out) < 256:
+            item = next(todo[-1], None)
+            if item is None:
+                todo.pop()
+        if item is None:
             break
-        x = todo.pop()
-        m = _BRACE.search(x)
-        if m:
-            todo += [x[:m.start()] + a + x[m.end():] for a in m.group(1).split(",")]
+        x, k, s = item
+        p = pair(x, k, s)
+        if p:
+            todo.append(alternatives(x, p[0], p[1], k, s))
         else:
             out.append(x)
     return out
