@@ -41,7 +41,8 @@ first-parent line, a merge's second parent on main, and the job's steps run agai
 given in a temp worktree (removed after) give each one's tree; else red sha, the pin's note. Every
 later step takes the readied head. Once the head differs from the sha given, the ok line reads
 `ok <sha>, main readied, as <head, whole>, plugin <version>` and a red line ends `, as <head>`,
-after every other ending. The check's stop line is read from the log's size just before `make
+after every other ending, the head read from the worktree, a cut just after a commit of the
+job's included. The check's stop line is read from the log's size just before `make
 check`, so a stamp's output never makes an unrun. `--dry-run` queues nothing and writes nothing,
 in a job or not: the reads up to merge-tree's, then `ready: ...` lines on stdout and `land <repo>:
 dry run, nothing queued`, exit 0; a read that reds prints its land line and exits its code.
@@ -1213,11 +1214,18 @@ def ready(repo, tree, branch, full, head, dry=False):
         return head
     if head != full:
         READIED = head
-    if plan is not None:
-        note("ready: merge main %s into %s in %s" % (ours, branch, tree))
-        READIED = do_merge(tree, branch, full, ours, plan)
-    if do_stamp(tree, branch, full, ours):
-        READIED = read(tree, "rev-parse", "HEAD")[1]
+    try:
+        if plan is not None:
+            note("ready: merge main %s into %s in %s" % (ours, branch, tree))
+            READIED = do_merge(tree, branch, full, ours, plan)
+        if do_stamp(tree, branch, full, ours):
+            READIED = read(tree, "rev-parse", "HEAD")[1]
+    except BaseException:
+        # R10: a red after the job wrote names the head read from the worktree, a cut just
+        # after a commit of the job's included (review 1, F5).
+        now = read(tree, "rev-parse", "-q", "--verify", "HEAD")[1]
+        READIED = now if now and now != full else READIED
+        raise
     at("version")
     script = os.path.join(tree, "scripts", "plugin-version-check")
     if os.path.lexists(script):
