@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_session import resolver
 from test_ak5_plug import ROOT, S, SHIPPED, _env, repo_file, user_file
 from test_ss2_quiet_errors import EVENTS, VERBS, _DRIVER
 
@@ -255,7 +256,7 @@ CDIR = {"a mapping": (MIS.rstrip("\n"), {"ntfy_topic": TOPIC}),
         "a list": (f" [{TOPIC}]", [TOPIC]), "a number": (" 7", 7)}
 LAYERS = {"repo": Path(".claude") / "agentik" / "config.yaml",
           "local": Path(".claude") / "agentik" / "config.local.yaml",
-          "old": Path(".claude") / "claude-code-session" / "config.yaml"}
+          "old": resolver.OLD_REPO_DIR / "config.yaml"}
 
 
 def _charter_dir(box, where, kind):
