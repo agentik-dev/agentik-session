@@ -547,3 +547,67 @@ def test_13_the_loose_reading_is_the_pins(monkeypatch):
     assert differ and all(any(o in ln for o in NEW_OPTS) for ln in differ), differ[:3]
     monkeypatch.setattr(shellreader, "_git_paths", pin._git_paths)
     assert [ln for ln in lines if _loose_reading(pin, ln) != _loose_reading(shellreader, ln)] == []
+
+
+# ---- 14: fix of review 2 (R2-F1, R2-F2): the make rule's brace reading, linear and capped first --
+
+def _braces_b8797f6(w):
+    """`_braces` as b8797f6 had it, verbatim but for the name: the answers the fix keeps."""
+    import re
+    brace = re.compile(r"\{([^{}]*,[^{}]*)\}")
+    todo, out = [w], []
+    for _ in range(1024):
+        if not todo or len(out) >= 256:
+            break
+        x = todo.pop()
+        m = brace.search(x)
+        if m:
+            todo += [x[:m.start()] + a + x[m.end():] for a in m.group(1).split(",")]
+        else:
+            out.append(x)
+    return out
+
+
+BRACE_PIECES = ["{", "}", ",", "a", "b", "ma", "ke", "{a,b}", "{,}", "{}", "x{", "}y", ",,"]
+BRACE_WORDS = F5 + ["{make,}", "{x,{a,b}}", "{a{b,c}}", "{{a,b}", "{a,b}}", "a{,}b", "{}", "{,}",
+                    "}{,}{", "{a,b}" * 10, "{a,b,c}" * 7, "{,}" * 9, "{" * 20 + "a,b" + "}" * 20,
+                    "{a,b}" * 300, "{" + "," * 600 + "}" + "{a,b}" * 3, "{a,{b,{c,{d,e}}}}" * 4,
+                    "x{a,b}y{c,d}z", "{a,b" + "}" * 5, "{" * 5 + "a,b}", "{a,}{,b}{a,b,}" * 3]
+
+
+def test_14_braces_answer_as_b8797f6():
+    import random
+    rnd = random.Random(20261113)
+    words = BRACE_WORDS + ["".join(rnd.choice(BRACE_PIECES) for _ in range(rnd.randint(1, 14)))
+                           for _ in range(20000)]
+    differ = [w for w in words if unattended._braces(w) != _braces_b8797f6(w)]
+    assert differ == [], differ[:3]
+
+
+R2_LINES = ["echo {a" + ",a" * 50000,                        # 100 KB: 21 s at b8797f6
+            "alias q=\"{a" + ",a" * 20000 + "\"",              # 40 KB: 14 s
+            "cat > x <<E\n{a" + ",a" * 20000 + "\nE"]          # a data sink's body, 40 KB: 10 s
+
+
+@pytest.mark.parametrize("line", R2_LINES, ids=["word", "alias", "body"])
+def test_14_r2f1_a_brace_pair_is_found_by_a_linear_scan(line):
+    import time
+    t = time.process_time()
+    assert unattended.unbounded(line) == ""
+    assert time.process_time() - t < 6.0        # CPU seconds; about 0.2 s after the fix
+
+
+def test_14_r2f2_the_cap_is_met_before_the_alternatives_are_built():
+    import tracemalloc
+    word = "{" + "," * 8000 + "}" + "A" * 8000      # 8,001 alternatives of 8 KB: 64 MB at b8797f6
+    was = tracemalloc.is_tracing()
+    if not was:
+        tracemalloc.start()
+    tracemalloc.reset_peak() if hasattr(tracemalloc, "reset_peak") else None
+    base = tracemalloc.get_traced_memory()[0]
+    out = unattended._braces(word)
+    peak = tracemalloc.get_traced_memory()[1] - base
+    if not was:
+        tracemalloc.stop()
+    assert out == ["A" * 8000] * 256
+    assert peak < 6_000_000, peak               # the 256 words kept (2 MB) and what reads them
