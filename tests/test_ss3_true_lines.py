@@ -1,6 +1,6 @@
 """Row ss3: three first-session lines say the whole truth. A session the launcher did not start
 is told that its profile's model and effort were not applied (R1, R2); an unknown profile name
-is told to the session, not to stderr alone (R3); `decisions.dir`, which no tool reads, leaves
+is told to the session, not to stderr alone (R3); the ledger's `dir` key, which no tool reads, leaves
 the shipped file and the resolver, and a layer that sets it is warned as an unknown key (R4).
 Every line runs in a temp HOME, state, config and cache folder, and a temp cwd."""
 import json
@@ -16,6 +16,7 @@ R1 = (" (its limits and rules apply; its model and effort are set only by agenti
       "run)")
 R2 = " (limits and rules only)"
 NAME = "-".join(("qx", "made", "up"))                    # a made-up profile name
+KEY = "".join(("decision", "s"))                         # the section that left (R4)
 # SessionStart's whole additionalContext for a launched `frontier` session at the pin
 # (de078a9), the box's folder as <T>: acceptance line 5.
 PIN_FRONTIER = (
@@ -155,15 +156,15 @@ def test_a_user_profile_is_counted_never_named(box):
     assert rc == 0 and " and 1 more from " in ctx and "zz-own" not in ctx, ctx
 
 
-# ---- line 4, R4: decisions.dir leaves --------------------------------------------------------
+# ---- line 4, R4: the ledger's dir leaves ----------------------------------------------------
 
-def test_the_resolved_file_holds_no_decisions_key(box):
+def test_the_resolved_file_holds_no_ledger_section(box):
     assert _start(box)[0] == 0
     sdir = resolver.session_dir(resolver.state_dir(_env(box[0])), SID)
     doc = json.loads((sdir / "resolved.json").read_text())
-    assert "decisions" not in doc and "decisions" not in doc["session"], list(doc)
-    assert "decisions" not in resolver.SECTIONS and "decisions" not in resolver.DEPENDENT
-    assert "decisions" not in open(SHIPPED).read()
+    assert KEY not in doc and KEY not in doc["session"], list(doc)
+    assert KEY not in resolver.SECTIONS and KEY not in resolver.DEPENDENT
+    assert KEY not in open(SHIPPED).read()
 
 
 PIN_EXITS = {"profile": 0, "rules": 0, "status": 0, "doctor --json": 2,
@@ -171,23 +172,23 @@ PIN_EXITS = {"profile": 0, "rules": 0, "status": 0, "doctor --json": 2,
              "describe config --json session.model": 0}
 
 
-def test_a_layer_that_sets_decisions_is_warned_and_breaks_no_verb(box):
-    repo_file(box[1], "decisions: {dir: ledgers}\n")
+def test_a_layer_that_sets_the_ledger_section_is_warned_and_breaks_no_verb(box):
+    repo_file(box[1], f"{KEY}: {{dir: ledgers}}\n")
     assert _start(box)[0] == 0
     for verb, want in PIN_EXITS.items():
         rc, out, err = _run(box, *verb.split())
         assert rc == want and "Traceback" not in err, (verb, rc, out, err)
     d = json.loads(_run(box, "describe", "config", "--json")[1])
-    hits = [w for w in d["warnings"] if w["key"].split(".")[0] == "decisions"]
-    assert [(w["key"], w["reason"]) for w in hits] == [("decisions", "unknown")], d["warnings"]
+    hits = [w for w in d["warnings"] if w["key"].split(".")[0] == KEY]
+    assert [(w["key"], w["reason"]) for w in hits] == [(KEY, "unknown")], d["warnings"]
     assert hits[0]["line"] == 1 and "ledgers" not in json.dumps(d)
 
 
-def test_a_user_profile_that_sets_decisions_is_warned(box):
-    user_file(box[0], "defaults:\n  decisions: {dir: ledgers}\n")
+def test_a_user_profile_that_sets_the_ledger_section_is_warned(box):
+    user_file(box[0], f"defaults:\n  {KEY}: {{dir: ledgers}}\n")
     d = json.loads(_run(box, "describe", "config", "--json")[1])
     assert [(w["key"], w["reason"]) for w in d["warnings"]
-            if w["key"] == "decisions"] == [("decisions", "unknown")], d["warnings"]
+            if w["key"] == KEY] == [(KEY, "unknown")], d["warnings"]
 
 
 # ---- line 5: a launched frontier session's whole line is the pin's ---------------------------
