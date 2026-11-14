@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet, the pin's figures measured again at 7c1f711 (they match the brief's)
-- [ ] tests first, red at the pin
+- [x] tests first, red at the pin: 17 of 24 red at 7c1f711 (acceptance 1 to 6); the 7 green are the pin's own land lines (nested, none, a stop line on a green check, a stop line not the last) and line 7
 - [ ] R1 to R3 the three keys, through `Fx`
 - [ ] R4 `status --json`'s done items
 - [ ] R5 `unrun` on the land line
@@ -23,6 +23,6 @@
 ## Handover
 
 ## Next act
-The failing tests, `tests/test_gl1_record.py`.
+R1 to R3 in `gate.py`.
 
 ## Exit
