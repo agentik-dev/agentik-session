@@ -18,11 +18,12 @@
 - [x] R5 `unrun` on the land line, read from the tail of the job's own log (`land.log_size`, `land.last_bounded`; `gate land --in-job` passes the log); a tee was tried and refused by test_land's import pin and fw4c's t14
 - [x] R6 the docstrings: gate.py's and land.py's
 - [x] the stamp `2.0.0-alpha.114`, 4530 tests (scripts/stamp); plugin.json the only path under plugin/ in its commit
-- [ ] the gate once
+- [x] the gate once: `20261114-020833-1843` exit 0 on 412c837 (4530 passed; the floor 4382 passed, 127 skipped); both scans 0
 
 ## Handover
 
 ## Next act
-The gate once, `make check` through the queue.
+The coordinator's review and landing.
 
 ## Exit
+Build 1: R1 to R6 built and stamped `2.0.0-alpha.114`; the gate green on 412c837; this record after it, no other change.
