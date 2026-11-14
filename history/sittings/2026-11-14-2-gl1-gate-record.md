@@ -27,12 +27,12 @@
 - [x] F3 (S4), `land.tail_lines` (and a unit test of the cut, the whole and the begin): the tail drops its first line only when the byte before it is not a newline
 - [x] the NICE row n240 (a slow dirty read delays the runner's other jobs)
 - [x] the stamp `2.0.0-alpha.115`, 4544 tests (scripts/stamp); plugin.json the only path under plugin/ in its commit
-- [ ] the gate: `20261114-030011-1853` exit 2 on 0613245 (F3's edge test, its probe make saw the gate's MAKELEVEL, which land strips: fixed in the test); the second run; both scans
+- [x] the gate: `20261114-030011-1853` exit 2 on 0613245 (F3's edge test, its probe make saw the gate's MAKELEVEL, which land strips: fixed in the test); `20261114-031054-1857` exit 0 on 4a85a48 (4544 passed; the floor 4395 passed, 128 skipped); both scans 0 over 15 commits
 
 ## Handover
 
 ## Next act
-Round 2's acts above, then the coordinator's review 2.
+The coordinator's review 2 and landing.
 
 ## Exit
-Build 1: R1 to R6 built and stamped `2.0.0-alpha.114`; the gate green on 412c837. Round 2: open.
+Build 1: R1 to R6 built and stamped `2.0.0-alpha.114`; the gate green on 412c837. Round 2: F1 to F3 fixed and the NICE row, stamped `2.0.0-alpha.115`; the gate green on 4a85a48; this record after it, no other change.
