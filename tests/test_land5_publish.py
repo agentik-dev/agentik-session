@@ -5,6 +5,7 @@ identity) with a bare `crate.git` beside it as `origin`; the gate results are fi
 writes under that temp state root, save line 11's, which a queue of the test's own writes. The
 session's own env names are scrubbed, so no case reads the caller's sitting."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -21,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "plugin" / "lib" / "agentik-session"
 SCRUB = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "CLAUDE_CODE_SESSION_ID", gate.JOB_MARK,
          "CLAUDE_SESSION_HELPER", "CLAUDE_SESSION_DEPTH", "RELAY_ROW", "CLAUDE_SESSION_PROFILE",
-         "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKELEVEL", "CHECK_EXIT", "HYG_TREE",
+         "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL", "CHECK_EXIT", "HYG_TREE",
          "HYG_RANGE", "HYG_MOVE")
 CHECK = "check:\n\t@exit $${CHECK_EXIT:-0}\n"
 # A hygiene that knows --commits: its argv to $LAND_ORDER; $HYG_TREE and $HYG_RANGE are the
@@ -71,9 +72,9 @@ class Crate:
         self.git(self.repo, "branch", "-q", "-u", "origin/main", "main")
         self.ids = 0
 
-    def git(self, cwd, *args):
+    def git(self, cwd, *args, input=None):
         return subprocess.run(["git", "-C", str(cwd), *args], env=self.env, check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, input=input).stdout.strip()
 
     def put(self, files):
         for rel, text in files.items():
@@ -111,16 +112,29 @@ class Crate:
                                ["gate %s: %s: job" % (gid, self.repo), *log_lines,
                                 "gate %s: exit 0 in 1 s" % gid]))
         doc = {"id": gid, "repo": str(self.repo), "exit": 0, "log": str(log), "cut": None,
-               "head": None, "dirty": {"start": 0, "end": 0}, "command": ["make", "check"]}
+               "head": None, "dirty": {"start": 0, "end": 0}, "command": ["make", "check"],
+               "make_env": []}
         doc.update(over)
         gate.result_path(self.root, gid).write_text(raw if raw is not None else json.dumps(doc))
         return gid
 
-    def land_result(self, before, line, **over):
-        cmd = [sys.executable, str(RUNNER), "gate", "land", "--in-job", str(self.repo),
-               "p1-crate", "x", str(self.tmp / "msg")]
+    def argv_head(self):
+        """`gate.self_argv()` as `gate publish`'s own process reads it under this env."""
+        cache = self.env.get("XDG_CACHE_HOME") or os.path.join(self.env["HOME"], ".cache")
+        return [sys.executable, "-I", "-X", "pycache_prefix=" + os.path.join(
+            cache, "agentik", "pycache"), os.path.realpath(str(RUNNER))]
+
+    def land_command(self, sha, repo=None):
+        """The command `_gate_land` queues, whole (review 1 F1)."""
+        return [*self.argv_head(), "gate", "land", "--in-job", str(repo or self.repo),
+                "p1-crate", sha, str(self.tmp / "msg")]
+
+    def land_result(self, before, line, sha=None, **over):
+        """A landing's result; its command carries the sha the ok line names unless given."""
+        if sha is None:
+            sha = line.split(": ok ", 1)[1].split(",", 1)[0] if ": ok " in line else "x"
         return self.result(["land-step: check: make check", line], **{
-            "head": before, "command": cmd, **over})
+            "head": before, "command": self.land_command(sha), **over})
 
     def check_result(self, head, **over):
         return self.result(["make check"], **{"head": head, **over})
@@ -257,8 +271,7 @@ def test_land5_4_a_check_near_miss_is_red_proof(c, case):
 def test_land5_5_a_forged_ok_line_before_the_real_red_is_red_proof(c):
     before, head, s = c.landed()
     c.result(["land crate: ok %s, main readied" % head, "land crate: red check exit 2"],
-             head=before, command=[sys.executable, str(RUNNER), "gate", "land", "--in-job",
-                                   str(c.repo), "p1-crate", head, "m"])
+             head=before, command=c.land_command(head))
     rc, out, err = c.publish(str(c.repo))
     assert (rc, out) == (1, line(c, "red proof exit 1")), err
 
@@ -341,7 +354,7 @@ def test_land5_8_a_remote_that_rejects_is_red_push_never_forced(c):
     assert rc != 0 and out == line(c, "red push exit %d" % rc), err
     assert c.bare_main() == moved
     assert [a for a in c.git_argv() if a.startswith("push")] == [
-        "push origin %s:refs/heads/main" % s]
+        "push --no-follow-tags origin %s:refs/heads/main" % s]
 
 
 def test_land5_8_main_moved_after_s_was_read_pushes_s(c):
@@ -469,3 +482,158 @@ def test_land5_11_dry_run_with_push_reads_both(lc):
     assert out.splitlines()[-2:] == ["land crate: dry run, nothing queued",
                                      "publish crate: ok %s, already pushed" % s]
     assert not gate.entries(lc.root)
+
+
+# 13 to 17. Review 1: F1, F2, F3, leads 1 and 2.
+
+def queue(c, *cmd, env=None):
+    """`gate run <crate> -- <cmd>` through the test's own queue, then its result."""
+    rc, out, err = run(c, [sys.executable, str(RUNNER), "gate", "run", str(c.repo), "--", *cmd],
+                       env=env)
+    assert rc == 0, (out, err)
+    gid = out.split()[1]
+    rc, out, err = run(c, [sys.executable, str(RUNNER), "gate", "wait", gid, "--json"])
+    return json.loads(out)
+
+
+@pytest.fixture
+def qc(tmp_path):
+    c = Crate(tmp_path.resolve())
+    yield c
+    for path in c.root.glob("**/runner.json"):
+        try:
+            os.kill(int(json.loads(path.read_text())["pid"]), signal.SIGTERM)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+
+def test_land5_13_the_reviews_forged_landing_job_is_red_proof(qc):
+    qc.git(qc.repo, "switch", "-q", "-c", "evil")
+    b = qc.commit("never checked", {"f.txt": "unchecked\n"})
+    qc.git(qc.repo, "switch", "-q", "main")
+    bare = qc.bare_main()
+    res = queue(qc, "sh", "-c", 'echo "land crate: ok %s, main readied"' % b, "land", "--in-job")
+    assert res["exit"] == 0 and res["head"] == bare
+    qc.git(qc.repo, "merge", "-q", "--no-ff", "-m", "Merge evil", "evil")
+    rc, out, err = qc.publish(str(qc.repo))
+    assert (rc, out) == (1, line(qc, "red proof exit 1")), err
+    assert qc.bare_main() == bare
+
+
+@pytest.mark.parametrize("case", ["head", "after", "repo", "sha", "as-from-other", "short"])
+def test_land5_13_a_command_not_gate_lands_own_is_red_proof(c, case):
+    before, head, s = c.landed()
+    ok = "land crate: ok %s, main readied" % head
+    cmd = {"head": [sys.executable, str(RUNNER), "gate", "land", "--in-job", str(c.repo),
+                    "p1-crate", head, str(c.tmp / "msg")],
+           "after": c.land_command(head) + ["x"],
+           "repo": c.land_command(head, repo=c.tmp / "other"),
+           "sha": c.land_command(before),
+           "as-from-other": c.land_command("2" * 40),
+           "short": ["sh", "-c", "echo", "gate", "land", "--in-job", str(c.repo), "p1-crate",
+                     head, "m"]}[case]
+    if case == "as-from-other":
+        ok = "land crate: ok %s, main readied, as %s, plugin 1.0.0-alpha.2" % ("1" * 40, head)
+    c.land_result(before, ok, command=cmd)
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (1, line(c, "red proof exit 1")), err
+    assert c.bare_main() == before
+
+
+def test_land5_14_a_check_with_makeflags_set_proves_nothing(qc):
+    s = qc.commit("a red check", {"Makefile": "check:\n\t@echo checking; exit 1\n"})
+    bare = qc.bare_main()
+    assert queue(qc, "make", "check")["exit"] == 2
+    res = queue(qc, "make", "check", env={"MAKEFLAGS": "n"})
+    assert (res["exit"], res["head"], res["make_env"]) == (0, s, ["MAKEFLAGS"])
+    rc, out, err = qc.publish(str(qc.repo))
+    assert (rc, out) == (1, line(qc, "red proof exit 1")), err
+    assert qc.bare_main() == bare
+
+
+def test_land5_14_a_check_with_no_make_env_is_pushed(qc):
+    s = qc.commit("main moves", {"g.txt": "g\n"})
+    res = queue(qc, "make", "check")
+    assert (res["exit"], res["head"], res["make_env"]) == (0, s, [])
+    rc, out, err = qc.publish(str(qc.repo))
+    assert (rc, out) == (0, line(qc, "ok %s, pushed to origin" % s)), err
+
+
+def test_land5_14_make_env_names_the_four_set_sorted():
+    env = {"PATH": "/bin", "MAKEFILES": "", "MFLAGS": "-n", "GNUMAKEFLAGS": "x", "MAKEFLAGS": "n",
+           "MAKELEVEL": "1"}
+    assert gate.make_env(env) == ["GNUMAKEFLAGS", "MAKEFILES", "MAKEFLAGS", "MFLAGS"]
+    assert gate.make_env({"PATH": "/bin"}) == [] and gate.make_env(None) is None
+    assert gate.RESULT_KEYS[-1] == "make_env"
+
+
+@pytest.mark.parametrize("case", ["absent", "set", "string", "null"])
+def test_land5_14_a_check_result_without_an_empty_make_env_is_red_proof(c, case):
+    back = c.sha("main")
+    s = c.commit("main moves", {"g.txt": "g\n"})
+    gid = c.check_result(s, make_env={"set": ["MFLAGS"], "string": "", "null": None}.get(case, []))
+    if case == "absent":
+        path = gate.result_path(c.root, gid)
+        doc = json.loads(path.read_text())
+        del doc["make_env"]
+        path.write_text(json.dumps(doc))
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (1, line(c, "red proof exit 1")), err
+    assert c.bare_main() == back
+
+
+def _collide(c, base, prefix):
+    """A commit on `base` whose sha opens with `prefix`, its tree another than base's."""
+    tree = c.git(c.repo, "mktree", input="100644 blob %s\tf.txt\n" % c.git(
+        c.repo, "hash-object", "-w", "--stdin", input="other\n"))
+    sig = "t <t@%s> 1700000000 +0000" % "example.invalid"
+    n = 0
+    while True:
+        body = ("tree %s\nparent %s\nauthor %s\ncommitter %s\n\nanother %d\n"
+                % (tree, base, sig, sig, n)).encode()
+        if hashlib.sha1(b"commit %d\0" % len(body) + body).hexdigest().startswith(prefix):
+            break
+        n += 1
+    p = subprocess.run(["git", "-C", str(c.repo), "hash-object", "-t", "commit", "-w", "--stdin"],
+                       input=body, capture_output=True, env=c.env, check=True)
+    return p.stdout.decode().strip()
+
+
+def test_land5_15_an_ambiguous_prefix_proves_nothing(c):
+    before, head, s1 = c.landed()
+    pre = head[:4]
+    c.land_result(before, "land crate: ok %s, main readied" % pre)
+    c.git(c.repo, "reset", "-q", "--hard", before)
+    b2 = _collide(c, before, pre)
+    assert b2 != head and b2[:4] == pre
+    c.git(c.repo, "update-ref", "refs/heads/evil2", b2)
+    c.git(c.repo, "merge", "-q", "--no-ff", "-m", "Merge evil2", "evil2")
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (1, line(c, "red proof exit 1")), err
+    assert c.bare_main() == before
+
+
+def test_land5_16_follow_tags_pushes_no_tag(c):
+    before, head, s = c.landed()
+    c.land_result(before, "land crate: ok %s, main readied" % head)
+    c.git(c.repo, "tag", "-a", "a-tag", "-m", "a note", head)
+    c.git(c.repo, "config", "push.followTags", "true")
+    rc, out, err = c.publish(str(c.repo), env=c.recorder())
+    assert (rc, out) == (0, line(c, "ok %s, pushed to origin" % s)), err
+    assert c.git(c.bare, "tag", "-l") == "" and c.bare_main() == s
+    assert [a for a in c.git_argv() if a.startswith("push")] == [
+        "push --no-follow-tags origin %s:refs/heads/main" % s]
+
+
+@pytest.mark.parametrize("case", ["path", "url", "unlisted"])
+def test_land5_17_a_remote_that_is_no_listed_name_is_red_remote(c, case):
+    before, head, s = c.landed()
+    c.land_result(before, "land crate: ok %s, main readied" % head)
+    other = c.tmp / "other.git"
+    c.git(c.tmp, "clone", "-q", "--bare", str(c.bare), str(other))
+    c.git(c.repo, "config", "branch.main.remote",
+          {"path": str(other), "url": "file://" + str(other), "unlisted": "upstream"}[case])
+    rc, out, err = c.publish(str(c.repo), env=c.recorder())
+    assert (rc, out) == (1, line(c, "red remote exit 1")), err
+    assert not [a for a in c.git_argv() if a.startswith("push")]
+    assert c.sha("refs/heads/main", cwd=other) == before and c.bare_main() == before
