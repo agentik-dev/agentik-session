@@ -2,6 +2,7 @@
 
   agentik session gate land <repo> <branch> <sha> <merge-file>      queues this as one gate job
   agentik session gate land --in-job <repo> <branch> <sha> <merge-file>   the job itself
+  agentik session gate land --dry-run <repo> <branch> <sha> <merge-file>  the reads alone, here
 
 A bare <repo> is that checkout in ~/code, else the one a folder below; one with a slash is a
 path; the cwd never decides. <sha> is a prefix of the commit, never a ref's name. Runs, in
@@ -13,6 +14,34 @@ there when present, then
 
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
+
+Ready (packet land4) runs where the worktree's Makefile holds a line that opens `stamp:`; without
+one every line and exit is the pin's, a branch behind main red sha. After the worktree's read it
+reads `git merge-tree --write-tree` of the head and main, nothing written: main an ancestor of
+the head is no merge; a merge with no conflict, or whose every conflict hunk is a derived line, is
+made in the worktree; anything else is `red behind exit 1`, nothing written, a note naming each
+path. The derived lines (R3): plugin/.claude-plugin/plugin.json's one `"version"` line, a line
+opening `Status: version ` in README.md or design/readme/source.md, and any line of
+design/readme/rendered.sha256, each taking main's side, the stamp rewriting them; and the rows of
+NICE_TO_HAVE.md's and history/NICE-overflow.md's tables, merged by id (R4): main's rows stand, a
+row only the branch added is kept, a row one side removed and the other left is removed, a row
+both changed is red behind, and a row the branch added under an id main has since used takes a
+number above every id on either side, rewritten in the files only the branch has, any other
+mention noted. Then `make stamp STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit
+<code>`, and a line written beyond the derived kinds (NICE rows moved whole to the overflow
+aside) `red stamp exit 1`, the paths named; either red restores the stamp's paths. Then
+`scripts/plugin-version-check` where it is there: `red version exit <code>`, before the check.
+The job's commits are `<branch>: merge main` and `<branch>: plugin <version>`, each closing with
+`Gate-Land: <the sha given, whole>`; a stamp that wrote nothing makes none. A head past the sha
+given is taken (R8) only when every commit between is the job's by that trailer, on the
+first-parent line, a merge's second parent on main, and the job's steps run again from the sha
+given in a temp worktree (removed after) give each one's tree; else red sha, the pin's note. Every
+later step takes the readied head. Once the head differs from the sha given, the ok line reads
+`ok <sha>, main readied, as <head, whole>, plugin <version>` and a red line ends `, as <head>`,
+after every other ending. The check's stop line is read from the log's size just before `make
+check`, so a stamp's output never makes an unrun. `--dry-run` queues nothing and writes nothing,
+in a job or not: the reads up to merge-tree's, then `ready: ...` lines on stdout and `land <repo>:
+dry run, nothing queued`, exit 0; a read that reds prints its land line and exits its code.
 
 A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A red
 check adds `, unrun lock|load|wall` (packet gl1, R5, as review 1 amended it) only when all three
@@ -103,6 +132,15 @@ STOPS = {b"bounded: stop: " + why.encode(): why for why in ("lock", "load", "wal
 CODES = {"lock": 2, "load": 2, "wall": 124}   # scripts/bounded's exit for each stop (gl1 R5)
 BOUNDED = b"bounded: "
 TAIL = 64 * 1024    # the most of the job's log a red check's stop line is looked for in
+READIED = ""        # the head ready gave, whole, once it differs from the sha given (land4 R10)
+PLUGIN = ""         # that head's plugin version, for the ok line
+TRAILER = "Gate-Land: "
+MANIFEST = "plugin/.claude-plugin/plugin.json"
+STATUS_FILES = ("README.md", "design/readme/source.md")
+STATUS_LINE = "Status: version "
+SIDECAR = "design/readme/rendered.sha256"
+NICE_FILES = ("NICE_TO_HAVE.md", "history/NICE-overflow.md")
+DERIVED = (MANIFEST,) + STATUS_FILES + (SIDECAR,) + NICE_FILES   # land4 R3's files
 
 
 class Red(Exception):
@@ -612,6 +650,533 @@ def takes_commits(tree, script):
     return p.returncode == 0 and "--commits" in p.stdout
 
 
+# The ready step (packet land4): main merged into a reviewed branch where every conflict is a
+# line a landing derives, then the stamp, each as one commit closing with the trailer.
+
+def stamps(tree):
+    """R1: the worktree's Makefile holds a line that opens `stamp:`."""
+    try:
+        with open(os.path.join(tree, "Makefile"), encoding="utf-8", errors="replace") as fh:
+            return any(line.startswith("stamp:") for line in fh)
+    except OSError:
+        return False
+
+
+def git_bytes(cwd, *args):
+    """A git read as bytes: (exit, stdout)."""
+    p = subprocess.run(("git",) + args, cwd=cwd, stdin=DEVNULL, stdout=subprocess.PIPE,
+                       stderr=DEVNULL)
+    return p.returncode, p.stdout
+
+
+def text_of(data):
+    return data.decode("utf-8", "surrogateescape")
+
+
+def lines_of(text):
+    """The lines, each with its newline; a last line with none kept as it is."""
+    parts = text.split("\n")
+    return [p + "\n" for p in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def blob_at(cwd, rev, path):
+    """The path's text at rev, or "" where it has none."""
+    code, data = git_bytes(cwd, "cat-file", "blob", "%s:%s" % (rev, path))
+    return text_of(data) if code == 0 else ""
+
+
+def is_version(line):
+    return line.lstrip().startswith('"version"')
+
+
+def is_status(line):
+    return line.startswith(STATUS_LINE)
+
+
+def row_id(line):
+    """`n<k>` of a NICE table row, else None."""
+    if not line.startswith("|"):
+        return None
+    cell = line.split("|")[1].strip()
+    return cell if cell[:1] == "n" and cell[1:].isdigit() else None
+
+
+def rows(lines):
+    """A NICE table's rows by id, in order."""
+    out = {}
+    for line in lines:
+        rid = row_id(line)
+        if rid:
+            out.setdefault(rid, line)
+    return out
+
+
+def number(rid):
+    return int(rid[1:])
+
+
+def swap_ids(text, renum):
+    """Each whole-word `n<k>` that renum names, rewritten in one pass."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] == "n" and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            j = i + 1
+            while j < n and text[j] in "0123456789":
+                j += 1
+            if j > i + 1 and (j == n or not (text[j].isalnum() or text[j] == "_")) \
+                    and text[i:j] in renum:
+                out.append(renum[text[i:j]])
+                i = j
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def merge_file(cwd, ours, base, theirs):
+    """The three stages through `git merge-file --diff3`, as segments: ("clean", lines) or
+    ("conflict", branch's, base's, main's); None when git cannot merge them."""
+    marks = ("<" * 40, "|" * 40, "=" * 40, ">" * 40)
+    code, data = git_bytes(cwd, "merge-file", "-p", "--diff3", "--marker-size", "40",
+                           "--object-id", "-L", "branch", "-L", "base", "-L", "main",
+                           ours, base, theirs)
+    if code < 0 or code > 127:
+        return None
+
+    def mark(line, i):
+        return line.startswith(marks[i]) and line[40:41] in ("", " ", "\n")
+
+    segs, part, cur = [], None, []
+    for line in lines_of(text_of(data)):
+        if part is None and mark(line, 0):
+            segs.append(("clean", cur))
+            part, cur = [[], [], []], 0
+        elif part is not None and cur == 0 and mark(line, 1):
+            cur = 1
+        elif part is not None and cur in (0, 1) and line.rstrip("\n") == marks[2]:
+            cur = 2
+        elif part is not None and cur == 2 and mark(line, 3):
+            segs.append(("conflict",) + tuple(part))
+            part, cur = None, []
+        elif part is None:
+            cur.append(line)
+        else:
+            part[cur].append(line)
+    if part is not None:
+        return None
+    segs.append(("clean", cur))
+    return segs
+
+
+class Behind(Exception):
+    """A conflict no landing derives: why."""
+
+
+def new_id(line, rid, renum):
+    at_id = line.index(rid)
+    return line[:at_id] + renum[rid] + line[at_id + len(rid):]
+
+
+def merge_rows(o, b, t, renum):
+    """R4 on one conflict hunk of NICE rows: the branch's, base's and main's lines. Main's rows
+    stand, a change of the branch's to a row main left taken; a row only the branch added kept,
+    renumbered where main has since used its id."""
+    O, B, T = rows(o), rows(b), rows(t)
+    out = []
+    for rid, line in T.items():
+        if rid in B and line == B[rid]:
+            if rid in O:
+                out.append(O[rid])
+            continue
+        if rid in B and (rid not in O or O[rid] not in (B[rid], line)):
+            raise Behind("%s changed on both sides" % rid)
+        out.append(line)
+    for rid, line in B.items():
+        if rid not in T and rid in O and O[rid] != line:
+            raise Behind("%s removed on main and changed on the branch" % rid)
+    for rid, line in O.items():
+        if rid in B or T.get(rid) == line:
+            continue
+        out.append(new_id(line, rid, renum) if rid in renum else line)
+    return out
+
+
+def renumbered(lines, renum, branch_rows):
+    """A branch's row under an id main has since used, in a hunk git merged clean."""
+    return [new_id(line, row_id(line), renum)
+            if row_id(line) in renum and branch_rows.get(row_id(line)) == line else line
+            for line in lines]
+
+
+def resolve(path, segs, sides, renum, branch_rows):
+    """A conflicted derived file's text and its hunk count, or Behind (R3, R4)."""
+    out, hunks = [], 0
+    for seg in segs:
+        if seg[0] == "clean":
+            out.extend(renumbered(seg[1], renum, branch_rows) if path in NICE_FILES else seg[1])
+            continue
+        o, b, t = seg[1:]
+        hunks += 1
+        every = o + b + t
+        if path == SIDECAR:
+            out.extend(t)
+        elif path == MANIFEST and all(len(x) == 1 and is_version(x[0]) for x in (o, b, t)) \
+                and all(sum(map(is_version, s)) == 1 for s in sides):
+            out.extend(t)
+        elif path in STATUS_FILES and o and t and all(map(is_status, every)):
+            out.extend(t)
+        elif path in NICE_FILES and every and all(map(row_id, every)):
+            out.extend(merge_rows(o, b, t, renum))
+        else:
+            raise Behind("a hunk not of a derived kind: %s" % "".join(every).strip()[:200])
+    return "".join(out), hunks
+
+
+def renumbering(cwd, head, ours, base):
+    """R4's new numbers: each id the branch added that main has since used for another row,
+    above the highest id on either side, the overflow file included. (renum, branch's rows)."""
+    def side(rev):
+        found = {}
+        for path in NICE_FILES:
+            for rid, line in rows(lines_of(blob_at(cwd, rev, path))).items():
+                found.setdefault(rid, line)
+        return found
+
+    B, O, T = side(base), side(head), side(ours)
+    added = {rid: line for rid, line in O.items() if rid not in B}
+    used = {rid: line for rid, line in T.items() if rid not in B}
+    clash = sorted((rid for rid in added if rid in used and used[rid] != added[rid]), key=number)
+    top = max([number(rid) for rid in list(B) + list(O) + list(T)] or [0])
+    return {rid: "n%d" % (top + k + 1) for k, rid in enumerate(clash)}, added
+
+
+def plan_merge(cwd, head, ours):
+    """R2's reads, nothing written: None when main's head is the branch's ancestor; else the
+    merge's plan (the files to write, the hunks, the conflicted paths, notes); else Red behind."""
+    if read(cwd, "merge-base", "--is-ancestor", ours, head)[0] == 0:
+        return None
+    code, fields = read_z(cwd, "merge-tree", "--write-tree", "--no-messages", "-z", head, ours)
+    if code not in (0, 1) or not fields:
+        raise Red("behind", code or 1, "git merge-tree exit %d: it reads no merge" % code)
+    tree, stages = fields[0], {}
+    for entry in fields[1:]:
+        info, _, path = entry.partition("\t")
+        mode, oid, stage = (info.split() + ["", "", ""])[:3]
+        stages.setdefault(path, {})[stage] = (mode, oid)
+    _, base = read(cwd, "merge-base", head, ours)
+    renum, branch_rows = renumbering(cwd, head, ours, base) if base else ({}, {})
+    files, hunks, bad = {}, 0, []
+    for path in sorted(stages):
+        got = stages[path]
+        modes = {m for m, _ in got.values()}
+        if path not in DERIVED or set(got) != {"1", "2", "3"} or len(modes) != 1 \
+                or modes - {"100644", "100755"}:
+            bad.append("%s: %s" % (path, "a conflict outside the derived lines"
+                                   if path not in DERIVED else "not a conflict of lines"))
+            continue
+        segs = merge_file(cwd, got["2"][1], got["1"][1], got["3"][1])
+        sides = [lines_of(text_of(git_bytes(cwd, "cat-file", "blob", got[s][1])[1]))
+                 for s in ("1", "2", "3")]
+        try:
+            if segs is None:
+                raise Behind("git merge-file reads no merge")
+            files[path], n = resolve(path, segs, sides, renum, branch_rows)
+            hunks += n
+        except Behind as why:
+            bad.append("%s: %s" % (path, why))
+    if bad:
+        raise Red("behind", note="main's changes conflict with the branch's beyond the lines a "
+                  "landing derives, nothing written:\n" + "\n".join(bad))
+    notes = []
+    if renum:
+        notes.append("NICE rows renumbered: " + ", ".join(
+            "%s -> %s" % kv for kv in sorted(renum.items(), key=lambda kv: number(kv[0]))))
+        for path in NICE_FILES:
+            if path not in files:
+                text = blob_at(cwd, tree, path)
+                new = "".join(renumbered(lines_of(text), renum, branch_rows))
+                if new != text:
+                    files[path] = new
+        theirs = set(read_z(cwd, "ls-tree", "-r", "-z", "--name-only", ours)[1])
+        for path in read_z(cwd, "ls-tree", "-r", "-z", "--name-only", head)[1]:
+            if path in theirs or path in NICE_FILES:
+                continue
+            code, data = git_bytes(cwd, "cat-file", "blob", "%s:%s" % (head, path))
+            if code == 0 and b"\0" not in data:
+                text = text_of(data)
+                new = swap_ids(text, renum)
+                if new != text:
+                    files[path] = new
+        for path in read_z(cwd, "diff", "--name-only", "-z", "--no-renames", base, head)[1]:
+            if path in theirs and path not in NICE_FILES:
+                text = blob_at(cwd, head, path)
+                for rid in sorted(renum, key=number):
+                    if swap_ids(text, {rid: "\0"}) != text:
+                        notes.append("%s named in %s, left as it is (that row is now %s)"
+                                     % (rid, path, renum[rid]))
+    return {"files": files, "hunks": hunks, "paths": sorted(stages), "notes": notes}
+
+
+def commit_job(tree, subject, given):
+    """R6: one commit closing with the trailer; Red at the step reached when git refuses."""
+    code = run(tree, "git", "commit", "-q", "-m", subject, "-m", TRAILER + given)
+    if code != 0:
+        raise Red(REACHED, code, "git commit exit %d in %s" % (code, tree))
+    return read(tree, "rev-parse", "HEAD")[1]
+
+
+def do_merge(tree, branch, given, ours, plan):
+    """R2 to R4 written: `git merge --no-commit` of main's commit, the planned files, by name."""
+    code = run(tree, "git", "merge", "--no-ff", "--no-commit", "--no-edit", ours)
+    try:
+        if code not in (0, 1):
+            raise Red("behind", code, "git merge exit %d in %s" % (code, tree))
+        for path, text in sorted(plan["files"].items()):
+            with open(os.path.join(tree, path), "w", encoding="utf-8",
+                      errors="surrogateescape", newline="") as fh:
+                fh.write(text)
+        if plan["files"]:
+            code = run(tree, "git", "add", "--", *sorted(plan["files"]))
+            if code != 0:
+                raise Red("behind", code, "git add exit %d in %s" % (code, tree))
+        left = read_z(tree, "diff", "--name-only", "-z", "--diff-filter=U")[1]
+        if left:
+            raise Red("behind", note="unresolved after the merge:\n" + "\n".join(left))
+        return commit_job(tree, "%s: merge main" % branch, given)
+    except BaseException:
+        if read(tree, "rev-parse", "-q", "--verify", "MERGE_HEAD")[0] == 0:
+            run(tree, "git", "merge", "--abort")
+        raise
+
+
+def changed_paths(tree):
+    """The worktree's changes as (status, path), the `.venv` link aside."""
+    fields = iter(read_z(tree, *STATUS, "-z")[1])
+    out = []
+    for entry in fields:
+        if "R" in entry[:2] or "C" in entry[:2]:
+            next(fields, "")
+        if entry != "?? .venv":
+            out.append((entry[:2], entry[3:]))
+    return out
+
+
+def restore(tree, changed):
+    """R5: the stamp's paths back as HEAD has them; a file it made is removed."""
+    tracked = [p for s, p in changed if s != "??"]
+    if tracked:
+        run(tree, "git", "checkout", "-q", "HEAD", "--", *tracked)
+    for s, p in changed:
+        if s == "??":
+            try:
+                os.remove(os.path.join(tree, p))
+            except OSError:
+                pass
+
+
+def stamp_diff_off(tree, changed):
+    """R5: the paths whose stamped lines are not of R3's kinds, NICE rows moved whole aside."""
+    bad, gone, came = [], [], []
+    for status, path in changed:
+        if status == "??" or path not in DERIVED:
+            bad.append(path)
+            continue
+        data = git_bytes(tree, "diff", "-U0", "--no-color", "--no-ext-diff", "HEAD", "--", path)[1]
+        minus, plus, body = [], [], False
+        for line in lines_of(text_of(data)):
+            if line.startswith("@@"):
+                body = True
+            elif body and line[:1] == "-":
+                minus.append(line[1:])
+            elif body and line[:1] == "+":
+                plus.append(line[1:])
+        every = minus + plus
+        if path == MANIFEST:
+            fine = all(map(is_version, every))
+        elif path in STATUS_FILES:
+            fine = all(map(is_status, every))
+        elif path == SIDECAR:
+            fine = True
+        elif path == NICE_FILES[0]:
+            fine = not plus and all(map(row_id, minus))
+            gone += minus
+        else:
+            fine = not minus and all(map(row_id, plus))
+            came += plus
+        if not fine:
+            bad.append(path)
+    if sorted(gone) != sorted(came):
+        bad.extend(p for p in NICE_FILES if p not in bad)
+    return bad
+
+
+def version_in(tree):
+    """plugin.json's version as its `"version"` line holds it, or ""."""
+    try:
+        with open(os.path.join(tree, MANIFEST), encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if is_version(line):
+                    return line.split(":", 1)[1].strip().rstrip(",").strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def do_stamp(tree, branch, given, base):
+    """R5: `make stamp` against main's commit as read; its lines as one commit, or none."""
+    at("stamp")
+    note("stamp: make stamp in " + tree)
+    try:
+        code = run(tree, "make", "stamp", "STAMP_BASE=" + base)
+    except Red:
+        restore(tree, changed_paths(tree))     # a cut: the next call meets a clean worktree
+        raise
+    changed = changed_paths(tree)
+    if code != 0:
+        restore(tree, changed)
+        raise Red("stamp", code, "make stamp exit %d; its paths restored" % code)
+    bad = stamp_diff_off(tree, changed)
+    if bad:
+        restore(tree, changed)
+        raise Red("stamp", 1, "make stamp wrote beyond the lines a landing derives; its paths "
+                  "restored:\n" + "\n".join(bad))
+    if not changed:
+        return False
+    code = run(tree, "git", "add", "--", *sorted(p for _, p in changed))
+    if code != 0:
+        raise Red("stamp", code, "git add exit %d in %s" % (code, tree))
+    commit_job(tree, "%s: plugin %s" % (branch, version_in(tree) or "?"), given)
+    return True
+
+
+def taken_head(repo, tree, branch, sha, dry=False):
+    """R8: (the sha given, whole; the branch's head) where the head is that sha, or a head the
+    job readied from it; else the pin's red sha."""
+    code, full = read(repo, "rev-parse", "--verify", "-q", sha + "^{commit}")
+    _, head = read(repo, "rev-parse", "--verify", "-q", "refs/heads/" + branch)
+    if code != 0 or not full.startswith(sha.lower()) or head == full \
+            or not readied_from(repo, tree, branch, full, head, dry):
+        full = require_sha(repo, branch, sha)
+    return full, head
+
+
+def readied_from(repo, tree, branch, full, head, dry):
+    """Every commit from the sha given to the head is the job's: on the first-parent line, each
+    closing with the trailer naming it, a merge's second parent on main; and the job's merge
+    and stamp, run again from the sha given in a temp worktree, give each one's tree."""
+    if read(repo, "merge-base", "--is-ancestor", full, head)[0] != 0:
+        return False
+    steps, prev = [], full
+    for commit in read(repo, "rev-list", "--first-parent", "--reverse",
+                       "%s..%s" % (full, head))[1].split():
+        parents = read(repo, "rev-list", "--parents", "-n", "1", commit)[1].split()[1:]
+        body = read(repo, "log", "-1", "--format=%B", commit)[1].strip().split("\n")
+        if not parents or parents[0] != prev or len(parents) > 2 or body[-1] != TRAILER + full:
+            note("%s is not the job's commit from %s" % (commit, full))
+            return False
+        if len(parents) == 2 and read(repo, "merge-base", "--is-ancestor", parents[1],
+                                      MAIN)[0] != 0:
+            note("%s merges %s, which is not on main" % (commit, parents[1]))
+            return False
+        steps.append((commit, parents[1] if len(parents) == 2 else None))
+        prev = commit
+    if dry:
+        note("a dry run takes %s's commits past %s by their trailers; the job runs them again"
+             % (branch, full))
+        return True
+    return rerun(repo, tree, branch, full, steps)
+
+
+def rerun(repo, tree, branch, full, steps):
+    """The job's steps from the sha given in a temp worktree, removed after: True when each
+    gives its commit's tree."""
+    global REACHED
+    reached, place, root = REACHED, None, os.environ.get("TMPDIR") or "/tmp"
+    for k in range(100):
+        try:
+            place = os.path.join(root, "land-ready-%d-%d" % (os.getpid(), k))
+            os.mkdir(place)
+            break
+        except FileExistsError:
+            place = None
+    if place is None:
+        return False
+    try:
+        if read(repo, "worktree", "add", "-q", "--detach", place, full)[0] != 0:
+            note("cannot add a temp worktree at " + place)
+            return False
+        venv = os.path.join(tree, ".venv")
+        if os.path.islink(venv):
+            os.symlink(os.path.realpath(venv), os.path.join(place, ".venv"))
+        for commit, second in steps:
+            cur = read(place, "rev-parse", "HEAD")[1]
+            if second:
+                plan = plan_merge(place, cur, second)
+                if plan is None:
+                    return False
+                do_merge(place, branch, full, second, plan)
+            else:
+                do_stamp(place, branch, full, read(place, "merge-base", cur, MAIN)[1])
+            if read(place, "rev-parse", "HEAD^{tree}")[1] != \
+                    read(repo, "rev-parse", commit + "^{tree}")[1]:
+                note("run again from %s, the job's step does not give %s's tree" % (full, commit))
+                return False
+        return True
+    except Red as red:
+        if red.step == "cut":
+            raise
+        note("run again from %s, the job's step reads red %s: %s" % (full, red.step, red.note))
+        return False
+    finally:
+        if os.path.islink(os.path.join(place, ".venv")):
+            os.unlink(os.path.join(place, ".venv"))
+        read(repo, "worktree", "remove", "--force", place)
+        if os.path.isdir(place):
+            subprocess.run(("rm", "-rf", "--", place), stdin=DEVNULL)
+        read(repo, "worktree", "prune")
+        REACHED = reached
+
+
+def ready(repo, tree, branch, full, head, dry=False):
+    """R2 to R7 in the branch's worktree; the head the rest takes (R9)."""
+    global READIED, PLUGIN
+    at("behind")
+    code, ours = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if code != 0:
+        raise Red("main", note="cannot read " + MAIN)
+    plan = plan_merge(tree, head, ours)
+    for text in (plan or {}).get("notes", []):
+        note(text)
+    if dry:
+        if plan is None:
+            print("ready: %s holds main" % branch, flush=True)
+        elif not plan["hunks"]:
+            print("ready: would merge main %s into %s, no conflict" % (ours[:7], branch),
+                  flush=True)
+        else:
+            print("ready: would merge main %s into %s, %d derived hunks: %s"
+                  % (ours[:7], branch, plan["hunks"], ", ".join(plan["paths"])), flush=True)
+        print("ready: would run make stamp and commit its lines", flush=True)
+        return head
+    if head != full:
+        READIED = head
+    if plan is not None:
+        note("ready: merge main %s into %s in %s" % (ours, branch, tree))
+        READIED = do_merge(tree, branch, full, ours, plan)
+    if do_stamp(tree, branch, full, ours):
+        READIED = read(tree, "rev-parse", "HEAD")[1]
+    at("version")
+    script = os.path.join(tree, "scripts", "plugin-version-check")
+    if os.path.lexists(script):
+        note("version: scripts/plugin-version-check in " + tree)
+        code = run(tree, script)
+        if code != 0:
+            raise Red("version", code)
+    if READIED:
+        PLUGIN = version_in(tree)
+    return read(tree, "rev-parse", "HEAD")[1]
+
+
 def is_checkout(path):
     """A directory holding a .git entry, a directory or a file (a linked worktree's)."""
     return os.path.isdir(path) and os.path.exists(os.path.join(path, ".git"))
@@ -641,7 +1206,8 @@ def resolve_repo(arg):
               % (os.path.join(code, arg), below))
 
 
-def land(repo, branch, sha, message, log=None):
+def land(repo, branch, sha, message, log=None, dry=False):
+    """The steps; True when a dry run stopped after its reads (land4 R11)."""
     global UNSCANNED
     at("repo")
     blocks = worktrees(repo)
@@ -653,6 +1219,16 @@ def land(repo, branch, sha, message, log=None):
     require_main(repo)
     at("worktree")
     tree = require_worktree(blocks, branch)
+    at("sha")
+    if stamps(tree):
+        given, head = taken_head(repo, tree, branch, sha, dry)
+        head = ready(repo, tree, branch, given, head, dry)
+        if dry:
+            return True
+        sha = head
+    elif dry:
+        print("ready: no stamp target; a branch behind main is red sha", flush=True)
+        return True
     at("sha")
     full = require_sha(repo, branch, sha)
     at("main")
@@ -716,7 +1292,7 @@ def land(repo, branch, sha, message, log=None):
         raise Red("branch", code, branch + " stays")
 
 
-def main(argv, log=None):
+def main(argv, log=None, dry=False):
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     signal.signal(signal.SIGTERM, on_cut)
@@ -731,16 +1307,20 @@ def main(argv, log=None):
         name = os.path.basename(os.path.normpath(argv[0]))
         repo = resolve_repo(argv[0])
         name = os.path.basename(repo)
-        land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log)
+        if land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log, dry):
+            print("land %s: dry run, nothing queued" % name, flush=True)
+            return 0
     except Exception as err:
         red = err if isinstance(err, Red) else Red(REACHED, 1, "%s: %s" % (type(err).__name__, err))
         for text in (red.note, STANDS):
             if text:
                 note(text)
-        print("land %s: red %s exit %d%s%s" % (name, red.step, red.code,
-                                               red.unrun and ", unrun " + red.unrun,
-                                               LEFT and ", " + LEFT), flush=True)
+        print("land %s: red %s exit %d%s%s%s" % (name, red.step, red.code,
+                                                 red.unrun and ", unrun " + red.unrun,
+                                                 LEFT and ", " + LEFT,
+                                                 READIED and ", as " + READIED), flush=True)
         return red.code
-    print("land %s: ok %s, main readied%s" % (name, argv[2], UNSCANNED and ", " + UNSCANNED),
-          flush=True)
+    print("land %s: ok %s, main readied%s%s" % (
+        name, argv[2], UNSCANNED and ", " + UNSCANNED,
+        READIED and ", as %s%s" % (READIED, PLUGIN and ", plugin " + PLUGIN)), flush=True)
     return 0

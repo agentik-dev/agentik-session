@@ -267,6 +267,18 @@ def test_land4_3_another_conflicted_line_is_red_behind(c, where):
     assert (c.head(), c.main(), c.clean(), c.ran()) == (before, main, "", [])
 
 
+def test_land4_3_a_second_version_key_is_no_derived_line(c):
+    two = ('{\n  "name": "crate",\n  "version": "1.0.0-alpha.1",\n  "engine": {\n'
+           '    "version": "%s"\n  }\n}\n')
+    c.on_main({MANIFEST: two % "1"}, "main's engine")
+    c.git(c.tree, "merge", "-q", "main")
+    sha = c.work({MANIFEST: two % "2"})
+    c.on_main({MANIFEST: two % "3"})
+    rc, out, err = c.land(sha)
+    assert (rc, out) == (1, "land crate: red behind exit 1\n"), err
+    assert MANIFEST in err and c.head() == sha
+
+
 # 4. NICE rows merge by id.
 
 def nice(*rows):
@@ -320,7 +332,9 @@ def test_land4_5_a_stamp_that_exits_3_is_red_stamp_and_a_rerun_lands(c):
     c.on_main({"g": "y\n"})
     rc, out, err = c.land(sha, env={"STAMP_EXIT": "3"})
     merge = c.head()
-    assert (rc, out) == (3, "land crate: red stamp exit 3, as %s\n" % merge), err
+    # The code is the step's, make's own: a recipe that exits 3 is make's 2, as the check's is.
+    assert (rc, out) == (2, "land crate: red stamp exit 2, as %s\n" % merge), err
+    assert "make: *** [stamp] Error 3" in err
     assert c.clean() == "" and "check" not in c.ran()
     assert c.body(merge).splitlines()[-1] == "Gate-Land: " + sha
     rc, out, err = c.land(sha)                          # a cut between the merge and the stamp
