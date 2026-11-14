@@ -25,9 +25,12 @@ opening `Status: version ` in README.md or design/readme/source.md, and any line
 design/readme/rendered.sha256, each taking main's side, the stamp rewriting them; and the rows of
 NICE_TO_HAVE.md's and history/NICE-overflow.md's tables, merged by id (R4): main's rows stand, a
 row only the branch added is kept, a row one side removed and the other left is removed, a row
-both changed is red behind, and a row the branch added under an id main has since used takes a
-number above every id on either side, rewritten in the files only the branch has, any other
-mention noted. Then `make stamp STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit
+both changed is red behind, a repeated id on any side of a hunk is red behind, and a row the
+branch added under an id main has since used takes a number above every id on either side. A
+renumbered id is rewritten only in `.md` files the branch added (the head has them, main does
+not, and they are in the merged tree), as a whole word; a mention anywhere else, code and tests
+included, is listed in the note and left. The renumbering writes only regular files (100644 or
+100755) of the merged tree, from its text, never through a link. Then `make stamp STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit
 <code>`, and a line written beyond the derived kinds (NICE rows moved whole to the overflow
 aside) `red stamp exit 1`, the paths named; either red restores the stamp's paths. Then
 `scripts/plugin-version-check` where it is there: `red version exit <code>`, before the check.
@@ -141,6 +144,7 @@ STATUS_LINE = "Status: version "
 SIDECAR = "design/readme/rendered.sha256"
 NICE_FILES = ("NICE_TO_HAVE.md", "history/NICE-overflow.md")
 DERIVED = (MANIFEST,) + STATUS_FILES + (SIDECAR,) + NICE_FILES   # land4 R3's files
+REGULAR = ("100644", "100755")    # the modes the job writes (review 1, F1 to F3)
 
 
 class Red(Exception):
@@ -826,6 +830,11 @@ def resolve(path, segs, sides, renum, branch_rows):
         elif path in STATUS_FILES and o and t and all(map(is_status, every)):
             out.extend(t)
         elif path in NICE_FILES and every and all(map(row_id, every)):
+            for name, side in (("branch's", o), ("base's", b), ("main's", t)):
+                ids = [row_id(x) for x in side]
+                twice = sorted({i for i in ids if ids.count(i) > 1}, key=number)
+                if twice:
+                    raise Behind("%s repeats on the %s side of a hunk" % (", ".join(twice), name))
             out.extend(merge_rows(o, b, t, renum))
         else:
             raise Behind("a hunk not of a derived kind: %s" % "".join(every).strip()[:200])
@@ -846,8 +855,35 @@ def renumbering(cwd, head, ours, base):
     added = {rid: line for rid, line in O.items() if rid not in B}
     used = {rid: line for rid, line in T.items() if rid not in B}
     clash = sorted((rid for rid in added if rid in used and used[rid] != added[rid]), key=number)
+    ids = [(row_id(line), path) for path in NICE_FILES
+           for line in lines_of(blob_at(cwd, head, path))]
+    twice = ["%s: %s repeats on the branch, and main has since used it" % (
+        ", ".join(sorted({p for i, p in ids if i == rid})), rid)
+        for rid in clash if [i for i, _ in ids].count(rid) > 1]
+    if twice:
+        raise Red("behind", note="main's changes conflict with the branch's beyond the lines a "
+                  "landing derives, nothing written:\n" + "\n".join(twice))
     top = max([number(rid) for rid in list(B) + list(O) + list(T)] or [0])
     return {rid: "n%d" % (top + k + 1) for k, rid in enumerate(clash)}, added
+
+
+def entries(cwd, rev):
+    """{path: mode} of every blob and link in rev's tree."""
+    out = {}
+    for entry in read_z(cwd, "ls-tree", "-r", "-z", rev)[1]:
+        info, _, path = entry.partition("\t")
+        out[path] = info.split(" ")[0]
+    return out
+
+
+def regular_at(tree, path):
+    """The path is a regular file in the worktree, reached through no link below it."""
+    cur = tree
+    for part in path.split("/"):
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return False
+    return os.path.isfile(cur)
 
 
 def plan_merge(cwd, head, ours):
@@ -870,7 +906,7 @@ def plan_merge(cwd, head, ours):
         got = stages[path]
         modes = {m for m, _ in got.values()}
         if path not in DERIVED or set(got) != {"1", "2", "3"} or len(modes) != 1 \
-                or modes - {"100644", "100755"}:
+                or modes - set(REGULAR):
             bad.append("%s: %s" % (path, "a conflict outside the derived lines"
                                    if path not in DERIVED else "not a conflict of lines"))
             continue
@@ -891,29 +927,37 @@ def plan_merge(cwd, head, ours):
     if renum:
         notes.append("NICE rows renumbered: " + ", ".join(
             "%s -> %s" % kv for kv in sorted(renum.items(), key=lambda kv: number(kv[0]))))
+        merged = entries(cwd, tree)
         for path in NICE_FILES:
-            if path not in files:
+            if path not in files and merged.get(path) in REGULAR:
                 text = blob_at(cwd, tree, path)
                 new = "".join(renumbered(lines_of(text), renum, branch_rows))
                 if new != text:
                     files[path] = new
+        # R4 as review 1 narrowed it: rewritten only in the .md files the branch added, from the
+        # merged tree's text; a mention in any other path the branch added or changed is noted.
         theirs = set(read_z(cwd, "ls-tree", "-r", "-z", "--name-only", ours)[1])
-        for path in read_z(cwd, "ls-tree", "-r", "-z", "--name-only", head)[1]:
-            if path in theirs or path in NICE_FILES:
+        mine = set(read_z(cwd, "ls-tree", "-r", "-z", "--name-only", head)[1])
+        changed = set(read_z(cwd, "diff", "--name-only", "-z", "--no-renames", base, head)[1])
+        for path in sorted((mine - theirs) | (changed & mine)):
+            if path in NICE_FILES or path in files:
                 continue
+            if path.endswith(".md") and path not in theirs and merged.get(path) in REGULAR:
+                code, data = git_bytes(cwd, "cat-file", "blob", "%s:%s" % (tree, path))
+                if code == 0 and b"\0" not in data:
+                    text = text_of(data)
+                    new = swap_ids(text, renum)
+                    if new != text:
+                        files[path] = new
+                    continue
             code, data = git_bytes(cwd, "cat-file", "blob", "%s:%s" % (head, path))
-            if code == 0 and b"\0" not in data:
-                text = text_of(data)
-                new = swap_ids(text, renum)
-                if new != text:
-                    files[path] = new
-        for path in read_z(cwd, "diff", "--name-only", "-z", "--no-renames", base, head)[1]:
-            if path in theirs and path not in NICE_FILES:
-                text = blob_at(cwd, head, path)
-                for rid in sorted(renum, key=number):
-                    if swap_ids(text, {rid: "\0"}) != text:
-                        notes.append("%s named in %s, left as it is (that row is now %s)"
-                                     % (rid, path, renum[rid]))
+            if code != 0 or b"\0" in data:
+                continue
+            text = text_of(data)
+            for rid in sorted(renum, key=number):
+                if swap_ids(text, {rid: "\0"}) != text:
+                    notes.append("%s named in %s, left as it is (that row is now %s)"
+                                 % (rid, path, renum[rid]))
     return {"files": files, "hunks": hunks, "paths": sorted(stages), "notes": notes}
 
 
@@ -932,6 +976,9 @@ def do_merge(tree, branch, given, ours, plan):
         if code not in (0, 1):
             raise Red("behind", code, "git merge exit %d in %s" % (code, tree))
         for path, text in sorted(plan["files"].items()):
+            if not regular_at(tree, path):
+                raise Red("behind", note="%s is no regular file in %s; nothing written"
+                          % (path, tree))
             with open(os.path.join(tree, path), "w", encoding="utf-8",
                       errors="surrogateescape", newline="") as fh:
                 fh.write(text)
