@@ -521,30 +521,33 @@ def _installed(env) -> dict:
     return got if isinstance(got, dict) else {}
 
 
-def _recorded(installed: dict, name: str) -> dict:
-    """fk3 R2: the installs whose plugin is named `name`, over every id, at scope `user` or
-    `managed`. One id stands; two or more are undecided (the file names no choice); none,
-    absent."""
+def _recorded(installed: dict, name: str):
+    """fk3 R2, as amended by review 1 (F5, F6): the installs whose plugin is named `name`, over
+    every id, at scope `user` or `managed`. Distinct ids are counted: one id stands (at `user`
+    and `managed` both too; no version when its entries differ in it); two or more are
+    undecided (the file names no choice). None when the file gives no entry: the pin's read
+    of the plugin list for the own id then stands."""
     ids = {}
     for pid, recs in installed.items():
         if not isinstance(pid, str) or pid.partition("@")[0] != name:
             continue
         for rec in (recs if isinstance(recs, list) else ()):
             if isinstance(rec, dict) and rec.get("scope") in SOURCE_SCOPES:
-                ids.setdefault(pid, rec)
+                ids.setdefault(pid, []).append(rec)
+    if not ids:
+        return None
     base = {"plugin": None, "root": None, "version": None, "found": False, "declared": None,
             "seen": [], "road": "file"}
-    if not ids:
-        return dict(base, kind="absent")
     if len(ids) > 1:
         return dict(base, kind="undecided", seen=[
-            {"plugin": _clean(pid), "version": _clean(rec.get("version")),
-             "scope": _clean(rec.get("scope")), "root": _clean(rec.get("installPath"))}
-            for pid, rec in ids.items()])
-    pid, rec = next(iter(ids.items()))
+            {"plugin": _clean(pid), "version": _clean(recs[0].get("version")),
+             "scope": _clean(recs[0].get("scope")), "root": _clean(recs[0].get("installPath"))}
+            for pid, recs in ids.items()])
+    pid, recs = next(iter(ids.items()))
+    versions = {_clean(r.get("version")) for r in recs}
     return dict(base, kind="own" if pid == f"{name}@agentik" else "plugin",
-                plugin=_clean(pid), id=pid, root=_clean(rec.get("installPath")),
-                version=_clean(rec.get("version")), found=True)
+                plugin=_clean(pid), id=pid, root=_clean(recs[0].get("installPath")),
+                version=versions.pop() if len(versions) == 1 else None, found=True)
 
 
 def _source_key(src: dict) -> dict:
@@ -559,7 +562,8 @@ def _check_dependency(dep: dict, plugins, err, src: dict | None = None) -> Check
     """fk3 R3: a sibling's line from the plugin that stands (`src`: the suite's answer, else
     Claude Code's record). Optional all through: absent or disabled is a note, any version is
     fine. `enabled` comes from the plugin list by the standing id. A plugin list that holds
-    the `old` id is read as before the suite's answer (R5)."""
+    the `old` id is read as before the suite's answer (R5), and so is a sibling neither the
+    suite nor the file gives (`src` None; review 1, F6)."""
     if src is None or (plugins is not None and dep["old"] in plugins):
         return _check_dependency_by_id(dep, plugins, err)
     name, adds = dep["name"], dep["adds"]
@@ -874,7 +878,7 @@ def run(env=None, cwd=None) -> Report:
         src = _answered(rows.get(dep["name"]), dep["name"])
         if src is None:                         # fk3 R2: no answer for this sibling
             installed = _installed(env) if installed is None else installed
-            src = _recorded(installed, dep["name"])
+            src = _recorded(installed, dep["name"])    # None: no entry, the pin's read
         add(_check_dependency(dep, plugins, err, src))
     add(_check_profiles(env, cwd))
     add(_check_resolved(env))

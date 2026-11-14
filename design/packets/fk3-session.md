@@ -24,6 +24,14 @@
 - R5 (ruled 2026-11-13). Where the plugin list holds a sibling's `old` id, the check is today's, byte for byte (`_pick_id`, `_switch_note`, `_twice_note` for that case alone).
 - R6, not this row: `_check_plugin`, `_check_launcher`, `_sibling_absent` (still `relay@agentik` for the git guard).
 
+Review 1's ruling (the coordinator, 2026-11-14), one round:
+
+- F1: a printed string of the answer or the record drops every character of category `Cc` or `Cf`. L4: `_from`'s text goes through `withheld` as `detail` does.
+- F2: the read ends when the launcher exits, with what is buffered; a child holding the pipe costs no wall. The wall and the cap hold for a launcher that runs on.
+- F3: the plugin list is searched by the id as read; the 200-character cut is the printed copy's alone. F4: no launcher unless `HOME` is absolute.
+- F5, R2 amended: distinct ids are counted, so one id at `user` and `managed` stands; where its entries differ in version, the line prints the id alone.
+- F6, R2 amended: where the file gives no entry for a sibling (no file, unreadable, only `project` or `local`), the pin's read of the plugin list for `<name>@agentik` stands, byte for byte.
+
 ## 3. Interfaces
 
 - `doctor --json` (`agentik.doctor/1`): each check gains `source`, null or `{kind, plugin, root, version, declared}` (`seen` added for an undecided one). Nothing else moves.
