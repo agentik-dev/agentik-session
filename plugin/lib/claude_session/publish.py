@@ -32,11 +32,14 @@ or its ancestor, nothing more runs and the line is `already pushed`. No fetch is
 `proof`: S is proven checked green by a gate result under the state root (`<root>/gate/<id>/
 result.json`), the first of these that holds; a result that is no JSON object, or whose keys are
 of the wrong type, is no proof and no error:
-- a landing: `exit` 0, `repo` this checkout, `command` holding `land --in-job` (the job `gate
-  land` queues), and its log's last land line of this repo (`gate.last_line`) opens `ok `. The
-  sha it proves is the one after `, as ` when the line has that part, else the one after `ok `
-  (the sha given, a prefix allowed); it is S's second parent, S has exactly two, its first is
-  the result's `head`, and the proved sha's tree is S's.
+- a landing: `exit` 0, `repo` this checkout, `command` the one `gate land` queues, whole:
+  this runner's argv (`gate.self_argv()`), then `gate land --in-job <repo> <branch> <sha>
+  <merge>` and nothing after, `<repo>` this checkout; and its log's last land line of this repo
+  (`gate.last_line`) opens `ok <sha>`, that same `<sha>` (review 1, F1). The sha it proves is
+  the one after `, as ` when the line has that part (the head readied from `<sha>`), else
+  `<sha>` itself, a prefix allowed; `git rev-parse --verify <it>^{commit}` gives exactly S's
+  second parent, so an ambiguous or unknown prefix proves nothing (F3); S has exactly two
+  parents, its first is the result's `head`, and the proved sha's tree is S's.
 - a check: `exit` 0, `repo` this checkout, `head` S, `dirty` 0 at the start and at the end, and
   `command` `make check` alone, or `sh -c` (or `/bin/sh -c`) of the one simple command `make
   check` with redirections (`>`, `>>`, `>|`, `<`, each to a plain word, `N>&M`) and nothing else.
@@ -130,20 +133,26 @@ def landing_proves(doc, repo, name, s, parents):
     if not (_zero(doc.get("exit")) and _same(doc.get("repo"), repo) and _strs(command)
             and isinstance(log, str) and isinstance(gid, str) and isinstance(head, str)):
         return False
-    if not any(command[i:i + 2] == ["land", "--in-job"] for i in range(len(command))):
+    own = [*gate.self_argv(), "gate", "land", "--in-job"]
+    if not (len(command) == len(own) + 4 and command[:len(own)] == own
+            and _same(command[-4], repo)):
         return False
+    given = command[-2]
     prefix = "land %s: " % name
     line = gate.last_line(log, gid, prefix) or ""
     if not line.startswith(prefix + "ok "):
         return False
     rest = line[len(prefix + "ok "):]
+    if rest.split(",", 1)[0] != given:
+        return False
     if ", as " in rest:
         rest = rest.split(", as ", 1)[1]
     proved = rest.split(",", 1)[0].strip().lower()
     if len(parents) != 2 or not PREFIX.match(proved):
         return False
     first, second = parents
-    return (first == head and second.startswith(proved)
+    code, named = land.read(repo, "rev-parse", "--verify", "-q", proved + "^{commit}")
+    return (first == head and code == 0 and named == second and second.startswith(proved)
             and _tree(repo, second) is not None and _tree(repo, second) == _tree(repo, s))
 
 
