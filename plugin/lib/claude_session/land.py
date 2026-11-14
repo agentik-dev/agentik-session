@@ -14,7 +14,14 @@ there when present, then
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
 
-A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A
+A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A red
+check whose output's last line that opens `bounded: ` is `bounded: stop: lock`, `... load` or
+`... wall` adds `, unrun lock|load|wall` (packet gl1, R5): `scripts/bounded` refused the check
+or cut it at its wall, so it did not run to its end; the code is the step's, and `bounded:
+nested stop: <why>`, an inner bound's, is a plain red. The check writes to this run's stderr as
+at the pin, and the line is read from the job's own log (`main`'s `log`, the file that stderr
+is, by device and inode), from where the check began, its last 64 KiB; with no such log the
+line is the pin's. A
 `scripts/hygiene` that predates `--commits`, its --help failing or not naming the flag, scans the
 tree alone: a note says so, and the ok line ends `, range not scanned`. The steps'
 own output and these notes go to stderr. In the job both streams reach the job's log, so the
@@ -87,12 +94,15 @@ REACHED = "usage"   # the step this run is at, for an error that is no Red
 STANDS = ""         # once main has moved, what any red says beside its line
 LEFT = ""           # what the land line adds when a cut leaves staged paths alone
 UNSCANNED = ""      # what the ok line adds when the repo's hygiene predates --commits
+STOPS = {b"bounded: stop: " + why.encode(): why for why in ("lock", "load", "wall")}  # gl1 R5
+BOUNDED = b"bounded: "
+TAIL = 64 * 1024    # the most of the job's log a red check's stop line is looked for in
 
 
 class Red(Exception):
-    def __init__(self, step, code=1, note=""):
+    def __init__(self, step, code=1, note="", unrun=""):
         super().__init__(step)
-        self.step, self.code, self.note = step, code, note
+        self.step, self.code, self.note, self.unrun = step, code, note, unrun
 
 
 def on_cut(signum, frame):
@@ -139,6 +149,37 @@ def run(cwd, *argv):
         settle(child)
         raise
     return code if code >= 0 else 128 - code
+
+
+def log_size(log):
+    """The job's log's size when `log` is the file this run's stderr is, by device and
+    inode; else None, and no stop line is read."""
+    if not log:
+        return None
+    try:
+        sys.stderr.flush()
+        mine, there = os.fstat(sys.stderr.fileno()), os.stat(log)
+    except (OSError, ValueError):
+        return None
+    if (mine.st_dev, mine.st_ino) != (there.st_dev, there.st_ino):
+        return None
+    return there.st_size
+
+
+def last_bounded(log, begin):
+    """The last line of the log from `begin` (its last TAIL bytes at most) that opens
+    `bounded: `, as bytes, or None. A line cut by the TAIL is not read."""
+    try:
+        with open(log, "rb") as fh:
+            size = os.fstat(fh.fileno()).st_size
+            at = max(begin, size - TAIL)
+            fh.seek(at)
+            lines = fh.read(size - at).split(b"\n")
+    except (OSError, ValueError):
+        return None
+    if at > begin:
+        lines = lines[1:]
+    return next((x for x in reversed(lines) if x.startswith(BOUNDED)), None)
 
 
 def settle(child):
@@ -561,7 +602,7 @@ def resolve_repo(arg):
               % (os.path.join(code, arg), below))
 
 
-def land(repo, branch, sha, message):
+def land(repo, branch, sha, message, log=None):
     global UNSCANNED
     at("repo")
     blocks = worktrees(repo)
@@ -582,9 +623,11 @@ def land(repo, branch, sha, message):
 
     at("check")
     note("check: make check in " + tree)
+    begin = log_size(log)
     code = run(tree, "make", "check")
     if code != 0:
-        raise Red("check", code)
+        last = last_bounded(log, begin) if begin is not None else None
+        raise Red("check", code, unrun=STOPS.get(last, ""))
     at("hygiene")
     script = os.path.join(tree, "scripts", "hygiene")
     if os.path.lexists(script):
@@ -635,7 +678,7 @@ def land(repo, branch, sha, message):
         raise Red("branch", code, branch + " stays")
 
 
-def main(argv):
+def main(argv, log=None):
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     signal.signal(signal.SIGTERM, on_cut)
@@ -650,13 +693,15 @@ def main(argv):
         name = os.path.basename(os.path.normpath(argv[0]))
         repo = resolve_repo(argv[0])
         name = os.path.basename(repo)
-        land(repo, argv[1], argv[2], os.path.abspath(argv[3]))
+        land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log)
     except Exception as err:
         red = err if isinstance(err, Red) else Red(REACHED, 1, "%s: %s" % (type(err).__name__, err))
         for text in (red.note, STANDS):
             if text:
                 note(text)
-        print("land %s: red %s exit %d%s" % (name, red.step, red.code, LEFT and ", " + LEFT), flush=True)
+        print("land %s: red %s exit %d%s%s" % (name, red.step, red.code,
+                                               red.unrun and ", unrun " + red.unrun,
+                                               LEFT and ", " + LEFT), flush=True)
         return red.code
     print("land %s: ok %s, main readied%s" % (name, argv[2], UNSCANNED and ", " + UNSCANNED),
           flush=True)

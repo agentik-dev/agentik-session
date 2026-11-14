@@ -15,14 +15,14 @@
 - [x] tests first, red at the pin: 17 of 24 red at 7c1f711 (acceptance 1 to 6); the 7 green are the pin's own land lines (nested, none, a stop line on a green check, a stop line not the last) and line 7
 - [x] R1 to R3 the three keys, through `Fx` (`loads`, `dirty`); `_dirty` beside `_head`; a 127's end sides null, since no child was reaped
 - [x] R4 `status --json`'s done items (`DONE_KEYS`); `tests/test_fw2.py:78` the one line edited
-- [ ] R5 `unrun` on the land line
-- [ ] R6 the docstrings: gate.py's written
+- [x] R5 `unrun` on the land line, read from the tail of the job's own log (`land.log_size`, `land.last_bounded`; `gate land --in-job` passes the log); a tee was tried and refused by test_land's import pin and fw4c's t14
+- [x] R6 the docstrings: gate.py's and land.py's
 - [ ] the stamp, alone in the last commit under `plugin/`
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-R5, `unrun` in `land.py`.
+The stamp, then the gate once.
 
 ## Exit

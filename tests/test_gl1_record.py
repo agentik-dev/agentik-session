@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import cli, gate
+from claude_session import cli, gate, resolver
 from test_gate import ENV, T0, World
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -225,7 +225,6 @@ def run_cli(*argv):
 def test_gl1_5_status_json_done_items_carry_the_three(tmp_path, monkeypatch):
     monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    from claude_session import resolver
     root = resolver.state_dir(os.environ)
     old, new = "20261109-120000-1", "20261109-120000-2"
     base = {"repo": "/r/crate", "command": ["make", "check"], "exit": 0, "started": T0,
@@ -300,18 +299,41 @@ class Crate:
         return [sys.executable, str(RUNNER), "gate", "land", "--in-job", str(self.repo), "work",
                 self.sha, str(self.msg)]
 
+    def log(self):
+        return gate.entry_dir(resolver.state_dir(self.env), self.env[gate.JOB_MARK]) / "log"
+
+    def start(self):
+        """As a job: both streams to the job's own log, opened as the runner opens it."""
+        log = self.log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            return subprocess.Popen(self.argv(), env=self.env, stdin=subprocess.DEVNULL,
+                                    stdout=fd, stderr=subprocess.STDOUT)
+        finally:
+            os.close(fd)
+
     def land(self):
+        """(exit, the log's last land line, the log): what `gate land` reads of a job."""
+        rc = self.start().wait(timeout=120)
+        text = self.log().read_text()
+        line = [x for x in text.splitlines() if x.startswith("land crate: ")][-1]
+        return rc, line + "\n", text
+
+    def land_piped(self):
         p = subprocess.run(self.argv(), env=self.env, capture_output=True, text=True, timeout=120)
         return p.returncode, p.stdout, p.stderr
 
 
 @pytest.mark.parametrize("why", ["lock", "load", "wall"])
 def test_gl1_6_a_refused_check_reads_unrun(tmp_path, why):
-    crate = Crate(tmp_path, ["@echo one", "@echo two >&2", f"@echo 'bounded: stop: {why}' >&2; exit 3"])
-    rc, out, err = crate.land()
-    assert (rc, out) == (2, f"land crate: red check exit 2, unrun {why}\n"), err
-    tail = err.splitlines()[-2:]
+    crate = Crate(tmp_path, ["@echo one", "@echo two >&2",
+                             f"@echo 'bounded: stop: {why}' >&2; exit 3"])
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, f"land crate: red check exit 2, unrun {why}\n"), log
+    tail = log.splitlines()[-3:]
     assert tail[0] == f"bounded: stop: {why}" and tail[1].startswith("make: ")   # make writes after
+    assert tail[2] == out.strip()
 
 
 @pytest.mark.parametrize("lines,want", [
@@ -325,14 +347,41 @@ def test_gl1_6_a_refused_check_reads_unrun(tmp_path, why):
 ], ids=["nested", "none", "nested-last", "stop-last", "a-line-after", "not-a-stop", "indented"])
 def test_gl1_6_only_the_last_bounded_line_counts(tmp_path, lines, want):
     recipe = ["@echo one"] + [f"@echo '{x}'" for x in lines] + ["@exit 3"]
-    rc, out, err = Crate(tmp_path, recipe).land()
-    assert (rc, out) == (2, f"land crate: red check exit 2{want}\n"), err
+    rc, out, log = Crate(tmp_path, recipe).land()
+    assert (rc, out) == (2, f"land crate: red check exit 2{want}\n"), log
 
 
-def test_gl1_6_a_stop_line_on_a_green_check_is_no_red(tmp_path):
+def test_gl1_6_a_stop_line_before_the_check_or_on_a_green_one_is_no_unrun(tmp_path):
     crate = Crate(tmp_path, ["@echo 'bounded: stop: load' >&2"])
-    rc, out, err = crate.land()
-    assert (rc, out) == (0, f"land crate: ok {crate.sha}, main readied\n"), err
+    rc, out, log = crate.land()
+    assert (rc, out) == (0, f"land crate: ok {crate.sha}, main readied\n"), log
+    again = tmp_path / "again"
+    again.mkdir()
+    crate = Crate(again, ["@exit 3"])
+    crate.log().parent.mkdir(parents=True)
+    crate.log().write_text("bounded: stop: load\n")          # the log's, before the check began
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), log
+
+
+def test_gl1_6_with_no_job_log_for_stderr_the_line_is_the_pins(tmp_path):
+    crate = Crate(tmp_path, ["@echo 'bounded: stop: load' >&2; exit 3"])
+    rc, out, err = crate.land_piped()                       # stderr a pipe, the log absent
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), err
+    crate.log().parent.mkdir(parents=True)
+    crate.log().write_text("bounded: stop: load\n")          # a log there, not this stderr
+    rc, out, err = crate.land_piped()
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), err
+    assert gate.ID.match(crate.env[gate.JOB_MARK])
+    crate.env[gate.JOB_MARK] = "not-an-id"                  # no log is named for it
+    log = tmp_path / "elsewhere.log"
+    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        rc = subprocess.run(crate.argv(), env=crate.env, stdin=subprocess.DEVNULL, stdout=fd,
+                            stderr=subprocess.STDOUT, timeout=120).returncode
+    finally:
+        os.close(fd)
+    assert (rc, log.read_text().splitlines()[-1]) == (2, "land crate: red check exit 2")
 
 
 def test_gl1_7_the_checks_output_reaches_the_log_as_it_comes_in_order(tmp_path):
@@ -341,15 +390,9 @@ def test_gl1_7_the_checks_output_reaches_the_log_as_it_comes_in_order(tmp_path):
               "@printf part; sleep 0.2; printf 'ial\\n' >&2",
               f'@echo early >&2; n=0; while [ ! -e "{go}" ] && [ $$n -lt 400 ]; do '
               f'sleep 0.05; n=$$((n+1)); done; [ $$n -lt 400 ] || echo "never went"',
-              "@echo late", "@echo last >&2; exit 3"]
+              "@echo late", "@echo 'bounded: stop: wall' >&2", "@echo last >&2; exit 3"]
     crate = Crate(tmp_path, recipe)
-    log = tmp_path / "job.log"
-    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)  # as the runner opens it
-    try:
-        p = subprocess.Popen(crate.argv(), env=crate.env, stdin=subprocess.DEVNULL, stdout=fd,
-                             stderr=subprocess.STDOUT)
-    finally:
-        os.close(fd)
+    p, log = crate.start(), crate.log()
 
     def watch():
         for _ in range(400):
@@ -364,6 +407,14 @@ def test_gl1_7_the_checks_output_reaches_the_log_as_it_comes_in_order(tmp_path):
     lines = log.read_text().splitlines()
     i = lines.index(f"land-step: check: make check in {crate.tree}")
     want = [x for n in range(1, 21) for x in (f"out{n}", f"err{n}")] + [
-        "partial", "early", "late", "last", "make: *** [check] Error 3",
-        "land crate: red check exit 2"]
+        "partial", "early", "late", "bounded: stop: wall", "last",
+        "make: *** [check] Error 3", "land crate: red check exit 2, unrun wall"]
     assert lines[i + 1:] == want
+
+
+def test_gl1_7_a_writer_the_check_leaves_behind_cannot_hold_the_landing(tmp_path):
+    crate = Crate(tmp_path, ["@echo 'bounded: stop: wall' >&2", "@(sleep 6; echo late) & exit 3"])
+    t = time.monotonic()
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2, unrun wall\n"), log
+    assert time.monotonic() - t < 5.5

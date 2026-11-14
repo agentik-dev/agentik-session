@@ -5,7 +5,7 @@
 | from | the hq coordinator, 2026-11-14, brief gl1 (a packet row, a small one, level S4); hq design/19 §3 item 10 and §6's row gl1 |
 | pin | `7c1f711` on main (2.0.0-alpha.113, the merge of ss5-meter-rest). Worktree `.claude/worktrees/gl1-gate-record`, branch `gl1-gate-record`; `.venv`, `.venv-floor` linked from the main checkout |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make` (the gate queue only, once, last); no `claude`; every test fakes its runner in a temp state root, and none starts, stops or signals the installed runner or reads the live gate folder; no relay verb |
-| may touch | `plugin/lib/claude_session/gate.py` (`RESULT_KEYS`, `Fx`, `_start`, `_close`, `_finish`, `status`, the module docstring, two readers beside `_head`), `plugin/lib/claude_session/land.py` (the check step, `Red`, the red line, the docstring), `tests/test_gl1_record.py` (new), `tests/test_fw2.py` (line 78, the count), this packet, `history/sittings/2026-11-14-2-gl1-gate-record.md`; in the last commit alone, the stamp's files |
+| may touch | `plugin/lib/claude_session/gate.py` (`RESULT_KEYS`, `Fx`, `_start`, `_close`, `_finish`, `status`, the module docstring, two readers beside `_head`), `plugin/lib/claude_session/land.py` (the check step, `Red`, the red line, the docstring), `plugin/lib/claude_session/cli.py` (`_gate_land`'s `--in-job` branch passes the job's log), `tests/test_gl1_record.py` (new), `tests/test_fw2.py` (line 78, the count), this packet, `history/sittings/2026-11-14-2-gl1-gate-record.md`; in the last commit alone, the stamp's files |
 | verify | `make check` through the gate queue, once, last |
 | acceptance | §3; `tests/test_gl1_record.py` green under `.venv` and `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
@@ -33,7 +33,7 @@ A gate result says what ran and how it ended, and nothing of the machine: design
 - `gate._dirty(repo) -> int | None`, beside `_head`: the git child in a session of its own, so a wait that passes kills its group and never waits on a grandchild's pipe.
 - `Fx.loads` (default `os.getloadavg`) and `Fx.dirty` (default `_dirty`). At the start the runner reads `dirty`, then `load`, after the head and before `started`; at the end `load`, then `dirty`, after `ended`. So neither read moves a job's `seconds`.
 - 127: the start sides and `beside` as read; the end sides null, since no child was reaped. 125, 126 and a caller's 130 before a start: every side null and `beside` null.
-- `land.run_check(cwd, *argv) -> (code, line)`: the check's two streams in one pipe, a reader thread passing each chunk to stderr as it is read and keeping the last line that opens `bounded: `; joined for up to `TEE_WAIT` after the child is reaped, so a grandchild that keeps the pipe open cannot hold the landing.
+- The stop line is read from the tail of the job's own log, not a tee: `land.main(argv, log=None)`; `gate land --in-job` passes `<state>/gate/<mark>/log`. `land.log_size(log)` takes the log's size just before the check, and only when the log is this run's stderr by device and inode; after a red check, `land.last_bounded(log, begin)` reads from there (its last 64 KiB at most) the last line that opens `bounded: `. So the check writes to stderr exactly as at the pin, and a writer it leaves behind still reaches the log until the runner's close. A tee was built first and refused by two unedited tests: `tests/test_land.py` pins `land.py`'s imports (no `threading`), and `tests/test_fw4c.py`'s t14 needs a leftover writer's lines after the land line, which a tee loses once land exits.
 
 All in `tests/test_gl1_record.py`, a faked runner in a temp state root and made-up repos.
 
@@ -45,7 +45,7 @@ All in `tests/test_gl1_record.py`, a faked runner in a temp state root and made-
 | 4 | a load read that raises: `load.start` null, one line in the runner's log, the job runs | no such key |
 | 5 | `status --json`: a new result's `done` item carries the three; a 12-key result's carries three nulls; the text status byte-equal to the pin's | `id`, `repo`, `exit`, `seconds`, `cut` |
 | 6 | `crate`'s check writes `bounded: stop: load` and exits 3: `land crate: red check exit 2, unrun load`, exit 2; the same for `lock` and `wall`; `nested stop: wall`, and a red with no such line, give the pin's line | `land crate: red check exit 2` |
-| 7 | the check's output in the job's log is the pin's, line for line and in order, and reaches it while the check runs | green |
+| 7 | the check's output in the job's log is the pin's, line for line and in order, and reaches it while the check runs; a writer the check leaves behind holds no landing | the check's lines green; the land line red (no `unrun`) |
 | 8 | `tests/test_fw2.py` passes with line 78 edited (the count 12 to 15); `tests/test_gate.py` and the land tests unedited | green |
 | 9 | both venvs; `make check` once, last, through the gate queue; the next alpha by `make stamp`, its files alone as the last commit under `plugin/` | green at alpha.113 |
 

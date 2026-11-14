@@ -1583,7 +1583,10 @@ def _gate_land(root, args, env) -> int:
             _die("gate land --in-job runs only inside a gate job, which sets "
                  f"{gate.JOB_MARK}; queue it: agentik session gate land <repo> <branch> <sha> "
                  "<merge-file>", 2)
-        return land.main(list(args.args))
+        # gl1 R5: the job's own log, where a red check's stop line is read (land.log_size
+        # trusts it only when it is the job's stderr).
+        log = str(gate.entry_dir(root, mark) / "log") if gate.ID.match(mark) else None
+        return land.main(list(args.args), log)
     if mark:
         _die(f"gate land: this is gate job {mark[:40]}; a landing queued here waits on its "
              "own repo until the wall cuts it: run gate land --in-job", 2)
