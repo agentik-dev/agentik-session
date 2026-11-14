@@ -167,7 +167,7 @@ def test_r5_depth_three():
             s = "sh -c " + unattended.shlex.quote(s)
         return s
     assert all(unattended.unbounded(nest(n)) for n in range(5))  # nest(4): a word at depth 3
-    assert unattended.unbounded(nest(5)) == ""                # a fourth -c text, not read
+    assert unattended.unbounded(nest(5))   # g8a R9: a text below the first level, unread, holds make
 
 
 # ---- round 1: F1 (every word after -c), F3 (a word's $( text), F5 (the name) ------------
@@ -195,8 +195,7 @@ def test_r1_f3_a_words_substitution_is_a_text():
 def test_r1_f3_the_substitution_counts_on_the_depth():
     line = 'd="$(make -n x)"'
     assert _refused("sh -c " + unattended.shlex.quote(line))         # its text at depth 2
-    assert unattended.unbounded(line, unattended.SHELL_DEPTH - 1)   # its text at depth 3: read
-    assert unattended.unbounded(line, unattended.SHELL_DEPTH) == ""  # a fourth text: not read
+    assert unattended.unbounded(line)       # g8a R9: a substitution counts no level; no depth
 
 
 def test_r1_f5_the_name_case_blind_and_gnumake():
