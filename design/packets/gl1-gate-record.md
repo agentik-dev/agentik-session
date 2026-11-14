@@ -49,10 +49,14 @@ All in `tests/test_gl1_record.py`, a faked runner in a temp state root and made-
 | 8 | `tests/test_fw2.py` passes with line 78 edited (the count 12 to 15); `tests/test_gate.py` and the land tests unedited | green |
 | 9 | both venvs; `make check` once, last, through the gate queue; the next alpha by `make stamp`, its files alone as the last commit under `plugin/` | green at alpha.113 |
 
-## 4. Left
+## 4. Findings that name this row
 
-A hold on a first start (design/19 §4: built only when 14 days of these loads show it is owed); `gate status --repo` and `head` on its lines (rw3); the proof of green that reads `dirty` (land5); the ready step (land4, which keeps `unrun` in the line).
+- None at the cut. Left to later rows: a hold on a first start (design/19 §4: built only when 14 days of these loads show it is owed); `gate status --repo` and `head` on its lines (rw3); the proof of green that reads `dirty` (land5); the ready step (land4, which keeps `unrun` in the line).
 
-## 5. Report
+## 5. Forbidden reads
+
+No live state root (`~/.local/state`, the gate folder and its runner included), no transcript, no file under `~/.claude`, no relay ledger, no hq checkout beyond the brief.
+
+## 6. Report
 
 The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the choices made, what was not done.
