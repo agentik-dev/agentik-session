@@ -16,13 +16,13 @@
 - [x] R2 the pass's words, and the newest session's note
 - [x] R3 an unreadable tail: own session today's verdict, newest a `warn`; the bound `TAIL_MAX` 4 MiB
 - [x] R4 the five cases byte-equal to the pin; `test_bare_machine`'s NOT_STATE gains `_missed_call`
-- [ ] R5 the stamp
+- [x] R5 the stamp `2.0.0-alpha.113` (4504 tests); `plugin-version-check` exit 0; README source 16,374 B
 - [ ] the commit scan `main..HEAD`: exit 0
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-The stamp (R5), the commit scan, then the gate once.
+The commit scan, then the gate once on this commit.
 
 ## Exit
