@@ -443,7 +443,9 @@ def test_gl1_f3_a_stop_line_that_opens_the_tail_is_read(tmp_path):
     probe = tmp_path / "probe"                       # make's error line, as this make writes it
     probe.mkdir()
     (probe / "Makefile").write_text("check:\n\t@echo pre\n\t@exit 2\n")
-    made = subprocess.run(["make", "-C", str(probe), "--no-print-directory", "check"],
+    env = {k: v for k, v in os.environ.items()                # as land.main runs make
+           if k not in ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKELEVEL")}
+    made = subprocess.run(["make", "-C", str(probe), "--no-print-directory", "check"], env=env,
                           capture_output=True).stderr.splitlines()[-1] + b"\n"
     stop = b"bounded: stop: load\n"
     fill = land.TAIL - len(stop) - len(made)

@@ -27,7 +27,7 @@
 - [x] F3 (S4), `land.tail_lines` (and a unit test of the cut, the whole and the begin): the tail drops its first line only when the byte before it is not a newline
 - [x] the NICE row n240 (a slow dirty read delays the runner's other jobs)
 - [x] the stamp `2.0.0-alpha.115`, 4544 tests (scripts/stamp); plugin.json the only path under plugin/ in its commit
-- [ ] the gate once; both scans
+- [ ] the gate: `20261114-030011-1853` exit 2 on 0613245 (F3's edge test, its probe make saw the gate's MAKELEVEL, which land strips: fixed in the test); the second run; both scans
 
 ## Handover
 
