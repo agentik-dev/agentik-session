@@ -998,7 +998,7 @@ def do_merge(tree, branch, given, ours, plan):
 
 def changed_paths(tree):
     """The worktree's changes as (status, path), the `.venv` link aside."""
-    fields = iter(read_z(tree, *STATUS, "-z")[1])
+    fields = iter(read_z(tree, *STATUS, "--no-renames", "-z")[1])
     out = []
     for entry in fields:
         if "R" in entry[:2] or "C" in entry[:2]:
@@ -1009,12 +1009,18 @@ def changed_paths(tree):
 
 
 def restore(tree, changed):
-    """R5: the stamp's paths back as HEAD has them; a file it made is removed."""
-    tracked = [p for s, p in changed if s != "??"]
-    if tracked:
-        run(tree, "git", "checkout", "-q", "HEAD", "--", *tracked)
-    for s, p in changed:
-        if s == "??":
+    """R5: the stamp's paths back as HEAD has them, the index too; a file it added, staged or
+    not, is removed (review 1, F4 and F7)."""
+    staged = [p for s, p in changed if s != "??"]
+    if staged:
+        run(tree, "git", "reset", "-q", "--", *staged)
+    paths = [p for _, p in changed]
+    kept = set(read_z(tree, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", *paths)[1]) \
+        if paths else set()
+    if kept:
+        run(tree, "git", "checkout", "-q", "HEAD", "--", *sorted(kept))
+    for p in paths:
+        if p not in kept and os.path.lexists(os.path.join(tree, p)):
             try:
                 os.remove(os.path.join(tree, p))
             except OSError:
@@ -1075,25 +1081,25 @@ def do_stamp(tree, branch, given, base):
     note("stamp: make stamp in " + tree)
     try:
         code = run(tree, "make", "stamp", "STAMP_BASE=" + base)
-    except Red:
-        restore(tree, changed_paths(tree))     # a cut: the next call meets a clean worktree
+        changed = changed_paths(tree)
+        if code != 0:
+            raise Red("stamp", code, "make stamp exit %d; its paths restored" % code)
+        bad = stamp_diff_off(tree, changed)
+        if bad:
+            raise Red("stamp", 1, "make stamp wrote beyond the lines a landing derives; its paths "
+                      "restored:\n" + "\n".join(bad))
+        if not changed:
+            return False
+        code = run(tree, "git", "add", "--", *sorted(p for _, p in changed))
+        if code != 0:
+            raise Red("stamp", code, "git add exit %d in %s" % (code, tree))
+        commit_job(tree, "%s: plugin %s" % (branch, version_in(tree) or "?"), given)
+        return True
+    except BaseException:
+        # Any red or cut between `make stamp` and its commit: the next call meets a clean
+        # worktree, the index too (review 1, F4 and F7).
+        restore(tree, changed_paths(tree))
         raise
-    changed = changed_paths(tree)
-    if code != 0:
-        restore(tree, changed)
-        raise Red("stamp", code, "make stamp exit %d; its paths restored" % code)
-    bad = stamp_diff_off(tree, changed)
-    if bad:
-        restore(tree, changed)
-        raise Red("stamp", 1, "make stamp wrote beyond the lines a landing derives; its paths "
-                  "restored:\n" + "\n".join(bad))
-    if not changed:
-        return False
-    code = run(tree, "git", "add", "--", *sorted(p for _, p in changed))
-    if code != 0:
-        raise Red("stamp", code, "git add exit %d in %s" % (code, tree))
-    commit_job(tree, "%s: plugin %s" % (branch, version_in(tree) or "?"), given)
-    return True
 
 
 def taken_head(repo, tree, branch, sha, dry=False):
