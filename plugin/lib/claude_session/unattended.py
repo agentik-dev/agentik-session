@@ -10,6 +10,7 @@ the 3.9 floor (hq entry 6); every effect is an `Fx` field, as `gate.py`'s.
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import re
@@ -28,7 +29,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import admission, gate, resolver, yamlsubset
-from .shellreader import _SHELLS, _commands, _substituted  # packet u3 R5: the hook's reader
+from .shellreader import _NEST, _SUB_OUT, _Bound, _sinks, commands  # g8a R9: the one walk
 
 QUEUE = Path("relay") / "queue.yaml"
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
@@ -666,49 +667,148 @@ def acceptance(text: str) -> list:
 # Packet u3 R5: a line that runs make is refused before the row's stage (design/07 §2
 # item 4): a make runs only through the gate queue, and the land step runs the check.
 MAKES = ("make", "gmake", "gnumake")   # by basename, case-blind (round 1 F5)
-SHELL_DEPTH = 3                  # the shells' `-c` texts read, nested
 LINE_SHOWN = 80                  # R6: the line in the log, cut
-_DASH_C = re.compile(r"^-[A-Za-z]*c[A-Za-z]*\Z")
 WHY_MAKE = "a make runs only through the gate queue, and the land step runs the check"
+_WORDS = re.compile(r"[\s;&|()<>'\"`$]+")
 
 
-def unbounded(shell: str, depth: int = 0) -> str:
-    """Why the line may not run, "" when it may: read with the hook's reader
-    (`instructionguard._commands`), it is refused when the reader cannot split it, when a
-    word of a simple command, by basename and case-blind, is `make`, `gmake` or `gnumake`
-    (round 1 F5; a shell's name is compared case-blind too), or when a shell's `-c` text is,
-    to depth SHELL_DEPTH. Once a word after a shell is `-c` (a flag cluster holding `c`),
-    every later word of that command is a text, whatever flags sit around it (round 1 F1); a
-    word's `$(` text is one too, on the same depth count (F3)."""
+_UNQUOTE = re.compile(r"\\\n|[\\'\"]")     # g8a r1 F1: as a shell spells a word
+
+
+def _brace_pairs(w: str) -> tuple:
+    """g8a r2 F1: the brace pairs of `w`, in one pass: each `{` whose next brace is a `}` with a
+    comma between, as the sorted lists of their starts and their ends."""
+    starts, ends, start, comma = [], [], -1, False
+    for k, ch in enumerate(w):
+        if ch == "{":
+            start, comma = k, False
+        elif ch == ",":
+            comma = True
+        elif ch == "}":
+            if start >= 0 and comma:
+                starts.append(start)
+                ends.append(k)
+            start = -1
+    return starts, ends
+
+
+def _braces(w: str) -> list:
+    """g8a r1 F5: a word's brace expansions (`{ma,}ke` is `make` and `ke`), innermost first,
+    at most 256 words and 1024 steps.
+
+    r2 F1, F2: a word waiting is held as `(x, k, s)`, where `x[k:]` is `w[s:]` and `x[:k]`
+    holds no whole pair; so its leftmost pair is the one across `k` or `w`'s first pair from
+    `s`, and `w`'s pairs are found once, by one scan. A brace's alternatives are built one at a
+    time, last first, as they are taken, so the cap is met before more are built."""
+    starts, ends = _brace_pairs(w)
+
+    def pair(x, k, s):
+        o = max(x.rfind("{", 0, k), x.rfind("}", 0, k))     # x[:k]'s last brace
+        if o >= 0 and x[o] == "{":
+            c = [p for p in (w.find("{", s), w.find("}", s)) if p >= 0]
+            c = min(c) if c else -1                          # w[s:]'s first brace
+            if c >= 0 and w[c] == "}" and (x.find(",", o + 1, k) >= 0 or w.find(",", s, c) >= 0):
+                return o, k + c - s
+        n = bisect.bisect_left(starts, s)
+        return (starts[n] + k - s, ends[n] + k - s) if n < len(starts) else None
+
+    def alternatives(x, i, j, k, s):
+        head, group, s2, end = x[:i], x[i + 1:j], s + j + 1 - k, j - i - 1
+        while True:
+            c = group.rfind(",", 0, end)
+            a = group[c + 1:end]
+            yield head + a + w[s2:], i + len(a), s2
+            if c < 0:
+                return
+            end = c
+
+    todo, out = [iter(((w, 0, 0),))], []
+    for _ in range(1024):
+        item = None
+        while todo and item is None and len(out) < 256:
+            item = next(todo[-1], None)
+            if item is None:
+                todo.pop()
+        if item is None:
+            break
+        x, k, s = item
+        p = pair(x, k, s)
+        if p:
+            todo.append(alternatives(x, p[0], p[1], k, s))
+        else:
+            out.append(x)
+    return out
+
+
+def _make_word(words) -> str | None:
+    """The first of `words` that is a make name, by basename and case-blind, a word's brace
+    expansions included (r1 F5)."""
+    for w in words:
+        for x in (_braces(w) if "{" in w and "," in w else (w,)):
+            if os.path.basename(x).lower() in MAKES:
+                return os.path.basename(x)
+    return None
+
+
+def _make_in(text: str, depth: int) -> str | None:
+    """g8a r1 F1: the make word of a text the reader does not read, or None. The text is read
+    as a shell spells it: walked by the reader's own walk, every word of every command and every
+    text it does not read in turn (to `_NEST` texts deep; past it, `_Bound`); and, where the walk
+    cannot split it or wherever a word hides in a comment or a longer one, split as build 2
+    split it and again after `\\`-NL, `\\` and quotes come off (`["make", "x"]` is held by the
+    first, `m\\ake` by the second); a substitution's output is read as empty."""
+    bare = text.replace(_SUB_OUT, "")
+    found = _make_word(_WORDS.split(bare)) or _make_word(_WORDS.split(_UNQUOTE.sub("", bare)))
+    if found:                             # build 2's split, and the one with the quotes off
+        return found
+    if depth > _NEST:
+        raise _Bound(text[:80])
+    cmds, unread = commands(text, None, {})
+    for c in cmds:
+        found = _make_word(c.pre + [c.name] + c.args)
+        if found:
+            return found
+    for u in unread:
+        found = u.why != "split" and _make_in(u.text, depth + 1)
+        if found:
+            return found
+    return None
+
+
+def unbounded(shell: str) -> str:
+    """Why the line may not run, "" when it may: read through the reader's one walk
+    (`shellreader.commands`, packet g8a R9), it is refused when the reader cannot split it (or
+    reads past its bound), when a word of a command at any level, by basename and case-blind,
+    is `make`, `gmake` or `gnumake` (round 1 F5), or when a text the reader does not read (an
+    `eval`'s, a shell's below the first level, one piped into a shell, a shell's `-c` text
+    behind a runner, a heredoc's body or here-string read as no script) holds one as a shell
+    spells it (r1 F1, `_make_in`); a body or here-string passes where the line's only commands
+    are data sinks (r1 N1, `shellreader._sinks`). A substitution glued to the command word is read as empty (`$(true)make`).
+    Nothing but this text comes out (r1 F4)."""
     try:
-        cmds = list(_commands(shell))
-    except ValueError as e:
-        return f"the hook's reader cannot split it ({e}), so it may run a make; {WHY_MAKE}"
-    for words, outs in cmds:
-        if outs is None:                  # a subshell's edge
-            continue
-        shell_seen = texts = False
-        for w in words:
-            name = os.path.basename(w).lower()
-            if name in MAKES:
-                return f"it runs `{os.path.basename(w)}`; {WHY_MAKE}"
-            if depth >= SHELL_DEPTH:
-                continue
-            if texts:
-                why = unbounded(w, depth + 1)
-                if why:
-                    return why
-            elif shell_seen and _DASH_C.match(w):
-                texts = True
-            elif name in _SHELLS:
-                shell_seen = True
-        if depth >= SHELL_DEPTH:
-            continue
-        for w in words + outs:            # round 1 F3: a quoted `$(`, a text on the same count
-            for text in _substituted(w):
-                why = unbounded(text, depth + 1)
-                if why:
-                    return why
+        cmds, unread = commands(shell, None, {})
+        if any(u.why == "split" for u in unread):
+            return f"the hook's reader cannot split it, so it may run a make; {WHY_MAKE}"
+        found = None
+        for c in cmds:
+            found = _make_word(c.pre + [c.name] + c.args)
+            if found:
+                return f"it runs `{found}`; {WHY_MAKE}"
+        sink = None
+        for u in unread:
+            found = _make_in(u.text, 1)
+            if found and u.why == "data":     # r1 N1: what is true, and the way out
+                sink = _sinks(shell) if sink is None else sink
+                if not sink:
+                    return (f"a heredoc's body or a here-string holds `{found}`: text the "
+                            f"reader could not rule out as run, so it may run a make; write "
+                            f"the file with the editor tool, or keep the word out of the line; "
+                            f"{WHY_MAKE}")
+            elif found:
+                return (f"it runs `{found}` in a text the reader does not read ({u.why}); "
+                        f"{WHY_MAKE}")
+    except (_Bound, RecursionError):
+        return f"the hook's reader cannot split it (past its bound), so it may run a make; {WHY_MAKE}"
     return ""
 
 

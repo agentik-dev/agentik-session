@@ -1,0 +1,305 @@
+"""Packet ss1-zero: a new session reads 0% from its first moment.
+
+SessionStart, once it has written resolved.json, writes the session's first meter.json by
+PostToolUse's own parse and save (R1); a transcript absent or unreadable is zero turns, and a
+meter already on disk is replaced only by a parse that succeeded. Any failure there is
+swallowed and the context is the pin's, byte for byte (R2). The readers stand (R3): `status`,
+doctor's `meter` check read the meter as written; the module's `bandLine` over it (lines 2,
+3 and 8) is tested in test_mod.py, the one reader of the module's files. Each case in a temp
+HOME, a made-up session id and a temp repo; no `claude`."""
+import io
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
+import pytest
+
+from claude_session import cli, doctor, hooks, meter, resolver
+
+ROOT = Path(__file__).resolve().parents[1]
+SID = "ss1-zero-sess-0000-1111"
+
+
+@pytest.fixture
+def env(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    return dict(os.environ)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    r = tmp_path / "repo"
+    r.mkdir()
+    subprocess.run(["git", "init", "-q", str(r)], check=True)
+    return r
+
+
+def sdir(env):
+    return resolver.session_dir(resolver.state_dir(env), SID)
+
+
+def transcript(tmp_path, turns, name="t.jsonl"):
+    """`turns` assistant lines at 1000 tokens of context; 0 turns is an empty file."""
+    rows = [{"type": "assistant", "requestId": f"r{i}", "timestamp": "2026-11-13T10:00:00Z",
+             "message": {"id": f"m{i}", "model": "claude-opus-5-5",
+                         "content": [{"type": "text", "text": "<placeholder>"}],
+                         "usage": {"input_tokens": 0, "cache_creation_input_tokens": 0,
+                                   "cache_read_input_tokens": 1000, "output_tokens": 7}}}
+            for i in range(turns)]
+    p = tmp_path / name
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return p
+
+
+def start(env, repo, tp, source="startup"):
+    return hooks.session_start({"session_id": SID, "transcript_path": str(tp), "cwd": str(repo),
+                                "hook_event_name": "SessionStart", "source": source}, env)
+
+
+def status():
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            rc = cli.main(["status"])
+        except SystemExit as e:
+            rc = e.code
+    return rc, out.getvalue(), err.getvalue()
+
+
+def zero_reads(env):
+    """Acceptance 1 over the meter written: `status` (the band's line: test_mod.py)."""
+    rc, out, err = status()
+    assert rc == 0, err
+    line = out.splitlines()[0]
+    assert "0.0% context" in line and "0.0% turns" in line and "zone clear" in line, line
+
+
+# ---- acceptance 1: an empty transcript --------------------------------------------
+
+def test_1_an_empty_transcript_reads_zero_in_status(env, repo, tmp_path):
+    start(env, repo, transcript(tmp_path, 0))
+    zero_reads(env)
+
+
+# ---- acceptance 3: a transcript that does not exist ------------------------------------
+
+def test_3_an_absent_transcript_reads_zero_in_status(env, repo, tmp_path):
+    gone = tmp_path / "not-yet.jsonl"
+    start(env, repo, gone)
+    zero_reads(env)
+    m = meter.load(sdir(env))
+    assert m["turns"] == 0 and m["transcript"]["path"] == str(gone)
+
+
+# ---- acceptance 4: a resume reads the transcript's turns, as PostToolUse would ------------
+
+def test_4_a_resume_says_four_turns_as_post_tool_use_would(env, repo, tmp_path):
+    tp = transcript(tmp_path, 4)
+    start(env, repo, tp, source="resume")
+    rc, out, _ = status()
+    assert rc == 0 and "turns (4/" in out.splitlines()[0], out
+    by_start = meter.load(sdir(env))
+    for f in (meter.METER, meter.STATE):
+        (sdir(env) / f).unlink()
+    hooks.post_tool_use({"session_id": SID, "transcript_path": str(tp), "tool_name": "Read"}, env)
+    by_tool = meter.load(sdir(env))
+    for d in (by_start, by_tool):
+        d.pop("ts")
+    assert by_start == by_tool and by_start["turns"] == 4
+
+
+def test_r1_a_meter_on_disk_is_replaced_only_by_a_parse_that_succeeded(env, repo, tmp_path):
+    hooks.post_tool_use({"session_id": SID, "transcript_path": str(transcript(tmp_path, 4)),
+                         "tool_name": "Read"}, env)
+    before = (sdir(env) / meter.METER).read_bytes()
+    start(env, repo, tmp_path / "gone.jsonl", source="resume")
+    assert (sdir(env) / meter.METER).read_bytes() == before
+
+
+# ---- acceptance 5, 6: the hook never breaks a session; the context is the pin's ------------
+
+def _pin_and_now(env, repo, tmp_path, monkeypatch, tp, source="startup", wrap=None):
+    """(the hook's output with R1's writer a no-op, as at the pin; the same with it), each
+    over a fresh state root at the same path."""
+    outs = []
+    for writer in (lambda *a, **k: None, hooks._first_meter):
+        root = resolver.state_dir(env)
+        for d in (root.rglob("*") if root.exists() else ()):
+            if d.is_dir():                      # a folder the last run made read-only
+                os.chmod(d, stat.S_IRWXU)
+        shutil.rmtree(root, ignore_errors=True)
+        with monkeypatch.context() as mp:
+            mp.setattr(hooks, "_first_meter", writer)
+            if wrap is not None:
+                wrap(mp)
+            outs.append(start(env, repo, tp, source))
+    return outs
+
+
+def test_5_an_unwritable_meter_is_swallowed_and_today_s_json_returned(env, repo, tmp_path,
+                                                                        monkeypatch):
+    real = resolver.save_request
+    made = []
+
+    def read_only(d, *a, **k):         # the session folder made read-only once resolved
+        real(d, *a, **k)
+        os.chmod(d, stat.S_IRUSR | stat.S_IXUSR)
+        made.append(Path(d))
+
+    try:
+        pin, now = _pin_and_now(env, repo, tmp_path, monkeypatch, transcript(tmp_path, 0),
+                                wrap=lambda mp: mp.setattr(resolver, "save_request", read_only))
+    finally:
+        for d in made:
+            if d.exists():
+                os.chmod(d, stat.S_IRWXU)
+    assert now == pin and now["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert not (sdir(env) / meter.METER).exists()
+
+
+def test_5_the_hook_exits_0_where_the_meter_cannot_be_written(env, repo, tmp_path):
+    (sdir(env) / meter.METER).mkdir(parents=True)        # a folder where the file goes
+    r = subprocess.run([sys.executable, "-m", "claude_session", "hook", "SessionStart"],
+                       input=json.dumps({"session_id": SID, "cwd": str(repo),
+                                         "transcript_path": str(transcript(tmp_path, 0)),
+                                         "hook_event_name": "SessionStart", "source": "startup"}),
+                       capture_output=True, text=True, cwd=ROOT, env=env, timeout=120)
+    assert r.returncode == 0 and r.stderr == "", r.stderr
+    assert hooks.START_METER in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("turns, source", [(0, "startup"), (None, "startup"), (4, "resume")])
+def test_6_the_context_is_the_pin_s_byte_for_byte(env, repo, tmp_path, monkeypatch, turns,
+                                                 source):
+    tp = tmp_path / "gone.jsonl" if turns is None else transcript(tmp_path, turns)
+    pin, now = _pin_and_now(env, repo, tmp_path, monkeypatch, tp, source)
+    ctx = now["hookSpecificOutput"]["additionalContext"]
+    assert ctx.encode() == pin["hookSpecificOutput"]["additionalContext"].encode()
+    assert now == pin and meter.load(sdir(env)) is not None
+
+
+# ---- acceptance 7: doctor's meter check, before any tool call ------------------------------
+
+def test_7_doctor_finds_the_meter_ok_before_any_tool_call(env, repo, tmp_path):
+    start(env, repo, transcript(tmp_path, 0))
+    c = doctor._check_meter(env)
+    assert c.ok and "0.0% context, 0.0% turns, zone clear" in c.detail, c.detail
+
+
+# ---- R3: the readers' fault words stand (line 8: test_mod.py) -----------------------------------
+
+def test_r3_status_with_no_session_folder_still_exits_2(env):
+    rc, _, err = status()
+    assert rc == 2 and "no meter for this session" in err
+
+
+# ---- R4: where SessionStart resolves it writes the meter; where it returns early, none -------
+
+def test_r4_a_helper_s_session_start_writes_its_meter(env, repo, tmp_path):
+    env = {**env, "CLAUDE_SESSION_HELPER": "1", "CLAUDE_SESSION_PROFILE": "orchestrator"}
+    start(env, repo, transcript(tmp_path, 0))
+    assert meter.load(sdir(env))["zone"] == "clear"
+
+
+def test_r4_an_early_return_writes_no_meter(env, repo, tmp_path, monkeypatch):
+    def fails(*a, **k):
+        raise RuntimeError("no layers")
+    monkeypatch.setattr(resolver, "resolve", fails)
+    out = start(env, repo, transcript(tmp_path, 0))
+    assert "hookSpecificOutput" not in out
+    root = resolver.state_dir(env)
+    assert not root.exists() or not list(root.rglob(meter.METER))
+
+
+
+# ---- review 1: each finding's reproduction ---------------------------------------------------
+
+def _prompt(sid=SID):
+    return hooks.user_prompt_submit({"session_id": sid, "hook_event_name": "UserPromptSubmit",
+                                     "prompt": "<placeholder>"})
+
+
+def test_review1_f1_no_meter_line_on_a_prompt_before_the_first_tool_call(env, repo, tmp_path,
+                                                                          monkeypatch):
+    """R2 holds: the first prompt's output is the pin's, byte for byte (no meter line while the
+    meter's turns is 0), and so is the first prompt after a tool call."""
+    tp = tmp_path / "later.jsonl"
+    runs = []
+    for writer in (lambda *a, **k: None, hooks._first_meter):
+        root = resolver.state_dir(env)
+        shutil.rmtree(root, ignore_errors=True)
+        if tp.exists():
+            tp.unlink()
+        with monkeypatch.context() as mp:
+            mp.setattr(hooks, "_first_meter", writer)
+            start(env, repo, tp)
+            first = _prompt()
+            transcript(tmp_path, 4, name=tp.name)
+            hooks.post_tool_use({"session_id": SID, "transcript_path": str(tp),
+                                 "tool_name": "Read"}, env)
+            runs.append((json.dumps(first), json.dumps(_prompt())))
+    pin, now = runs
+    assert now[0].encode() == pin[0].encode() and "session meter" not in now[0], now[0]
+    assert now[1].encode() == pin[1].encode() and "session meter" in now[1], now[1]
+
+
+def test_review1_f2_a_fifo_transcript_is_absent_and_never_hangs_the_hook(env, repo, tmp_path):
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    try:
+        r = subprocess.run([sys.executable, "-m", "claude_session", "hook", "SessionStart"],
+                           input=json.dumps({"session_id": SID, "cwd": str(repo),
+                                             "transcript_path": str(fifo),
+                                             "hook_event_name": "SessionStart",
+                                             "source": "startup"}),
+                           capture_output=True, text=True, cwd=ROOT, env=env, timeout=15)
+    except subprocess.TimeoutExpired:
+        pytest.fail("SessionStart hung on a FIFO transcript")
+    assert r.returncode == 0 and r.stderr == "", r.stderr
+    assert hooks.START_METER in json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    m = meter.load(sdir(env))
+    assert m["turns"] == 0 and m["zone"] == "clear" and m["transcript"]["path"] == str(fifo)
+
+
+def test_review1_f3_doctor_passes_a_zero_turn_meter_absent_or_not_yet_metered(env, repo,
+                                                                              tmp_path):
+    tp = tmp_path / "absent.jsonl"
+    start(env, repo, tp)
+    c = doctor._check_meter(env)                     # 1: the transcript absent
+    assert c.ok and "zone clear" in c.detail, c.detail
+    tp.write_text('{"type": "user", "message": {"content": "<placeholder>"}}\n')
+    c = doctor._check_meter(env)                     # 2: written, not yet metered
+    assert c.ok, c.detail
+    st = os.stat(tp)
+    os.utime(tp, (st.st_atime, st.st_mtime + 200))  # 3: past FRESH_S, no tool call yet
+    c = doctor._check_meter(env)
+    assert c.ok and "stale" not in c.detail, c.detail
+
+
+def test_review1_f3_a_metered_meter_still_goes_stale(env, repo, tmp_path):
+    tp = transcript(tmp_path, 4)
+    start(env, repo, tp)
+    with open(tp, "a") as f:
+        f.write("{}\n")
+    st = os.stat(tp)
+    os.utime(tp, (st.st_atime, st.st_mtime + 600))
+    c = doctor._check_meter(env)
+    assert not c.ok and "stale" in c.detail
+
+
+def test_review1_f4_no_drift_against_a_zero_turn_meter(env, repo, tmp_path):
+    from claude_session import measure
+    start(env, repo, transcript(tmp_path, 0))
+    measure.record(SID, json.dumps({"context": {"tokens": 31000, "window": 200000,
+                                                "percent": 15.5},
+                                    "rateLimits": [], "changed": ["context"]}), env)
+    c = doctor._check_measure(env)
+    assert c.ok and not c.warn and c.detail.startswith("not comparable (no turns metered)"), c.detail
+    rc, out, _ = status()
+    assert rc == 0 and "measure: not comparable (no turns metered)" in out, out
+    assert "drift" not in out

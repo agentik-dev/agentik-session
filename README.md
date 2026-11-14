@@ -2,11 +2,22 @@
 
 <img src="assets/icon.svg" alt="" width="56" align="left">
 
-`session` is a Claude Code plugin, with its `agentik-session` command line tool, that gives each Claude Code session one named profile, a budget with a stop, and a written charter. It is part of a small family of plugins that answers "how much may this session spend, and what happens when it runs out".
+`session` is a Claude Code plugin that gives each session a budget it can see: a meter over context and turns, a checkpoint at 80%, and a note of what is done and what is next.
+Use it when a session runs long enough to lose its thread.
+
+Install it in a terminal, then type the second line in a new Claude Code session:
+
+```
+claude plugin marketplace add agentik-dev/agentik-commons; claude plugin install session@agentik
+/session:status
+```
+
+It needs Claude Code and the system's Python at 3.9 or newer. No clone and no package: it works alone.
+Part of [agentik](https://github.com/agentik-dev): the other tools, and how to leave.
 
 ## Why it exists
 
-Plugins cooperate in unattended relay runs: a driver spawns builders, each may spawn agents. Each sitting then needs four things: one resolved configuration that every plugin reads the same way, a budget over context and turns whose stop is a signal, a rule and, under the relay, a kill, a charter saying what the sitting is for and how it ended, and a gate on spawning. Without the gate and the budget, a swarm can fork past its means; with them, each session stops at a known point and leaves a readable record.
+The plugin gives each session one named profile, a budget with a stop and a written charter. It is part of a small family of plugins that answers "how much may this session spend, and what happens when it runs out".
 
 ## Install
 
@@ -15,7 +26,7 @@ claude plugin marketplace add agentik-dev/agentik-commons
 claude plugin install session@agentik
 ```
 
-- The plugin carries the code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`, 3.9 or newer, with no clone, venv or launcher. Hooks never use PATH, so a session keeps its version until it respawns.
+- The plugin carries its code (`plugin/lib/claude_session/`) and runs it under `/usr/bin/python3`. Hooks never use PATH, so a session keeps its version until it respawns.
 - `/session:install-cli` gives the terminal a CLI, which a fresh Mac's relay band needs: it freezes the plugin's `lib/` under `~/.local/share/agentik-session/<hash>/` and writes `~/.local/bin/agentik-session`, run with `-I` under `/usr/bin/python3`. From a clone, `make install`; a dirty tree exits 2.
 - Then run `agentik session doctor`. It checks the tool, plugin and hooks, notes an absent optional sibling, and lists the instruction files a repo's last session loaded; exit 2 names the failing check and its remedy.
 - To upgrade: `claude plugin update session@agentik`; new sessions pick it up, live ones at their respawn; a new session moves a launcher forward.
@@ -183,7 +194,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.112`, rendered `2026-11-10`, `4150` tests in the suite.
+Status: version `v2.0.0-alpha.117`, rendered `2026-11-10`, `4581` tests in the suite.
 
 ## Credit
 

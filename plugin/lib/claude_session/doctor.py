@@ -18,6 +18,7 @@ import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import (SEMVER, demand, hooks, install, instructionguard, instructions, measure, meter,
@@ -35,6 +36,8 @@ OLD_PLUGIN_ID = "session@claude-code-session"
 CLAUDE_FLAGS = ("--model", "--effort", "--tools", "--permission-mode",
                 "--max-budget-usd", "--output-format", "--session-id")
 FRESH_S = 120
+# ss5 R3: the most of a transcript's unmetered tail the meter check reads, from its end back.
+TAIL_MAX = 4 * 1024 * 1024
 HOOK_EVENTS = ("SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
                "PostToolBatch", "UserPromptSubmit", "Stop", "StopFailure", "SessionEnd",
                "PreCompact", "PostModelSwitch",               # wfg R7: PostModelSwitch
@@ -673,10 +676,64 @@ def _check_resolved(env) -> Check:
     return Check("resolved", True, f"{path}, profile {prof}{note}")
 
 
+def _epoch(ts) -> float | None:
+    """A transcript line's or the meter's ISO-8601 time as seconds; None if it is none."""
+    if not isinstance(ts, str):
+        return None
+    try:
+        d = datetime.fromisoformat(ts[:-1] + "+00:00" if ts.endswith("Z") else ts)
+    except ValueError:
+        return None
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def _missed_call(tp, start: int, end: int, since: float):
+    """Row ss5 R1 and R3: read the transcript's bytes from `start` to `end`, the last TAIL_MAX
+    of them when longer (the window's first, cut line skipped), and find a main-thread tool
+    call that ended with no meter: a `user` line holding a `tool_result` that is no error
+    (PostToolUseFailure and a helper's PostToolUse never write the meter), stamped more than
+    FRESH_S after `since`, the meter's ts. Returns ("missed", stamp, seconds) for the first,
+    ("none",) when there is none, ("unread", why) when the tail cannot be judged."""
+    try:
+        with open(tp, "rb") as f:
+            back = end - start > TAIL_MAX
+            f.seek(end - TAIL_MAX if back else start)
+            data = f.read(min(end - start, TAIL_MAX))
+    except OSError as e:
+        return ("unread", e.__class__.__name__)
+    if back:
+        data = data[data.find(b"\n") + 1:] if b"\n" in data else b""
+    if not data.endswith(b"\n"):
+        return ("unread", "a line cut short")
+    for raw in data.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw)
+        except (ValueError, RecursionError):
+            return ("unread", "a line that is not JSON")
+        if not isinstance(obj, dict) or not isinstance(obj.get("type"), str):
+            return ("unread", "a line with no type")
+        msg = obj.get("message")
+        items = msg.get("content") if isinstance(msg, dict) else None
+        if obj["type"] != "user" or obj.get("isSidechain") or not isinstance(items, list) \
+                or not any(isinstance(x, dict) and x.get("type") == "tool_result"
+                           and not x.get("is_error") for x in items):
+            continue
+        t = _epoch(obj.get("timestamp"))
+        if t is None:
+            return ("unread", "a tool result with no time")
+        if t - since > FRESH_S:
+            return ("missed", obj["timestamp"], t - since)
+    return ("none",)
+
+
 def _check_meter(env) -> Check:
     """meter.json exists and matches its transcript's size, or its ts is within
-    FRESH_S of the transcript's mtime."""
+    FRESH_S of the transcript's mtime, or no tool call ended in the transcript's
+    unmetered tail more than FRESH_S after its ts (row ss5)."""
     state = resolver.state_dir(env)
+    own = bool(env.get("CLAUDE_CODE_SESSION_ID"))
     sid = env.get("CLAUDE_CODE_SESSION_ID") or resolver.newest_session(state)
     if not sid:
         return Check("meter", True, "no session to meter ($CLAUDE_CODE_SESSION_ID unset, "
@@ -686,21 +743,47 @@ def _check_meter(env) -> Check:
     if m is None:
         return Check("meter", False, f"{path} absent: no PostToolUse has metered this "
                      "session (the plugin's hook)")
-    tp = (m.get("transcript") or {}).get("path")
+    tr = m.get("transcript") or {}
+    tp = tr.get("path")
+    summary = f"{m.get('pct_context')}% context, {m.get('pct_turns')}% turns, zone {m.get('zone')}"
+    zero = m.get("turns") == 0              # SessionStart's meter, before any tool call (ss1)
     try:
-        size = os.stat(tp).st_size
+        info = os.stat(tp)
+        size = info.st_size
     except (OSError, TypeError) as e:
+        if zero and (tp is None or isinstance(e, FileNotFoundError)):
+            return Check("meter", True, f"{path}: {summary}; no transcript yet")
         return Check("meter", False, f"{path}: transcript {tp} unreadable: "
                      f"{e.__class__.__name__}")
-    summary = f"{m.get('pct_context')}% context, {m.get('pct_turns')}% turns, zone {m.get('zone')}"
-    if (m.get("transcript") or {}).get("size") == size:
+    if tr.get("size") == size:
         return Check("meter", True, f"{path}: {summary}; transcript size matches")
+    if zero:                                # no tool call has metered the transcript yet
+        return Check("meter", True, f"{path}: {summary}; no tool call metered yet")
     age = meter.mtime_age(m)
     if age is not None and age <= FRESH_S:
         return Check("meter", True, f"{path}: {summary}; {age:.0f}s from the transcript")
-    return Check("meter", False, f"{path} stale: metered {(m.get('transcript') or {}).get('size')}"
-                 f" bytes of {size}, " + ("ts unreadable" if age is None
-                                          else f"{age:.0f}s from the transcript's mtime"))
+    stale = f"{path} stale: metered {tr.get('size')} bytes of {size}, "
+    today = Check("meter", False, stale + ("ts unreadable" if age is None
+                                           else f"{age:.0f}s from the transcript's mtime"))
+    since, metered, offset = _epoch(m.get("ts")), tr.get("size"), tr.get("offset")
+    if age is None or since is None or not isinstance(metered, int) or metered > size \
+            or tr.get("inode") not in (None, info.st_ino):
+        return today                        # no tail to read: the file shrank or was replaced
+    start = offset if isinstance(offset, int) and 0 <= offset <= metered else metered
+    found = _missed_call(tp, start, size, since)
+    if found[0] == "missed":
+        return Check("meter", False, f"{stale}{found[2]:.0f}s from the tool call that ended "
+                     f"at {found[1]}")
+    note = "" if own else " ($CLAUDE_CODE_SESSION_ID unset: the newest session)"
+    ran = (f"{path}: {summary}; the transcript has run {size - metered} bytes and {age:.0f}s "
+           "past the meter")
+    if found[0] == "none":
+        return Check("meter", True, f"{ran} with no tool call ended since, so the meter runs "
+                     f"at the next one{note}")
+    if own:                                 # R3: the caller's own session keeps the pin's verdict
+        return today
+    return Check("meter", True, f"{ran} and its tail could not be read ({found[1]}), so nothing "
+                 f"shows a missed tool call{note}", warn=True)
 
 
 def _check_meter_hook(plugins, err) -> Check:

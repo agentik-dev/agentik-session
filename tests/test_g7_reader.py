@@ -1,7 +1,7 @@
 """Packet g7-one-reader: the strict and the loose reading of a shell line, and a quoted `$(`'s
 text, live in one module, `shellreader.py`, and no answer changed.
 
-1 the module imports alone; 2 each of its 54 names lives once, the guard and the loop holding
+1 the module imports alone; 2 each of its 53 names lives once (g8a: the cutter gone), the guard and the loop holding
 the module's own objects; 3 one splitter; 4 the lines where the readers differ, pinned as the
 pin reads them, so that the next row changes each knowingly; 5 the repo's own packets' lines.
 """
@@ -22,9 +22,9 @@ MOVED = ("_home _tilde _HEREDOC _PH _PH_RE _PUNCT _OPS _MASK _UNMASK _CASE_NEXT 
          "_heredocs _mask _commands _resolve _py_literals _copy_args _copy_like _git_paths "
          "bash_targets _Bound _Paid _parse _strict _CAP_STATES _STRICT_BOUND _STRICT_READS _move "
          "_states _judge _others _LOOSE_SEP _LOOSE_W _LOOSE_REDIR _LOOSE_COMMENT _LOOSE_SKIP "
-         "_LOOSE_HARD _LOOSE_COND _clean _loose loose_targets _substituted").split()
+         "_LOOSE_HARD _LOOSE_COND _clean _loose loose_targets").split()
 GUARD = {"_Bound", "_home", "_loose", "_resolve", "_strict", "_tilde"}
-LOOP = {"_SHELLS", "_commands", "_substituted"}
+LOOP = {"_Bound"}                      # g8a R9: the loop reads `commands`
 
 
 # ---- 1, 2, 3: the module alone, each name once, one splitter ----------------------------
@@ -40,7 +40,7 @@ def test_1_the_module_imports_alone(tmp_path):
 
 
 def test_2_each_name_lives_once():
-    assert len(MOVED) == len(set(MOVED)) == 54
+    assert len(MOVED) == len(set(MOVED)) == 53
     mine = vars(shellreader)
     assert set(MOVED) <= set(mine)
     for n in MOVED:
@@ -86,24 +86,24 @@ TABLE = [
     ("time -p {M}", GATED, RUNS),
     ("echo make > CLAUDE.md", GATED, RUNS),
     ("git log -- make > CLAUDE.md", GATED, RUNS),
-    ("bash -lc '{M}'", NONE, RUNS),
-    ("bash -c -e '{M}'", NONE, RUNS),
-    ("BASH -c '{M}'", NONE, RUNS),
+    ("bash -lc '{M}'", GATED, RUNS),
+    ("bash -c -e '{M}'", GATED, RUNS),
+    ("BASH -c '{M}'", GATED, RUNS),
     ("bash -c \"bash -c '{M}'\"", NONE, RUNS),
-    ("echo \"$({M})\"", NONE, RUNS),
-    ("sh <<EOF\n{M}\nEOF", NONE, RUNS),
-    ("cat <<EOF\n{M}\nEOF", NONE, RUNS),
-    ("echo `{M}`", GATED, ""),
+    ("echo \"$({M})\"", GATED, RUNS),
+    ("sh <<EOF\n{M}\nEOF", GATED, RUNS),
+    ("cat <<EOF\n{M}\nEOF", NONE, "a heredoc's body"),   # refused as at the pin; r1 N1 words it
+    ("echo `{M}`", GATED, RUNS),
     ("./make.sh > CLAUDE.md", GATED, ""),
-    ("ksh -c '{M}'", NONE, ""),
-    ("eval '{M}'", NONE, ""),
-    ("echo '{M}' | sh", NONE, ""),
+    ("ksh -c '{M}'", GATED, RUNS),
+    ("eval '{M}'", NONE, RUNS),
+    ("echo '{M}' | sh", NONE, RUNS),
     ("echo '{M}'", NONE, ""),
     ("git commit -m \"{M}\"", NONE, ""),
     ("echo ok # {M}", NONE, ""),
-    ("x=\"$(case a in a) {M};; esac)\"; echo \"$x\"", NONE, ""),
-    ("x=\"$(echo ${{y:-a)}} ; {M})\"; echo \"$x\"", NONE, ""),
-    ("n=\"$(grep -c ')' f.txt)\"; echo \"$n\" > CLAUDE.md", GATED, SPLIT),
+    ("x=\"$(case a in a) {M};; esac)\"; echo \"$x\"", GATED, RUNS),
+    ("x=\"$(echo ${{y:-a)}} ; {M})\"; echo \"$x\"", GATED, RUNS),
+    ("n=\"$(grep -c ')' f.txt)\"; echo \"$n\" > CLAUDE.md", GATED, ""),
     ("echo \"it's\" 'x > CLAUDE.md", ValueError("No closing quotation"), SPLIT),
 ]
 

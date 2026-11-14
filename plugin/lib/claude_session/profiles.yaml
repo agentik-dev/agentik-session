@@ -76,7 +76,6 @@ defaults:
       S4: "the rest: review notes, polish, refactors, docs; filed in NICE_TO_HAVE.md with its level, taken on an S3 slice's path, or while fill is on; never ahead of S3"
   pacing: {enabled: true, fallback: 1800, waiting: 3, meter_line_minutes: 30}
   respeak: {narrative: tech}
-  decisions: {dir: decisions}
   relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
 
 profiles:
@@ -98,7 +97,6 @@ profiles:
     charter: {dir: history/sittings, required: true}
     verify: null
     respeak: {narrative: tech}
-    decisions: {dir: decisions}
     relay: {enabled: auto}
     plugins: [respeak]
     notes: "Frontier resources. Spend them on judgement, not bulk retrieval."
@@ -160,7 +158,7 @@ profiles:
       build: {model: opus}
     posture: deny
   orchestrator:
-    description: The orchestrator for large, complex work, Fable 5.1 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
+    description: The orchestrator for large, complex work, Fable on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: fable
     effort: high
     builders: {model: opus, max_concurrent: 3}
@@ -171,7 +169,7 @@ profiles:
     ceilings: {context: 180000, turns: 400}
     ceilings_1m: {context: 400000, turns: 400}
   orchestrator-opus:
-    description: The orchestrator for small and medium projects, Opus 5.5 on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
+    description: The orchestrator for small and medium projects, Opus on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: opus[1m]
     effort: high
     tiers:

@@ -68,10 +68,11 @@ from .yamlsubset import dump, load
 
 PLUGIN = "session"
 # S38 ruling 4: `gate` (ntfy_url, ntfy_topic, wall) is a section; the runner reads its user
-# layer alone (gate_config), since it serves every repo.
-SECTIONS = ("session", "respeak", "decisions", "relay", "gate", "tiers")
+# layer alone (gate_config), since it serves every repo. Row ss3 R4: `decisions` left, since no
+# tool read it; a layer that still sets it is an unknown key.
+SECTIONS = ("session", "respeak", "relay", "gate", "tiers")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
-DEPENDENT = ("respeak", "decisions", "relay")
+DEPENDENT = ("respeak", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
 # `relay`, and `relay` wins over it in one layer, with a warning; the resolved file carries
 # a copy under the old key until r2 (§8.6), for a relay that still reads it.
@@ -102,6 +103,49 @@ _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")      # \Z: a trailing newline neve
 
 class ResolveError(ValueError):
     pass
+
+
+class UnknownProfile(ResolveError):
+    """Row ss3 R3: a profile name the tool does not know, with the name the caller gave (None
+    when a layer file named it) and `known`'s list, so SessionStart can tell the session."""
+
+    def __init__(self, msg: str, name: str | None, known: str):
+        super().__init__(msg)
+        self.name, self.known = name, known
+
+
+_AT_LINE = re.compile(r": line (\d+): ")
+_QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
+
+
+def withheld(msg: str) -> str:
+    """A parser's message names the file, the line and the reason, and nothing of the line's
+    text, whatever it holds (review 2, R2-F1: a rule, not a pattern): what follows the reason,
+    the quoted line, key or item, is dropped. A layer file's parse error is raised through it
+    (row ss2), and the config read's error and the doctor's details, both forms, pass it."""
+    m = _AT_LINE.search(msg) if isinstance(msg, str) else None
+    if not m:
+        return msg
+    reason = re.split(r"""['"]""", msg[m.end():], maxsplit=1)[0].rstrip(": ")
+    return msg[:m.end()] + reason
+
+
+def scrubbed(msg: str) -> str:
+    """A resolver's message as a read prints it: a parser's as `withheld` gives it, and any
+    other with each quoted span (a value or name taken from a layer file) withheld."""
+    return _QUOTED.sub("(withheld)", withheld(msg))
+
+
+def kind(v) -> str:
+    """What a value read from a layer file is, never what it holds (row ss4): a line
+    mis-indented under a key makes the next line, `gate.ntfy_topic`'s among them, its value."""
+    if isinstance(v, bool):
+        return "a boolean"
+    for t, name in ((dict, "a mapping"), ((list, tuple), "a list"), ((int, float), "a number"),
+                    (str, "a word")):
+        if isinstance(v, t):
+            return name
+    return "nothing" if v is None else "a value"
 
 
 class ShippedGone(ResolveError):
@@ -198,7 +242,7 @@ def _parse(path: Path, raw: bytes, inputs: list) -> dict:
     try:
         doc = load(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as e:
-        raise ResolveError(f"{path}: {e}") from None
+        raise ResolveError(withheld(f"{path}: {e}")) from None     # row ss2: never the line
     return doc
 
 
@@ -265,13 +309,26 @@ def _profiles(shipped: dict, user: dict) -> tuple[dict, dict]:
     return defaults, profiles
 
 
-def _models(shipped: dict, user: dict) -> dict:
-    """The models table: the shipped one, the user's entries over it."""
+def _models(shipped: dict, user: dict, user_path: Path) -> dict:
+    """The models table: the shipped one, the user's entries over it. A bad entry names its
+    file and the section and withholds the key, a layer file's text (ss2 R1-F2); the parser
+    keeps no line for a key."""
     table = {**(shipped.get("models") or {}), **(user.get("models") or {})}
     for k, v in table.items():
         if not isinstance(v, int) or isinstance(v, bool) or v <= 0:
-            raise ResolveError(f"models.{k} must be a positive integer (a window in tokens)")
+            src = user_path if k in (user.get("models") or {}) else SHIPPED
+            raise ResolveError(f"{src}: models: a key (withheld) must be a positive integer "
+                               "(a window in tokens)")
     return table
+
+
+def _respawn_keys(body, path) -> None:
+    """ss2 R1-F2: a `respawn` key that is none of RESPAWN_KEYS is a layer file's text, so
+    the file and the section are named and the key withheld."""
+    rs = body.get("respawn") if isinstance(body, dict) else None
+    if isinstance(rs, dict) and any(k not in RESPAWN_KEYS for k in rs):
+        raise ResolveError(f"{path}: respawn: a key (withheld) is not a respawn key "
+                           f"({', '.join(RESPAWN_KEYS)})")
 
 
 def _window_ceilings(shipped: dict, user: dict, name: str, explicit: list) -> dict:
@@ -399,6 +456,18 @@ def user_profile(env) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+def known(names, env) -> str:
+    """An error's list of profile names (row ss4 R5): the shipped names in full, then how many
+    more the user file defines and which file, never their names, which are its text."""
+    try:
+        shipped = set(_read_shipped([]).get("profiles") or {})
+    except ResolveError:
+        shipped = set()
+    more = [n for n in names if n not in shipped]
+    out = ", ".join(n for n in names if n in shipped)
+    return out + (f" and {len(more)} more from {_user_file(env)}" if more else "")
+
+
 def load_profiles(env) -> tuple[dict, dict]:
     """(defaults, profiles) from the shipped and the user's files; for doctor and `profile`."""
     inputs: list = []
@@ -469,12 +538,13 @@ def gate_config(env, log=None) -> dict:
     if isinstance(c, (int, float)) and not isinstance(c, bool) and 0 < c < float("inf"):
         out["load_ceiling"] = c
     elif "load_ceiling" in g and log:
-        log(f"gate: load_ceiling {c!r} is no positive number; the default stands")
+        # ss4 R4: the value is the file's text, and `ntfy_topic` sits beside this key
+        log("gate: load_ceiling is no positive number; the default stands")
     m = g.get("max_running")
     if isinstance(m, int) and not isinstance(m, bool) and m > 0:
         out["max_running"] = m
     elif "max_running" in g and log:
-        log(f"gate: max_running {m!r} is no positive whole number; the default stands")
+        log("gate: max_running is no positive whole number; the default stands")
     return out
 
 
@@ -493,7 +563,8 @@ def _validate(s: dict) -> None:
         raise ResolveError("respawn must be a mapping of " + ", ".join(RESPAWN_KEYS))
     for k, v in rs.items():
         if k not in RESPAWN_KEYS:
-            raise ResolveError(f"respawn.{k} is not a respawn key ({', '.join(RESPAWN_KEYS)})")
+            raise ResolveError("respawn: a key (withheld) is not a respawn key "   # ss2 R1-F2
+                               f"({', '.join(RESPAWN_KEYS)})")
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise ResolveError(f"respawn.{k} must be a non-negative integer")
     try:
@@ -557,6 +628,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
                        renamed)
 
     ov_path = state_dir(env) / "overlays" / f"{session_id}.json"
+    ov_src = ov_path if overlay is None else "the overlay"
     if overlay is None:
         try:
             raw = ov_path.read_bytes()
@@ -583,10 +655,23 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
             or (ud.get("profile") if isinstance(ud.get("profile"), str) else None)
             or DEFAULT_PROFILE)
     if name not in profiles:
-        raise ResolveError(f"unknown profile {name!r}; known: {', '.join(profiles)}")
+        # row ss2: a name read from a layer file (session.profile) is its text, so it is
+        # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
+        # argument) prints as it did (R1-F3)
+        said, names = (repr(profile) if profile else "(withheld)"), known(profiles, env)
+        raise UnknownProfile(f"unknown profile {said}; known: {names}", profile or None, names)
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}
+    ub = [user.get("defaults"), (user.get("profiles") or {}).get(name)]
+    try:                                    # ss2 R1-F2: which file holds a stray respawn key
+        for b in ub:
+            _respawn_keys(b, "")
+        up = SHIPPED
+    except ResolveError:
+        up = _user_file(env)
+    files = {"profiles.yaml": up, "launch": up, "config.yaml": rdir / "config.yaml",
+             "config.local.yaml": rdir / "config.local.yaml"}
     for layer, secs in (
             ("profiles.yaml", _split(_merge(defaults, own), "profiles.yaml", unknown)),
             ("config.yaml", repo_s),
@@ -594,6 +679,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
             ("launch", _split(own, "launch", unknown) if profile else {})):
         for s, body in secs.items():
             if s == "session":
+                _respawn_keys(body, files[layer])
                 body = _normalized(body, unknown, layer)
             sections[s] = _merge(sections[s], body)
 
@@ -604,6 +690,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         k = OVERLAY_RENAMES.get(k, k)
         if k in SESSION_KEYS:
             ov_session[k] = v
+    _respawn_keys(ov_session, ov_src)
     ov_session = _normalized(ov_session, unknown, "overlay")
     sections["session"] = _merge(sections["session"], ov_session)
     sections["session"]["profile"] = name
@@ -620,7 +707,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         ("config.yaml", repo_s.get("session") or {}),
         ("config.local.yaml", local_s.get("session") or {}),
         ("overlay", ov_session)])
-    table = _models(shipped, user)
+    table = _models(shipped, user, _user_file(env))
     session_model = session_model if isinstance(session_model, str) else None
     configured = models.configured(env, cwd)
     engine = models.engine_window(session_dir(state_dir(env), str(session_id)))
@@ -772,16 +859,17 @@ def rewindow(sdir, n) -> bool:
 
 
 def save_request(sdir: Path, cwd, profile, transcript_path, model=None,
-                 model_source=None) -> None:
+                 model_source=None, launched=None) -> None:
     """What the hook resolved with, so `set` can re-resolve the same inputs: the
-    session model with its source (S28), so a re-resolve records the same one."""
+    session model with its source (S28), so a re-resolve records the same one; and whether
+    the launcher set the session's model and effort (row ss3 R2), for `status`."""
     model = model if isinstance(model, str) else None
-    _write_atomic(Path(sdir) / "request.json", json.dumps(
-        {"cwd": str(cwd), "profile": profile,
-         "transcript_path": str(transcript_path) if transcript_path else None,
-         "model": model,
-         "model_source": model_source if model is not None else None},
-        indent=2) + "\n")
+    doc = {"cwd": str(cwd), "profile": profile,
+           "transcript_path": str(transcript_path) if transcript_path else None,
+           "model": model, "model_source": model_source if model is not None else None}
+    if isinstance(launched, bool):
+        doc["launched"] = launched
+    _write_atomic(Path(sdir) / "request.json", json.dumps(doc, indent=2) + "\n")
 
 
 def load_request(sdir: Path) -> dict | None:

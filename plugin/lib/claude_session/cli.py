@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -95,8 +96,8 @@ def cmd_start(args) -> int:
     except resolver.ResolveError as e:
         _die(str(e), 2)
     if not cfg:
-        _die(f"unknown profile {args.config!r}. Known: "
-             f"{', '.join(known)}  (agentik session profile)")
+        _die(f"unknown profile {args.config!r}. Known: "              # ss4 R5
+             f"{resolver.known(known, os.environ)}  (agentik session profile)")
     if _on_line(args.claude_args, "--model"):           # mt1 R7: the line's model wins
         cfg.model = cfg.effort = None
     elif _on_line(args.claude_args, "--effort"):
@@ -206,11 +207,12 @@ def cmd_status(args) -> int:
     state = resolver.state_dir(env)
     if args.transcript:
         stem = os.path.splitext(os.path.basename(args.transcript))[0]
-        limits = meter.limits_for(resolver.session_dir(state, stem), env)
+        sdir = resolver.session_dir(state, stem)
+        limits = meter.limits_for(sdir, env)
         m = meter.parse(args.transcript, {}, limits)
         if m is None:
             _die(f"transcript unreadable: {args.transcript}", 2)
-        d = m.as_dict()
+        d = {**m.as_dict(), "launched": _launched(sdir, env)}
     else:
         sid = sessionconfig.session_id() or resolver.newest_session(state)
         sdir = resolver.session_dir(state, sid) if sid else None
@@ -219,6 +221,7 @@ def cmd_status(args) -> int:
             print("no meter for this session: PostToolUse has not run (see "
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
+        d = {**d, "launched": _launched(sdir, env)}         # ss3 R2: its one new key
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
         if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
@@ -227,7 +230,7 @@ def cmd_status(args) -> int:
         if args.json and facts:
             d = {**d, "admission": facts}
         if not args.json:
-            print(meter.one_line(d))
+            print(_role_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
             print(f"model: {mod.model_line(d, measure.load(sdir))}")   # S41: the band's facts
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
@@ -245,8 +248,29 @@ def cmd_status(args) -> int:
             if "mode" in facts:
                 print(f"admission mode: {facts['mode']}")
             return 0
-    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else meter.one_line(d))
+    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else _role_line(d))
     return 0
+
+
+ROLE_NOTE = " (limits and rules only)"      # ss3 R2: its model and effort are claude's own
+
+
+def _launched(sdir, env) -> bool:
+    """Row ss3 R2: whether the launcher set the session's model and effort, as its SessionStart
+    recorded it; a session with no record of it, by this shell's environment."""
+    req = resolver.load_request(sdir) if sdir else None
+    mark = (req or {}).get("launched")
+    return mark if isinstance(mark, bool) else hooks.launched(env)
+
+
+def _role_line(d: dict) -> str:
+    """The meter's line; for a session the launcher did not start, ROLE_NOTE once, after its
+    `role:<name>` or, with none in the line, at its end."""
+    line = meter.one_line({k: v for k, v in d.items() if k != "launched"})
+    if d.get("launched", True):
+        return line
+    m = re.search(r"role:\S+", line)
+    return line[:m.end()] + ROLE_NOTE + line[m.end():] if m else line + ROLE_NOTE
 
 
 def _admission_facts(band) -> dict:
@@ -644,7 +668,7 @@ def cmd_profile(args) -> int:
                   f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
         return 0
     if args.name not in profiles:
-        _die(f"unknown profile {args.name!r}. Known: {', '.join(profiles)}")
+        _die(f"unknown profile {args.name!r}. Known: {resolver.known(profiles, os.environ)}")
     try:
         r = resolver.resolve(os.getcwd(), "profile", os.environ, profile=args.name,
                              overlay={})
@@ -682,8 +706,8 @@ def cmd_config(args) -> int:
         name = args.name or active
         cfg = configs.get(name)
         if not cfg:
-            _die(f"unknown configuration {name!r}. Known: "
-                 f"{', '.join(sorted(configs))}")
+            _die(f"unknown configuration {name!r}. Known: "         # ss4 R6, as R5
+                 f"{resolver.known(sorted(configs), os.environ)}")
         ov = {} if args.stored else (
             sessionconfig.load_overlay() if name == active else {})
         eff = cfg.merged(ov)
@@ -867,11 +891,11 @@ def _save_tier(path: Path, role: str, model: str) -> None:
     """mt1 R4's `--save`: the file's top-level `tiers:` block gains or changes `role`; every
     other line, its comments among them, stays as it was."""
     from .yamlsubset import load
-    text = path.read_text() if path.exists() else ""
-    try:
+    try:                                    # ss2 R1-F1: a file not UTF-8 is its own error
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
         doc = load(text) if text.strip() else {}
-    except ValueError as e:
-        _die(f"{path}: {e}; nothing written", 2)
+    except ValueError as e:                 # the file, the line and the reason, never the line
+        _die(f"{resolver.withheld(f'{path}: {e}')}; nothing written", 2)
     cur = doc.get("tiers") if isinstance(doc, dict) and isinstance(doc.get("tiers"), dict) \
         else {}
     table = tiers.merge(cur, {role: {"model": model}})
@@ -895,9 +919,10 @@ def _save_tier(path: Path, role: str, model: str) -> None:
         check = load(new)
         tiers.merge({}, check.get("tiers"))
     except ValueError as e:
-        _die(f"{path}: the edit would not parse ({e}); nothing written", 2)
+        why = resolver.withheld(f": {e}")[2:]
+        _die(f"{path}: the edit would not parse ({why}); nothing written", 2)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(new)
+    path.write_text(new, encoding="utf-8")
 
 
 def _set_tier(args, key: str) -> int:
@@ -1032,7 +1057,7 @@ def cmd_set(args) -> int:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
         try:
-            _replace(probe, **{key: value}).validate()
+            _replace(probe, **{key: value}).validate(typed=key == "checkpoint")
         except ValueError as e:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):
@@ -1092,7 +1117,8 @@ def _rewrite_resolved(model_set: bool = False) -> None:
         resolver.write(r, state)
         if model_set:
             resolver.save_request(sdir, req["cwd"], req.get("profile"),
-                                  req.get("transcript_path"), None)
+                                  req.get("transcript_path"), None,
+                                  launched=req.get("launched"))
     except (resolver.ResolveError, OSError, KeyError) as e:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
 
@@ -1552,12 +1578,18 @@ def _gate_land(root, args, env) -> int:
     here, and only inside a gate job."""
     from . import gate, land
     mark = env.get(gate.JOB_MARK) or ""
+    if args.dry_run:
+        # land4 R11: the reads alone, here, in a job or not; nothing queued, nothing written.
+        return land.main(list(args.args), None, dry=True)
     if args.in_job:
         if not mark:
             _die("gate land --in-job runs only inside a gate job, which sets "
                  f"{gate.JOB_MARK}; queue it: agentik session gate land <repo> <branch> <sha> "
                  "<merge-file>", 2)
-        return land.main(list(args.args))
+        # gl1 R5: the job's own log, where a red check's stop line is read (land.log_size
+        # trusts it only when it is the job's stderr).
+        log = str(gate.entry_dir(root, mark) / "log") if gate.ID.match(mark) else None
+        return land.main(list(args.args), log)
     if mark:
         _die(f"gate land: this is gate job {mark[:40]}; a landing queued here waits on its "
              "own repo until the wall cuts it: run gate land --in-job", 2)
@@ -1884,6 +1916,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
     gl.add_argument("--wall", type=_positive_int, metavar="SECONDS",
                     help="cut the landing after SECONDS (default: gate.wall, 5400)")
+    gl.add_argument("--dry-run", action="store_true",
+                    help="queue nothing and write nothing: make the reads up to the merge of "
+                         "main, print what the ready step would do, and exit 0 (a read that "
+                         "reds prints its land line and exits its code)")
     gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")

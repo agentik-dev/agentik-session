@@ -150,6 +150,8 @@ def drift(sdir) -> dict:
         return {**out, "why": "no engine tokens"}
     if c is None:
         return {**out, "why": "no meter"}
+    if mt.get("turns") == 0:                # SessionStart's zero meter (ss1 review 1 F4)
+        return {**out, "why": "no turns metered"}
     if a is None or b is None:
         return {**out, "why": "age unknown"}
     apart = int(abs((a - b).total_seconds()))
