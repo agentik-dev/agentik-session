@@ -1,0 +1,28 @@
+# Sitting 2026-11-14-2: agentik-session, gl1 a gate result records the machine, and a refused check says `unrun`
+
+| item | value |
+|---|---|
+| goal | the three keys `load`, `beside`, `dirty` in each result and `status --json`; `unrun <why>` on a land line whose check `scripts/bounded` refused (R1 to R6) |
+| budget | about 90 tool calls; checkpoint at 80% |
+| pin | main at `7c1f711` (ss5-meter-rest, alpha.113) |
+| branch | `gl1-gate-record`, worktree `.claude/worktrees/gl1-gate-record`, the two venvs linked |
+| level | S4, a small packet: `design/packets/gl1-gate-record.md` |
+| window | 200k |
+| agents | 0 |
+
+## Done-ness
+- [x] the packet, the pin's figures measured again at 7c1f711 (they match the brief's)
+- [ ] tests first, red at the pin
+- [ ] R1 to R3 the three keys, through `Fx`
+- [ ] R4 `status --json`'s done items
+- [ ] R5 `unrun` on the land line
+- [ ] R6 the docstrings
+- [ ] the stamp, alone in the last commit under `plugin/`
+- [ ] the gate once
+
+## Handover
+
+## Next act
+The failing tests, `tests/test_gl1_record.py`.
+
+## Exit
