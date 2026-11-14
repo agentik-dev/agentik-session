@@ -455,8 +455,9 @@ def _suite_sources(env, cwd):
     """fk3 R1: the suite's rows by tool, from `$HOME/.local/bin/agentik-suite describe sources
     --json`; None when there is no launcher or the answer does not count (exit 0, one object,
     `schema` agentik.sources/1, `ok` true, `tools` a list)."""
-    home = env.get("HOME")
-    exe = Path(home) / ".local" / "bin" / "agentik-suite" if home else None
+    home = env.get("HOME")      # review 1, F4: a HOME that is not absolute names no place
+    exe = Path(home) / ".local" / "bin" / "agentik-suite" if home and os.path.isabs(home) \
+        else None
     if not exe or not exe.is_file() or not os.access(exe, os.X_OK):
         return None
     try:
@@ -485,14 +486,16 @@ def _suite_sources(env, cwd):
 def _answered(row, name: str):
     """fk3 R1: one row of the suite's answer as the check reads it, or None when it says
     nothing this check can use (R2 then): an unknown kind, an id kind with no id, a folder
-    with no folder. `own` is the id `<name>@agentik`, whatever kind the row gives it."""
+    with no folder. `own` is the id `<name>@agentik`, whatever kind the row gives it. `id` is
+    the id as read, the plugin list's key (review 1, F3); `plugin` the copy a line prints."""
     if not isinstance(row, dict) or row.get("kind") not in SOURCE_KINDS:
         return None
     kind, plugin, root = row["kind"], _clean(row.get("plugin")), _clean(row.get("root"))
+    pid = row.get("plugin") if isinstance(row.get("plugin"), str) else None
     if kind in ("own", "plugin"):
         if not plugin:
             return None
-        kind = "own" if plugin == f"{name}@agentik" else "plugin"
+        kind = "own" if pid == f"{name}@agentik" else "plugin"
     if kind == "folder" and not root:
         return None
     d = row.get("declared")
@@ -505,6 +508,7 @@ def _answered(row, name: str):
             for s in (row.get("seen") if isinstance(row.get("seen"), list) else ())
             if isinstance(s, dict)]
     return {"kind": kind, "plugin": plugin if kind != "folder" else None, "root": root,
+            "id": pid if kind != "folder" else None,
             "version": _clean(row.get("version")), "found": row.get("found") is True,
             "declared": declared, "seen": seen, "road": "suite"}
 
@@ -539,7 +543,7 @@ def _recorded(installed: dict, name: str) -> dict:
             for pid, rec in ids.items()])
     pid, rec = next(iter(ids.items()))
     return dict(base, kind="own" if pid == f"{name}@agentik" else "plugin",
-                plugin=_clean(pid), root=_clean(rec.get("installPath")),
+                plugin=_clean(pid), id=pid, root=_clean(rec.get("installPath")),
                 version=_clean(rec.get("version")), found=True)
 
 
@@ -587,7 +591,7 @@ def _check_dependency(dep: dict, plugins, err, src: dict | None = None) -> Check
         return Check(row, True, "installed", source=source)
     if plugins is None:
         return Check(row, True, f"optional, not checked: {err}", note=True, source=source)
-    pid = src["plugin"]
+    pid = src["id"]             # review 1, F3: the id as read, never the printed copy
     p = plugins.get(pid)
     if not p:
         return Check(row, True, f"not installed, optional: {adds} (`{own}`)", note=True,
