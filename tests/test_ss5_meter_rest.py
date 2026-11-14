@@ -31,24 +31,21 @@ def _exe(path: Path, body: str) -> None:
 
 @pytest.fixture
 def box(tmp_path):
-    """A green fake machine (test_doctor's shape), one session metered over a copy of a
-    shipped fixture transcript."""
+    """A green fake machine (test_doctor's shape, this plugin alone: the optional ones are
+    notes), one session metered over a copy of a shipped fixture transcript."""
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     install = tmp_path / "install"
     (install / "hooks").mkdir(parents=True)
     (install / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
         e: [] for e in doctor.HOOK_EVENTS}}))
-    plugins = [{"id": "session@agentik", "version": "2.0.0", "enabled": True,
-                "installPath": str(install)},
-               {"id": "decisions@agentik", "version": "0.4.0", "enabled": True},
-               {"id": "respeak@agentik", "version": "0.6.0", "enabled": True},
-               {"id": "relay@agentik", "version": "0.1.0", "enabled": True}]
+    plugins = [{"id": doctor.PLUGIN_ID, "version": "2.0.0", "enabled": True,
+                "installPath": str(install)}]
     (tmp_path / "plugins.json").write_text(json.dumps(plugins))
     _exe(bin_ / "claude", f'if [ "$1" = plugin ]; then /bin/cat {tmp_path}/plugins.json; exit 0; fi\n'
          'echo "--model --effort --tools --permission-mode '
          '--max-budget-usd --output-format --session-id"\n')
-    for b in ("relay", "tmux", "git"):
+    for b in ("tmux", "git"):
         _exe(bin_ / b, "exit 0\n")
     repo = tmp_path / "repo"
     repo.mkdir()

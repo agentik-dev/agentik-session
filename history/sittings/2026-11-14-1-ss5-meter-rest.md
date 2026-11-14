@@ -17,7 +17,7 @@
 - [x] R3 an unreadable tail: own session today's verdict, newest a `warn`; the bound `TAIL_MAX` 4 MiB
 - [x] R4 the five cases byte-equal to the pin; `test_bare_machine`'s NOT_STATE gains `_missed_call`
 - [x] R5 the stamp `2.0.0-alpha.113` (4504 tests); `plugin-version-check` exit 0; README source 16,374 B
-- [ ] the commit scan `main..HEAD`: exit 0
+- [x] the tree scan 0; the commit scan flags d380f55 (`sibling`, the fake machine's optional plugin rows, fixed forward: the fixture lists this plugin alone): an allow row is the coordinator's
 - [ ] the gate once
 
 ## Handover
