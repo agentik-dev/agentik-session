@@ -14,9 +14,11 @@
 - [x] Phase 2: main e147e06 merged (n204 is n239), the allow row for e28379e, stamped 2.0.0-alpha.111, gate green
 - [x] Review 2's fix: tests red at b8797f6 in 2600b3b (F1 22.6, 14.9, 11.7 CPU s; F2 64 MB; answers as b8797f6's `_braces`)
 - [x] R2-F1 one scan of the word's pairs (`_brace_pairs`), no regex; R2-F2 alternatives built one at a time, the cap met first; 727 passed in each venv; 260,000 fuzz words answer as b8797f6
-- [ ] The stamp at alpha.111 again; the gate once, last; the scans
+- [x] The stamp at alpha.111 again: 4473 tests (README and source Status lines, sidecar; plugin.json unchanged)
+- [ ] The gate once, last; the scans
 
 ## Handover
+- decide, owner: coordinator. The ruling keeps 2.0.0-alpha.111, but `scripts/plugin-version-check` fails any change under plugin/ after the commit that set the version (b8797f6), so it exits 1 on `unattended.py` and the gate is red there until the version moves. Recommended: 2.0.0-alpha.112 by `scripts/stamp --version 2.0.0-alpha.112` (alpha.111 never reached main), merge.txt's last line to match, one gate. Consumer: the next builder and the landing.
 - Review 1: a glued parameter (`${u}make check`, any level) passes, as at the pin (n197's class). N1's sink list is closed (`cat` to a file, `tee`, `git commit -F -`): it returns 2 replay lines; a `cd` before a sink keeps the refusal.
 - The make rule's class C (a tool's own option holds the make line, 18 replay lines, NICE n239) and a shell's name in a variable (NICE n197) pass, as at the pin. A Python body that shells out a make is refused now, as `data`.
 - Not rerun this round: acceptance 7 by the brief's classes, 10 (real shells, 20,000 lines), 11's launcher cold runs.
