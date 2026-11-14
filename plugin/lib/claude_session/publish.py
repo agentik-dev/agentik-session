@@ -36,7 +36,9 @@ of the wrong type, is no proof and no error:
 - a landing: `exit` 0, `repo` this checkout, `command` the one `gate land` queues, whole:
   this runner's argv (`gate.self_argv()`), then `gate land --in-job <repo> <branch> <sha>
   <merge>` and nothing after, `<repo>` this checkout; and its log's last land line of this repo
-  (`gate.last_line`) opens `ok <sha>`, that same `<sha>` (review 1, F1). The sha it proves is
+  (`gate.last_line`) opens `ok <sha>`, that same `<sha>` (review 1, F1); `make_env` a list
+  that holds no `MAKEFILES`, so a landing older than the key proves none (review 2, F1:
+  `land.main` drops that name and the other three itself). The sha it proves is
   the one after `, as ` when the line has that part (the head readied from `<sha>`), else
   `<sha>` itself, a prefix allowed; `git rev-parse --verify <it>^{commit}` gives exactly S's
   second parent, so an ambiguous or unknown prefix proves nothing (F3); S has exactly two
@@ -136,6 +138,10 @@ def landing_proves(doc, repo, name, s, parents):
     command, log, gid, head = (doc.get(k) for k in ("command", "log", "id", "head"))
     if not (_zero(doc.get("exit")) and _same(doc.get("repo"), repo) and _strs(command)
             and isinstance(log, str) and isinstance(gid, str) and isinstance(head, str)):
+        return False
+    # Review 2, F1: a land.main older than the fix read MAKEFILES; it drops the other three.
+    made = doc.get("make_env")
+    if not (_strs(made) and "MAKEFILES" not in made):
         return False
     own = [*gate.self_argv(), "gate", "land", "--in-job"]
     if not (len(command) == len(own) + 4 and command[:len(own)] == own

@@ -1373,8 +1373,9 @@ def main(argv, log=None, dry=False):
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     signal.signal(signal.SIGTERM, on_cut)
+    # MAKEFILES too (land5 review 2, F1): make reads the files it names before the Makefile.
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
-                 "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKELEVEL"):
+                 "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL"):
         os.environ.pop(name, None)
     name = "?"
     try:
