@@ -278,10 +278,13 @@ def test_fr1_a_session_without_its_files_still_fails(machine):
     # an id that names no session's files: as test_no_resolved_file, both stay red
     env = {**_no_session(machine), "CLAUDE_CODE_SESSION_ID": "another"}
     assert failing(doctor.run(env, machine.repo)) == ["resolved", "meter"]
-    # a session that resolved and was never metered: meter alone stays red
+    # a session that resolved and no tool call has metered: SessionStart's zero meter, its
+    # transcript absent, passes (ss1-zero review 1 F3, R3 amended); a missing meter stays red
     bare = {**machine.env, "XDG_STATE_HOME": str(machine.tmp / "bare-state"),
             "CLAUDE_CODE_SESSION_ID": "sess-2"}
     hooks.session_start({"session_id": "sess-2", "cwd": str(machine.repo)}, bare)
+    assert failing(doctor.run(_no_session(machine), machine.repo)) == []
+    (machine.tmp / "bare-state/agentik-session/sessions/sess-2/meter.json").unlink()
     assert failing(doctor.run(_no_session(machine), machine.repo)) == ["meter"]
 
 

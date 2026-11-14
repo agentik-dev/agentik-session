@@ -800,7 +800,7 @@ def user_prompt_submit(payload: dict) -> dict:
     bits: list[str] = []
 
     m = _meter(sid)
-    if m:
+    if m and m.get("turns") != 0:      # ss1 review 1 F1: SessionStart's zero meter says nothing
         sdir = _session_dir(sid, os.environ)
         now = _now()
         if (_past_checkpoint(m)
@@ -936,8 +936,36 @@ def session_start(payload: dict, env=None) -> dict:
     line += _tiers_part(sid, env)                          # mt1 R4: the session's words
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
+    _first_meter(path.parent, payload.get("transcript_path"), env)   # ss1 R1, after the line
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                 "additionalContext": line}}, env)
+
+
+def _first_meter(sdir: Path, tp, env) -> None:
+    """Packet ss1-zero R1: the session's first meter.json by PostToolUse's own parse and
+    save, so the band, `status` and doctor read 0% before the first tool call. A transcript
+    absent or unreadable is zero turns (`os.devnull` parsed, the payload's path kept), written
+    only where no meter stands; a meter on disk is replaced only by a parse that succeeded.
+    Any failure is swallowed (R2): SessionStart says what it says today."""
+    try:
+        cfg, _ = sessionconfig.effective()
+        limits, policy = meter.limits_for(sdir, env), _policy(cfg)
+        st = meter.load_state(sdir)
+        try:                                            # review 1 F2: a FIFO never blocks
+            regular = bool(tp) and stat.S_ISREG(os.stat(tp).st_mode)
+        except (OSError, ValueError):
+            regular = False
+        m = meter.parse(tp, st, limits, policy, sdir.name) if regular else None
+        if m is None:
+            if meter.load(sdir) is not None:
+                return
+            st = {}
+            m = meter.parse(os.devnull, st, limits, policy, sdir.name)
+            m = replace(m, transcript={**m.transcript, "path": str(tp) if tp else None,
+                                       "inode": None})
+        meter.save(sdir, m, st)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
