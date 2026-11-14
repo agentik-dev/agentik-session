@@ -26,7 +26,8 @@
 - [x] F2: `make_env` in the gate's result, a check proves only with it there and empty; `test_fw2.py` and `test_gl1_record.py` count 16 keys
 - [x] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists; the row's tests 77 of 77 (`.venv`)
 - [x] four NICE rows, n250 to n253 (S4); the file past its bound, the stamp moves the oldest S4 rows
-- [ ] the stamp; both scans; `make check` once, last
+- [x] both scans exit 0 at `dd908b0` (13 commits); doclint 0 (the packet trimmed under 9,216 B); the row's tests and the key counts green under `.venv-floor` (124, 1 skipped)
+- [ ] the stamp, its files the last commit; `make check` once, last, on it
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
@@ -34,7 +35,8 @@
 - decide, owner: the coordinator (consumer: review 2). F2's ruling names a `make check` result alone; a landing job runs its own `make check` in the caller's env too, so `MAKEFLAGS=n` on `gate land` makes an ok land line that proves S. Built as ruled: a landing's proof reads no `make_env`.
 
 ## Next act
-The fix of review 1: the tests, then F1 to F3 and the two leads, as ticked above.
+The stamp through the gate, its files the last commit, then `make check` once; after it, review 2.
 
 ## Exit
+Build 2 (fix of review 1): F1 to F3, leads 1 and 2 and four NICE rows built; the stamp and `make check` follow.
 Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`; `make check` once on the stamp's commit.
