@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -386,10 +387,12 @@ def _check_dependency_by_id(dep: dict, plugins, err) -> Check:
 
 def _clean(v):
     """A string of the suite's answer or Claude Code's record as a line may print it: no
-    control byte, at most 200 characters; anything else None."""
+    control or format character (review 1, F1: C1 controls and bidi overrides too, every
+    category `Cc` or `Cf`), at most 200 characters; anything else None."""
     if not isinstance(v, str):
         return None
-    return "".join(ch for ch in v if ch >= " " and ch != "\x7f")[:200] or None
+    return "".join(ch for ch in v
+                   if unicodedata.category(ch) not in ("Cc", "Cf"))[:200] or None
 
 
 def _drain(p, wall: float, cap: int):
@@ -896,7 +899,7 @@ def _from(source) -> str:
 def render(rep: Report) -> str:
     from .plug import withheld     # build 3, L1: the text withholds a secret as the read does
     lines = [f"{('note' if c.note else 'warn' if c.warn else 'ok  ') if c.ok else 'FAIL'} "
-             f"{c.name:<12} {withheld(c.detail)}{_from(c.source)}"
+             f"{c.name:<12} {withheld(c.detail)}{withheld(_from(c.source))}"   # review 1, L4
              for c in rep.checks]
     failed = [c.name for c in rep.checks if not c.ok]
     lines.append("doctor: green" if rep.ok else "doctor: failing: " + ", ".join(failed))
