@@ -389,3 +389,144 @@ def test_land5b_9_in_job_with_install_is_usage(lb):
     rc, out, err = run(lb.c, land_argv(lb.c, "--in-job", "--install", sha=lb.c.head),
                        env={**lb.env, gate.JOB_MARK: "20261110-000000-1"})
     assert (rc, out) == (2, "land ?: red usage exit 2\n"), err
+
+
+# Review 1's fix (packet §7). F1: only S is installed: main at S, every tracked file S, and no
+# untracked file git does not ignore (`.claude/` aside); else red tree, nothing run.
+
+def _jobs(c):
+    return [r for r in _results(c) if r["command"] == ["make", "install"]]
+
+
+def test_land5b_f1_an_uncommitted_edit_on_an_already_pushed_main_is_red_tree(b):
+    b.makefile()
+    marker = b.c.tmp / "dirty-ran"
+    (b.c.repo / "Makefile").write_text(CHECK + "install:\n\t@echo unpushed > %s\n" % marker)
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out) == (1, line(b.c, "ok %s, already pushed" % b.c.sha("main"))
+                         + "install crate: red tree exit 1\n"), err
+    assert "Makefile" in err
+    assert not marker.exists() and not _jobs(b.c) and b.ran() == []
+
+
+def test_land5b_f1_an_untracked_include_after_a_fresh_push_is_red_tree(b):
+    b.makefile(CHECK + "-include local.mk\ninstall:\n\t@true\n")
+    before, s = proven(b)
+    marker = b.c.tmp / "untracked-ran"
+    (b.c.repo / "local.mk").write_text("install: more\nmore:\n\t@echo unpushed > %s\n" % marker)
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out) == (1, line(b.c, "ok %s, pushed to origin" % s)
+                         + "install crate: red tree exit 1\n"), err
+    assert "local.mk" in err
+    assert not marker.exists() and not _jobs(b.c)
+
+
+@pytest.mark.parametrize("where", ["under .claude", "ignored"])
+def test_land5b_f1_an_entry_under_claude_or_an_ignored_file_is_not_red(b, where):
+    b.makefile()
+    if where == "ignored":
+        with open(str(b.c.repo / ".git" / "info" / "exclude"), "a") as fh:
+            fh.write("scratch.txt\n")
+        (b.c.repo / "scratch.txt").write_text("the machine's own\n")
+    else:
+        (b.c.repo / ".claude" / "worktrees" / "w").mkdir(parents=True)
+        (b.c.repo / ".claude" / "worktrees" / "w" / "notes").write_text("x\n")
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out.splitlines()[-1]) == (0, "install crate: ok, make install"), err
+
+
+# F2: no `make` outside the gate job; the target is read from the Makefile's text at S.
+
+HOSTILE = ("X := $(shell touch {shell})\ninstall:\n\t+@touch {plus}\n"
+           "\t$(MAKE) -s -C . noop && touch {sub}\nnoop:\n\t@true\n")
+
+
+def test_land5b_f2_a_dry_or_held_call_runs_no_make(b):
+    marks = {k: b.c.tmp / ("%s-ran" % k) for k in ("shell", "plus", "sub")}
+    b.makefile(CHECK + HOSTILE.format(**marks))
+    rc, out, err = b.publish(str(b.c.repo), "--dry-run", "--install")
+    assert (rc, out.splitlines()[-1]) == (0, "install crate: would run make install"), err
+    b.ps_text.write_text("4242 /usr/local/bin/relay run\n")
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert rc == 1 and out.splitlines()[-1].startswith("install crate: held install: "), err
+    assert [k for k, p in sorted(marks.items()) if p.exists()] == []
+    assert not _jobs(b.c)
+
+
+@pytest.mark.parametrize("text", [CHECK + ".PHONY: install\n", CHECK + "include extra.mk\n"])
+def test_land5b_f2_no_install_rule_queues_nothing(b, text):
+    b.c.commit("no install rule", {"Makefile": text, "install": "#!/bin/sh\n",
+                                   "extra.mk": "install:\n\t@true\n"})
+    b.c.git(b.c.repo, "push", "-q", "origin", "main")
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out.splitlines()[-1]) == (0, "install crate: ok, nothing to install here"), err
+    assert not _jobs(b.c)
+
+
+def test_land5b_f2_has_install_reads_rule_lines():
+    from claude_session import deliver
+    assert deliver.install_rule("install:\n") and deliver.install_rule("a install :: b\n")
+    assert not deliver.install_rule(".PHONY: install\n\tinstall: x\n# install:\n")
+    assert not deliver.install_rule("X := install: y\nY = install:\n")
+
+
+# F3: `already installed` skips the plugin's two commands only; make install runs each call.
+
+def test_land5b_f3_a_red_make_install_runs_again_on_the_next_call(b):
+    b.plugin()
+    b.makefile()
+    rc, out, err = b.publish(str(b.c.repo), "--install", env={"INSTALL_EXIT": "3"})
+    assert (rc, out.splitlines()[-1]) == (2, "install crate: red install exit 2"), err
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out.splitlines()[-1]) == (
+        0, "install crate: ok murmur@acme 1.0.1, already installed, make install"), err
+    assert [r["exit"] for r in _jobs(b.c)] == [2, 0]
+    assert b.ran() == UPDATES
+
+
+# F4: a version prints only as one plain token, else `?`.
+
+@pytest.mark.parametrize("old,new,shown", [
+    ("1.0.0", "1.0.1\ninstall spool: ok, nothing to install here", "1.0.0 to ?"),
+    ("1.0.0", "1" * 65, "1.0.0 to ?"), ("0.9 x", "1.0.1", "? to 1.0.1")])
+def test_land5b_f4_a_version_no_plain_token_prints_as_a_question_mark(b, old, new, shown):
+    b.plugin(old=old)
+    rc, out, err = b.publish(str(b.c.repo), "--install", env={"STUB_NEW": new})
+    assert (rc, out) == (0, line(b.c, "ok %s, already pushed" % b.c.sha("main"))
+                         + "install crate: ok murmur@acme %s\n" % shown), err
+
+
+# F6: a plugin.json `name` present and not a string of R4's form is red.
+
+@pytest.mark.parametrize("name", [5, ["murmur"], ""])
+def test_land5b_f6_a_name_that_is_no_plain_string_is_red(b, name):
+    b.c.commit("the plugin", {"plugin/.claude-plugin/plugin.json":
+                              json.dumps({"name": name, "version": "1.0.1"}) + "\n"})
+    b.c.git(b.c.repo, "push", "-q", "origin", "main")
+    b.installed({"murmur@acme": [{"scope": "user", "version": "1.0.0"}]})
+    rc, out, err = b.publish(str(b.c.repo), "--install")
+    assert (rc, out.splitlines()[-1]) == (1, "install crate: red install exit 1"), err
+    assert b.ran() == []
+
+
+# F7: a newest unattended run whose ledger exists and cannot be read holds.
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode 0 file")
+@pytest.mark.parametrize("how", ["mode 0", "a folder"])
+def test_land5b_f7_an_unreadable_unattended_ledger_holds(b, how):
+    b.plugin()
+    d = b.c.root / "unattended" / "2026-11-14-1"
+    d.mkdir(parents=True)
+    ledger = d / "ledger.jsonl"
+    if how == "a folder":
+        ledger.mkdir()
+    else:
+        ledger.write_text(json.dumps({"kind": "spawn", "row": "r1"}) + "\n")
+        os.chmod(str(ledger), 0)
+    try:
+        rc, out, err = b.publish(str(b.c.repo), "--install")
+    finally:
+        if how == "mode 0":
+            os.chmod(str(ledger), 0o600)
+    assert rc == 1 and out.splitlines()[-1].startswith("install crate: held install: "), (out, err)
+    assert b.ran() == []

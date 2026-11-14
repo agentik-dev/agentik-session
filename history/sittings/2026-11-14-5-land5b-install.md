@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] build 1: the packet, the tests, R1 to R9, the stamp; its gate `20261114-140514-1981` exit 0 on `5dd358d`
 - [x] build 2: the packet's §7, this file current
-- [ ] build 2: the tests of §7, red at `5dd358d`
+- [x] build 2: the tests of §7, red at `5dd358d`: 15 failed, 2 passed (the two not-red guards) of 17
 - [ ] build 2: F1 (red tree), F2 (the Makefile's text), F3 (make install on each call)
 - [ ] build 2: F4, F6, F7
 - [ ] build 2: NICE n257 to n261 at S4
@@ -26,7 +26,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The tests of §7, red at `5dd358d`.
+F1, F2, F3 in `deliver.py`.
 
 ## Exit
 Open.
