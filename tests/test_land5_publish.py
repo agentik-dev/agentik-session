@@ -637,3 +637,79 @@ def test_land5_17_a_remote_that_is_no_listed_name_is_red_remote(c, case):
     assert (rc, out) == (1, line(c, "red remote exit 1")), err
     assert not [a for a in c.git_argv() if a.startswith("push")]
     assert c.sha("refs/heads/main", cwd=other) == before and c.bare_main() == before
+
+
+# 18 to 20. Review 2: F1, F2, lead 1.
+
+def test_land5_18_makefiles_under_a_landing_runs_the_real_check(lc):
+    tree = lc.repo / ".claude" / "worktrees" / "p1-crate"
+    (tree / "Makefile").write_text("check:\n\t@echo REAL-CHECK-RAN; exit 1\n")
+    lc.git(tree, "commit", "-qam", "a red check")
+    lc.head = lc.sha("HEAD", cwd=tree)
+    before = lc.sha("main")
+    extra = lc.tmp / "extra.mk"
+    extra.write_text("override SHELL := /usr/bin/true\n")
+    rc, out, err = run(lc, land_argv(lc, "--push", sha=lc.head), env={"MAKEFILES": str(extra)})
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), err
+    assert lc.sha("main") == before and lc.bare_main() == before
+    logs = "".join(p.read_text() for p in lc.root.glob("**/log"))
+    assert "REAL-CHECK-RAN" in logs
+
+
+@pytest.mark.parametrize("case", ["makefiles", "absent", "null", "string", "others"])
+def test_land5_18_a_landing_proves_only_with_no_makefiles_in_make_env(c, case):
+    before, head, s = c.landed()
+    env = {"makefiles": ["MAKEFILES"], "null": None, "string": "",
+           "others": ["GNUMAKEFLAGS", "MAKEFLAGS", "MFLAGS"]}.get(case)
+    gid = c.land_result(before, "land crate: ok %s, main readied" % head, make_env=env)
+    if case == "absent":
+        path = gate.result_path(c.root, gid)
+        doc = json.loads(path.read_text())
+        del doc["make_env"]
+        path.write_text(json.dumps(doc))
+    rc, out, err = c.publish(str(c.repo))
+    if case == "others":
+        assert (rc, out) == (0, line(c, "ok %s, pushed to origin" % s)), err
+        assert c.bare_main() == s
+    else:
+        assert (rc, out) == (1, line(c, "red proof exit 1")), err
+        assert c.bare_main() == before
+
+
+@pytest.mark.parametrize("kind", ["branch", "tag"])
+def test_land5_19_a_ref_named_as_the_prefix_proves_nothing(c, kind):
+    before, head, s1 = c.landed()
+    pre = head[:4]
+    c.land_result(before, "land crate: ok %s, main readied" % pre)
+    c.git(c.repo, "reset", "-q", "--hard", before)
+    b2 = _collide(c, before, pre)
+    assert b2 != head and b2[:4] == pre
+    c.git(c.repo, kind, pre, b2)
+    c.git(c.repo, "update-ref", "refs/heads/evil2", b2)
+    c.git(c.repo, "merge", "-q", "--no-ff", "-m", "Merge evil2", "evil2")
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (1, line(c, "red proof exit 1")), err
+    assert c.bare_main() == before
+
+
+@pytest.mark.parametrize("kind", ["branch", "tag"])
+def test_land5_19_a_ref_named_as_the_word_changes_nothing(c, kind):
+    before, head, s = c.landed()
+    c.git(c.repo, kind, head[:9], before)
+    c.land_result(before, "land crate: ok %s, main readied" % head[:9])
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (0, line(c, "ok %s, pushed to origin" % s)), err
+    assert c.bare_main() == s
+
+
+def test_land5_20_a_hygiene_without_the_exec_bit_is_red_hygiene(c):
+    os.chmod(str(c.repo / "scripts" / "hygiene"), 0o644)
+    c.git(c.repo, "update-index", "--chmod=-x", "scripts/hygiene")
+    c.git(c.repo, "commit", "-qm", "no exec bit")
+    before, head, s = c.landed()
+    c.land_result(before, "land crate: ok %s, main readied" % head)
+    bare = c.bare_main()
+    rc, out, err = c.publish(str(c.repo))
+    assert (rc, out) == (126, line(c, "red hygiene exit 126")), err
+    assert "not executable" in err and not c.ran()
+    assert c.bare_main() == bare != s

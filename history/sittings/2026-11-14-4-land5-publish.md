@@ -10,37 +10,29 @@
 | window | 200k |
 | agents | 0 |
 
-## Done-ness
-- [x] the packet
-- [x] the tests, red at the pin: 58 of 58 at 1dbef66 (`invalid choice: 'publish'`, `--push` unrecognized)
-- [x] R1 to R9: `publish.py`, the verb and `gate land --push` in `cli.py`, one commit (the parser's hunks share a block); 58 of 58 green under both venvs; the gate's own reader (`gate._load`), so no new state reader joins `test_bare_machine.py`'s table
-- [x] R10: the module's docstring, the `gate` help, SKILL.md's line, NICE n248 and n249 (the file then past its bound: the stamp moves the oldest S4 rows)
-- [x] the stamp, gate `20261114-092041-1940` exit 0: `2.0.0-alpha.119`, 4671 tests, n169 and n171 to the overflow; its files alone the last commit
-- [x] both scans exit 0 (`--require-private`, and `--commits main..HEAD`); doclint, recordlint
-- [ ] `make check`, once, last, on the stamp's commit: its line is the build record's
+## Done-ness, build 1 and the fix of review 1
+- [x] R1 to R10 (`publish.py`, the verb and `gate land --push` in `cli.py`), 58 tests red at the pin, then green; stamped alpha.119
+- [x] review 1: F1 to F3, leads 1 and 2, NICE n250 to n253; 20 tests red at `78b4b27`; restamped `2.0.0-alpha.120` (`plugin-version-check` reds a `plugin/` change after the version's commit)
+- [x] `make check` of `60e082a`: exit 0
 
-## Done-ness, the fix of review 1 (from `78b4b27`)
-- [x] the packet amended: R3, R5, R7, §3, acceptance 13 to 17
-- [x] the tests for F1, F2, F3 and leads 1 and 2, red at `78b4b27`: 20 failed, 57 passed (`.venv`)
-- [x] F1 and F3: the landing's command whole, its sha, the prefix resolved (32 of the slice green)
-- [x] F2: `make_env` in the gate's result, a check proves only with it there and empty; `test_fw2.py` and `test_gl1_record.py` count 16 keys
-- [x] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists; the row's tests 77 of 77 (`.venv`)
-- [x] four NICE rows, n250 to n253 (S4); the file past its bound, the stamp moves the oldest S4 rows
-- [x] both scans exit 0 at `dd908b0` (13 commits); doclint 0 (the packet trimmed under 9,216 B); the row's tests and the key counts green under `.venv-floor` (124, 1 skipped)
-- [x] the stamp at alpha.119 (count 4690, n172, n175, n178 to the overflow), then `make check` once: `20261114-101910-1948` exit 2, both suites green (4690; 4541, 128 skipped), red at `plugin-version-check` (gate.py, publish.py changed since 119 was set)
-- [x] restamped `2.0.0-alpha.120` (gate `20261114-104803-1952` exit 0): `plugin-version-check` 0, `readme: fresh`; its files the last commit
-- [ ] `make check` on the restamp: the coordinator's gate (the verify line runs once)
+## Done-ness, the fix of review 2 (from `60e082a`)
+- [x] the packet amended: R5, R6, §3, acceptance 18 to 20 (under 9,216 B)
+- [x] the tests for F1, F2 and lead 1, red at `60e082a`
+- [ ] F1: `land.main` drops `MAKEFILES`; a landing proves only with `make_env` a list holding no `MAKEFILES`
+- [ ] F2: the word resolved by `rev-parse --disambiguate`, exactly S's second parent
+- [ ] lead 1: a `scripts/hygiene` that is there and not executable is `red hygiene exit 126`
+- [ ] three NICE rows (S4)
+- [ ] the stamp, its files the last commit; `make check` once, last; both scans exit 0
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
-- decide, owner: the coordinator (consumer: review 2). F2's ruling names a `make check` result alone; a landing job runs its own `make check` in the caller's env too, but `land.main` pops `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS` and `MAKELEVEL`, not `MAKEFILES` (by reading). Built as ruled: a landing's proof reads no `make_env`.
-
-- decide, owner: the coordinator (consumer: the landing). The brief kept alpha.119; `plugin-version-check` reds any change under `plugin/` after the commit that set the version, so the fix round takes alpha.120, as land4's fix took 117 after 116.
+- A fix round that changes `plugin/` takes the next alpha by `make stamp`, as land4's fix did.
 
 ## Next act
-`make check` on the restamp's commit, then review 2.
+F1, F2 and lead 1 in `land.py` and `publish.py`.
 
 ## Exit
-Build 2 (fix of review 1): F1 to F3, leads 1 and 2 and four NICE rows built; restamped `2.0.0-alpha.120`; the one `make check` red only at `plugin-version-check`, which the restamp passes.
-Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`; `make check` once on the stamp's commit.
+Build 3 (fix of review 2): in flight.
+Build 2 (fix of review 1): built; restamped `2.0.0-alpha.120`; its check `exit 0`.
+Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`.
