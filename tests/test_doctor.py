@@ -876,3 +876,143 @@ def test_fk3_a_liars_text_reaches_no_line_raw(machine):
     _suite(machine, _answer(_src(version="0.12.6\x1b[2J")))
     line = _line(doctor.run(machine.env, machine.repo))
     assert "\x1b" not in line and FORK in line
+
+
+# ---- fk3, fix of review 1 ------------------------------------------------------------------
+
+_BAD = "\x9b‮\x07\x1b"
+
+
+def test_fk3_f1_no_control_or_format_character_reaches_the_line(machine):
+    # C1 controls (U+009B is CSI), bidi overrides (U+202E), BEL and ESC: none is printed.
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    _suite(machine, _answer(_src(plugin=f"respeak@acme{_BAD}x", version=f"0.12.6{_BAD}1A")))
+    line = _line(doctor.run(machine.env, machine.repo))
+    assert not [ch for ch in _BAD if ch in line], repr(line)
+    assert "respeak@acmex" in line and "0.12.61A" in line
+
+
+def test_fk3_f2_a_child_holding_the_pipe_costs_no_wall(machine):
+    import time
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    (machine.tmp / "answer.json").write_text(json.dumps(_answer(_src())))
+    _suite(machine, f"/bin/sleep 30 &\n/bin/cat {machine.tmp}/answer.json\nexit 0\n")
+    t = time.monotonic()
+    rep = doctor.run(machine.env, machine.repo)
+    took = time.monotonic() - t
+    assert "installed (from respeak@acme-tools 0.12.6)" in _line(rep)
+    assert took < 3.0, took
+    _fork_stands(rep)
+
+
+def test_fk3_f2_the_wall_and_the_cap_still_hold_for_a_launcher_that_runs_on(machine,
+                                                                            monkeypatch):
+    import time
+    monkeypatch.setattr(doctor, "SOURCES_WALL", 1.0)
+    for body in (f"/bin/cat {machine.tmp}/answer.json\nexec /bin/sleep 30\n",
+                 "exec /usr/bin/yes '{\"schema\": \"agentik.sources/1\"}'\n"):
+        (machine.tmp / "answer.json").write_text(json.dumps(_answer(_src(kind="absent"))))
+        _suite(machine, body)
+        t = time.monotonic()
+        rep = doctor.run(machine.env, machine.repo)
+        assert time.monotonic() - t < doctor.SOURCES_WALL + 1
+        assert _named(rep).detail == "respeak@agentik 0.6.0 installed"   # the file's road
+
+
+LONG = "respeak@" + "m" * 240
+
+
+def test_fk3_f3_a_long_id_that_stands_reads_installed_by_both_roads(machine):
+    _with(machine, {"id": LONG, "version": "1.0.0", "enabled": True})
+    for answer in (_answer(_src(plugin=LONG, version="1.0.0")), None):
+        if answer:
+            _suite(machine, answer)
+        else:
+            (machine.home / ".local" / "bin" / "agentik-suite").unlink()
+        rep = doctor.run(machine.env, machine.repo)
+        assert (_named(rep).status, _named(rep).detail) == ("ok", "installed")
+        line = _line(rep)
+        assert LONG[:200] in line and LONG not in line
+
+
+def test_fk3_f4_no_launcher_under_a_home_that_is_not_absolute(machine, monkeypatch, tmp_path):
+    # A relative HOME would be checked against the doctor's cwd and started from the
+    # project's: no launcher at all, so no file under the project folder is started.
+    elsewhere = tmp_path / "elsewhere"
+    for top in (elsewhere, machine.repo):
+        d = top / "rh" / ".local" / "bin"
+        d.mkdir(parents=True)
+        _exe(d / "agentik-suite", f"echo ran > {top}/ran\n/bin/cat {machine.tmp}/answer.json\n")
+    (machine.tmp / "answer.json").write_text(json.dumps(_answer(_src(version="6.6.6"))))
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    monkeypatch.chdir(elsewhere)
+    for home in ("rh", ""):
+        rep = doctor.run(dict(machine.env, HOME=home), machine.repo)
+        assert not (machine.repo / "ran").exists() and not (elsewhere / "ran").exists()
+        assert "6.6.6" not in _line(rep)
+
+
+def _recorded_as(machine, pid, *recs):
+    f = machine.home / ".claude" / "plugins" / "installed_plugins.json"
+    rec = json.loads(f.read_text())
+    rec["plugins"][pid] = list(recs)
+    f.write_text(json.dumps(rec))
+
+
+def test_fk3_f5_one_id_at_user_and_managed_stands_its_version_only_when_they_agree(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    _recorded_as(machine, FORK, {"scope": "user", "version": "0.12.6"},
+                 {"scope": "managed", "version": "0.13.0"})
+    rep = doctor.run(machine.env, machine.repo)
+    assert (_named(rep).status, _named(rep).detail) == ("ok", "installed")
+    assert _line(rep).endswith(f"installed (from {FORK})")
+    _recorded_as(machine, FORK, {"scope": "user", "version": "0.12.6"},
+                 {"scope": "managed", "version": "0.12.6"})
+    assert _line(doctor.run(machine.env, machine.repo)).endswith(
+        f"installed (from {FORK} 0.12.6)")
+
+
+# The pin's lines (5890501) for the own ids of the machine fixture.
+PIN = {"decisions": "decisions@agentik 0.4.0 installed",
+       "relay-plugin": "relay@agentik 0.1.0 installed"}
+
+
+def test_fk3_f6_a_project_scope_relay_reads_as_at_the_pin(machine):
+    _recorded_as(machine, "relay@agentik", {"scope": "project", "projectPath": "/r"})
+    rep = doctor.run(machine.env, machine.repo)
+    c = _named(rep, "relay-plugin")
+    assert (c.status, c.detail, c.source) == ("ok", PIN["relay-plugin"], None)
+    assert _named(rep, "git").detail.endswith("guarded by the relay plugin (its check above)")
+
+
+def test_fk3_f6_no_installs_file_reads_as_at_the_pin(machine):
+    _with(machine, {"id": FORK, "version": "0.12.6", "enabled": True})
+    (machine.home / ".claude" / "plugins" / "installed_plugins.json").unlink()
+    rep = doctor.run(machine.env, machine.repo)
+    assert _named(rep, "decisions").detail == PIN["decisions"]
+    assert _named(rep, "relay-plugin").detail == PIN["relay-plugin"]
+    c = _named(rep)
+    assert c.status == "note" and c.detail == (
+        "not installed, optional: the plain-English renderer the built-in profiles load "
+        "(`respeak@agentik`)")
+    assert _named(rep, "git").detail.endswith("guarded by the relay plugin (its check above)")
+
+
+def test_fk3_f6_an_own_id_disabled_with_no_entry_reads_as_at_the_pin(machine):
+    ps = [dict(p) for p in machine.plugins]
+    ps[1]["enabled"] = False
+    machine.set_plugins(ps)
+    (machine.home / ".claude" / "plugins" / "installed_plugins.json").write_text("not json")
+    c = _named(doctor.run(machine.env, machine.repo), "decisions")
+    assert (c.status, c.detail) == ("note", "decisions@agentik 0.4.0 installed, disabled, "
+                                    "optional: the decisions ledger, which reads its section "
+                                    "of the resolved configuration")
+
+
+def test_fk3_l4_the_source_text_withholds_a_secret_as_the_detail_does(machine):
+    _with(machine)
+    root = "/cfg/sources.yaml: line 3: mapping values are not allowed 'not-for-print'"
+    _suite(machine, _answer(_src(kind="folder", plugin=None, root=root, version="0.9.0")))
+    line = _line(doctor.run(machine.env, machine.repo))
+    assert "/cfg/sources.yaml: line 3: mapping values are not allowed" in line
+    assert "not-for-print" not in line
