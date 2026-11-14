@@ -244,8 +244,8 @@ def test_gl1_5_status_json_done_items_carry_the_three(tmp_path, monkeypatch):
     assert {k: done[0][k] for k in NEW} == machine
     assert {k: done[1][k] for k in NEW} == {"load": None, "beside": None, "dirty": None}
     rc, out, _ = run_cli("gate", "status")
-    assert (rc, out) == (0, f"done {new} /r/crate exit 0 1.5 min\n"
-                            f"done {old} /r/crate exit 0 1.5 min\nrunner: none\n")
+    assert (rc, out) == (0, f"done {new} /r/crate exit 0 2 min\n"
+                            f"done {old} /r/crate exit 0 2 min\nrunner: none\n")
 
 
 def test_gl1_5_wait_line_and_inbox_keep_their_bytes(w):
@@ -253,7 +253,7 @@ def test_gl1_5_wait_line_and_inbox_keep_their_bytes(w):
     a = w.put("a", caller="sess-1")
     gate.serve(w.root, w.fx(loads=calls((1, 1, 1)), dirty=lambda repo: 2))
     r = w.result(a["id"])
-    assert gate.wait_line(r) == (f"gate {a['id']} {a['repo']}: exit 0 in 1.0 min; "
+    assert gate.wait_line(r) == (f"gate {a['id']} {a['repo']}: exit 0 in 1 min; "
                                  f"log {r['log']}")
     inbox = json.loads((w.root / "sessions" / "sess-1" / "inbox" / f"{a['id']}.json").read_text())
     assert list(inbox) == list(gate.INBOX_KEYS) == ["at", "kind", "id", "repo", "exit",

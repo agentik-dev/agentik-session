@@ -13,16 +13,16 @@
 ## Done-ness
 - [x] the packet, the pin's figures measured again at 7c1f711 (they match the brief's)
 - [x] tests first, red at the pin: 17 of 24 red at 7c1f711 (acceptance 1 to 6); the 7 green are the pin's own land lines (nested, none, a stop line on a green check, a stop line not the last) and line 7
-- [ ] R1 to R3 the three keys, through `Fx`
-- [ ] R4 `status --json`'s done items
+- [x] R1 to R3 the three keys, through `Fx` (`loads`, `dirty`); `_dirty` beside `_head`; a 127's end sides null, since no child was reaped
+- [x] R4 `status --json`'s done items (`DONE_KEYS`); `tests/test_fw2.py:78` the one line edited
 - [ ] R5 `unrun` on the land line
-- [ ] R6 the docstrings
+- [ ] R6 the docstrings: gate.py's written
 - [ ] the stamp, alone in the last commit under `plugin/`
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-R1 to R3 in `gate.py`.
+R5, `unrun` in `land.py`.
 
 ## Exit

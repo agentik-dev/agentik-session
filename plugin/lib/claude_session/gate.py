@@ -10,8 +10,19 @@ child runs in its own process group in its repo; at its end the runner writes
 the caller's inbox (and ntfy when configured). `wait`, `status` and the inbox are reads. The
 tool reports exit codes and judges none: 124 is the wall's cut, 125 a runner that died, 126
 a lock held past the wall, 127 a command that could not start. Every effect the runner has
-(the clock, spawn, flock, the group kill, the POST, the load, the cores) is in Fx, so a test
-fakes each one.
+(the clock, spawn, flock, the group kill, the POST, the load, the cores, the head and the
+machine's reads) is in Fx, so a test fakes each one.
+
+A result also says what the machine was doing (packet gl1): `load`, `{"start": [a, b, c],
+"end": [a, b, c]}`, the three load averages read just before the spawn and just after the
+child is reaped; `beside`, the ids running when the job started, oldest first; `dirty`,
+`{"start": n, "end": n}`, the lines of `git status --porcelain --untracked-files=all` in the
+job's folder, read as `_head` reads git. A side is null where it was not read (no work tree,
+git failing or past `GIT_WAIT`, a read that raised, which logs one line); a job the runner
+did not start and end itself (127's end, 125, 126, a caller's 130 before a start) holds the
+keys with those sides null, and `beside` null when it was not read. A result older than the
+keys holds none, and every reader takes an absent key as null. No read holds a start or
+moves a job's `seconds`; `_over` reads the one-minute load apart.
 """
 
 from __future__ import annotations
@@ -50,9 +61,11 @@ MORE = "{n} more: agentik session gate status"
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
-               "caller", "cut", "head", "key")
+               "caller", "cut", "head", "key", "load", "beside", "dirty")
+SIDES = ("start", "end")    # the two sides of `load` and `dirty` (packet gl1, R1)
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
 RUNNER_KEYS = ("pid", "since", "running")
+DONE_KEYS = ("id", "repo", "exit", "seconds", "cut", "load", "beside", "dirty")  # gl1 R4
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": WALL}
 MAX_RUNNING = 3             # gate.max_running's default (packet S47, ruling 4)
 LOAD_SHARE = 0.75           # gate.load_ceiling's default, as a share of the cores
@@ -264,6 +277,21 @@ def _head(repo: str) -> str | None:
         return None
     out = p.stdout.strip() if p.returncode == 0 else ""
     return out if _HEAD.match(out) else None
+
+
+def _dirty(repo: str) -> int | None:
+    """The count of lines of `git -C <repo> --no-optional-locks status --porcelain
+    --untracked-files=all`, run as `_head` runs git: no `GIT_*` from the caller, under
+    `GIT_WAIT`. None when the folder is in no work tree, git fails or the wait passes
+    (packet gl1, R1). Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "--no-optional-locks", "status", "--porcelain",
+                            "--untracked-files=all"], env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=GIT_WAIT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return sum(1 for x in p.stdout.split(b"\n") if x) if p.returncode == 0 else None
 
 
 def entry_key(e: dict) -> str:
@@ -571,6 +599,8 @@ class Fx:
     grace: float = GRACE
     pid: int = field(default_factory=os.getpid)
     head: Callable[[str], str | None] = _head
+    loads: Callable[[], tuple] = os.getloadavg          # the three, for the result (gl1 R3)
+    dirty: Callable[[str], int | None] = _dirty
 
 
 def _take(fh, fx: Fx) -> bool:
@@ -658,6 +688,53 @@ def _str_or_none(x) -> str | None:
     return x if isinstance(x, str) and x else None
 
 
+def _loads_read(fx: Fx, gid: str, side: str) -> list | None:
+    """The three load averages, each rounded to two places; None for a read that raised (one
+    line in the runner's log) or is not three finite numbers of zero or more."""
+    try:
+        x = fx.loads()
+    except Exception as err:                            # noqa: BLE001 (a null, never a job's)
+        fx.log(f"gate {gid}: the load at its {side} was not read: {err}")
+        return None
+    return _three(x)
+
+
+def _three(x) -> list | None:
+    if not isinstance(x, (tuple, list)) or len(x) != 3:
+        return None
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and 0 <= v < float("inf") for v in x):
+        return None
+    return [round(float(v), 2) for v in x]
+
+
+def _dirty_read(fx: Fx, gid: str, repo, side: str) -> int | None:
+    """The folder's dirty count; None for a read that raised (one line in the runner's log)
+    or is no count."""
+    try:
+        n = fx.dirty(repo)
+    except Exception as err:                            # noqa: BLE001 (a null, never a job's)
+        fx.log(f"gate {gid}: the dirt at its {side} was not read: {err}")
+        return None
+    return _count(n)
+
+
+def _count(n) -> int | None:
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
+
+
+def _machine(e: dict) -> dict:
+    """The result's `load`, `beside` and `dirty` from what the runner read into the entry in
+    its memory: each side null where it was not read, `beside` null when it was not."""
+    load, dirty = e.get("load"), e.get("dirty")
+    load, dirty = (x if isinstance(x, dict) else {} for x in (load, dirty))
+    beside = e.get("beside")
+    ok = isinstance(beside, list) and all(isinstance(g, str) for g in beside)
+    return {"load": {k: _three(load.get(k)) for k in SIDES},
+            "beside": list(beside) if ok else None,
+            "dirty": {k: _count(dirty.get(k)) for k in SIDES}}
+
+
 def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
             note: str | None = None) -> dict:
     """Write result.json last, atomically; drop the entry; tell the inbox and ntfy."""
@@ -671,7 +748,8 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     result = {"id": gid, "repo": e.get("repo"), "command": e.get("command"), "exit": rc,
               "started": started, "ended": ended, "seconds": seconds,
               "log": str(d / "log"), "caller": e.get("caller"), "cut": cut,
-              "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key"))}
+              "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key")),
+              **_machine(e)}
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
     _unlink(_queue(root) / f"{gid}.json")
     _unlink(cancel_path(root, gid))
@@ -705,6 +783,11 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
         e["head"] = _clean_head(fx.head(e["repo"]))
     except Exception:
         e["head"] = None
+    # Packet gl1 R1: the machine just before the spawn, the dirt first so that the load is the
+    # last read; neither moves `started`. The end sides are read once the child is reaped.
+    e["beside"] = [c.e["id"] for c in s.running]
+    e["dirty"] = {"start": _dirty_read(fx, gid, e["repo"], "start"), "end": None}
+    e["load"] = {"start": _loads_read(fx, gid, "start"), "end": None}
     started = fx.now()
     with _open_log(d / "log") as log:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
@@ -718,15 +801,21 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
             p = None
     s.starting = None
     if p is None:
-        _close(root, fx, cfg, e, 127, started, None, s)
+        _close(root, fx, cfg, e, 127, started, None, s, reaped=False)
         return
     s.running.append(_Child(e, p, started))
     s.last_start = started
     _runner_write(root, fx, s)
 
 
-def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set) -> None:
+def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set,
+           reaped: bool = True) -> None:
+    """Close a started entry: the end sides of its load and dirt read after `ended`, when a
+    child was reaped (a 127 had none, so its end sides stay null)."""
     ended = fx.now()
+    if reaped:
+        e["load"]["end"] = _loads_read(fx, e["id"], "end")
+        e["dirty"]["end"] = _dirty_read(fx, e["id"], e["repo"], "end")
     with _open_log(entry_dir(root, e["id"]) / "log") as log:
         log.write(f"gate {e['id']}: exit {rc} in {round(ended - started)} s\n".encode())
     _finish(root, fx, cfg, e, rc, started, ended, cut)
@@ -1004,7 +1093,9 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
     """{running, queued, done, runner}: the entries running, a list; the rest in order, each
     with its key and its wait; the last five results newest first; the live runner or None.
     The wait is the runner's own rule, from `_holds` and `_over`; the load is read only for
-    an entry nothing else holds, and only with one running."""
+    an entry nothing else holds, and only with one running. A `done` item holds `DONE_KEYS`,
+    each as the result holds it: `load`, `beside` and `dirty` are null for a result written
+    before them (packet gl1, R4); `status_lines` reads none of the three."""
     fx = fx or Fx()
     r = runner_info(root)
     live = r if r and alive(r.get("pid")) else None
@@ -1032,7 +1123,7 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
     for n in _result_names(root):
         res = _load(result_path(root, n))
         if res is not None:
-            done.append({k: res.get(k) for k in ("id", "repo", "exit", "seconds", "cut")})
+            done.append({k: res.get(k) for k in DONE_KEYS})
             if len(done) == DONE_SHOWN:
                 break
     runner = {"pid": live.get("pid"), "since": live.get("since")} if live else None

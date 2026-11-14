@@ -75,7 +75,7 @@ def test_fw2_wait_strict_keeps_waits_own_codes(state):
 
 
 def test_fw2_result_gains_head_and_key(w, tmp_path):
-    assert gate.RESULT_KEYS[-2:] == ("head", "key") and len(gate.RESULT_KEYS) == 12
+    assert gate.RESULT_KEYS[10:12] == ("head", "key") and len(gate.RESULT_KEYS) == 15
     seen = []
     w.plan = {"a": (3, 0), "b": OSError("no such command")}
     a, b = w.put("a"), w.put("b")
