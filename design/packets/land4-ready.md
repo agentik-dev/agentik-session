@@ -58,7 +58,7 @@ All in `tests/test_land4_ready.py`: made-up repos `crate`, branch `p1-crate`; a 
 
 ## 4. Findings that name this row
 
-None at the cut. Left to later rows: `gate publish`, `--push` and `--install` (land5); GUIDE §7's words on the stamp (c8); the rows read of the trailer (a decisions row); a dry form of `scripts/stamp` (a NICE row); `make stamp` in the other tool repos.
+None at the cut. Left to later rows: `gate publish`, `--push` and `--install` (land5); GUIDE §7's words on the stamp (c8); the rows read of the trailer (a ledger row); a dry form of `scripts/stamp` (a NICE row); `make stamp` in the other tool repos.
 
 ## 5. Forbidden reads
 
