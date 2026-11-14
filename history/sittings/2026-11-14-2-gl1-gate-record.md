@@ -26,7 +26,8 @@
 - [x] F2 (S2), the argv and both docstrings: `_dirty` runs `git -c core.fsmonitor=false`
 - [x] F3 (S4), `land.tail_lines` (and a unit test of the cut, the whole and the begin): the tail drops its first line only when the byte before it is not a newline
 - [x] the NICE row n240 (a slow dirty read delays the runner's other jobs)
-- [ ] the stamp `2.0.0-alpha.115`; the gate once; both scans
+- [x] the stamp `2.0.0-alpha.115`, 4544 tests (scripts/stamp); plugin.json the only path under plugin/ in its commit
+- [ ] the gate once; both scans
 
 ## Handover
 
