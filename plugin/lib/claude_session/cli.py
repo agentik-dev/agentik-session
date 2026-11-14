@@ -95,8 +95,8 @@ def cmd_start(args) -> int:
     except resolver.ResolveError as e:
         _die(str(e), 2)
     if not cfg:
-        _die(f"unknown profile {args.config!r}. Known: "
-             f"{', '.join(known)}  (agentik session profile)")
+        _die(f"unknown profile {args.config!r}. Known: "              # ss4 R5
+             f"{resolver.known(known, os.environ)}  (agentik session profile)")
     if _on_line(args.claude_args, "--model"):           # mt1 R7: the line's model wins
         cfg.model = cfg.effort = None
     elif _on_line(args.claude_args, "--effort"):
@@ -644,7 +644,7 @@ def cmd_profile(args) -> int:
                   f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
         return 0
     if args.name not in profiles:
-        _die(f"unknown profile {args.name!r}. Known: {', '.join(profiles)}")
+        _die(f"unknown profile {args.name!r}. Known: {resolver.known(profiles, os.environ)}")
     try:
         r = resolver.resolve(os.getcwd(), "profile", os.environ, profile=args.name,
                              overlay={})
@@ -682,8 +682,8 @@ def cmd_config(args) -> int:
         name = args.name or active
         cfg = configs.get(name)
         if not cfg:
-            _die(f"unknown configuration {name!r}. Known: "
-                 f"{', '.join(sorted(configs))}")
+            _die(f"unknown configuration {name!r}. Known: "         # ss4 R6, as R5
+                 f"{resolver.known(sorted(configs), os.environ)}")
         ov = {} if args.stored else (
             sessionconfig.load_overlay() if name == active else {})
         eff = cfg.merged(ov)
@@ -1033,7 +1033,7 @@ def cmd_set(args) -> int:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
         try:
-            _replace(probe, **{key: value}).validate()
+            _replace(probe, **{key: value}).validate(typed=key == "checkpoint")
         except ValueError as e:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):

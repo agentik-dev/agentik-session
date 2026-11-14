@@ -259,12 +259,14 @@ def dump(obj: dict) -> str:
                 for x in v:
                     if not isinstance(x, dict) or any(
                             isinstance(y, (dict, list, tuple)) for y in x.values()):
-                        raise ValueError(f"{k}: list items must be flat mappings")
+                        raise ValueError("a key (withheld): list items must be flat mappings")
                     out.append(f"{pad}  - {{" + ", ".join(
                         f"{a}: {_dump_scalar(b)}" for a, b in x.items()) + "}")
             elif isinstance(v, (list, tuple)):
                 if any(isinstance(x, (list, tuple)) for x in v):
-                    raise ValueError(f"{k}: only flat lists are in the subset")
+                    # ss4 R3: a key is a layer file's or the overlay's text, and every
+                    # caller dumps a resolved config, so no caller is given the name
+                    raise ValueError("a key (withheld): only flat lists are in the subset")
                 out.append(f"{pad}{k}: [" + ", ".join(_dump_scalar(x) for x in v) + "]")
             else:
                 out.append(f"{pad}{k}: {_dump_scalar(v)}")

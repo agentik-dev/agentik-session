@@ -126,6 +126,18 @@ def scrubbed(msg: str) -> str:
     return _QUOTED.sub("(withheld)", withheld(msg))
 
 
+def kind(v) -> str:
+    """What a value read from a layer file is, never what it holds (row ss4): a line
+    mis-indented under a key makes the next line, `gate.ntfy_topic`'s among them, its value."""
+    if isinstance(v, bool):
+        return "a boolean"
+    for t, name in ((dict, "a mapping"), ((list, tuple), "a list"), ((int, float), "a number"),
+                    (str, "a word")):
+        if isinstance(v, t):
+            return name
+    return "nothing" if v is None else "a value"
+
+
 class ShippedGone(ResolveError):
     """The shipped profiles.yaml is missing, so its frozen tree went (F8). A ResolveError, so
     a caller holds on it as on any config error (respawn-r1 §4)."""
@@ -434,6 +446,18 @@ def user_profile(env) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
+def known(names, env) -> str:
+    """An error's list of profile names (row ss4 R5): the shipped names in full, then how many
+    more the user file defines and which file, never their names, which are its text."""
+    try:
+        shipped = set(_read_shipped([]).get("profiles") or {})
+    except ResolveError:
+        shipped = set()
+    more = [n for n in names if n not in shipped]
+    out = ", ".join(n for n in names if n in shipped)
+    return out + (f" and {len(more)} more from {_user_file(env)}" if more else "")
+
+
 def load_profiles(env) -> tuple[dict, dict]:
     """(defaults, profiles) from the shipped and the user's files; for doctor and `profile`."""
     inputs: list = []
@@ -504,12 +528,13 @@ def gate_config(env, log=None) -> dict:
     if isinstance(c, (int, float)) and not isinstance(c, bool) and 0 < c < float("inf"):
         out["load_ceiling"] = c
     elif "load_ceiling" in g and log:
-        log(f"gate: load_ceiling {c!r} is no positive number; the default stands")
+        # ss4 R4: the value is the file's text, and `ntfy_topic` sits beside this key
+        log("gate: load_ceiling is no positive number; the default stands")
     m = g.get("max_running")
     if isinstance(m, int) and not isinstance(m, bool) and m > 0:
         out["max_running"] = m
     elif "max_running" in g and log:
-        log(f"gate: max_running {m!r} is no positive whole number; the default stands")
+        log("gate: max_running is no positive whole number; the default stands")
     return out
 
 
@@ -624,7 +649,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
         # argument) prints as it did (R1-F3)
         said = repr(profile) if profile else "(withheld)"
-        raise ResolveError(f"unknown profile {said}; known: {', '.join(profiles)}")
+        raise ResolveError(f"unknown profile {said}; known: {known(profiles, env)}")
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}

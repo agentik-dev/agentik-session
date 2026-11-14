@@ -978,7 +978,7 @@ def _charter_reminder(session: dict, cwd) -> str:
     if not isinstance(c, dict) or c.get("required") is not True:
         return ""
     d = _charter({"session": session})
-    if any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
+    if not d.startswith("?") and any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
         return ""
     return (f"; charter: none open today under {d}, run "
             f'agentik-session charter open "<goal>"')
@@ -1011,9 +1011,14 @@ def _state_reminder(env, now, sid=None) -> str:
 
 
 def _charter(resolved: dict) -> str:
+    """The charter folder a line names: a word, filtered to a path's characters; a value of
+    another kind is named by its kind, never turned into text (ss4 review 1, R1-F1: a line
+    mis-indented under `dir` makes `gate.ntfy_topic` its value)."""
     c = ((resolved.get("session") or {}).get("charter") or {})
     d = c.get("dir") if isinstance(c, dict) else None
-    return re.sub(r"[^A-Za-z0-9_./-]", "", str(d or "history/sittings"))[:80] or "?"
+    if d is not None and not isinstance(d, str):
+        return f"? (session.charter.dir holds {resolver.kind(d)})"
+    return re.sub(r"[^A-Za-z0-9_./-]", "", d or "history/sittings")[:80] or "?"
 
 
 def _signal(m: meter.Meter) -> bool:
