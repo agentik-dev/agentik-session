@@ -2,29 +2,31 @@
 
 | item | value |
 |---|---|
-| goal | `gate publish ... --install` and `gate land ... --install`: after the publish turn, install the repo's plugin (marketplace update, plugin update) and its `make install`, only where main is pushed, held while a relay run, an unattended run or a gate job of the repo is live (R1 to R9) |
-| budget | about 90 tool calls (the second builder's, the first cut after its first commit), `claude-opus-5-5`; checkpoint at 80% |
-| pin | main at `45b975d` (land5-publish's merge, alpha.121) |
+| goal | build 1: `gate publish ... --install` and `gate land ... --install` (R1 to R9); build 2, the fix of review 1: F1, F2, F3, F4, F6, F7 (packet §7), each with a test red at `5dd358d` |
+| budget | about 90 tool calls a builder, `claude-opus-5-5`; checkpoint at 80% |
+| pin | main at `45b975d` (land5-publish's merge, alpha.121); build 2 from `5dd358d` |
 | branch | `land5b-install`, worktree `.claude/worktrees/land5b-install`, the two venvs linked |
 | level | S3: `design/packets/land5b-install.md` |
 | window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [x] the packet and this charter
-- [x] the tests (`tests/test_land5b_install.py`), red at the pin: 50 failed of 50
-- [x] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`; 50 of 50 green under both venvs; the packet reshaped to doclint's six sections
-- [x] R9: SKILL.md's line
-- [x] the stamp `2.0.0-alpha.122` (4751 tests), its files alone in the last commit under `plugin/` (stamped again after the gate's first run, `20261114-131615-1971`, red at `test_bare_machine`'s reader table: `deliver` now reads JSON through `hooks._load_json`)
-- [x] both scans exit 0 (the tree's after `9dce140`)
-- [ ] `make check` once, last, through the gate queue, on this commit
+- [x] build 1: the packet, the tests, R1 to R9, the stamp; its gate `20261114-140514-1981` exit 0 on `5dd358d`
+- [x] build 2: the packet's §7, this file current
+- [ ] build 2: the tests of §7, red at `5dd358d`
+- [ ] build 2: F1 (red tree), F2 (the Makefile's text), F3 (make install on each call)
+- [ ] build 2: F4, F6, F7
+- [ ] build 2: NICE n257 to n261 at S4
+- [ ] build 2: the stamp again, `2.0.0-alpha.122`, the last commit under `plugin/`
+- [ ] build 2: `make check` once, last, through the gate queue
 
 ## Handover
-- Choices inside the rulings: the packet's §3.
-- If this sitting is cut: the gate on this head is all that is left; then the row's record.
+- Choices inside the rulings: the packet's §3 and §7.
+- decide, owner: the coordinator (consumer: review 2): F2's "`--dry-run` starts no process but git" is read as no `make` and no `claude`; the `ps` read R3 and R6 name stays, so a dry run still holds.
+- If this sitting is cut: the first unticked line above.
 
 ## Next act
-`make check` once through the gate queue on this head; the record names its job and result.
+The tests of §7, red at `5dd358d`.
 
 ## Exit
-Every ruling built; the gate's job and its exit are in the row's record, run on this commit.
+Open.
