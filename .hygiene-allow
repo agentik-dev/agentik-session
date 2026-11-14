@@ -31,6 +31,7 @@ tests/test_resolver.py: sibling,renamed
 tests/test_doctor.py: sibling,renamed
 tests/test_hook_session_start.py: sibling
 tests/test_hook_meter.py: sibling
+tests/test_ss5_meter_rest.py: sibling
 tests/test_hooks.py: sibling
 tests/fixtures/repo/.claude/*/config.yaml: sibling
 # The fixture's path names the tool's own config directory (paths scan since ADV6-1).
