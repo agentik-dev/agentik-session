@@ -30,7 +30,7 @@ def test_writes_the_resolved_file_and_one_line(tmp_path):
     out = hooks.session_start(payload(), env)
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "\n" not in ctx and "'frontier'; " + hooks.START_METER in ctx
+    assert "\n" not in ctx and "'frontier'" + hooks.NOT_LAUNCHED + "; " + hooks.START_METER in ctx
     assert "180000" not in ctx and "400 turns" not in ctx        # packet b1 R3
     path = tmp_path / "state/agentik-session/sessions/test-session/resolved.json"
     assert str(path) in ctx
@@ -79,7 +79,9 @@ def test_cwd_falls_back_to_the_project_dir(tmp_path):
 
 def test_failure_writes_nothing_and_says_one_line(tmp_path, capsys):
     env = env_for(tmp_path, CLAUDE_SESSION_PROFILE="no-such-profile")
-    assert hooks.session_start(payload(), env) == {}
+    out = hooks.session_start(payload(), env)              # ss3 R3: the session is told
+    assert out["hookSpecificOutput"]["additionalContext"].startswith(
+        "agentik-session: unknown profile 'no-such-profile'; nothing of a profile applies")
     err = capsys.readouterr().err
     assert err.count("\n") == 1 and "unknown profile" in err
     assert not (tmp_path / "state").exists()
