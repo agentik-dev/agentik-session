@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -35,10 +36,10 @@ def _run(box, *argv, stdin=b"", **extra):
     return p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace")
 
 
-def _hook(box, event="SessionStart", **extra):
+def _hook(box, event="SessionStart", transcript=None, **extra):
     home, cwd = box
     ev = {"session_id": SID, "hook_event_name": event, "cwd": str(cwd), "source": "startup",
-          "transcript_path": str(home / "none.jsonl"), "permission_mode": "default",
+          "transcript_path": transcript or str(home / "none.jsonl"), "permission_mode": "default",
           "tool_name": "Bash", "tool_input": {"command": "true"}, "tool_response": {"stdout": ""},
           "prompt": "hello", "trigger": "manual", "reason": "other", "model": "m"}
     return _run(box, "hook", event, stdin=json.dumps(ev).encode(), CLAUDE_CODE_SESSION_ID=SID,
@@ -246,3 +247,58 @@ def test_config_show_of_an_unknown_name_counts_the_file_names(box):
     rc, out, err = _run(box, "config", "show", "zz-typed")
     assert rc != 0 and MARK not in out + err, (out, err)
     assert "'zz-typed'" in err and f" and 1 more from {u}" in err, err
+
+
+# ---- review 1, R1-F1: the charter folder's value is named by its kind ------------------------
+
+CDIR = {"a mapping": (MIS.rstrip("\n"), {"ntfy_topic": TOPIC}),
+        "a list": (f" [{TOPIC}]", [TOPIC]), "a number": (" 7", 7)}
+LAYERS = {"repo": Path(".claude") / "agentik" / "config.yaml",
+          "local": Path(".claude") / "agentik" / "config.local.yaml",
+          "old": Path(".claude") / "claude-code-session" / "config.yaml"}
+
+
+def _charter_dir(box, where, kind):
+    text, doc = CDIR[kind]
+    if where == "overlay":
+        _overlay(box, {"charter": {"required": True, "dir": doc}})
+        return
+    p = box[1] / LAYERS[where]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("session:\n  charter:\n    required: true\n    dir:" + text + "\n")
+
+
+@pytest.mark.parametrize("where", ["repo", "local", "old", "overlay"])
+@pytest.mark.parametrize("kind", sorted(CDIR))
+def test_a_charter_dir_of_another_kind_is_named_by_its_kind(box, tmp_path, where, kind):
+    from test_hook_meter import transcript
+    _charter_dir(box, where, kind)
+    rc, out, err = _hook(box)
+    assert rc == 0 and MARK not in out + err, (out, err)
+    assert f"charter: none open today under ? (session.charter.dir holds {kind}), run " in out, out
+    t = transcript(tmp_path, 179000)
+    rc, out, err = _hook(box, "PostToolUse", transcript=str(t))
+    assert rc == 0 and MARK not in out + err, (out, err)
+    line = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert (f"; charter ? (session.charter.dir holds {kind}); bring the charter current"
+            in line), line
+
+
+@pytest.mark.parametrize("kind", sorted(CDIR))
+def test_the_checkpoint_line_under_a_launcher_names_no_value(kind):
+    from claude_session import hooks
+    from types import SimpleNamespace
+    d = hooks._charter({"session": {"charter": {"dir": CDIR[kind][1]}}})
+    assert d == f"? (session.charter.dir holds {kind})"
+    m = SimpleNamespace(ceilings={"context": 9, "turns": 9}, pct_context=90.0, context=8,
+                        pct_turns=1.0, turns=1, used_pct=90.0)
+    for files in (None, ["<this sitting's charter>"]):
+        line = hooks._checkpoint_out(m, d, files)["hookSpecificOutput"]["additionalContext"]
+        assert MARK not in line, line
+
+
+def test_a_charter_dir_typed_as_a_word_still_reads():
+    from claude_session import hooks
+    assert hooks._charter({"session": {"charter": {"dir": "h/s"}}}) == "h/s"
+    assert hooks._charter({"session": {"charter": {}}}) == "history/sittings"
+
