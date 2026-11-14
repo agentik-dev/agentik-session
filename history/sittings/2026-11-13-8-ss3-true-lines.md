@@ -7,13 +7,14 @@
 | pin | `ss4-quiet-values` phase 2 at `de078a9` (alpha.109) |
 | branch | `ss3-true-lines`, worktree `.claude/worktrees/ss3-true-lines`, the two venvs linked |
 | level | S2, a small change: no packet |
+| window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [ ] tests first, red at the pin (acceptance 1 to 5)
-- [ ] R1 SessionStart's line for a session the launcher did not start
-- [ ] R2 `status` and `status --json` `launched`
-- [ ] R3 the unknown profile told to the session
+- [x] tests first, red at the pin (acceptance 1 to 5): 17 of 23 red at de078a9
+- [x] R1 SessionStart's line for a session the launcher did not start
+- [x] R2 `status` and `status --json` `launched`
+- [x] R3 the unknown profile told to the session
 - [ ] R4 `decisions` leaves; R6 no model version in a description
 - [ ] the stamp `2.0.0-alpha.110`
 - [ ] the gate once
@@ -21,6 +22,6 @@
 ## Handover
 
 ## Next act
-Tests first.
+R4 and R6: the shipped file and the resolver's section lists.
 
 ## Exit

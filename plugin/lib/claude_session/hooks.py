@@ -858,6 +858,17 @@ def launch_profile(env) -> str | None:
     return env.get("CLAUDE_SESSION_PROFILE") or env.get("CLAUDE_SESSION_CONFIG") or None
 
 
+def launched(env) -> bool:
+    """Row ss3 R1: the launcher set this session's model and effort: a launch profile, or
+    `agentik session run`'s chain mark, which passes the profile's flags with none exported."""
+    return launch_profile(env) is not None or bool(CHAIN_RE.match(str(env.get(CHAIN_VAR) or "")))
+
+
+# Row ss3 R1: what a session the launcher did not start is told of its profile.
+NOT_LAUNCHED = (" (its limits and rules apply; its model and effort are set only by agentik "
+                "session run)")
+
+
 def follow_launcher_on(env=None, now=None) -> bool:
     """The shim's switch as `plugin/hooks/run` reads it (design/04 §3): the file a regular file,
     never a link, under 24 h by mtime and never in the future, and the launcher there a file.
@@ -922,14 +933,19 @@ def session_start(payload: dict, env=None) -> dict:
                              session_model=model, session_model_source=source)
         path = resolver.write(r, resolver.state_dir(env))
         resolver.save_request(path.parent, cwd, launch_profile(env),
-                              payload.get("transcript_path"), model, source)
+                              payload.get("transcript_path"), model, source,
+                              launched=launched(env))
     except Exception as e:                              # noqa: BLE001
         print(f"agentik-session: SessionStart resolved nothing: {e}", file=sys.stderr)
+        if isinstance(e, resolver.UnknownProfile):      # ss3 R3: the session is told too
+            return _follow_said({"hookSpecificOutput": {
+                "hookEventName": "SessionStart", "additionalContext": _unknown_line(e)}}, env)
         return _follow_said({}, env)
     s = r.sections["session"]
     # Packet b1 R3: no ceiling, window or turn cap reaches the model; the band above the
     # prompt, which only the owner sees, keeps every figure.
-    line = (f"agentik-session: profile '{_token(s['profile'])}'; {START_METER}; "
+    line = (f"agentik-session: profile '{_token(s['profile'])}'"
+            f"{'' if launched(env) else NOT_LAUNCHED}; {START_METER}; "
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
@@ -939,6 +955,20 @@ def session_start(payload: dict, env=None) -> dict:
     _first_meter(path.parent, payload.get("transcript_path"), env)   # ss1 R1, after the line
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                 "additionalContext": line}}, env)
+
+
+_PLAIN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _unknown_line(e) -> str:
+    """Row ss3 R3: the session's one line on a profile name the tool does not know. The name
+    prints when the caller gave it and it is a plain word; a name read from a layer file is
+    its text, withheld (ss2), as is one that is no plain word."""
+    name = e.name if isinstance(e.name, str) and _PLAIN.match(e.name) else None
+    said = f"'{name}'" if name else "(withheld)"
+    return (f"agentik-session: unknown profile {said}; nothing of a profile applies to this "
+            f"session. Known: {e.known}; start with CLAUDE_SESSION_PROFILE=<one> agentik "
+            "session run")
 
 
 def _first_meter(sdir: Path, tp, env) -> None:

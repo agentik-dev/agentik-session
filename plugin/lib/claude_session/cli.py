@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -206,11 +207,12 @@ def cmd_status(args) -> int:
     state = resolver.state_dir(env)
     if args.transcript:
         stem = os.path.splitext(os.path.basename(args.transcript))[0]
-        limits = meter.limits_for(resolver.session_dir(state, stem), env)
+        sdir = resolver.session_dir(state, stem)
+        limits = meter.limits_for(sdir, env)
         m = meter.parse(args.transcript, {}, limits)
         if m is None:
             _die(f"transcript unreadable: {args.transcript}", 2)
-        d = m.as_dict()
+        d = {**m.as_dict(), "launched": _launched(sdir, env)}
     else:
         sid = sessionconfig.session_id() or resolver.newest_session(state)
         sdir = resolver.session_dir(state, sid) if sid else None
@@ -219,6 +221,7 @@ def cmd_status(args) -> int:
             print("no meter for this session: PostToolUse has not run (see "
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
+        d = {**d, "launched": _launched(sdir, env)}         # ss3 R2: its one new key
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
         if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
@@ -227,7 +230,7 @@ def cmd_status(args) -> int:
         if args.json and facts:
             d = {**d, "admission": facts}
         if not args.json:
-            print(meter.one_line(d))
+            print(_role_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
             print(f"model: {mod.model_line(d, measure.load(sdir))}")   # S41: the band's facts
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
@@ -245,8 +248,29 @@ def cmd_status(args) -> int:
             if "mode" in facts:
                 print(f"admission mode: {facts['mode']}")
             return 0
-    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else meter.one_line(d))
+    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else _role_line(d))
     return 0
+
+
+ROLE_NOTE = " (limits and rules only)"      # ss3 R2: its model and effort are claude's own
+
+
+def _launched(sdir, env) -> bool:
+    """Row ss3 R2: whether the launcher set the session's model and effort, as its SessionStart
+    recorded it; a session with no record of it, by this shell's environment."""
+    req = resolver.load_request(sdir) if sdir else None
+    mark = (req or {}).get("launched")
+    return mark if isinstance(mark, bool) else hooks.launched(env)
+
+
+def _role_line(d: dict) -> str:
+    """The meter's line; for a session the launcher did not start, ROLE_NOTE once, after its
+    `role:<name>` or, with none in the line, at its end."""
+    line = meter.one_line({k: v for k, v in d.items() if k != "launched"})
+    if d.get("launched", True):
+        return line
+    m = re.search(r"role:\S+", line)
+    return line[:m.end()] + ROLE_NOTE + line[m.end():] if m else line + ROLE_NOTE
 
 
 def _admission_facts(band) -> dict:
@@ -1093,7 +1117,8 @@ def _rewrite_resolved(model_set: bool = False) -> None:
         resolver.write(r, state)
         if model_set:
             resolver.save_request(sdir, req["cwd"], req.get("profile"),
-                                  req.get("transcript_path"), None)
+                                  req.get("transcript_path"), None,
+                                  launched=req.get("launched"))
     except (resolver.ResolveError, OSError, KeyError) as e:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
 

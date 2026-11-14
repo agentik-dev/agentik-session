@@ -104,6 +104,15 @@ class ResolveError(ValueError):
     pass
 
 
+class UnknownProfile(ResolveError):
+    """Row ss3 R3: a profile name the tool does not know, with the name the caller gave (None
+    when a layer file named it) and `known`'s list, so SessionStart can tell the session."""
+
+    def __init__(self, msg: str, name: str | None, known: str):
+        super().__init__(msg)
+        self.name, self.known = name, known
+
+
 _AT_LINE = re.compile(r": line (\d+): ")
 _QUOTED = re.compile(r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*\"""")
 
@@ -648,8 +657,8 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
         # row ss2: a name read from a layer file (session.profile) is its text, so it is
         # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
         # argument) prints as it did (R1-F3)
-        said = repr(profile) if profile else "(withheld)"
-        raise ResolveError(f"unknown profile {said}; known: {known(profiles, env)}")
+        said, names = (repr(profile) if profile else "(withheld)"), known(profiles, env)
+        raise UnknownProfile(f"unknown profile {said}; known: {names}", profile or None, names)
     own = profiles[name] or {}
 
     sections = {s: {} for s in SECTIONS}
@@ -849,16 +858,17 @@ def rewindow(sdir, n) -> bool:
 
 
 def save_request(sdir: Path, cwd, profile, transcript_path, model=None,
-                 model_source=None) -> None:
+                 model_source=None, launched=None) -> None:
     """What the hook resolved with, so `set` can re-resolve the same inputs: the
-    session model with its source (S28), so a re-resolve records the same one."""
+    session model with its source (S28), so a re-resolve records the same one; and whether
+    the launcher set the session's model and effort (row ss3 R2), for `status`."""
     model = model if isinstance(model, str) else None
-    _write_atomic(Path(sdir) / "request.json", json.dumps(
-        {"cwd": str(cwd), "profile": profile,
-         "transcript_path": str(transcript_path) if transcript_path else None,
-         "model": model,
-         "model_source": model_source if model is not None else None},
-        indent=2) + "\n")
+    doc = {"cwd": str(cwd), "profile": profile,
+           "transcript_path": str(transcript_path) if transcript_path else None,
+           "model": model, "model_source": model_source if model is not None else None}
+    if isinstance(launched, bool):
+        doc["launched"] = launched
+    _write_atomic(Path(sdir) / "request.json", json.dumps(doc, indent=2) + "\n")
 
 
 def load_request(sdir: Path) -> dict | None:
