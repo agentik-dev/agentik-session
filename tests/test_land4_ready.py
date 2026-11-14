@@ -538,8 +538,8 @@ def listed(c, rev="main"):
 
 @pytest.mark.parametrize("alone", [False, True])
 def test_land4_f1_a_renumber_never_brings_back_a_file_main_deleted(c, alone):
-    c.on_main(dict({"docs/old.md": "old notes, see n8\n"}, **({} if alone else {"docs/k.md": "k\n"})),
-              "main adds old")
+    keep = {} if alone else {"docs/k.md": "k\n"}
+    c.on_main(dict({"docs/old.md": "old notes, see n8\n"}, **keep), "main adds old")
     c.git(c.tree, "merge", "-q", "main")
     sha = c.work({NICE: nice(*rows7(), row(8, "b8"))})
     c.on_main({"docs/old.md": None, NICE: nice(*rows7(), row(8, "m8"))}, "main deletes old")
@@ -677,8 +677,9 @@ def test_land4_f8_the_dry_run_of_a_head_past_the_sha(c, trailer):
     c.order.unlink()
     rc, out, err = dry(c, sha, True)
     if trailer:
-        assert (rc, out) == (0, "ready: p1-crate is past %s by its trailers; the rerun is not run "
-                             "dry\nready: p1-crate holds main\nready: would run make stamp and "
-                             "commit its lines\nland crate: dry run, nothing queued\n" % sha[:7]), err
+        assert (rc, out) == (0, "ready: p1-crate is past %s by its trailers; the rerun is not "
+                             "run dry\nready: p1-crate holds main\nready: would run make stamp "
+                             "and commit its lines\nland crate: dry run, nothing queued\n"
+                             % sha[:7]), err
     else:
         assert (rc, out) == (1, "land crate: red sha exit 1\n"), err

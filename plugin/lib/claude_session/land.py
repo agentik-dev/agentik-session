@@ -30,12 +30,12 @@ branch added under an id main has since used takes a number above every id on ei
 renumbered id is rewritten only in `.md` files the branch added (the head has them, main does
 not, and they are in the merged tree), as a whole word; a mention anywhere else, code and tests
 included, is listed in the note and left. The renumbering writes only regular files (100644 or
-100755) of the merged tree, from its text, never through a link. Then `make stamp STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit
-<code>`, and a line written beyond the derived kinds (NICE rows moved whole to the overflow
-aside) `red stamp exit 1`, the paths named, as is a head that moves during `make stamp` (the
-branch reset to the head read before, the note naming the commits' subjects); any red or cut
-between `make stamp` and its commit restores the stamp's paths, the index too, and removes a file
-it added. Then
+100755) of the merged tree, from its text, never through a link. Then `make stamp
+STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit <code>`, and a line written beyond
+the derived kinds (NICE rows moved whole to the overflow aside) `red stamp exit 1`, the paths
+named, as is a head that moves during `make stamp` (the branch reset to the head read before, the
+note naming the commits' subjects); any red or cut between `make stamp` and its commit restores
+the stamp's paths, the index too, and removes a file it added. Then
 `scripts/plugin-version-check` where it is there: `red version exit <code>`, before the check.
 The job's commits are `<branch>: merge main` and `<branch>: plugin <version>`, each closing with
 `Gate-Land: <the sha given, whole>`; a stamp that wrote nothing makes none. A head past the sha
@@ -48,7 +48,9 @@ after every other ending, the head read from the worktree, a cut just after a co
 job's included. The check's stop line is read from the log's size just before `make
 check`, so a stamp's output never makes an unrun. `--dry-run` queues nothing and writes nothing,
 in a job or not: the reads up to merge-tree's, then `ready: ...` lines on stdout and `land <repo>:
-dry run, nothing queued`, exit 0; a read that reds prints its land line and exits its code.
+dry run, nothing queued`, exit 0; a read that reds prints its land line and exits its code. A
+head past the sha given whose trailer chain reads true first prints `ready: <branch> is past
+<sha7> by its trailers; the rerun is not run dry`; a chain that reads false is red sha.
 
 A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A red
 check adds `, unrun lock|load|wall` (packet gl1, R5, as review 1 amended it) only when all three
@@ -1147,8 +1149,10 @@ def readied_from(repo, tree, branch, full, head, dry):
         steps.append((commit, parents[1] if len(parents) == 2 else None))
         prev = commit
     if dry:
-        note("a dry run takes %s's commits past %s by their trailers; the job runs them again"
-             % (branch, full))
+        # R11 as review 1 ruled (F8): the rerun writes a temp worktree, so a dry run says the
+        # head is taken by its trailers alone.
+        print("ready: %s is past %s by its trailers; the rerun is not run dry"
+              % (branch, full[:7]), flush=True)
         return True
     return rerun(repo, tree, branch, full, steps)
 
