@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import cli, gate, resolver
+from claude_session import cli, gate, land, resolver
 from test_gate import ENV, T0, World
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -146,6 +146,33 @@ def test_gl1_2_dirty_reads_as_head_does(w, tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_WORK_TREE", str(other))
     assert gate._dirty(str(w.repo)) == 3
     assert not (w.repo / ".git" / "index.lock").exists()
+
+
+def has_fsmonitor_daemon():
+    p = subprocess.run(["git", "version", "--build-options"], capture_output=True, text=True)
+    return p.returncode == 0 and "fsmonitor--daemon" in p.stdout
+
+
+@pytest.mark.skipif(not has_fsmonitor_daemon(), reason="this git has no fsmonitor--daemon")
+def test_gl1_f2_the_dirty_read_starts_no_daemon_and_writes_nothing(w, tmp_path):
+    """Review 1's F2: a repo whose config sets core.fsmonitor=true; the read starts no daemon
+    and leaves the listing of `.git` as it was."""
+    git_repo(w.repo, tmp_path)
+    repo = str(w.repo)
+    env = git_env(tmp_path)
+    try:
+        subprocess.run(["git", "-C", repo, "config", "core.fsmonitor", "true"], check=True,
+                       env=env)
+        (w.repo / "a").write_text("a\n")
+        before = sorted(os.listdir(w.repo / ".git"))
+        assert gate._dirty(repo) == 1
+        assert sorted(os.listdir(w.repo / ".git")) == before
+        status = subprocess.run(["git", "-C", repo, "fsmonitor--daemon", "status"], env=env,
+                                capture_output=True, text=True)
+        assert status.returncode != 0 and "not watching" in status.stdout + status.stderr, status
+    finally:
+        subprocess.run(["git", "-C", repo, "fsmonitor--daemon", "stop"], env=env,
+                       capture_output=True)
 
 
 # ---- R2: a job the runner did not start and end itself ----------------------
@@ -325,10 +352,13 @@ class Crate:
         return p.returncode, p.stdout, p.stderr
 
 
+CODES = {"lock": 2, "load": 2, "wall": 124}    # scripts/bounded's exit for each stop
+
+
 @pytest.mark.parametrize("why", ["lock", "load", "wall"])
 def test_gl1_6_a_refused_check_reads_unrun(tmp_path, why):
     crate = Crate(tmp_path, ["@echo one", "@echo two >&2",
-                             f"@echo 'bounded: stop: {why}' >&2; exit 3"])
+                             f"@echo 'bounded: stop: {why}' >&2; exit {CODES[why]}"])
     rc, out, log = crate.land()
     assert (rc, out) == (2, f"land crate: red check exit 2, unrun {why}\n"), log
     tail = log.splitlines()[-3:]
@@ -336,19 +366,93 @@ def test_gl1_6_a_refused_check_reads_unrun(tmp_path, why):
     assert tail[2] == out.strip()
 
 
-@pytest.mark.parametrize("lines,want", [
-    (["bounded: nested stop: wall"], ""),
-    ([], ""),
-    (["bounded: stop: load", "bounded: nested stop: wall"], ""),
-    (["bounded: nested stop: wall", "bounded: stop: wall"], ", unrun wall"),
-    (["bounded: stop: lock", "a test said more"], ", unrun lock"),
-    (["bounded: stop: loads"], ""),
-    (["  bounded: stop: load"], ""),
-], ids=["nested", "none", "nested-last", "stop-last", "a-line-after", "not-a-stop", "indented"])
-def test_gl1_6_only_the_last_bounded_line_counts(tmp_path, lines, want):
-    recipe = ["@echo one"] + [f"@echo '{x}'" for x in lines] + ["@exit 3"]
+@pytest.mark.parametrize("why,code", [("lock", 3), ("load", 124), ("wall", 2), ("wall", 1)])
+def test_gl1_6_a_stop_line_whose_code_make_disagrees_with_is_a_plain_red(tmp_path, why, code):
+    crate = Crate(tmp_path, [f"@echo 'bounded: stop: {why}' >&2; exit {code}"])
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), log
+    assert f"make: *** [check] Error {code}" in log
+
+
+@pytest.mark.parametrize("lines,code,want", [
+    (["bounded: nested stop: wall"], 124, ""),
+    ([], 2, ""),
+    (["bounded: stop: load", "bounded: nested stop: wall"], 2, ""),
+    (["bounded: nested stop: wall", "bounded: stop: wall"], 124, ", unrun wall"),
+    (["bounded: stop: lock", "a test said more"], 2, ""),
+    (["bounded: stop: lock", "", "make: *** [other] Error 9"], 2, ""),
+    (["bounded: stop: lock", ""], 2, ", unrun lock"),
+    (["bounded: stop: loads"], 2, ""),
+    (["  bounded: stop: load"], 2, ""),
+], ids=["nested", "none", "nested-last", "stop-last", "a-line-after", "make-said-another-code",
+        "an-empty-line-after", "not-a-stop", "indented"])
+def test_gl1_6_only_the_last_bounded_line_counts(tmp_path, lines, code, want):
+    recipe = ["@echo one"] + [f"@echo '{x}'" for x in lines] + [f"@exit {code}"]
     rc, out, log = Crate(tmp_path, recipe).land()
     assert (rc, out) == (2, f"land crate: red check exit 2{want}\n"), log
+
+
+def test_gl1_6_a_sub_makes_error_line_carries_the_code(tmp_path):
+    sub = "sub:\\n\\t@echo \\\"bounded: stop: wall\\\" >&2; exit 124\\n"
+    crate = Crate(tmp_path, [f'@printf "{sub}" | $(MAKE) --no-print-directory -f - sub'])
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2, unrun wall\n"), log
+    assert log.splitlines()[-4:-1] == ["bounded: stop: wall", "make[1]: *** [sub] Error 124",
+                                       "make: *** [check] Error 2"]
+
+
+def test_gl1_f1_a_real_failure_whose_captured_stderr_holds_a_stop_is_a_plain_red(tmp_path):
+    """Review 1's F1: a failing test ran a refused bounded with its stderr inherited, so pytest's
+    'Captured stderr call' holds `bounded: stop: load`, then its summary lines; the check ran to
+    its end and is a plain red."""
+    bounded = ROOT / "scripts" / "bounded"
+    suite = tmp_path / "suite_t.py"
+    suite.write_text(
+        "import os, subprocess, sys\n"
+        "def test_refused_command_is_reported():\n"
+        "    env = {k: v for k, v in os.environ.items() if not k.startswith('BOUNDED_')}\n"
+        "    env.update(BOUNDED_LOADAVG='999', BOUNDED_LOAD_POLL='0.05', BOUNDED_LOAD_MAX='0')\n"
+        f"    p = subprocess.run([sys.executable, {str(bounded)!r}, '--load', '1', '--', 'true'],"
+        " env=env)\n"
+        "    assert p.returncode == 3\n")
+    py = sys.executable
+    crate = Crate(tmp_path, [f"@{py} {bounded} --wall 600 -- {py} -m pytest -q "
+                             f"-p no:cacheprovider {suite}"])
+    for name in [k for k in crate.env if k.startswith("PYTEST_")]:
+        del crate.env[name]
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), log
+    lines = log.splitlines()
+    i = lines.index("bounded: stop: load")
+    assert any(x.startswith("FAILED ") for x in lines[i:]), log      # the stop line is no unrun
+    assert "make: *** [check] Error 1" in lines[i:], log
+
+
+def test_gl1_f1_a_stop_line_then_a_failure_is_a_plain_red(tmp_path):
+    crate = Crate(tmp_path, ["@echo 'bounded: stop: load'",
+                             "@echo 'FAILED t.py::test_x - assert 1 == 2'; exit 1"])
+    rc, out, log = crate.land()
+    assert (rc, out) == (2, "land crate: red check exit 2\n"), log
+
+
+def test_gl1_f3_a_stop_line_that_opens_the_tail_is_read(tmp_path):
+    """Review 1's F3: the check's last TAIL bytes begin exactly at the stop line, so no line is
+    cut and the stop line is read; empty lines and make's own line follow it."""
+    probe = tmp_path / "probe"                       # make's error line, as this make writes it
+    probe.mkdir()
+    (probe / "Makefile").write_text("check:\n\t@echo pre\n\t@exit 2\n")
+    made = subprocess.run(["make", "-C", str(probe), "--no-print-directory", "check"],
+                          capture_output=True).stderr.splitlines()[-1] + b"\n"
+    stop = b"bounded: stop: load\n"
+    fill = land.TAIL - len(stop) - len(made)
+    crate = Crate(tmp_path, ["@echo pre", "@echo 'bounded: stop: load' >&2; "
+                             f"{sys.executable} -c 'import sys; sys.stdout.write(chr(10) * {fill})';"
+                             " exit 2"])
+    rc, out, _ = crate.land()
+    log = crate.log().read_bytes()
+    assert log.index(b"land crate: ") - log.index(stop) == land.TAIL       # the edge, exactly
+    assert log.index(stop) > log.index(b"pre\n")
+    assert (rc, out) == (2, "land crate: red check exit 2, unrun load\n")
 
 
 def test_gl1_6_a_stop_line_before_the_check_or_on_a_green_one_is_no_unrun(tmp_path):
@@ -390,7 +494,7 @@ def test_gl1_7_the_checks_output_reaches_the_log_as_it_comes_in_order(tmp_path):
               "@printf part; sleep 0.2; printf 'ial\\n' >&2",
               f'@echo early >&2; n=0; while [ ! -e "{go}" ] && [ $$n -lt 400 ]; do '
               f'sleep 0.05; n=$$((n+1)); done; [ $$n -lt 400 ] || echo "never went"',
-              "@echo late", "@echo 'bounded: stop: wall' >&2", "@echo last >&2; exit 3"]
+              "@echo late", "@echo last >&2", "@echo 'bounded: stop: wall' >&2; exit 124"]
     crate = Crate(tmp_path, recipe)
     p, log = crate.start(), crate.log()
 
@@ -407,13 +511,13 @@ def test_gl1_7_the_checks_output_reaches_the_log_as_it_comes_in_order(tmp_path):
     lines = log.read_text().splitlines()
     i = lines.index(f"land-step: check: make check in {crate.tree}")
     want = [x for n in range(1, 21) for x in (f"out{n}", f"err{n}")] + [
-        "partial", "early", "late", "bounded: stop: wall", "last",
-        "make: *** [check] Error 3", "land crate: red check exit 2, unrun wall"]
+        "partial", "early", "late", "last", "bounded: stop: wall",
+        "make: *** [check] Error 124", "land crate: red check exit 2, unrun wall"]
     assert lines[i + 1:] == want
 
 
 def test_gl1_7_a_writer_the_check_leaves_behind_cannot_hold_the_landing(tmp_path):
-    crate = Crate(tmp_path, ["@echo 'bounded: stop: wall' >&2", "@(sleep 6; echo late) & exit 3"])
+    crate = Crate(tmp_path, ["@echo 'bounded: stop: wall' >&2", "@(sleep 6; echo late) & exit 124"])
     t = time.monotonic()
     rc, out, log = crate.land()
     assert (rc, out) == (2, "land crate: red check exit 2, unrun wall\n"), log
