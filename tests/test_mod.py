@@ -380,3 +380,49 @@ def test_s41_a1_an_int_past_a_double_is_no_part_and_status_prints(state, tmp_pat
     rc, out, err = run("status")
     assert rc == 0 and "Traceback" not in err, err
     assert out.splitlines()[2] == "model: opus 5.5; claude-opus-5-5, window from session:claude-opus-5-5", out
+
+
+# ---- Packet ss1-zero, lines 2, 3 and 8: the module's bandLine over the meter SessionStart writes.
+# This file is the one reader of plugin/hooks/*.ts (criterion 5): the module is run under node
+# with its types stripped, and the case skips without the module or node.
+
+SS1_SID = "ss1-zero-sess-0000-2222"
+NO_METER = "session: no meter · agentik-session doctor"
+
+
+def _band_line(meter_text):
+    """The module's own `bandLine(meter, false, now)`."""
+    mod = HOOKS_DIR / "session.ts"
+    if not mod.exists():
+        pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
+    import shutil
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH: the module's own test draws the line")
+    js = ("const m = await import(process.argv[1]); const t = process.argv[2];"
+          "console.log(m.bandLine(t === '-' ? null : t, false, Date.now()))")
+    r = subprocess.run([node, "--input-type=module", "-e", js, mod.as_uri(),
+                        "-" if meter_text is None else meter_text],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+@pytest.mark.parametrize("absent", [False, True])
+def test_ss1_the_band_reads_session_start_s_zero_meter(tmp_path, absent):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    tp = tmp_path / "t.jsonl"
+    if not absent:
+        tp.write_text("")
+    env = dict(os.environ)
+    hooks.session_start({"session_id": SS1_SID, "transcript_path": str(tp), "cwd": str(repo),
+                         "hook_event_name": "SessionStart", "source": "startup"}, env)
+    text = (resolver.session_dir(resolver.state_dir(env), SS1_SID) / "meter.json").read_text()
+    drawn = _band_line(text)
+    assert "ctx 0% · turns 0%" in drawn and "doctor" not in drawn and "no meter" not in drawn, drawn
+
+
+def test_ss1_no_meter_still_draws_no_meter():
+    assert _band_line(None) == NO_METER

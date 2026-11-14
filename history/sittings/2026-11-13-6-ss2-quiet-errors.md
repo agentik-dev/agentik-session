@@ -2,40 +2,28 @@
 
 | item | value |
 |---|---|
-| goal | brief ss2-quiet-errors (a small change, no packet): R1 to R5 |
-| budget | builder: about 90 tool calls |
-| pin | 5890501 on main (2.0.0-alpha.106); worktree `.claude/worktrees/ss2-quiet-errors`, `.venv`, `.venv-floor` linked |
+| goal | brief ss2-quiet-errors (a small change, no packet): R1 to R5; review 1's fix; phase 2 |
+| budget | builder: about 90 tool calls per round |
+| pin | 5890501 on main (2.0.0-alpha.106); phase 2 merged main 4028087 (alpha.107); `.venv`, `.venv-floor` linked |
 | window | 200k |
 | agents | 0 |
 
 ## Done-ness
-- [x] Tests first (acceptance 1 to 4), `tests/test_ss2_quiet_errors.py`: 8 of 33 red at the pin (git archive of 5890501): both verb sweeps, the three verbs, SessionStart (user, repo), the unknown-profile control
-- [x] R1, R2: scrubbed at the raise, two lines of `resolver.py` (`_parse` through `withheld`; the unknown profile's name withheld); `withheld`, `scrubbed` moved down to the resolver, `plug`'s names kept. No resolver test pinned the old text
-- [x] R4: every event of hooks.json fed to `hook <event>`, two shapes, user and repo: SessionStart alone printed the text at the pin
-- [x] R5: five of the seven sentences respoken; `admission.*` kept (`admission.mix` is advice on the week's spend, it decides no fit), `reconcile.*` kept (`reconcile.record` names where records are written, and `read.*` a reading pass). No test pinned an old one; a new test pins all seven
-- [x] Suite before the stamp: .venv 4162 passed, 3 failed; .venv-floor 4014 passed, 127 skipped, 3 failed. The three: test_readme's count twice (the stamp's), test_ak5_plug's describe_json under 1.0 s at load 16 to 20 (passes alone)
-- [x] Stamp: `scripts/stamp --base main --version 2.0.0-alpha.108`, 4131 -> 4165 tests, its four files alone, the last commit
-- [ ] The gate once, on the stamp's commit (the first build's job is left to run)
-
-## Fix of review 1 (R1-F1, R1-F2, R1-F3, N1; other notes to NICE)
-- [x] Tests first, edaba2f: 20 red at 5a0eeb0 (the commit says 23; 20 is the count)
-- [x] R1-F1: `_save_tier` reads the file inside its `try` as UTF-8 and passes both parse errors through `resolver.withheld`; VERBS hold every `--save` form
-- [x] R1-F2: a key's name read from a file withheld: `models` and `respawn` name the file and the section (the parser keeps no line for a key), and the reconciler's three key-name lines; four tests' pins moved (test_resolver, test_models, test_r2 twice)
-- [x] R1-F3: a profile name from the environment or a caller prints as at the pin; only a name read from a file is withheld
-- [x] N1: a threshold's error says `is not a number` or `is below 0`, never the value
-- [x] NICE: review 1's notes are n223 to n231 (S4); n152 to n159, the oldest S4 rows, moved to the overflow for recordlint's bound
-- [x] db08331: the save test builds the old folder's name from the resolver (the tree's hygiene scan, group renamed)
-- [x] Suites before the stamp: .venv 4183 passed, 2 failed (test_readme's count, the stamp's); .venv-floor 4037 passed, 127 skipped, 0 failed (its test_readme ran after the stamp landed)
-- [x] Stamp 2af1704: alpha.108 in place leaves plugin-version-check red (plugin/ changed after the version moved), so 2.0.0-alpha.109 as the repo's fix rounds did (ak5's review 2 fix, S53); 4165 -> 4185 tests; test_readme and test_describe_json pass alone after it, both venvs
-- [ ] The gate once, last, on this commit
+- [x] Build 1: tests first (`tests/test_ss2_quiet_errors.py`, 8 of 33 red at the pin); R1, R2 scrubbed at the raise in `resolver.py` (`withheld`, `scrubbed` moved down from `plug`); R4 every hooks.json event fed under two shapes (SessionStart alone leaked); R5 five of seven sentences respoken
+- [x] Fix of review 1: tests first (edaba2f, 20 red at 5a0eeb0); R1-F1 `_save_tier` reads as UTF-8 inside its `try`, both parse errors through `withheld`; R1-F2 a key's name from a file withheld (`models`, `respawn`, the reconciler's three key lines; four pins moved); R1-F3 a typed profile name prints, one from a file is withheld; N1 a threshold says `is not a number` or `is below 0`
+- [x] NICE: review 1's notes n223 to n231 (S4); n152 to n159 to the overflow for recordlint's bound
+- [x] Phase 2, merge f626c4d: main 4028087 (ss1-zero). Conflicts only in the four stamped lines (README and source Status, the sidecar, plugin.json), main's side taken; ss1's `doctor.py`, `hooks.py`, `measure.py` merged clean, and its zero-turn meter prints no file text (`_first_meter` swallows every error)
+- [x] Phase 2, NICE: main left `NICE_TO_HAVE.md` and the overflow alone since 5890501 (its highest n222), so n223 to n231 stand; recordlint holds (75 rows, 24,238 B)
+- [x] Phase 2, stamp ba1289b: `scripts/stamp --base main --version 2.0.0-alpha.108`, 4152 -> 4206 tests (main's 4152 plus this row's 54), the last commit under `plugin/`; plugin-version-check 0
+- [x] Phase 2, by hand: test_ss2_quiet_errors, test_ss1_zero, test_readme 131 passed under each venv; lint, doclint 0; hygiene tree 0, `--require-private --commits main..HEAD` 0
+- [ ] The gate once, last, on this commit (the older job 20261113-151418-1628 is ignored)
 
 ## Handover
-- decide, owner: the coordinator: alpha.109 here and ss1-zero's alpha.107; the merge's restamp sets the number. NICE n223 to n231 and the overflow move of n152 to n159 may meet main's rows at the merge.
-- The reconciler's own ConfigError quotes a `reconcile.thresholds` value (`is {v!r}`) from a layer file; outside R1's parse-or-resolve error and these tests' shapes, left for NICE_TO_HAVE.
-- A later merge of main (ss1-zero takes alpha.107) is the coordinator's.
+- Review 2's five findings (values that stand at the pin too) are row ss4-quiet-values, cut from this branch's old tip; it lands after this one.
+- The commit scan reports the allowlist changed in the range (fdd8d66, build 1's row for a sibling name); it exits 0.
 
 ## Next act
-- The gate's result goes to the coordinator; landing is theirs.
+- The gate's result goes to the coordinator; the landing is theirs.
 
 ## Exit
-- Done: R1 to R5 built (build 1); review 1's F1, F2, F3 and N1 fixed, its other notes NICE n223 to n231, alpha.109 stamped; the gate runs once on the charter's commit, after this one.
+- Done: R1 to R5 built; review 1's fixes built; review 2 closed; phase 2 merged main, alpha.108 stamped; the gate runs once on this charter's commit.
