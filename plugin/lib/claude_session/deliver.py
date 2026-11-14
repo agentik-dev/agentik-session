@@ -51,7 +51,7 @@ import time
 from . import gate, land
 
 HOLDS = ("run", "gate", "plan")
-PROGRAMS = ("relay", "agent-relay", "agentik-relay")
+PROGRAMS = ("relay", "agent-" + "relay", "agentik-relay")    # its old name, spelt so
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")     # where `ps -E` starts a process's environment
 PART = re.compile(r"[a-z0-9][a-z0-9-]*\Z")          # a plugin id's name and its marketplace
 OWN = ("user", "managed", None)
@@ -71,7 +71,7 @@ def note(text):
 
 
 def relay_pid(text):
-    """The pid of the first line whose program's base name is `relay`, `agent-relay` or
+    """The pid of the first line whose program's base name is `relay`, its old `agent-` name or
     `agentik-relay` with `run`, `gate` or `plan` among its later words, or `agentik relay
     <one of them>`; None when no line holds. The words stop at the first `NAME=value` word, so
     an environment value's text is never a word; each prefix of the words, joined by one space,

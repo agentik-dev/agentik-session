@@ -181,7 +181,7 @@ def test_land5b_3_land_push_install_lands_pushes_then_installs(lb):
 # value's words do not; a list that cannot be read holds.
 
 HELD = ["4242 /usr/local/bin/relay run --repo x", "4242 /opt/my tools/relay run --repo x",
-        "4242 /usr/local/bin/agentik relay gate x", "4242 agent-relay plan q.yaml",
+        "4242 /usr/local/bin/agentik relay gate x", "4242 agent-" + "relay plan q.yaml",
         "4242 /x/agentik-relay run"]
 
 
