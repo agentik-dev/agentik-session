@@ -18,10 +18,10 @@
 ## Done-ness, the fix of review 2 (from `60e082a`)
 - [x] the packet amended: R5, R6, §3, acceptance 18 to 20 (under 9,216 B)
 - [x] the tests for F1, F2 and lead 1, red at `60e082a`
-- [ ] F1: `land.main` drops `MAKEFILES`; a landing proves only with `make_env` a list holding no `MAKEFILES`
-- [ ] F2: the word resolved by `rev-parse --disambiguate`, exactly S's second parent
-- [ ] lead 1: a `scripts/hygiene` that is there and not executable is `red hygiene exit 126`
-- [ ] three NICE rows (S4)
+- [x] F1: `land.main` drops `MAKEFILES`; a landing proves only with `make_env` a list holding no `MAKEFILES`
+- [x] F2: the word resolved by `rev-parse --disambiguate`, exactly S's second parent
+- [x] lead 1: a `scripts/hygiene` that is there and not executable is `red hygiene exit 126`
+- [x] three NICE rows (S4), n254 to n256
 - [ ] the stamp, its files the last commit; `make check` once, last; both scans exit 0
 
 ## Handover
@@ -30,7 +30,7 @@
 - A fix round that changes `plugin/` takes the next alpha by `make stamp`, as land4's fix did.
 
 ## Next act
-F1, F2 and lead 1 in `land.py` and `publish.py`.
+The stamp, then `make check` once, last.
 
 ## Exit
 Build 3 (fix of review 2): in flight.
