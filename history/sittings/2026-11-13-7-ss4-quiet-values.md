@@ -30,7 +30,8 @@
 Tests in `tests/test_ss4_quiet_values.py`; matrix exits at pin and head compared by hand (744, equal).
 
 ## Next act
-Look at main's head: if it is ss2's merge, merge main, renumber NICE rows, stamp the next alpha, the gate; else stamp the next alpha after the branch's and run the gate.
+Landing: the gate's line in the hq's build 3, then the merge into main.
 
 ## Exit
 Build 1: R1 to R6 built and stamped. Build 2: review 1's R1-F1 and R1-F2 fixed behind 16 tests red at c2622a2, stamped `2.0.0-alpha.111`; the gate runs once on this commit, its line in the build record. Phase 2 owed: main had not taken ss2 when the fixes landed. The commit scan flags a75051b (`sibling`, the old folder's name in a test line, fixed forward): an allow row is the coordinator's.
+Phase 2: main 6c97f49 merged (only the stamp's four files conflicted, taken from main), NICE n232 to n235 already follow main's n231, the allow row for a75051b added (the commit scan exits 0), stamped `2.0.0-alpha.109`, 4270 tests.
