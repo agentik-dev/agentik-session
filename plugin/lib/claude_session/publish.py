@@ -54,8 +54,10 @@ With neither, the note gives the line that makes one, `agentik session gate run 
 check` on a clean main, none of those four names set; this verb never queues it.
 
 `main` again: a tracked file of the working tree that differs from S, read before the scans and
-after them, since the tree's scan would read another tree. `hygiene`: where `scripts/hygiene` is
-an executable file, it runs in the checkout, then `scripts/hygiene --require-private --commits
+after them, since the tree's scan would read another tree. `hygiene`: a repo with no
+`scripts/hygiene` is not scanned; one that is there and is no executable file is `red hygiene
+exit 126` (a shell's code for a file it may not run), before any push (review 2, lead 1).
+Else it runs in the checkout, then `scripts/hygiene --require-private --commits
 <R's sha>..<S>` when its --help names `--commits` (as land's own step reads it), each one's
 output on stderr; a non-zero exit is the line's code. With no R, or a hygiene without
 `--commits`, the range is not scanned and the ok line ends `, range not scanned`. `push`: `git
@@ -88,6 +90,7 @@ WORD = r"[A-Za-z0-9_./~+,:@%=-]+"
 REDIRECT = r"(?:[0-9]*(?:>>|>\||>|<)[ \t]*%s|[0-9]*[<>]&[ \t]*(?:[0-9]+|-))" % WORD
 CHECK_SCRIPT = re.compile(r"\A[ \t\n]*make[ \t]+check(?:[ \t]+%s)*[ \t\n]*\Z" % REDIRECT)
 SHELLS = ("sh", "/bin/sh")
+NOT_EXECUTABLE = 126        # a shell's exit for a file it found and may not run
 
 
 def note(text):
@@ -232,9 +235,13 @@ def remote_of(repo):
 def scans(repo, r, s):
     """The hygiene step; what the ok line adds ("" or "range not scanned")."""
     script = os.path.join(repo, "scripts", "hygiene")
-    if not (os.path.isfile(script) and os.access(script, os.X_OK)):
-        note("hygiene: no executable scripts/hygiene in " + repo)
+    if not os.path.lexists(script):
+        note("hygiene: no scripts/hygiene in %s, so no scan" % repo)
         return ""
+    if not (os.path.isfile(script) and os.access(script, os.X_OK)):     # review 2, lead 1
+        raise land.Red("hygiene", NOT_EXECUTABLE, "scripts/hygiene in %s is there but not "
+                       "executable, so the scan cannot run and nothing is pushed: chmod +x "
+                       "scripts/hygiene and commit its mode" % repo)
     note("hygiene: scripts/hygiene in " + repo)
     code = land.run(repo, script)
     if code != 0:
