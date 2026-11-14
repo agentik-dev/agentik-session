@@ -15,14 +15,16 @@
 - [x] the tests (`tests/test_land5b_install.py`), red at the pin: 50 failed of 50
 - [x] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`; 50 of 50 green under both venvs; the packet reshaped to doclint's six sections
 - [x] R9: SKILL.md's line
-- [ ] the stamp `2.0.0-alpha.122`, its files the last commit
-- [ ] both scans exit 0; `make check` once, last
+- [x] the stamp `2.0.0-alpha.122` (4751 tests), its files alone in `216063d`, the last commit under `plugin/`
+- [x] both scans exit 0 (the tree's after `9dce140`)
+- [ ] `make check` once, last, through the gate queue, on this commit
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
+- If this sitting is cut: the gate on this head is all that is left; then the row's record.
 
 ## Next act
-The stamp `2.0.0-alpha.122` (its files alone, the last commit), then both scans and `make check` once through the gate queue.
+`make check` once through the gate queue on this head; the record names its job and result.
 
 ## Exit
-(open)
+Every ruling built; the gate's job and its exit are in the row's record, run on this commit.
