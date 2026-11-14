@@ -130,3 +130,5 @@ tests/test_ss2_quiet_errors.py: sibling
 tests/test_ss4_quiet_values.py: sibling
 # ss3: the R4 tests named the removed settings section, a settings key and no private name, 13 times in fa4b34e (de382fb builds it at run time).
 tests/test_ss3_true_lines.py: sibling
+# g8a: the packet names the ledger file a sibling plugin reads, one line since its first commit (e28379e).
+design/packets/g8a-reader-parts.md: sibling
