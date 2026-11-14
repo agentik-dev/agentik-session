@@ -17,7 +17,8 @@ A result also says what the machine was doing (packet gl1): `load`, `{"start": [
 "end": [a, b, c]}`, the three load averages read just before the spawn and just after the
 child is reaped; `beside`, the ids running when the job started, oldest first; `dirty`,
 `{"start": n, "end": n}`, the lines of `git status --porcelain --untracked-files=all` in the
-job's folder, read as `_head` reads git. A side is null where it was not read (no work tree,
+job's folder, read as `_head` reads git, with `-c core.fsmonitor=false` so it starts no daemon
+and writes nothing there. A side is null where it was not read (no work tree,
 git failing or past `GIT_WAIT`, a read that raised, which logs one line); a job the runner
 did not start and end itself (127's end, 125, 126, a caller's 130 before a start) holds the
 keys with those sides null, and `beside` null when it was not read. A result older than the
@@ -280,13 +281,15 @@ def _head(repo: str) -> str | None:
 
 
 def _dirty(repo: str) -> int | None:
-    """The count of lines of `git -C <repo> --no-optional-locks status --porcelain
-    --untracked-files=all`, run as `_head` runs git: no `GIT_*` from the caller, under
-    `GIT_WAIT`. None when the folder is in no work tree, git fails or the wait passes
-    (packet gl1, R1). Never raises."""
+    """The count of lines of `git -C <repo> --no-optional-locks -c core.fsmonitor=false status
+    --porcelain --untracked-files=all`, run as `_head` runs git: no `GIT_*` from the caller,
+    under `GIT_WAIT`. None when the folder is in no work tree, git fails or the wait passes
+    (packet gl1, R1). Never raises. The read starts no fsmonitor daemon and writes nothing in
+    the job's `.git`, whatever the repo's config says (review 1, F2)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
-        p = subprocess.run(["git", "-C", repo, "--no-optional-locks", "status", "--porcelain",
+        p = subprocess.run(["git", "-C", repo, "--no-optional-locks", "-c",
+                            "core.fsmonitor=false", "status", "--porcelain",
                             "--untracked-files=all"], env=env, stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=GIT_WAIT)
     except (OSError, ValueError, subprocess.SubprocessError):

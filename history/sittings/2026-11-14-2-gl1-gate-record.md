@@ -23,7 +23,7 @@
 ## Round 2, the fix of review 1 (on `f70941e`; about 90 tool calls)
 - [x] tests first, 10 of 37 red at `f70941e` (F1 the code, a line after, both repros; F2 the `.git` listing; F3 the edge); four land tests moved to bounded's codes (2, 124)
 - [x] F1 (S1), `land.refused`: `unrun` only when every non-empty line after the stop line is make's own `*** ` line and make's first `Error <n>` is bounded's code (2 lock, load; 124 wall); R5 and acceptance 6 amended in the packet
-- [ ] F2 (S2): `_dirty` runs `git -c core.fsmonitor=false`
+- [x] F2 (S2), the argv and both docstrings: `_dirty` runs `git -c core.fsmonitor=false`
 - [ ] F3 (S4): the tail drops its first line only when the byte before it is not a newline
 - [ ] the NICE row (a slow dirty read delays the runner's other jobs)
 - [ ] the stamp `2.0.0-alpha.115`; the gate once; both scans
