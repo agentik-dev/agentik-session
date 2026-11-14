@@ -40,7 +40,6 @@ alone (R8), so no edit-gates list is read.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
@@ -148,12 +147,10 @@ def pushed(repo):
 
 
 def _json(path):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            d = json.load(fh)
-    except (OSError, ValueError, RecursionError):
-        return {}
-    return d if isinstance(d, dict) else {}
+    """The file's JSON object, {} when absent, unreadable or no object (hooks' own reader)."""
+    from pathlib import Path
+    from . import hooks
+    return hooks._load_json(Path(path))
 
 
 def _installed(env):
