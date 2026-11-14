@@ -606,7 +606,8 @@ NOT_STATE = {("__init__", "_pin"), ("admission", "decode"), ("chain", "_checks")
              ("ledger", "read_chains"), ("ledger", "restarts_in"), ("meter", "_scan"), ("unattended", "_parse"),
              ("resolver", "resolve"), ("yamlsubset", "_scalar"),
              ("instructionguard", "gates_write"),   # g2b: a `.json` draft checked, no state
-             ("doctor", "_missed_call")}            # ss5 R1: a transcript's tail, no state
+             ("doctor", "_missed_call"),            # ss5 R1: a transcript's tail, no state
+             ("doctor", "_suite_sources")}          # fk3 R1: the suite's answer, no state
 
 
 def test_the_table_names_every_reader():

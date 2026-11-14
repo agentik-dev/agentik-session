@@ -362,7 +362,7 @@ def test_no_new_row_changes_the_exit(machine, monkeypatch):  # noqa: F811
     assert green.ok and [c.name for c in green.checks if c.name == "instructions"] == ["instructions"]
     # every warning and note fires
     home = Path(env["HOME"])
-    (home / ".claude").mkdir(parents=True)
+    (home / ".claude").mkdir(parents=True, exist_ok=True)  # fk3: the fixture records installs
     (home / ".claude" / "settings.json").write_text('{"effortLevel": "high", "model": "opus"}')
     repo = machine.repo
     (repo / ".git").mkdir()
