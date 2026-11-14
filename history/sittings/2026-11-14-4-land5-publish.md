@@ -19,12 +19,20 @@
 - [x] both scans exit 0 (`--require-private`, and `--commits main..HEAD`); doclint, recordlint
 - [ ] `make check`, once, last, on the stamp's commit: its line is the build record's
 
+## Done-ness, the fix of review 1 (from `78b4b27`)
+- [x] the packet amended: R3, R5, R7, §3, acceptance 13 to 17
+- [ ] the tests for F1, F2, F3 and leads 1 and 2, red at `78b4b27`
+- [ ] F1 and F3: the landing's command whole, its sha, the prefix resolved
+- [ ] F2: `make_env` in the gate's result, a check proves only with it there and empty
+- [ ] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists
+- [ ] four NICE rows; the stamp; both scans; `make check` once, last
+
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
 
 ## Next act
-The coordinator's review 1 of `land5-publish`.
+The fix of review 1: the tests, then F1 to F3 and the two leads, as ticked above.
 
 ## Exit
 Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`; `make check` once on the stamp's commit.
