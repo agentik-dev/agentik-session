@@ -17,7 +17,7 @@
 - [x] build 2: F1 (red tree), F2 (the Makefile's text at S), F3 (make install on each call): 59 of 67 green, F4, F6, F7's 8 red
 - [x] build 2: F4, F6, F7: 67 of 67; the land files 381 passed (.venv), 257 passed 124 skipped (.venv-floor)
 - [x] build 2: NICE n257 to n261 at S4 (the stamp moves S4 rows past the bound)
-- [ ] build 2: the stamp again, `2.0.0-alpha.122`, the last commit under `plugin/`
+- [x] build 2: the stamp again (job `20261114-150053-1987`), `2.0.0-alpha.122`, 4768 tests, n193 to n197 to the overflow; the last commit under `plugin/`
 - [ ] build 2: `make check` once, last, through the gate queue
 
 ## Handover
@@ -26,7 +26,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The stamp, through the gate queue, then the check once.
+`make check` once through the gate queue on this head; then the row's record.
 
 ## Exit
 Open.
