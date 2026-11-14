@@ -401,6 +401,8 @@ def test_gl1_6_a_sub_makes_error_line_carries_the_code(tmp_path):
                                        "make: *** [check] Error 2"]
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="scripts/bounded needs 3.11 "
+                    "(Popen's process_group); the floor excepts test_bounded.py too")
 def test_gl1_f1_a_real_failure_whose_captured_stderr_holds_a_stop_is_a_plain_red(tmp_path):
     """Review 1's F1: a failing test ran a refused bounded with its stderr inherited, so pytest's
     'Captured stderr call' holds `bounded: stop: load`, then its summary lines; the check ran to
