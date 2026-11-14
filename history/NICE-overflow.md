@@ -68,6 +68,7 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n159 | S4 | `claude_session/tiers.py` | An overlay tier word with no family (`lookup: {model: sonet}`) skips the drop: `effective` takes it, `above(sonnet, sonet)` is False, a `tier: lookup` sonnet spawn under deny passes; `set` refuses the word, only a hand-edit reaches it; `words()` could drop it | hq `REFUTE-2026-11-12-mt1-r3.md` R3-F3, r3b.json ov lookup typo | 2026-11-12, mt1 review r3 |
 | n161 | S4 | `claude_session/land.py` | `worktree_dirt` reads status through `read()`, which strips the output, so a dirty-worktree note shows its first line ` M x` as `M x`; read it unstripped as `nested()` does | land2 builder's note | 2026-11-12, land2 |
 | n162 | S4 | `tests/test_land.py` | `TestAmendment2.cut_at` (`:752`, also `TestAmendment3`'s) ends on `p.communicate()` with no timeout: a child still holding a pipe after the SIGKILL loop hangs the test to the check's wall instead of failing it; bound it | t2: wait on land's exit, killpg, then read unbounded | 2026-11-12, t2's review |
+| n163 | S4 | `claude_session/hooks.py` | The frontmatter read takes top-level `key: value` lines alone: a `model:` block scalar, an indented map and a flow map (`{model: fable}`) are not read, so such a Fable type passes under an Opus session; a YAML read would close it | hq h5 review 1, probe cases1 | 2026-11-13, h5 review 1 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 
