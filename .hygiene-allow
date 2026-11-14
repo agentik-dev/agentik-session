@@ -128,3 +128,5 @@ tests/test_ak5_plug.py: sibling
 tests/test_ss2_quiet_errors.py: sibling
 # ss4: a test path named the old repo folder, as resolver.OLD_REPO_DIR spells it, in one commit of this row (a75051b; b05f574 drops it).
 tests/test_ss4_quiet_values.py: sibling
+# ss3: the R4 tests named the removed settings section, a settings key and no private name, 13 times in fa4b34e (de382fb builds it at run time).
+tests/test_ss3_true_lines.py: sibling
