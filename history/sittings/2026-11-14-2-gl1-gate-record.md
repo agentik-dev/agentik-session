@@ -17,12 +17,12 @@
 - [x] R4 `status --json`'s done items (`DONE_KEYS`); `tests/test_fw2.py:78` the one line edited
 - [x] R5 `unrun` on the land line, read from the tail of the job's own log (`land.log_size`, `land.last_bounded`; `gate land --in-job` passes the log); a tee was tried and refused by test_land's import pin and fw4c's t14
 - [x] R6 the docstrings: gate.py's and land.py's
-- [ ] the stamp, alone in the last commit under `plugin/`
+- [x] the stamp `2.0.0-alpha.114`, 4530 tests (scripts/stamp); plugin.json the only path under plugin/ in its commit
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-The stamp, then the gate once.
+The gate once, `make check` through the queue.
 
 ## Exit
