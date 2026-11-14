@@ -15,14 +15,16 @@
 - [x] the tests, red at the pin: 58 of 58 at 1dbef66 (`invalid choice: 'publish'`, `--push` unrecognized)
 - [x] R1 to R9: `publish.py`, the verb and `gate land --push` in `cli.py`, one commit (the parser's hunks share a block); 58 of 58 green under both venvs; the gate's own reader (`gate._load`), so no new state reader joins `test_bare_machine.py`'s table
 - [x] R10: the module's docstring, the `gate` help, SKILL.md's line, NICE n248 and n249 (the file then past its bound: the stamp moves the oldest S4 rows)
-- [ ] the stamp, through the gate queue
-- [ ] `make check`, once, last; both scans
+- [x] the stamp, gate `20261114-092041-1940` exit 0: `2.0.0-alpha.119`, 4671 tests, n169 and n171 to the overflow; its files alone the last commit
+- [x] both scans exit 0 (`--require-private`, and `--commits main..HEAD`); doclint, recordlint
+- [ ] `make check`, once, last, on the stamp's commit: its line is the build record's
 
 ## Handover
-- none yet
+- Choices inside the rulings: the packet's §3.
+- `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
 
 ## Next act
-`make stamp` through the gate queue, its files alone the last commit under `plugin/`; then `make check` once.
+The coordinator's review 1 of `land5-publish`.
 
 ## Exit
-Open.
+Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`; `make check` once on the stamp's commit.
