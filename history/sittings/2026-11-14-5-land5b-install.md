@@ -15,7 +15,7 @@
 - [x] the tests (`tests/test_land5b_install.py`), red at the pin: 50 failed of 50
 - [x] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`; 50 of 50 green under both venvs; the packet reshaped to doclint's six sections
 - [x] R9: SKILL.md's line
-- [x] the stamp `2.0.0-alpha.122` (4751 tests), its files alone in `216063d`, the last commit under `plugin/`
+- [x] the stamp `2.0.0-alpha.122` (4751 tests), its files alone in the last commit under `plugin/` (stamped again after the gate's first run, `20261114-131615-1971`, red at `test_bare_machine`'s reader table: `deliver` now reads JSON through `hooks._load_json`)
 - [x] both scans exit 0 (the tree's after `9dce140`)
 - [ ] `make check` once, last, through the gate queue, on this commit
 
