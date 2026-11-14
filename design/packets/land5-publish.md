@@ -2,10 +2,10 @@
 
 | item | value |
 |---|---|
-| from | the hq coordinator, 2026-11-14, brief land5 (S3); review 1's ruling (F1 to F3, leads 1 and 2), the fix round |
+| from | the hq coordinator, 2026-11-14, brief land5 (S3); review 1's ruling (F1 to F3, leads 1, 2) |
 | pin | `1dbef66` on main (2.0.0-alpha.118, the merge of fk3-session, after land4-ready). Worktree `.claude/worktrees/land5-publish`, branch `land5-publish`; `.venv`, `.venv-floor` linked from the main checkout |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make` (the gate queue, once, last); no `claude`; no test queues in the live gate, reads its results or the live state, or pushes but to a bare repo in its own temp folder; no `gate publish` or `git push` in a real checkout; no relay verb |
-| may touch | `plugin/lib/claude_session/publish.py` (new), `plugin/lib/claude_session/cli.py` (`_gate_land`, `cmd_gate`, the `gate` parsers), `tests/test_land5_publish.py` (new), `plugin/skills/session/SKILL.md` (one line), `NICE_TO_HAVE.md` (two rows; the fix round four more), this packet, and for the fix round `plugin/lib/claude_session/gate.py` (the result's `make_env`), `tests/test_fw2.py` and `tests/test_gl1_record.py` (their count of the result's keys), `history/sittings/2026-11-14-4-land5-publish.md`; in the last commit alone, the stamp's files |
+| may touch | `plugin/lib/claude_session/publish.py` (new), `plugin/lib/claude_session/cli.py` (`_gate_land`, `cmd_gate`, the `gate` parsers), `tests/test_land5_publish.py` (new), `plugin/skills/session/SKILL.md` (one line), `NICE_TO_HAVE.md` (two rows; review 1 four), this packet; for review 1 `gate.py` (`make_env`) and the key counts of `tests/test_fw2.py`, `tests/test_gl1_record.py`; `history/sittings/2026-11-14-4-land5-publish.md`; in the last commit alone, the stamp's files |
 | verify | `make check` by the gate queue, once, last |
 | acceptance | §3; `.venv/bin/python -m pytest -q tests/test_land5_publish.py`, and under `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
@@ -25,7 +25,7 @@ S is `refs/heads/main`'s sha, read once at the start of a repo's turn; the remot
 - R3. `require_main`'s reads, else `red main exit 1`. No `branch.main.remote`, a `branch.main.merge` other than `refs/heads/main`, a remote opening `-`, or one that is no name `git remote` lists (a path or a URL, review 1 lead 2): `red remote exit 1`, before any push.
 - R4. R exists and S is R or its ancestor: `ok <S>, already pushed`, exit 0, nothing more. No fetch, ever.
 - R5. S is proven by a gate result under the state root: a landing (exit 0, this checkout, its log's last land line of this repo opens `ok`; the sha after `, as `, else after `ok `, is S's second parent; S's first parent is the result's `head`; that sha's tree is S's), or a check (exit 0, this checkout, `head` S, `dirty` 0 at both ends, command `make check` alone or `sh -c`/`/bin/sh -c` of `make check` with redirections alone).
-  Review 1 amends it. F1: a landing's `command` is `_gate_land`'s own, whole: the runner's argv (`gate.self_argv()`), then `gate land --in-job <repo> <branch> <sha> <merge>` and nothing after, `<repo>` this checkout; and the sha after `ok ` is that command's `<sha>`, so the `, as ` sha is the one readied from it. F2: a check's result holds `make_env`, and it is there and empty; an older result proves no check. F3: the proved sha, a prefix or whole, proves only where `git rev-parse --verify <sha>^{commit}` gives exactly S's second parent, so an ambiguous or unknown prefix is `red proof`. Else `red proof exit 1`, a note naming `agentik session gate run <repo> -- make check`. Nothing queued. A result not JSON or of the wrong types is no proof and no error.
+  Review 1: F1, a landing's `command` is `_gate_land`'s, whole (`gate.self_argv()`, `gate land --in-job <repo> <branch> <sha> <merge>`, nothing after, `<repo>` this checkout), and `ok ` names that `<sha>`. F2, a check's `make_env` is there and empty; an older result proves no check. F3, the proved sha proves only where `rev-parse --verify <sha>^{commit}` gives exactly S's second parent. Else `red proof exit 1`, a note naming `agentik session gate run <repo> -- make check`. Nothing queued. A result not JSON or of the wrong types is no proof and no error.
 - R6. Where `scripts/hygiene` is an executable file: it, then `--require-private --commits <R>..<S>` when its `--help` names `--commits`; output to stderr; non-zero is `red hygiene exit <code>`. No R: the range is not scanned, the ok line ends `, range not scanned`. A tracked file that differs from S is `red main exit 1`.
 - R7. `git push --no-follow-tags <remote> <S>:refs/heads/main` (review 1 lead 1: with `push.followTags` set no tag rides it), no other argument; non-zero is `red push exit <code>`; 0 is `ok <S>, pushed to <remote>`.
 - R8. `--dry-run`: R2 to R6 as written; in place of R7, `would push <S> to <remote>`, exit 0.
@@ -52,11 +52,11 @@ Acceptance, `tests/test_land5_publish.py` (made-up `crate` with `crate.git` as `
 10. Two repos, the first with no proof: both lines, the second pushed, exit 1.
 11. `gate land --push`: the land line, then the publish line; a red landing pushes nothing; refused as line 6 before it queues.
 12. `tests/test_land*.py` unedited and green; both venvs; `make check` once, last, by the gate queue; the alpha by `make stamp`, its files the last commit under `plugin/`.
-13. Review 1 F1: the forged job (`gate run <repo> -- sh -c 'echo "land crate: ok <B>, main readied"' land --in-job`, then a hand merge) is `red proof exit 1`; a landing whose command has another head, a word after it, another repo or another sha is `red proof`.
-14. F2: `gate run <repo> -- make check` with `MAKEFLAGS=n` writes `make_env` `["MAKEFLAGS"]` and is `red proof`; with none, `[]`; a check result without the key is `red proof`.
-15. F3: a 4-hex prefix shared by another commit (ambiguous) is `red proof`.
-16. Lead 1: with `push.followTags=true` and an annotated tag on the branch, the bare repo holds no tag; the argv is `push --no-follow-tags origin <S>:refs/heads/main`.
-17. Lead 2: `branch.main.remote` a path or a URL: `red remote exit 1`, nothing pushed.
+13. F1: the review's forged job, then a hand merge: `red proof exit 1`; so is a landing command with another head, a word after, another repo or sha.
+14. F2: `make check` queued with `MAKEFLAGS=n`: `make_env` `["MAKEFLAGS"]`, `red proof`; with none, `[]`; no key: `red proof`.
+15. F3: an ambiguous 4-hex prefix: `red proof`.
+16. Lead 1: `push.followTags=true`, a tag on the branch: no tag in `crate.git`.
+17. Lead 2: a path or a URL as the remote: `red remote exit 1`, no push.
 
 ## 4. Findings that name this row
 
