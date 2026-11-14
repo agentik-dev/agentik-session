@@ -40,9 +40,11 @@ of the wrong type, is no proof and no error:
   that holds no `MAKEFILES`, so a landing older than the key proves none (review 2, F1:
   `land.main` drops that name and the other three itself). The sha it proves is
   the one after `, as ` when the line has that part (the head readied from `<sha>`), else
-  `<sha>` itself, a prefix allowed; `git rev-parse --verify <it>^{commit}` gives exactly S's
-  second parent, so an ambiguous or unknown prefix proves nothing (F3); S has exactly two
-  parents, its first is the result's `head`, and the proved sha's tree is S's.
+  `<sha>` itself, a prefix allowed, resolved as an object name alone: `git rev-parse
+  --disambiguate=<it>` gives exactly one object, S's second parent, so an ambiguous or unknown
+  prefix proves nothing (review 1, F3) and a branch or tag of that name changes nothing
+  (review 2, F2); S has exactly two parents, its first is the result's `head`, and the proved
+  sha's tree is S's.
 - a check: `exit` 0, `repo` this checkout, `head` S, `dirty` 0 at the start and at the end,
   `make_env` there and empty (none of `gate.MAKE_ENV` set in the job's environment, review 1
   F2, so a result older than the key proves no check), and
@@ -161,8 +163,10 @@ def landing_proves(doc, repo, name, s, parents):
     if len(parents) != 2 or not PREFIX.match(proved):
         return False
     first, second = parents
-    code, named = land.read(repo, "rev-parse", "--verify", "-q", proved + "^{commit}")
-    return (first == head and code == 0 and named == second and second.startswith(proved)
+    # An object name alone (review 2, F2): a ref named as the word is never read.
+    code, named = land.read(repo, "rev-parse", "--disambiguate=" + proved)
+    return (first == head and code == 0 and named.split() == [second]
+            and second.startswith(proved)
             and _tree(repo, second) is not None and _tree(repo, second) == _tree(repo, s))
 
 
