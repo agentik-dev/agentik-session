@@ -126,3 +126,5 @@ plugin/lib/claude_session/plug.py: lan
 tests/test_ak5_plug.py: sibling
 # ss2: the R5 test's heading named the public summary tool in 38ebafc (a later commit drops it).
 tests/test_ss2_quiet_errors.py: sibling
+# ss4: a test path named the old repo folder, as resolver.OLD_REPO_DIR spells it, in one commit of this row (a75051b; b05f574 drops it).
+tests/test_ss4_quiet_values.py: sibling
