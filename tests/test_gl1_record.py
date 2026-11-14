@@ -67,7 +67,7 @@ def calls(*values):
 # ---- R1: the three keys ------------------------------------------------------
 
 def test_gl1_1_a_job_run_to_its_end_holds_the_machine(w, tmp_path):
-    assert len(gate.RESULT_KEYS) == 15 and gate.RESULT_KEYS[-4:] == ("key", *NEW)
+    assert len(gate.RESULT_KEYS) == 16 and gate.RESULT_KEYS[11:15] == ("key", *NEW)
     git_repo(w.repo, tmp_path)
     (w.repo / "loose1").write_text("1\n")
     (w.repo / "loose2").write_text("2\n")

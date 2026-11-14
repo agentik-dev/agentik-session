@@ -23,7 +23,7 @@
 - [x] the packet amended: R3, R5, R7, §3, acceptance 13 to 17
 - [x] the tests for F1, F2, F3 and leads 1 and 2, red at `78b4b27`: 20 failed, 57 passed (`.venv`)
 - [x] F1 and F3: the landing's command whole, its sha, the prefix resolved (32 of the slice green)
-- [ ] F2: `make_env` in the gate's result, a check proves only with it there and empty
+- [x] F2: `make_env` in the gate's result, a check proves only with it there and empty; `test_fw2.py` and `test_gl1_record.py` count 16 keys
 - [ ] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists
 - [ ] four NICE rows; the stamp; both scans; `make check` once, last
 

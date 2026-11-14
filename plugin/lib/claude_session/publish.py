@@ -40,11 +40,13 @@ of the wrong type, is no proof and no error:
   `<sha>` itself, a prefix allowed; `git rev-parse --verify <it>^{commit}` gives exactly S's
   second parent, so an ambiguous or unknown prefix proves nothing (F3); S has exactly two
   parents, its first is the result's `head`, and the proved sha's tree is S's.
-- a check: `exit` 0, `repo` this checkout, `head` S, `dirty` 0 at the start and at the end, and
+- a check: `exit` 0, `repo` this checkout, `head` S, `dirty` 0 at the start and at the end,
+  `make_env` there and empty (none of `gate.MAKE_ENV` set in the job's environment, review 1
+  F2, so a result older than the key proves no check), and
   `command` `make check` alone, or `sh -c` (or `/bin/sh -c`) of the one simple command `make
   check` with redirections (`>`, `>>`, `>|`, `<`, each to a plain word, `N>&M`) and nothing else.
 With neither, the note gives the line that makes one, `agentik session gate run <repo> -- make
-check` on a clean main; this verb never queues it.
+check` on a clean main, none of those four names set; this verb never queues it.
 
 `main` again: a tracked file of the working tree that differs from S, read before the scans and
 after them, since the tree's scan would read another tree. `hygiene`: where `scripts/hygiene` is
@@ -161,7 +163,7 @@ def check_proves(doc, repo, s):
     dirty = doc.get("dirty")
     return (_zero(doc.get("exit")) and _same(doc.get("repo"), repo) and doc.get("head") == s
             and isinstance(dirty, dict) and _zero(dirty.get("start")) and _zero(dirty.get("end"))
-            and is_check_command(doc.get("command")))
+            and doc.get("make_env") == [] and is_check_command(doc.get("command")))
 
 
 def results(root):
@@ -258,7 +260,8 @@ def turn(arg, root, dry=False):
         why = proof(root, repo, name, s)
         if why is None:
             raise land.Red("proof", note="no gate result proves %s checked green; on a clean main: "
-                           "agentik session gate run %s -- make check" % (s, repo))
+                           "agentik session gate run %s -- make check, with none of %s set"
+                           % (s, repo, ", ".join(gate.MAKE_ENV)))
         note("proof: " + why)
         step = "main"
         require_tree(repo, s)
