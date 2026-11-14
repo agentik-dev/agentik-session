@@ -1578,6 +1578,9 @@ def _gate_land(root, args, env) -> int:
     here, and only inside a gate job."""
     from . import gate, land
     mark = env.get(gate.JOB_MARK) or ""
+    if args.dry_run:
+        # land4 R11: the reads alone, here, in a job or not; nothing queued, nothing written.
+        return land.main(list(args.args), None, dry=True)
     if args.in_job:
         if not mark:
             _die("gate land --in-job runs only inside a gate job, which sets "
@@ -1913,6 +1916,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="the session told of the result (default: $CLAUDE_CODE_SESSION_ID)")
     gl.add_argument("--wall", type=_positive_int, metavar="SECONDS",
                     help="cut the landing after SECONDS (default: gate.wall, 5400)")
+    gl.add_argument("--dry-run", action="store_true",
+                    help="queue nothing and write nothing: make the reads up to the merge of "
+                         "main, print what the ready step would do, and exit 0 (a read that "
+                         "reds prints its land line and exits its code)")
     gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
