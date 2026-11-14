@@ -431,14 +431,19 @@ def _check_meter(env) -> Check:
         return Check("meter", False, f"{path} absent: no PostToolUse has metered this "
                      "session (the plugin's hook)")
     tp = (m.get("transcript") or {}).get("path")
+    summary = f"{m.get('pct_context')}% context, {m.get('pct_turns')}% turns, zone {m.get('zone')}"
+    zero = m.get("turns") == 0              # SessionStart's meter, before any tool call (ss1)
     try:
         size = os.stat(tp).st_size
     except (OSError, TypeError) as e:
+        if zero and (tp is None or isinstance(e, FileNotFoundError)):
+            return Check("meter", True, f"{path}: {summary}; no transcript yet")
         return Check("meter", False, f"{path}: transcript {tp} unreadable: "
                      f"{e.__class__.__name__}")
-    summary = f"{m.get('pct_context')}% context, {m.get('pct_turns')}% turns, zone {m.get('zone')}"
     if (m.get("transcript") or {}).get("size") == size:
         return Check("meter", True, f"{path}: {summary}; transcript size matches")
+    if zero:                                # no tool call has metered the transcript yet
+        return Check("meter", True, f"{path}: {summary}; no tool call metered yet")
     age = meter.mtime_age(m)
     if age is not None and age <= FRESH_S:
         return Check("meter", True, f"{path}: {summary}; {age:.0f}s from the transcript")
