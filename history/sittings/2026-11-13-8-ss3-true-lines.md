@@ -15,13 +15,13 @@
 - [x] R1 SessionStart's line for a session the launcher did not start
 - [x] R2 `status` and `status --json` `launched`
 - [x] R3 the unknown profile told to the session
-- [ ] R4 `decisions` leaves; R6 no model version in a description
+- [x] R4 `decisions` leaves; R6 no model version in a description; n236, n237 new, n161 and n162 to the overflow
 - [ ] the stamp `2.0.0-alpha.110`
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-R4 and R6: the shipped file and the resolver's section lists.
+The stamp, then the gate.
 
 ## Exit

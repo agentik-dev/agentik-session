@@ -68,10 +68,11 @@ from .yamlsubset import dump, load
 
 PLUGIN = "session"
 # S38 ruling 4: `gate` (ntfy_url, ntfy_topic, wall) is a section; the runner reads its user
-# layer alone (gate_config), since it serves every repo.
-SECTIONS = ("session", "respeak", "decisions", "relay", "gate", "tiers")
+# layer alone (gate_config), since it serves every repo. Row ss3 R4: `decisions` left, since no
+# tool read it; a layer that still sets it is an unknown key.
+SECTIONS = ("session", "respeak", "relay", "gate", "tiers")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
-DEPENDENT = ("respeak", "decisions", "relay")
+DEPENDENT = ("respeak", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
 # `relay`, and `relay` wins over it in one layer, with a warning; the resolved file carries
 # a copy under the old key until r2 (§8.6), for a relay that still reads it.
