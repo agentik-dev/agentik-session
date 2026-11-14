@@ -183,7 +183,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.103`, rendered `2026-11-10`, `4015` tests in the suite.
+Status: version `v2.0.0-alpha.110`, rendered `2026-11-10`, `4293` tests in the suite.
 
 ## Credit
 

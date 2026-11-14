@@ -1,13 +1,18 @@
-"""The sitting's charter: open one, check its shape, close it (overhaul-r1 D10).
+"""The sitting's charter: open one, check its shape, close it, show it (overhaul-r1 D10).
 
-The port of the `charter-close` shape check (overhaul-r1 D10). The charter has six
-parts and nothing else:
+The port of the `charter-close` shape check (overhaul-r1 D10). The charter has seven
+parts and nothing else, the seventh optional:
   1. the title line        # Sitting <date>-<n>: <repo>, <component>
   2. the table             goal, budget, pin, window, agents
   3. ## Done-ness
   4. ## Handover
   5. ## While waiting      (S40; a charter opened before alpha.24 has none)
   6. ## Next act
+  7. ## Waits on the owner (in2; optional, anywhere among the ## parts; `open` writes it
+                            directly before While waiting)
+Waits on the owner's lines are `- hand: <what>; `<command>`` (the line ends in one code
+span holding no backtick, `; ` before it) or `- none` alone; `check` and `close` warn on any
+other shape, never refuse. `show` reads a repo's newest charter and changes nothing.
 Refusals, the part named: a charter of 4,096 bytes or more (doclint's `>=`); a missing part
 other than While waiting; a table missing one of its five rows. An empty Done-ness or Handover
 is not refused here: `open` seeds the Handover's open-by-level line (none with priority off)
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import time
 from pathlib import Path
 
@@ -60,6 +66,10 @@ MAX_READY = 3
 RED = "WAITING while ready"
 STALLED_RED = "STALLED without its parts"
 REDS = (RED, STALLED_RED)
+# Packet in2: the seventh part, optional, and its one line shape besides `- none`.
+WAITS = "## Waits on the owner"
+HAND = "- hand: "
+HAND_SHAPE = "'- hand: <what>; `<command>`'"
 
 
 class CharterError(ValueError):
@@ -115,13 +125,78 @@ def while_waiting(raw: bytes) -> list[str] | None:
     return out
 
 
-def _near_miss(text: str) -> str | None:
-    """A heading that is nearly `## While waiting` (its case, or a tail after it), or None."""
+def _near_miss(text: str, head: str = WHILE_WAITING) -> str | None:
+    """A heading that is nearly `head` (its case, or a tail after it), or None."""
     for line in text.splitlines():
         s = line.strip()
-        if line.rstrip() != WHILE_WAITING and s.lower().startswith(WHILE_WAITING.lower()):
+        if line.rstrip() != head and s.lower().startswith(head.lower()):
             return line.rstrip()
     return None
+
+
+def waits_parts(raw: bytes) -> list[list[tuple[int, str]]]:
+    """Packet in2: each Waits on the owner part in file order, as its non-blank lines with
+    their 1-based line numbers in the file, trailing blanks cut; [] with no part."""
+    parts: list = []
+    cur = None
+    for i, line in enumerate(raw.decode("utf-8", "replace").splitlines()):
+        if line.startswith("## "):
+            cur = [] if line.rstrip() == WAITS else None
+            if cur is not None:
+                parts.append(cur)
+        elif cur is not None and line.strip():
+            cur.append((i + 1, line.rstrip()))
+    return parts
+
+
+def waits(raw: bytes) -> list[tuple[int, str]] | None:
+    """The lines of every Waits on the owner part, in file order (review 1's L2: a second
+    part hides nothing); None when the charter has no such part."""
+    parts = waits_parts(raw)
+    return [x for p in parts for x in p] if parts else None
+
+
+def hand_line(line: str) -> tuple[str, str] | None:
+    """`(what, command)` of a hand line, ``- hand: <what>; `<command>` ``: the line ends in
+    one code span that holds no backtick and something past blanks, `; ` before it, and
+    <what> is the non-blank text between (it may hold a `;`); None for any other line."""
+    if not line.startswith(HAND) or not line.endswith("`") or len(line) < len(HAND) + 2:
+        return None
+    tick = line.rfind("`", 0, len(line) - 1)
+    if tick < len(HAND) + 2 or line[tick - 2:tick] != "; ":
+        return None
+    what, command = line[len(HAND):tick - 2], line[tick + 1:-1]
+    if not what.strip() or not command.strip():
+        return None
+    return what, command
+
+
+def _waits_shape(parts: list[list[tuple[int, str]]], text: str = "") -> list[str]:
+    """The Waits on the owner parts' shape warnings (in2 R4), each naming its line or
+    heading; no part, and no near-miss heading, warns nothing (the part is optional). A
+    second part is the fifth shape (review 1's L2), then each part is read as one."""
+    if not parts:
+        near = _near_miss(text, WAITS)
+        return [f"heading '{near}' is not '{WAITS}'"] if near is not None else []
+    out = []
+    if len(parts) > 1:
+        out.append(f"Waits on the owner has {len(parts)} parts: keep one '{WAITS}'")
+    for lines in parts:
+        out.extend(_waits_part_shape(lines))
+    return out
+
+
+def _waits_part_shape(lines: list[tuple[int, str]]) -> list[str]:
+    if not lines:
+        return ["Waits on the owner is empty: write - none, or the hand lines"]
+    body = [line for _, line in lines]
+    out = []
+    if NONE in body and len(body) > 1:
+        out.append(f"Waits on the owner has '{NONE}' beside other lines: drop '{NONE}' "
+                   "or the others")
+    out.extend(f"Waits on the owner line is not {HAND_SHAPE} or '{NONE}' alone: {line}"
+               for line in body if line != NONE and hand_line(line) is None)
+    return out
 
 
 def _while_waiting_shape(lines: list[str] | None, text: str = "") -> list[str]:
@@ -219,6 +294,7 @@ def warnings(raw: bytes, session: dict) -> list[str]:
     n = waiting(line) if pacing["enabled"] else None
     lines = while_waiting(raw)
     out.extend(_while_waiting_shape(lines, text))
+    out.extend(_waits_shape(waits_parts(raw), text))    # in2 R4: whatever pacing says
     if n:
         # FW1a: <what> up to its first `;`, since WAITING_LINE's `\S` lets it take one, and
         # in FULL that would read <how to tell> as the wait's subject.
@@ -427,6 +503,9 @@ def open(dir, goal: str, section: dict, head: str | None,
         "## Handover",
         *([rules.SEED] if rules.parts(section)[0]["enabled"] else []),
         "",
+        WAITS,                                   # in2 R3: directly before While waiting
+        NONE,
+        "",
         WHILE_WAITING,
         NONE,
         "",
@@ -439,6 +518,125 @@ def open(dir, goal: str, section: dict, head: str | None,
     with path.open("x") as fh:
         fh.write(text)
     return path
+
+
+# ---- Packet in2: `charter show`, the read of a repo's newest charter, writing nothing ----
+
+SCHEMA = "agentik.charter/1"
+NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)(?:-[A-Za-z0-9._-]+)?\.md$")
+SHOW_PARTS = ("title", "table", "Done-ness", "Handover", "Waits on the owner",
+              "While waiting", "Next act")
+NO_DIR, NO_CHARTER, UNREADABLE = "not a directory", "no charter", "unreadable"
+# Review 1's F1: the most `show` reads of one charter, 16 times the ceiling, so a charter
+# over the ceiling is still read and its refusal shown; past it, the REPO is unreadable.
+SHOW_BOUND = 16 * CEILING
+
+
+def newest(dir) -> Path | None:
+    """R5: the entry of `dir` named `<date>-<n>.md` or `<date>-<n>-<suffix>.md` with the
+    greatest date, then the greatest n, then the last name; None with none or no folder."""
+    try:
+        names = os.listdir(dir)
+    except OSError:
+        return None
+    found = [(m.group(1), int(m.group(2)), name) for name in names
+             for m in (NAME.match(name),) if m]
+    return Path(dir) / max(found)[2] if found else None
+
+
+def _read_regular(path) -> tuple[bytes, int]:
+    """Review 1's F1: the bytes and whole mtime of `path` when it is a regular file of at
+    most SHOW_BOUND bytes, opened without blocking (a FIFO with no writer, a device, a
+    folder never hold the read); OSError for anything else. `show` chooses the file
+    itself, so it reads only this way; `check` reads the file it is handed as before."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(f"{path}: not a regular file")
+        if st.st_size > SHOW_BOUND:
+            raise OSError(f"{path}: over {SHOW_BOUND} bytes")
+        chunks, size = [], 0
+        while size <= SHOW_BOUND:
+            b = os.read(fd, SHOW_BOUND + 1 - size)
+            if not b:
+                break
+            chunks.append(b)
+            size += len(b)
+        if size > SHOW_BOUND:
+            raise OSError(f"{path}: over {SHOW_BOUND} bytes")
+        return b"".join(chunks), int(st.st_mtime)
+    finally:
+        os.close(fd)
+
+
+def read(repo, path) -> dict:
+    """R7: one repo's object for the charter at `path`. Raises OSError when unreadable."""
+    path = Path(path)
+    raw, mtime = _read_regular(path)
+    text = raw.decode("utf-8", "replace")
+    lines = text.splitlines()
+    heads = {line.rstrip() for line in lines}
+    title = next((m.group(3) for m in (TITLE_RE.match(l.rstrip()) for l in lines) if m), None)
+    present = {"title": title is not None, "table": bool(_table(lines))}
+    present.update((p, f"## {p}" in heads) for p in SHOW_PARTS[2:])
+    m = NAME.match(path.name)
+    part = waits(raw)
+    return {
+        "repo": os.path.realpath(repo), "file": os.path.realpath(path),
+        "name": path.name[:-len(".md")], "date": m.group(1), "n": int(m.group(2)),
+        "mtime": mtime, "closed": any(l.startswith(EXIT_MARK) for l in lines),
+        "title": title, "parts": [p for p in SHOW_PARTS if present[p]],
+        "refusals": check_text(raw), "next_act": next_act_line(text),
+        "waits": None if part is None else [
+            {"line": n, "what": hand[0] if hand else line, "command": hand[1] if hand else None}
+            for n, line in part if line != NONE for hand in (hand_line(line),)],
+    }
+
+
+def show(repos, dir_of) -> dict:
+    """R5 to R7: the object for each REPO, in order; `dir_of(repo)` names its charter folder
+    (relative to the repo, or absolute). A REPO is skipped as not a directory, no charter or
+    unreadable, and the read goes on. Reads only."""
+    doc = {"schema": SCHEMA, "ok": True, "repos": [], "skipped": []}
+    for repo in repos:
+        why = None
+        if not os.path.isdir(repo):
+            why = NO_DIR
+        else:
+            path = newest(os.path.join(repo, dir_of(repo)))
+            if path is None:
+                why = NO_CHARTER
+            else:
+                try:
+                    doc["repos"].append(read(repo, path))
+                except (OSError, ValueError):
+                    why = UNREADABLE
+        if why:
+            doc["skipped"].append({"repo": os.path.realpath(repo), "why": why})
+    return doc
+
+
+def show_text(doc: dict) -> str:
+    """R8: the plain view, one block a repo with a blank line between, the skipped last."""
+    blocks = []
+    for r in doc["repos"]:
+        w = r["waits"]
+        count = "no Waits part" if w is None else f"{len(w)} for the owner's hand"
+        out = [f"== {os.path.basename(r['repo'])}  {r['name']}  {count}"
+               + ("  closed" if r["closed"] else ""),
+               f"next  {r['next_act'] if r['next_act'] is not None else '(none)'}"]
+        out += [f"hand  {x['what']}; `{x['command']}`" if x["command"] is not None
+                else f"hand  {x['what']}  (no command)" for x in w or ()]
+        out += [f"form  {x}" for x in r["refusals"]]
+        blocks.append("\n".join(out))
+    reasons: dict = {}
+    for s in doc["skipped"]:
+        reasons.setdefault(s["why"], []).append(os.path.basename(s["repo"]))
+    if reasons:
+        blocks.append("\n".join(f"skipped ({why}): {', '.join(names)}"
+                                for why, names in reasons.items()))
+    return "\n\n".join(blocks) + "\n" if blocks else ""
 
 
 def exit_line(exit_text: str, meter: dict | None) -> str:

@@ -94,6 +94,11 @@ def _unwritable(folder: Path, path: Path) -> str | None:
     return None
 
 
+def _kind(v) -> str:
+    from ..resolver import kind
+    return kind(v)
+
+
 def check(cwd, env, value=None) -> dict:
     """The key with its defaults, plus `tree_doc` (the tree file's JSON). `value` given is
     checked instead of the resolved key. Raises ConfigError, one line per bad key."""
@@ -105,13 +110,16 @@ def check(cwd, env, value=None) -> dict:
                           "over it)")
     if not isinstance(cfg, dict):
         raise ConfigError(f"{_PATH} must be a mapping of {', '.join(KEYS)}")
-    bad = [f"{_PATH}.{k} is not a key ({', '.join(KEYS)})" for k in cfg if k not in KEYS]
+    # ss2 R1-F2: a key's name is the layer file's text, so it is withheld
+    bad = [f"{_PATH}: a key (withheld) is not a key ({', '.join(KEYS)})"] \
+        if any(k not in KEYS for k in cfg) else []
     out = {**DEFAULTS, **{k: v for k, v in cfg.items() if k in KEYS}}
     tree, names = out.get("tree"), None
     if tree is None:
         bad.append(f"{_PATH}.tree is required: the repo file with a `repos` list")
-    elif not isinstance(tree, str) or not tree.strip():
-        bad.append(f"{_PATH}.tree must be a file name, not {tree!r}")
+    elif not isinstance(tree, str) or not tree.strip():     # ss4 R2: a string typed here
+        bad.append(f"{_PATH}.tree must be a file name, not "  # prints; any other its kind
+                   + (repr(tree) if isinstance(tree, str) else _kind(tree)))
     else:
         try:
             doc = json.loads((cwd / tree).read_text(encoding="utf-8"))
@@ -154,10 +162,11 @@ def check(cwd, env, value=None) -> dict:
         else:
             for k, v in th.items():
                 if k not in THRESHOLDS:
-                    bad.append(f"{_PATH}.thresholds.{k} is not a detector "
+                    bad.append(f"{_PATH}.thresholds: a key (withheld) is not a detector "
                                f"({', '.join(sorted(THRESHOLDS))})")
-                elif not _num(v) or v < 0:
-                    bad.append(f"{_PATH}.thresholds.{k} is {v!r}; a threshold is a number, "
+                elif not _num(v) or v < 0:          # ss2 N1: the reason, never the value
+                    why = "is not a number" if not _num(v) else "is below 0"
+                    bad.append(f"{_PATH}.thresholds.{k} {why}; a threshold is a number, "
                                "0 or more")
     rd = out.get("read")
     if rd is not None and not isinstance(rd, dict):
@@ -166,7 +175,7 @@ def check(cwd, env, value=None) -> dict:
     rd = {**READ_DEFAULTS, **(rd or {})}
     for k in list(rd):
         if k not in READ_KEYS:
-            bad.append(f"{_PATH}.read.{k} is not a key ({', '.join(READ_KEYS)})")
+            bad.append(f"{_PATH}.read: a key (withheld) is not a key ({', '.join(READ_KEYS)})")
         elif not _int(rd[k]) or rd[k] < 1:
             bad.append(f"{_PATH}.read.{k} must be a whole number, 1 or more")
     floor_ok = _int(rd.get("floor")) and _int(rd.get("every"))
@@ -178,8 +187,9 @@ def check(cwd, env, value=None) -> dict:
                    f"({rd['floor']})")
     out["read"] = {k: rd[k] for k in READ_KEYS}
     if not _inside(cwd, out["record"]):
+        rec = out["record"]                                  # ss4 R2: as `tree`
         bad.append(f"{_PATH}.record must be a relative folder inside the repo, not "
-                   f"{out['record']!r}")
+                   + (repr(rec) if isinstance(rec, str) else _kind(rec)))
     if bad:
         raise ConfigError("\n".join(bad))
     return out

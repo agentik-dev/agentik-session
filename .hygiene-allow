@@ -118,3 +118,15 @@ design/packets/g4-folder-gates.md: sibling
 tests/test_g4_folder_gates.py: sibling
 # mt1: the packet cites the owner's decisions by the ledger tool's word.
 design/packets/mt1-model-tiers.md: sibling
+# in2: the packet's first commit names the ledger file a sibling plugin reads.
+design/packets/in2-charter-show.md: sibling
+# ak5: the plug's module names an attribute `local` (the local layer), no network name.
+plugin/lib/claude_session/plug.py: lan
+# ak5: the plug's tests name a public plugin by its id.
+tests/test_ak5_plug.py: sibling
+# ss2: the R5 test's heading named the public summary tool in 38ebafc (a later commit drops it).
+tests/test_ss2_quiet_errors.py: sibling
+# ss4: a test path named the old repo folder, as resolver.OLD_REPO_DIR spells it, in one commit of this row (a75051b; b05f574 drops it).
+tests/test_ss4_quiet_values.py: sibling
+# ss3: the R4 tests named the removed settings section, a settings key and no private name, 13 times in fa4b34e (de382fb builds it at run time).
+tests/test_ss3_true_lines.py: sibling

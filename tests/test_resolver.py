@@ -39,11 +39,11 @@ def test_defaults_alone(world):
     assert s["ceilings"] == {"context": 180000, "turns": 400}
     assert s["push"] == "never" and s["device"] == "never"
     assert r.sections["relay"]["enabled"] == "auto"
-    assert r.sections["decisions"] == {"dir": "decisions"}
+    assert "decisions" not in r.sections                # ss3 R4: no tool read it
     # agentik-r1 ruling 5: the section is `relay`, with a copy under the old key until r2
     # S38 ruling 4: `gate` joins the sections, empty until a repo layer sets it
-    assert list(r.as_dict()) == ["provider", "session", "respeak", "decisions", "relay",
-                                 "gate", "agent-relay"]
+    assert list(r.as_dict()) == ["provider", "session", "respeak", "relay", "gate",
+                                 "agent-relay"]
     assert r.sections["gate"] == {}
     assert r.as_dict()["agent-relay"] == r.sections["relay"] and r.renamed == []
     assert r.provider["version"] == SEMVER and r.provider["plugin"] == "session"
@@ -254,7 +254,7 @@ def test_s19_respawn_layers(world, layers, want):
 @pytest.mark.parametrize("value,key", [
     ("{cap: -1}", "respawn.cap"), ('{floor: "x"}', "respawn.floor"),
     ("{settle: 1.5}", "respawn.settle"), ("{cap: true}", "respawn.cap"),
-    ("{cap: 1, colour: 2}", "respawn.colour"),
+    ("{cap: 1, colour: 2}", "respawn: a key"),      # ss2 R1-F2: the name withheld
 ], ids=["negative", "string", "float", "bool", "stray-key"])
 def test_s19_respawn_refuses_bad_values(world, value, key):
     world[2]("repo", "session:\n  respawn: {cap: 0}\n")

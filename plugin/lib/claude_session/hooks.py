@@ -43,7 +43,7 @@ SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
 # a quoted or continued spelling reads as the plain one. Each regex has one repetition at most
 # and none nests, so the pass is linear in the command's length. A quoted mention that names
 # the launcher is denied too, and the helper rewords it.
-CHARTER_READS = ("check",)          # `charter`'s verbs that write nothing: never open, never close
+CHARTER_READS = ("check", "show")   # `charter`'s verbs that write nothing: never open, never close
 _LAUNCHER = re.compile(r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])")
 _CHARTER_WORD = re.compile(r"(?<![\w-])charter(?![\w.-])")
 _CHARTER_READ = re.compile(r"[ \t]+(?:" + "|".join(CHARTER_READS) + r")(?![\w.-])")
@@ -72,7 +72,8 @@ HELPER_CHARTER = _HelperCharter()
 HELPER_CHARTER_DENY = (
     "agentik-session: a helper's charter open or close would take or write its sitting's "
     "record (a helper's Bash carries its parent's session id). Write your charter by hand "
-    "(a helper's one charter call is `agentik-session charter check <file>`, the verb first), "
+    "(a helper's charter calls are `agentik-session charter check <file>` and `charter show`, "
+    "the verb first), "
     "and put a probe's own call to charter open or close in a script file run under a scratch "
     "state home.")
 
@@ -799,7 +800,7 @@ def user_prompt_submit(payload: dict) -> dict:
     bits: list[str] = []
 
     m = _meter(sid)
-    if m:
+    if m and m.get("turns") != 0:      # ss1 review 1 F1: SessionStart's zero meter says nothing
         sdir = _session_dir(sid, os.environ)
         now = _now()
         if (_past_checkpoint(m)
@@ -855,6 +856,17 @@ def launch_profile(env) -> str | None:
     if env.get("CLAUDE_SESSION_HELPER") == "1":
         return HELPER_PROFILE
     return env.get("CLAUDE_SESSION_PROFILE") or env.get("CLAUDE_SESSION_CONFIG") or None
+
+
+def launched(env) -> bool:
+    """Row ss3 R1: the launcher set this session's model and effort: a launch profile, or
+    `agentik session run`'s chain mark, which passes the profile's flags with none exported."""
+    return launch_profile(env) is not None or bool(CHAIN_RE.match(str(env.get(CHAIN_VAR) or "")))
+
+
+# Row ss3 R1: what a session the launcher did not start is told of its profile.
+NOT_LAUNCHED = (" (its limits and rules apply; its model and effort are set only by agentik "
+                "session run)")
 
 
 def follow_launcher_on(env=None, now=None) -> bool:
@@ -921,22 +933,69 @@ def session_start(payload: dict, env=None) -> dict:
                              session_model=model, session_model_source=source)
         path = resolver.write(r, resolver.state_dir(env))
         resolver.save_request(path.parent, cwd, launch_profile(env),
-                              payload.get("transcript_path"), model, source)
+                              payload.get("transcript_path"), model, source,
+                              launched=launched(env))
     except Exception as e:                              # noqa: BLE001
         print(f"agentik-session: SessionStart resolved nothing: {e}", file=sys.stderr)
+        if isinstance(e, resolver.UnknownProfile):      # ss3 R3: the session is told too
+            return _follow_said({"hookSpecificOutput": {
+                "hookEventName": "SessionStart", "additionalContext": _unknown_line(e)}}, env)
         return _follow_said({}, env)
     s = r.sections["session"]
     # Packet b1 R3: no ceiling, window or turn cap reaches the model; the band above the
     # prompt, which only the owner sees, keeps every figure.
-    line = (f"agentik-session: profile '{_token(s['profile'])}'; {START_METER}; "
+    line = (f"agentik-session: profile '{_token(s['profile'])}'"
+            f"{'' if launched(env) else NOT_LAUNCHED}; {START_METER}; "
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
     line += _tiers_part(sid, env)                          # mt1 R4: the session's words
     line += _charter_reminder(s, cwd)
     line += _state_reminder(env, time.time(), sid=sid)     # outside the clause's bound
+    _first_meter(path.parent, payload.get("transcript_path"), env)   # ss1 R1, after the line
     return _follow_said({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                 "additionalContext": line}}, env)
+
+
+_PLAIN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _unknown_line(e) -> str:
+    """Row ss3 R3: the session's one line on a profile name the tool does not know. The name
+    prints when the caller gave it and it is a plain word; a name read from a layer file is
+    its text, withheld (ss2), as is one that is no plain word."""
+    name = e.name if isinstance(e.name, str) and _PLAIN.match(e.name) else None
+    said = f"'{name}'" if name else "(withheld)"
+    return (f"agentik-session: unknown profile {said}; nothing of a profile applies to this "
+            f"session. Known: {e.known}; start with CLAUDE_SESSION_PROFILE=<one> agentik "
+            "session run")
+
+
+def _first_meter(sdir: Path, tp, env) -> None:
+    """Packet ss1-zero R1: the session's first meter.json by PostToolUse's own parse and
+    save, so the band, `status` and doctor read 0% before the first tool call. A transcript
+    absent or unreadable is zero turns (`os.devnull` parsed, the payload's path kept), written
+    only where no meter stands; a meter on disk is replaced only by a parse that succeeded.
+    Any failure is swallowed (R2): SessionStart says what it says today."""
+    try:
+        cfg, _ = sessionconfig.effective()
+        limits, policy = meter.limits_for(sdir, env), _policy(cfg)
+        st = meter.load_state(sdir)
+        try:                                            # review 1 F2: a FIFO never blocks
+            regular = bool(tp) and stat.S_ISREG(os.stat(tp).st_mode)
+        except (OSError, ValueError):
+            regular = False
+        m = meter.parse(tp, st, limits, policy, sdir.name) if regular else None
+        if m is None:
+            if meter.load(sdir) is not None:
+                return
+            st = {}
+            m = meter.parse(os.devnull, st, limits, policy, sdir.name)
+            m = replace(m, transcript={**m.transcript, "path": str(tp) if tp else None,
+                                       "inode": None})
+        meter.save(sdir, m, st)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
@@ -949,7 +1008,7 @@ def _charter_reminder(session: dict, cwd) -> str:
     if not isinstance(c, dict) or c.get("required") is not True:
         return ""
     d = _charter({"session": session})
-    if any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
+    if not d.startswith("?") and any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
         return ""
     return (f"; charter: none open today under {d}, run "
             f'agentik-session charter open "<goal>"')
@@ -982,9 +1041,14 @@ def _state_reminder(env, now, sid=None) -> str:
 
 
 def _charter(resolved: dict) -> str:
+    """The charter folder a line names: a word, filtered to a path's characters; a value of
+    another kind is named by its kind, never turned into text (ss4 review 1, R1-F1: a line
+    mis-indented under `dir` makes `gate.ntfy_topic` its value)."""
     c = ((resolved.get("session") or {}).get("charter") or {})
     d = c.get("dir") if isinstance(c, dict) else None
-    return re.sub(r"[^A-Za-z0-9_./-]", "", str(d or "history/sittings"))[:80] or "?"
+    if d is not None and not isinstance(d, str):
+        return f"? (session.charter.dir holds {resolver.kind(d)})"
+    return re.sub(r"[^A-Za-z0-9_./-]", "", d or "history/sittings")[:80] or "?"
 
 
 def _signal(m: meter.Meter) -> bool:

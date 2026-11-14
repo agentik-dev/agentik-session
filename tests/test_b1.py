@@ -241,8 +241,9 @@ def start_line(tmp_path, **extra):
 def test_t6_the_start_line_holds_no_absolute_ceiling(tmp_path, extra):
     line = start_line(tmp_path, **extra)
     head = line.split("; resolved config at ")[0]
+    note = "" if "CLAUDE_SESSION_PROFILE" in extra else hooks.NOT_LAUNCHED     # ss3 R1
     assert head == (f"agentik-session: profile '{extra.get('CLAUDE_SESSION_PROFILE', 'frontier')}'"
-                    "; the meter shows this session's percent on its schedule and prints "
+                    f"{note}; the meter shows this session's percent on its schedule and prints "
                     "CHECKPOINT when it is time to bring the charter current and hand off")
     for word in ("180000", "400000", "200000", "1000000", "turns", "window", "ceilings",
                  "CLAUDE_SESSION_MAX_TURNS", "checkpoint at"):

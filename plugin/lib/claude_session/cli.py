@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -16,8 +17,8 @@ import time
 from pathlib import Path
 
 from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
-               launch, ledger, measure, meter, mod, resolver, rules, sessionconfig, store,
-               tiers)
+               launch, ledger, measure, meter, mod, plug, resolver, rules, sessionconfig,
+               store, tiers)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -95,8 +96,8 @@ def cmd_start(args) -> int:
     except resolver.ResolveError as e:
         _die(str(e), 2)
     if not cfg:
-        _die(f"unknown profile {args.config!r}. Known: "
-             f"{', '.join(known)}  (agentik session profile)")
+        _die(f"unknown profile {args.config!r}. Known: "              # ss4 R5
+             f"{resolver.known(known, os.environ)}  (agentik session profile)")
     if _on_line(args.claude_args, "--model"):           # mt1 R7: the line's model wins
         cfg.model = cfg.effort = None
     elif _on_line(args.claude_args, "--effort"):
@@ -138,9 +139,41 @@ def _fmt_value(v):
 
 
 def cmd_doctor(args) -> int:
-    rep = doctor.run()
+    try:
+        rep = doctor.run()
+    except doctor.NoCwd:           # review 2, R2-F3: one line, or the envelope's error
+        if args.json:
+            print(plug.dumps(plug.no_cwd("doctor")))
+        else:
+            print("agentik-session: doctor: the working directory is gone", file=sys.stderr)
+        return 2
     print(json.dumps(rep.as_dict(), indent=2) if args.json else doctor.render(rep))
     return 0 if rep.ok else 2
+
+
+def cmd_describe(args) -> int:
+    """Packet ak5: `describe --json` and `describe config --json [KEY]`, the reads the suite's
+    `agentik config` and `agentik doctor` take; one JSON object on stdout, nothing written."""
+    words = list(args.words or [])
+    if not args.json:
+        print("agentik-session: describe: say describe --json, or describe config --json [KEY]",
+              file=sys.stderr)
+        return 2
+    if not words:
+        print(plug.dumps(plug.describe(build_parser())))
+        return 0
+    if words[0] != "config" or len(words) > 2:
+        print(f"agentik-session: describe: no read {' '.join(words)[:60]!r}; say describe "
+              "--json, or describe config --json [KEY]", file=sys.stderr)
+        return 2
+    try:
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    except FileNotFoundError:      # review 2, R2-F3
+        print(plug.dumps(plug.no_cwd("config")))
+        return 2
+    d, rc = plug.config_read(cwd, os.environ, words[1] if len(words) > 1 else None)
+    print(plug.dumps(d))
+    return rc
 
 
 def cmd_gates(args) -> int:
@@ -174,11 +207,12 @@ def cmd_status(args) -> int:
     state = resolver.state_dir(env)
     if args.transcript:
         stem = os.path.splitext(os.path.basename(args.transcript))[0]
-        limits = meter.limits_for(resolver.session_dir(state, stem), env)
+        sdir = resolver.session_dir(state, stem)
+        limits = meter.limits_for(sdir, env)
         m = meter.parse(args.transcript, {}, limits)
         if m is None:
             _die(f"transcript unreadable: {args.transcript}", 2)
-        d = m.as_dict()
+        d = {**m.as_dict(), "launched": _launched(sdir, env)}
     else:
         sid = sessionconfig.session_id() or resolver.newest_session(state)
         sdir = resolver.session_dir(state, sid) if sid else None
@@ -187,6 +221,7 @@ def cmd_status(args) -> int:
             print("no meter for this session: PostToolUse has not run (see "
                   "`agentik session doctor`)", file=sys.stderr)
             return 2
+        d = {**d, "launched": _launched(sdir, env)}         # ss3 R2: its one new key
         band = admission.session_band(admission.read_band(env), sid)   # S44: the band, from band.json
         if args.json and admission.draws_week(band):   # pl1 review 1 F1: S51's week line too
             dem = band.get("demand")           # under `band`: the meter's own `window` is its context
@@ -195,7 +230,7 @@ def cmd_status(args) -> int:
         if args.json and facts:
             d = {**d, "admission": facts}
         if not args.json:
-            print(meter.one_line(d))
+            print(_role_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
             print(f"model: {mod.model_line(d, measure.load(sdir))}")   # S41: the band's facts
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
@@ -213,8 +248,29 @@ def cmd_status(args) -> int:
             if "mode" in facts:
                 print(f"admission mode: {facts['mode']}")
             return 0
-    print(json.dumps(d, indent=2) if args.json else meter.one_line(d))
+    print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else _role_line(d))
     return 0
+
+
+ROLE_NOTE = " (limits and rules only)"      # ss3 R2: its model and effort are claude's own
+
+
+def _launched(sdir, env) -> bool:
+    """Row ss3 R2: whether the launcher set the session's model and effort, as its SessionStart
+    recorded it; a session with no record of it, by this shell's environment."""
+    req = resolver.load_request(sdir) if sdir else None
+    mark = (req or {}).get("launched")
+    return mark if isinstance(mark, bool) else hooks.launched(env)
+
+
+def _role_line(d: dict) -> str:
+    """The meter's line; for a session the launcher did not start, ROLE_NOTE once, after its
+    `role:<name>` or, with none in the line, at its end."""
+    line = meter.one_line({k: v for k, v in d.items() if k != "launched"})
+    if d.get("launched", True):
+        return line
+    m = re.search(r"role:\S+", line)
+    return line[:m.end()] + ROLE_NOTE + line[m.end():] if m else line + ROLE_NOTE
 
 
 def _admission_facts(band) -> dict:
@@ -429,11 +485,15 @@ def cmd_rules(args) -> int:
 
 
 def cmd_charter(args) -> int:
-    """The sitting's charter: open, check, close (the shape of D10)."""
+    """The sitting's charter: open, check, close (the shape of D10); show reads (in2)."""
     if getattr(args, "cont", False) and args.action != "open":
         _die(f"charter --continue is read only with open, not {args.action}", 2)
     if getattr(args, "replace", False) and args.action != "open":
         _die(f"charter --replace is read only with open, not {args.action}", 2)
+    if getattr(args, "json", False) and args.action != "show":
+        _die(f"charter --json is read only with show, not {args.action}", 2)
+    if args.action == "show":
+        return _charter_show(args)
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
@@ -522,6 +582,37 @@ def cmd_charter(args) -> int:
     return 0
 
 
+def _charter_show(args) -> int:
+    """Packet in2 R5 to R8: each REPO's newest charter, read and never written: no session
+    record, no resolved.json, no lock; `git` only to find the default REPO. Exit 0 whenever
+    the read ran."""
+    repos = list(args.args)
+    if not repos:
+        cwd = os.getcwd()
+        rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
+        repos = [top.strip() if rc == 0 and top.strip() else cwd]
+
+    def dir_of(repo: str) -> str:
+        if args.dir:
+            return args.dir
+        try:                                 # the repo's own session.charter.dir; writes nothing
+            section = resolver.resolve(repo, sessionconfig.session_id() or "unsaved",
+                                       os.environ, profile=hooks.launch_profile(os.environ)
+                                       ).sections["session"]
+        except Exception:                                   # noqa: BLE001
+            return charter.DEFAULT_DIR
+        # Review 1's F2: a charter.dir that is not a non-empty string reads as the default.
+        d = _charter_dir(section) if isinstance(section, dict) else None
+        return d if isinstance(d, str) and d else charter.DEFAULT_DIR
+
+    doc = charter.show(repos, dir_of)
+    if args.json:
+        print(json.dumps(doc, indent=2, ensure_ascii=False))
+    else:
+        sys.stdout.write(charter.show_text(doc))
+    return 0
+
+
 def _commit_line(path: str) -> str:
     """The line that commits the charter, run verbatim from any cwd (S22 fix round, F1
     and F2): `git -C <its dir> add` takes an untracked one, and `-C` the absolute
@@ -577,7 +668,7 @@ def cmd_profile(args) -> int:
                   f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
         return 0
     if args.name not in profiles:
-        _die(f"unknown profile {args.name!r}. Known: {', '.join(profiles)}")
+        _die(f"unknown profile {args.name!r}. Known: {resolver.known(profiles, os.environ)}")
     try:
         r = resolver.resolve(os.getcwd(), "profile", os.environ, profile=args.name,
                              overlay={})
@@ -615,8 +706,8 @@ def cmd_config(args) -> int:
         name = args.name or active
         cfg = configs.get(name)
         if not cfg:
-            _die(f"unknown configuration {name!r}. Known: "
-                 f"{', '.join(sorted(configs))}")
+            _die(f"unknown configuration {name!r}. Known: "         # ss4 R6, as R5
+                 f"{resolver.known(sorted(configs), os.environ)}")
         ov = {} if args.stored else (
             sessionconfig.load_overlay() if name == active else {})
         eff = cfg.merged(ov)
@@ -800,11 +891,11 @@ def _save_tier(path: Path, role: str, model: str) -> None:
     """mt1 R4's `--save`: the file's top-level `tiers:` block gains or changes `role`; every
     other line, its comments among them, stays as it was."""
     from .yamlsubset import load
-    text = path.read_text() if path.exists() else ""
-    try:
+    try:                                    # ss2 R1-F1: a file not UTF-8 is its own error
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
         doc = load(text) if text.strip() else {}
-    except ValueError as e:
-        _die(f"{path}: {e}; nothing written", 2)
+    except ValueError as e:                 # the file, the line and the reason, never the line
+        _die(f"{resolver.withheld(f'{path}: {e}')}; nothing written", 2)
     cur = doc.get("tiers") if isinstance(doc, dict) and isinstance(doc.get("tiers"), dict) \
         else {}
     table = tiers.merge(cur, {role: {"model": model}})
@@ -828,9 +919,10 @@ def _save_tier(path: Path, role: str, model: str) -> None:
         check = load(new)
         tiers.merge({}, check.get("tiers"))
     except ValueError as e:
-        _die(f"{path}: the edit would not parse ({e}); nothing written", 2)
+        why = resolver.withheld(f": {e}")[2:]
+        _die(f"{path}: the edit would not parse ({why}); nothing written", 2)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(new)
+    path.write_text(new, encoding="utf-8")
 
 
 def _set_tier(args, key: str) -> int:
@@ -965,7 +1057,7 @@ def cmd_set(args) -> int:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
         try:
-            _replace(probe, **{key: value}).validate()
+            _replace(probe, **{key: value}).validate(typed=key == "checkpoint")
         except ValueError as e:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):
@@ -1025,7 +1117,8 @@ def _rewrite_resolved(model_set: bool = False) -> None:
         resolver.write(r, state)
         if model_set:
             resolver.save_request(sdir, req["cwd"], req.get("profile"),
-                                  req.get("transcript_path"), None)
+                                  req.get("transcript_path"), None,
+                                  launched=req.get("launched"))
     except (resolver.ResolveError, OSError, KeyError) as e:
         print(f"note: resolved.json not rewritten: {e}", file=sys.stderr)
 
@@ -1378,7 +1471,7 @@ def cmd_gate(args) -> int:
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
         est = gate.entry_estimates(root)
-        print(json.dumps({**st, "est": est}, indent=2) if args.json
+        print(json.dumps(plug.envelope("gate", {**st, "est": est}), indent=2) if args.json
               else "\n".join(gate.status_lines(st, est)))
         return 0
     command = list(args.command)
@@ -1456,7 +1549,8 @@ def cmd_unattended(args) -> int:
     from . import unattended
     if args.unattended_verb == "status":
         st = unattended.status(os.environ, time.time())
-        print(json.dumps(st, indent=2) if args.json else "\n".join(unattended.status_lines(st)))
+        print(json.dumps(plug.envelope("unattended", st), indent=2) if args.json
+              else "\n".join(unattended.status_lines(st)))
         return 0
     if args.unattended_verb == "report":
         d = unattended.find_run(os.environ, args.run)
@@ -1642,6 +1736,12 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--json", action="store_true")
     dr.set_defaults(func=cmd_doctor)
 
+    ds = sub.add_parser("describe", help="the reads the agentik suite takes: describe --json, "
+                        "describe config --json [KEY]")
+    ds.add_argument("--json", action="store_true")
+    ds.add_argument("words", nargs="*", metavar="config [KEY]")
+    ds.set_defaults(func=cmd_describe)
+
     ic = sub.add_parser("install-cli", help="give the terminal the CLI: freeze this code, write "
                         "the launcher in ~/.local/bin, its link and the agentik door, and prune")
     ic.add_argument("--prefix", help="instead of $HOME/.local")
@@ -1741,10 +1841,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "then claude_md_bytes (--since reads the rows only; a hook row has no time)")
     rp.set_defaults(func=cmd_report)
 
-    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close")
-    ch.add_argument("action", choices=["open", "check", "close"])
-    ch.add_argument("args", nargs="*", metavar="GOAL|FILE")
-    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close)")
+    ch = sub.add_parser("charter", help="the sitting's charter: open, check, close; show "
+                                         "reads each repo's newest, writing nothing")
+    ch.add_argument("action", choices=["open", "check", "close", "show"])
+    ch.add_argument("args", nargs="*", metavar="GOAL|FILE|REPO")
+    ch.add_argument("--dir", metavar="D", help="the charter directory (open, close; show: "
+                                               "under each REPO)")
+    ch.add_argument("--json", action="store_true",
+                    help="show: one object, agentik.charter/1, and nothing else on stdout")
     ch.add_argument("--exit", metavar="TEXT", help="the exit taken (close)")
     ch.add_argument("--continue", dest="cont", action="store_true",
                     help="open: adopt today's newest charter of the same suffix while under "
