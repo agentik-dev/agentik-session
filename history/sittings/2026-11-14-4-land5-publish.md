@@ -13,8 +13,7 @@
 ## Done-ness
 - [x] the packet
 - [x] the tests, red at the pin: 58 of 58 at 1dbef66 (`invalid choice: 'publish'`, `--push` unrecognized)
-- [ ] R1 to R8: `publish.py` and the verb
-- [ ] R9: `gate land --push`
+- [x] R1 to R9: `publish.py`, the verb and `gate land --push` in `cli.py`, one commit (the parser's hunks share a block); 58 of 58 green under both venvs; the gate's own reader (`gate._load`), so no new state reader joins `test_bare_machine.py`'s table
 - [ ] R10: help, SKILL.md, two NICE rows
 - [ ] the stamp, through the gate queue
 - [ ] `make check`, once, last; both scans
@@ -23,7 +22,7 @@
 - none yet
 
 ## Next act
-R1 to R8: `plugin/lib/claude_session/publish.py`, the verb in `cli.py`.
+R10: SKILL.md's line, two NICE rows.
 
 ## Exit
 Open.

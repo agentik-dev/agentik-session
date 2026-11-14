@@ -246,7 +246,7 @@ def test_land5_4_a_check_near_miss_is_red_proof(c, case):
             "make-test": {"command": ["make", "test"]},
             "sh-extra": {"command": ["sh", "-c", "make check", "x"]},
             "pipe": {"command": ["/bin/sh", "-c", "make check | tee log"]}}[case]
-    c.check_result(s, **over)
+    c.check_result(over.pop("head", s), **over)
     rc, out, err = c.publish(str(c.repo))
     assert (rc, out) == (1, line(c, "red proof exit 1")), err
     assert c.bare_main() == back
@@ -265,7 +265,7 @@ def test_land5_5_a_forged_ok_line_before_the_real_red_is_red_proof(c):
 
 def test_land5_5_a_check_log_holding_a_land_line_proves_no_landing(c):
     before, head, s = c.landed()
-    c.check_result(before, log_lines=["land crate: ok %s, main readied" % head])
+    c.result(["land crate: ok %s, main readied" % head], head=before)
     rc, out, err = c.publish(str(c.repo))
     assert (rc, out) == (1, line(c, "red proof exit 1")), err
 
