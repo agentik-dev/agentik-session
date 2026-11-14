@@ -336,5 +336,7 @@ def test_7_the_json_keys_are_the_pin_s(box, kind, monkeypatch, capsys):
     doc = json.loads(out)
     assert list(doc) == ["schema", "ok", "tool", "failed", "warned", "checks"]
     row = next(c for c in doc["checks"] if c["name"] == "meter")
-    assert list(row) == ["name", "ok", "status", "detail", "remedy"]
+    # fk3 R4: every check gains `source`, null for the meter
+    assert list(row) == ["name", "ok", "status", "detail", "remedy", "source"]
+    assert row["source"] is None
     assert rc in (0, 2)                 # the statuses and exits: lines 1, 4 and 5
