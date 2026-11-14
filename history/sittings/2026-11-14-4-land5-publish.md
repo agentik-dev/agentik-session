@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet
-- [ ] the tests, red at the pin
+- [x] the tests, red at the pin: 58 of 58 at 1dbef66 (`invalid choice: 'publish'`, `--push` unrecognized)
 - [ ] R1 to R8: `publish.py` and the verb
 - [ ] R9: `gate land --push`
 - [ ] R10: help, SKILL.md, two NICE rows
@@ -23,7 +23,7 @@
 - none yet
 
 ## Next act
-The failing tests, `tests/test_land5_publish.py`.
+R1 to R8: `plugin/lib/claude_session/publish.py`, the verb in `cli.py`.
 
 ## Exit
 Open.
