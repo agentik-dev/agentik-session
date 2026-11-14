@@ -16,12 +16,12 @@
 - [x] R2 `status` and `status --json` `launched`
 - [x] R3 the unknown profile told to the session
 - [x] R4 `decisions` leaves; R6 no model version in a description; n236, n237 new, n161 and n162 to the overflow
-- [ ] the stamp `2.0.0-alpha.110`
+- [x] the stamp `2.0.0-alpha.110` (4293 tests)
 - [ ] the gate once
 
 ## Handover
 
 ## Next act
-The stamp, then the gate.
+The gate once, then the hygiene scans; phase 2 after ss4 lands, on the coordinator's word.
 
 ## Exit
