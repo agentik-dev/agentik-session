@@ -9,17 +9,21 @@ It runs in the caller's own process after a repo's ok publish line (or, for `gat
 refusal has already held. Stdout is one line a repo, after its publish (or land) line:
 
   install <repo>: ok <N>@<M> <old> to <new>[, make install]     exit 0
-  install <repo>: ok <N>@<M> <new>, already installed           exit 0, nothing run
+  install <repo>: ok <N>@<M> <new>, already installed[, make install]   exit 0
   install <repo>: ok, make install                              exit 0
   install <repo>: ok, nothing to install here                   exit 0
   install <repo>: would run <command>; <command>...             exit 0, --dry-run
   install <repo>: held install: <what is live>                  exit 1, nothing run
   install <repo>: red unpushed exit 1                           nothing run
+  install <repo>: red tree exit 1                               nothing run
   install <repo>: red install exit <code>                       the step's own code
 
 Pushed (R2): main's head S is `refs/remotes/<remote>/main` or its ancestor, read as publish
-reads it, no fetch; a dry publish's `would push` line reads as pushed. The hold (R3), read
-before anything else, nothing of the repo installed while: a line of the process list names a
+reads it, no fetch; a dry publish's `would push` line reads as pushed. Only S is installed
+(review 1, F1): main is checked out at S, every tracked file is S (publish's tree read) and no
+untracked file stands that git does not ignore, entries under `.claude/` aside (a checkout's
+worktrees live there); else `red tree`, the first path in a note. An ignored file is the
+machine's own, as it is for `make check`. The hold (R3), read after that, nothing of the repo installed while: a line of the process list names a
 relay `run`, `gate` or `plan` (`relay_pid`), or the list cannot be read; this tool's unattended
 state names a running row (`unattended.status`); the gate's queue holds an entry, running or
 queued, on the repo's key (the checkout or a worktree of it). Held, a note gives the command to
@@ -31,9 +35,13 @@ What is installed (R4), each command a note before it runs: (1) the plugin `<rep
 first by name): `claude plugin marketplace update M`, then `claude plugin update N@M`, in the
 user's home; N or M other than lowercase letters, digits and dashes opening with a letter or a
 digit is `red install exit 1`, nothing run, so no word from a file is a command's option. Where
-the entry's version is plugin.json's before anything ran, nothing runs at all. (2) a Makefile
-whose `make -n install` exits 0 under land.main's cleaned environment: `make install` queued as
-a gate job on the repo's key and waited for, its strict code the step's. hq measured twice on a
+the entry's version is plugin.json's before anything ran, `already installed`: the plugin's two
+commands are skipped and nothing else (review 1, F3). (2) a Makefile at S (the first of
+`GNUmakefile`, `makefile` and `Makefile` that S holds, read from git, as make takes the first)
+with a rule line whose targets hold the word `install`: `make install` queued as a gate job on
+the repo's key and waited for, its strict code the step's; it runs on every call that is not
+held and not dry, so a red one is run again by the next. No `make` runs outside that job (F2):
+a target that only an included file gives is not seen. hq measured twice on a
 Mac that `claude plugin update` and `marketplace update` leave Claude Code's user settings file
 alone (R8), so no edit-gates list is read.
 """
@@ -54,6 +62,7 @@ PROGRAMS = ("relay", "agent-" + "relay", "agentik-relay")    # its old name, spe
 ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")     # where `ps -E` starts a process's environment
 PART = re.compile(r"[a-z0-9][a-z0-9-]*\Z")          # a plugin id's name and its marketplace
 OWN = ("user", "managed", None)
+MAKEFILES = ("GNUmakefile", "makefile", "Makefile")     # make's own order
 PS_WALL = 10
 DROP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
         "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")    # land.main's
@@ -130,6 +139,12 @@ def hold(repo, root, env):
     return None
 
 
+def main_head(repo):
+    """Main's head S, or None."""
+    code, s = land.read(repo, "rev-parse", "--verify", "-q", land.MAIN + "^{commit}")
+    return s if code == 0 and s else None
+
+
 def pushed(repo):
     """True where main's head is its remote's main or an ancestor of it (publish's read)."""
     from . import publish
@@ -137,13 +152,34 @@ def pushed(repo):
         remote = publish.remote_of(repo)
     except land.Red:
         return False
-    code, s = land.read(repo, "rev-parse", "--verify", "-q", land.MAIN + "^{commit}")
-    if code != 0 or not s:
+    s = main_head(repo)
+    if s is None:
         return False
     code, r = land.read(repo, "rev-parse", "--verify", "-q", "refs/remotes/%s/main^{commit}" % remote)
     if code != 0 or not r:
         return False
     return r == s or land.read(repo, "merge-base", "--is-ancestor", s, r)[0] == 0
+
+
+def off_tree(repo, s):
+    """The first thing that keeps the checkout from being S, or None (review 1, F1): main
+    checked out at S, every tracked file S (publish's `diff S` read), no untracked file git does
+    not ignore, entries under `.claude/` aside."""
+    code, head = land.read(repo, "symbolic-ref", "-q", "HEAD")
+    at = land.read(repo, "rev-parse", "--verify", "-q", "HEAD^{commit}")[1]
+    if code != 0 or head != land.MAIN or at != s:
+        return "HEAD, %s at %s, not main at %s" % (head or "detached", at or "nothing", s)
+    code, paths = land.read_z(repo, "diff", "--no-ext-diff", "--name-only", "-z",
+                              "--ignore-submodules=none", s, "--")
+    if code != 0 or paths:
+        return paths[0] if paths else "(git diff failed)"
+    code, paths = land.read_z(repo, "ls-files", "-z", "--others", "--exclude-standard")
+    if code != 0:
+        return "(git ls-files failed)"
+    for path in paths:
+        if not path.startswith(".claude/"):
+            return path
+    return None
 
 
 def _json(path):
@@ -200,15 +236,30 @@ def _clean(env):
     return {k: v for k, v in env.items() if k not in DROP}
 
 
-def has_install(repo, env):
-    """`make -n install` exits 0 under land.main's cleaned environment."""
-    try:
-        p = subprocess.run(["make", "-n", "install"], cwd=repo, env=_clean(env),
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return p.returncode == 0
+def install_rule(text):
+    """A rule line whose targets hold the word `install` (review 1, F2): a line that is no
+    recipe line, with a `:` that opens no assignment (`:=`, `::=`) and no `=` before it."""
+    for row in text.splitlines():
+        if row.startswith("\t"):
+            continue
+        head, colon, tail = row.split("#", 1)[0].partition(":")
+        if not colon or "=" in head or tail.lstrip(":").startswith("="):
+            continue
+        if "install" in head.split():
+            return True
+    return False
+
+
+def has_install(repo, s):
+    """The Makefile make would read at S has an `install` rule; read with git alone, so no
+    `make` runs outside the gate job (review 1, F2)."""
+    for name in MAKEFILES:
+        p = subprocess.run(["git", "cat-file", "blob", "%s:%s" % (s, name)], cwd=repo,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL)
+        if p.returncode == 0:
+            return install_rule(p.stdout.decode("utf-8", "replace"))
+    return False
 
 
 def _claude(env, *argv):
@@ -251,27 +302,37 @@ def turn(arg, root, env, dry=False, would=False):
             note("main of %s is not on its remote's main, so nothing is installed: push it "
                  "first, agentik session gate publish %s --install" % (repo, repo))
             return "install %s: red unpushed exit 1" % name, 1
+        s = main_head(repo)
+        off = off_tree(repo, s) if s else "no %s" % land.MAIN
+        if off:
+            note("the checkout %s is not main's head %s, so it would install what was never "
+                 "pushed: %s; commit it, remove it or ignore it, then repeat: agentik session "
+                 "gate publish %s --install" % (repo, s, off, repo))
+            return "install %s: red tree exit 1" % name, 1
         live = hold(repo, root, env)
         if live:
             note("repeat when it is over: agentik session gate publish %s --install" % repo)
             return "install %s: held install: %s" % (name, live), 1
         plug = plugin(repo, env)
-        if plug and plug[3] is not None and plug[2] == plug[3]:
-            n, m, old, _ = plug
-            return "install %s: ok %s@%s %s, already installed" % (name, n, m, old), 0
-        make = has_install(repo, env)
+        agreed = bool(plug) and plug[3] is not None and plug[2] == plug[3]
+        make = has_install(repo, s)
         steps = []
-        if plug:
+        if plug and not agreed:
             steps += ["claude plugin marketplace update %s" % plug[1],
                       "claude plugin update %s@%s" % (plug[0], plug[1])]
         if make:
             steps.append("make install")
+        if agreed and not steps:
+            return "install %s: ok %s@%s %s, already installed" % (name, plug[0], plug[1],
+                                                                    plug[2]), 0
         if not steps:
             return "install %s: ok, nothing to install here" % name, 0
         if dry:
             return "install %s: would run %s" % (name, "; ".join(steps)), 0
         parts = [""]
-        if plug:
+        if agreed:
+            parts = [" %s@%s %s, already installed" % (plug[0], plug[1], plug[2])]
+        elif plug:
             n, m, old, wanted = plug
             _claude(env, "plugin", "marketplace", "update", m)
             _claude(env, "plugin", "update", "%s@%s" % (n, m))
