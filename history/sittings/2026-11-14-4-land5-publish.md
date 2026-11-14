@@ -14,7 +14,7 @@
 - [x] the packet
 - [x] the tests, red at the pin: 58 of 58 at 1dbef66 (`invalid choice: 'publish'`, `--push` unrecognized)
 - [x] R1 to R9: `publish.py`, the verb and `gate land --push` in `cli.py`, one commit (the parser's hunks share a block); 58 of 58 green under both venvs; the gate's own reader (`gate._load`), so no new state reader joins `test_bare_machine.py`'s table
-- [ ] R10: help, SKILL.md, two NICE rows
+- [x] R10: the module's docstring, the `gate` help, SKILL.md's line, NICE n248 and n249 (the file then past its bound: the stamp moves the oldest S4 rows)
 - [ ] the stamp, through the gate queue
 - [ ] `make check`, once, last; both scans
 
@@ -22,7 +22,7 @@
 - none yet
 
 ## Next act
-R10: SKILL.md's line, two NICE rows.
+`make stamp` through the gate queue, its files alone the last commit under `plugin/`; then `make check` once.
 
 ## Exit
 Open.
