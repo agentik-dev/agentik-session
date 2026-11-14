@@ -445,9 +445,9 @@ def test_gl1_f3_a_stop_line_that_opens_the_tail_is_read(tmp_path):
                           capture_output=True).stderr.splitlines()[-1] + b"\n"
     stop = b"bounded: stop: load\n"
     fill = land.TAIL - len(stop) - len(made)
+    write = f"import sys; sys.stdout.write(chr(10) * {fill})"
     crate = Crate(tmp_path, ["@echo pre", "@echo 'bounded: stop: load' >&2; "
-                             f"{sys.executable} -c 'import sys; sys.stdout.write(chr(10) * {fill})';"
-                             " exit 2"])
+                             f"{sys.executable} -c '{write}'; exit 2"])
     rc, out, _ = crate.land()
     log = crate.log().read_bytes()
     assert log.index(b"land crate: ") - log.index(stop) == land.TAIL       # the edge, exactly

@@ -15,13 +15,18 @@ there when present, then
   land <repo>: red <step> exit <code>            exit <code>
 
 A cut that leaves staged paths alone adds to that line: `, staged paths left on main`. A red
-check whose output's last line that opens `bounded: ` is `bounded: stop: lock`, `... load` or
-`... wall` adds `, unrun lock|load|wall` (packet gl1, R5): `scripts/bounded` refused the check
-or cut it at its wall, so it did not run to its end; the code is the step's, and `bounded:
-nested stop: <why>`, an inner bound's, is a plain red. The check writes to this run's stderr as
-at the pin, and the line is read from the job's own log (`main`'s `log`, the file that stderr
-is, by device and inode), from where the check began, its last 64 KiB; with no such log the
-line is the pin's. A
+check adds `, unrun lock|load|wall` (packet gl1, R5, as review 1 amended it) only when all three
+hold: the last line of its output that opens `bounded: ` is `bounded: stop: lock`, `... load` or
+`... wall`; every non-empty line after it is make's own, opening `make: *** ` or
+`make[<n>]: *** `; and make's first `*** [...] Error <n>` line after it carries the code
+`scripts/bounded` exits with for that stop, 2 for lock and load, 124 for the wall (no such line,
+no unrun). Then `scripts/bounded` refused the check or cut it at its wall, so it did not run to
+its end. Anything else is a plain red: a stop line in a failing test's captured output, a stop
+line with any other line after it, `bounded: nested stop: <why>` (an inner bound's). The code on the
+line is the step's, make's own. The check writes to this run's stderr as at the pin, and the
+lines are read from the job's own log (`main`'s `log`, the file that stderr is, by device and
+inode), from where the check began, its last 64 KiB, a first line the 64 KiB cut not read; with
+no such log the line is the pin's. A
 `scripts/hygiene` that predates `--commits`, its --help failing or not naming the flag, scans the
 tree alone: a note says so, and the ok line ends `, range not scanned`. The steps'
 own output and these notes go to stderr. In the job both streams reach the job's log, so the
@@ -95,6 +100,7 @@ STANDS = ""         # once main has moved, what any red says beside its line
 LEFT = ""           # what the land line adds when a cut leaves staged paths alone
 UNSCANNED = ""      # what the ok line adds when the repo's hygiene predates --commits
 STOPS = {b"bounded: stop: " + why.encode(): why for why in ("lock", "load", "wall")}  # gl1 R5
+CODES = {"lock": 2, "load": 2, "wall": 124}   # scripts/bounded's exit for each stop (gl1 R5)
 BOUNDED = b"bounded: "
 TAIL = 64 * 1024    # the most of the job's log a red check's stop line is looked for in
 
@@ -166,9 +172,9 @@ def log_size(log):
     return there.st_size
 
 
-def last_bounded(log, begin):
-    """The last line of the log from `begin` (its last TAIL bytes at most) that opens
-    `bounded: `, as bytes, or None. A line cut by the TAIL is not read."""
+def tail_lines(log, begin):
+    """The log's lines from `begin`, its last TAIL bytes at most, as bytes, or None. A first
+    line the TAIL cut is not read."""
     try:
         with open(log, "rb") as fh:
             size = os.fstat(fh.fileno()).st_size
@@ -179,7 +185,35 @@ def last_bounded(log, begin):
         return None
     if at > begin:
         lines = lines[1:]
-    return next((x for x in reversed(lines) if x.startswith(BOUNDED)), None)
+    return lines
+
+
+def make_says(line):
+    """What make's own error line says after its `make: *** ` or `make[<n>]: *** `; else None."""
+    if line.startswith(b"make: *** "):
+        return line[len(b"make: *** "):]
+    head, sep, rest = line.partition(b"]: *** ")
+    return rest if sep and head.startswith(b"make[") and head[5:].isdigit() else None
+
+
+def make_error(said):
+    """The <n> of make's `[<target>] Error <n>`, or None."""
+    head, sep, n = said.rpartition(b"] Error ")
+    return int(n) if sep and said.startswith(b"[") and n.isdigit() else None
+
+
+def refused(log, begin):
+    """`lock`, `load` or `wall` when scripts/bounded stopped the check, else "" (gl1 R5): the
+    last line from `begin` that opens `bounded: ` is that stop's line, every non-empty line
+    after it is make's own, and make's first `Error <n>` after it is the stop's code."""
+    lines = tail_lines(log, begin) or []
+    at = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith(BOUNDED)), None)
+    why = STOPS.get(lines[at], "") if at is not None else ""
+    said = [make_says(x) for x in lines[at + 1:] if x] if why else [None]
+    if None in said:
+        return ""
+    codes = [n for n in map(make_error, said) if n is not None]
+    return why if codes and codes[0] == CODES[why] else ""
 
 
 def settle(child):
@@ -626,8 +660,7 @@ def land(repo, branch, sha, message, log=None):
     begin = log_size(log)
     code = run(tree, "make", "check")
     if code != 0:
-        last = last_bounded(log, begin) if begin is not None else None
-        raise Red("check", code, unrun=STOPS.get(last, ""))
+        raise Red("check", code, unrun=refused(log, begin) if begin is not None else "")
     at("hygiene")
     script = os.path.join(tree, "scripts", "hygiene")
     if os.path.lexists(script):
