@@ -32,7 +32,10 @@ not, and they are in the merged tree), as a whole word; a mention anywhere else,
 included, is listed in the note and left. The renumbering writes only regular files (100644 or
 100755) of the merged tree, from its text, never through a link. Then `make stamp STAMP_BASE=<main as read>`: a non-zero exit is `red stamp exit
 <code>`, and a line written beyond the derived kinds (NICE rows moved whole to the overflow
-aside) `red stamp exit 1`, the paths named; either red restores the stamp's paths. Then
+aside) `red stamp exit 1`, the paths named, as is a head that moves during `make stamp` (the
+branch reset to the head read before, the note naming the commits' subjects); any red or cut
+between `make stamp` and its commit restores the stamp's paths, the index too, and removes a file
+it added. Then
 `scripts/plugin-version-check` where it is there: `red version exit <code>`, before the check.
 The job's commits are `<branch>: merge main` and `<branch>: plugin <version>`, each closing with
 `Gate-Land: <the sha given, whole>`; a stamp that wrote nothing makes none. A head past the sha
@@ -1080,8 +1083,17 @@ def do_stamp(tree, branch, given, base):
     """R5: `make stamp` against main's commit as read; its lines as one commit, or none."""
     at("stamp")
     note("stamp: make stamp in " + tree)
+    before = read(tree, "rev-parse", "-q", "--verify", "HEAD")[1]
     try:
         code = run(tree, "make", "stamp", "STAMP_BASE=" + base)
+        after = read(tree, "rev-parse", "-q", "--verify", "HEAD")[1]
+        if after != before:
+            # R5, R6: the stamp's lines are the job's to commit (review 1, F6).
+            said = read(tree, "log", "--format=%s", "%s..%s" % (before, after))[1]
+            run(tree, "git", "reset", "-q", before)
+            raise Red("stamp", 1, "make stamp moved the head to %s, its commits: %s; the branch "
+                      "reset to %s, the stamp's paths restored"
+                      % (after or "none", "; ".join(said.splitlines()) or "none", before))
         changed = changed_paths(tree)
         if code != 0:
             raise Red("stamp", code, "make stamp exit %d; its paths restored" % code)
