@@ -524,3 +524,161 @@ def test_land4_6_the_repos_own_stamp_reruns_to_the_heads_tree(tmp_path):
     second = p.land(sha, env={"CHECK_EXIT": "2"})
     assert second[:2] == first[:2], second[2]
     assert p.head() == new and [x for x in os.listdir(str(tmp_path)) if "ready" in x] == []
+
+
+# Review 1's findings, each red at 631b284.
+
+def rows7():
+    return [row(n) for n in range(2, 8)]
+
+
+def listed(c, rev="main"):
+    return c.git(c.repo, "ls-tree", "-r", "--name-only", rev).split()
+
+
+@pytest.mark.parametrize("alone", [False, True])
+def test_land4_f1_a_renumber_never_brings_back_a_file_main_deleted(c, alone):
+    c.on_main(dict({"docs/old.md": "old notes, see n8\n"}, **({} if alone else {"docs/k.md": "k\n"})),
+              "main adds old")
+    c.git(c.tree, "merge", "-q", "main")
+    sha = c.work({NICE: nice(*rows7(), row(8, "b8"))})
+    c.on_main({"docs/old.md": None, NICE: nice(*rows7(), row(8, "m8"))}, "main deletes old")
+    rc, out, err = c.land(sha)
+    assert rc == 0, (out, err)
+    assert "docs/old.md" not in listed(c)
+    assert row(9, "b8") in c.show("main", NICE) + "\n"
+
+
+def test_land4_f1_a_renumber_never_keeps_a_copy_of_a_file_main_renamed(c):
+    c.on_main({"docs/old.md": "old notes, see n8\nline2\nline3\nline4\n"}, "main adds old")
+    c.git(c.tree, "merge", "-q", "main")
+    sha = c.work({NICE: nice(*rows7(), row(8, "b8"))})
+    c.git(c.repo, "mv", "docs/old.md", "docs/new.md")
+    c.on_main({NICE: nice(*rows7(), row(8, "m8"))}, "main renames old")
+    rc, out, err = c.land(sha)
+    assert rc == 0, (out, err)
+    assert "docs/old.md" not in listed(c) and "docs/new.md" in listed(c)
+    assert c.show("main", "docs/new.md").startswith("old notes, see n8\n")
+
+
+def test_land4_f2_a_renumber_never_writes_through_a_link(c, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (c.tree / "docs").mkdir()
+    os.symlink(str(outside / "n8.txt"), str(c.tree / "docs" / "link-n8.md"))
+    sha = c.work({NICE: nice(*rows7(), row(8, "b8"))})
+    c.on_main({NICE: nice(*rows7(), row(8, "m8"))})
+    rc, out, err = c.land(sha)
+    assert rc == 0, (out, err)
+    assert os.listdir(str(outside)) == []
+    assert os.readlink(str(c.repo / "docs" / "link-n8.md")) == str(outside / "n8.txt")
+
+
+@pytest.mark.parametrize("side", ["branch", "main"])
+def test_land4_f3_a_repeated_id_in_a_nice_hunk_is_red_behind(c, side):
+    two, one = (row(8, "first"), row(8, "second")), (row(8, "other"),)
+    sha = c.work({NICE: nice(*rows7(), *(two if side == "branch" else one))})
+    c.on_main({NICE: nice(*rows7(), *(one if side == "branch" else two))})
+    before = c.main()
+    rc, out, err = c.land(sha)
+    assert (rc, out) == (1, "land crate: red behind exit 1\n"), err
+    assert NICE in err and "n8" in err
+    assert c.head() == sha and c.main() == before and c.clean() == ""
+
+
+def test_land4_f1_r4_only_md_files_the_branch_added_are_rewritten(c):
+    sha = c.work({NICE: nice(*rows7(), row(8, "b8")),
+                  "design/packets/p1-crate.md": "Row n8; not n80, xn8 or n8x.\n",
+                  "tool/calc.py": "n8 = 8\n", "tests/test_p1.py": "# row n8\n",
+                  "shared.txt": "base\nsee n8\n"})
+    c.on_main({NICE: nice(*rows7(), row(8, "m8"))})
+    rc, out, err = c.land(sha)
+    assert rc == 0, (out, err)
+    assert c.show("main", "design/packets/p1-crate.md") == "Row n9; not n80, xn8 or n8x."
+    assert (c.show("main", "tool/calc.py"), c.show("main", "tests/test_p1.py")) == (
+        "n8 = 8", "# row n8")
+    for path in ("tool/calc.py", "tests/test_p1.py", "shared.txt"):
+        assert "n8 named in %s, left as it is" % path in err, err
+
+
+def hook(c, name, body):
+    path = c.repo / ".git" / "hooks" / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+
+
+# The hook's parent is git, whose parent is the job: the cut the gate's wall would send.
+CUT_AT = ('[ -f "$CUT_FLAG" ] || exit 0\n%s\nrm -f "$CUT_FLAG"\n'
+          'kill -TERM $(ps -o ppid= -p $PPID)\nsleep 3\nexit 0\n')
+
+
+def test_land4_f4_a_cut_in_the_stamps_commit_leaves_a_clean_worktree(c, tmp_path):
+    sha = c.work({"f": "x\n"})
+    c.on_main({"g": "y\n"})
+    flag = tmp_path / "flag"
+    flag.write_text("1")
+    hook(c, "pre-commit", CUT_AT % "git diff --cached --name-only | grep -q README.md || exit 0")
+    rc, out, err = c.land(sha, env={"CUT_FLAG": str(flag)})
+    merge = c.head()
+    assert (rc, out) == (124, "land crate: red cut exit 124, as %s\n" % merge), err
+    assert c.clean() == ""
+    rc, out, err = c.land(sha)
+    assert (rc, out) == (0, ok(sha, c.git(c.repo, "rev-parse", "main^2"), "1.0.0-alpha.2")), err
+
+
+def test_land4_f5_a_cut_just_after_the_merge_commit_names_the_head(c, tmp_path):
+    sha = c.work({"f": "x\n"})
+    c.on_main({"g": "y\n"})
+    flag = tmp_path / "flag"
+    flag.write_text("1")
+    hook(c, "post-commit", CUT_AT % 'git log -1 --format=%s | grep -q "merge main" || exit 0')
+    rc, out, err = c.land(sha, env={"CUT_FLAG": str(flag)})
+    head = c.head()
+    assert head != sha and c.git(c.repo, "log", "-1", "--format=%s", head) == "p1-crate: merge main"
+    assert (rc, out) == (124, "land crate: red cut exit 124, as %s\n" % head), err
+
+
+def test_land4_f6_a_stamp_that_commits_is_red_stamp_and_reset(c):
+    stub = STUB.replace("exit 0\n", 'echo by-the-stamp >> shared.txt; git add shared.txt; '
+                        'git commit -qm "stamp did it"\nexit 0\n')
+    c.on_main({"tools/stamp-stub": stub}, "main: a stamp that commits")
+    c.git(c.tree, "merge", "-q", "main")
+    sha = c.work({"f": "x\n"})
+    before = c.main()
+    rc, out, err = c.land(sha)
+    assert (rc, out) == (1, "land crate: red stamp exit 1\n"), err
+    assert "stamp did it" in err
+    assert c.head() == sha and c.main() == before and c.clean() == ""
+    assert "check" not in c.ran()
+
+
+@pytest.mark.parametrize("stage", [True, False])
+def test_land4_f7_a_red_stamp_removes_a_file_it_added(c, stage):
+    stub = STUB.replace("exit 0\n", "echo new > made.txt\n%sexit 0\n"
+                        % ("git add made.txt\n" if stage else ""))
+    c.on_main({"tools/stamp-stub": stub}, "main: a stamp that makes a file")
+    c.git(c.tree, "merge", "-q", "main")
+    sha = c.work({"f": "x\n"})
+    c.on_main({"g": "y\n"})
+    rc, out, err = c.land(sha)
+    assert (rc, out) == (1, "land crate: red stamp exit 1, as %s\n" % c.head()), err
+    assert "made.txt" in err and c.clean() == ""
+    assert not (c.tree / "made.txt").exists()
+
+
+@pytest.mark.parametrize("trailer", [True, False])
+def test_land4_f8_the_dry_run_of_a_head_past_the_sha(c, trailer):
+    sha = c.work({"f": "x\n"})
+    c.on_main({"g": "y\n"})
+    c.land(sha, env={"CHECK_EXIT": "2"})
+    c.put(c.tree, {"shared.txt": "a hand\n"})
+    c.git(c.tree, "commit", "-qam", "by hand" + ("\n\nGate-Land: " + sha if trailer else ""))
+    c.order.unlink()
+    rc, out, err = dry(c, sha, True)
+    if trailer:
+        assert (rc, out) == (0, "ready: p1-crate is past %s by its trailers; the rerun is not run "
+                             "dry\nready: p1-crate holds main\nready: would run make stamp and "
+                             "commit its lines\nland crate: dry run, nothing queued\n" % sha[:7]), err
+    else:
+        assert (rc, out) == (1, "land crate: red sha exit 1\n"), err
