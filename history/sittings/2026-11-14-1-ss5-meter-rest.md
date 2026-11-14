@@ -12,10 +12,10 @@
 
 ## Done-ness
 - [x] tests first, red at the pin (acceptance 1 to 7): 14 of 31 red at ad8029a; the 17 green are lines 6 and 7 and the own session's unread tails
-- [ ] R1 the tail read: fail only on a tool result stamped past `FRESH_S` after the meter's `ts`
-- [ ] R2 the pass's words, and the newest session's note
-- [ ] R3 an unreadable tail: own session today's verdict, newest a `warn`; the bound
-- [ ] R4 the five cases byte-equal to the pin
+- [x] R1 the tail read: fail only on a tool result stamped past `FRESH_S` after the meter's `ts` (`_missed_call`; an error result and a sidechain line are no missed call)
+- [x] R2 the pass's words, and the newest session's note
+- [x] R3 an unreadable tail: own session today's verdict, newest a `warn`; the bound `TAIL_MAX` 4 MiB
+- [x] R4 the five cases byte-equal to the pin; `test_bare_machine`'s NOT_STATE gains `_missed_call`
 - [ ] R5 the stamp
 - [ ] the commit scan `main..HEAD`: exit 0
 - [ ] the gate once
@@ -23,6 +23,6 @@
 ## Handover
 
 ## Next act
-The change in `doctor._check_meter` (R1 to R3), then the stamp.
+The stamp (R5), the commit scan, then the gate once.
 
 ## Exit
