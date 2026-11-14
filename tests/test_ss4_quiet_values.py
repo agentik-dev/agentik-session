@@ -302,3 +302,15 @@ def test_a_charter_dir_typed_as_a_word_still_reads():
     assert hooks._charter({"session": {"charter": {"dir": "h/s"}}}) == "h/s"
     assert hooks._charter({"session": {"charter": {}}}) == "history/sittings"
 
+
+# ---- review 1, R1-F2: a zone typed on the command line prints ---------------------------------
+
+def test_a_typed_zone_prints(box):
+    rc, out, err = _run(box, "set", "checkpoint", '{"wind_down": 3}', CLAUDE_CODE_SESSION_ID=SID)
+    assert rc == 1 and "error: checkpoint: unknown zone 'wind_down'; zones are clear" in err, err
+
+
+def test_a_zone_from_a_file_stays_withheld_under_set(box):
+    user_file(box[0], f"profiles:\n  balanced:\n    checkpoint:\n      {TOPIC}: 1\n")
+    rc, out, err = _run(box, "set", "effort", "high", CLAUDE_CODE_SESSION_ID=SID)
+    assert MARK not in out + err, (rc, out, err)

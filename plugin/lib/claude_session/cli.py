@@ -1033,7 +1033,7 @@ def cmd_set(args) -> int:
         probe = configs.get(target) or SessionConfig(name=target)
         from dataclasses import replace as _replace
         try:
-            _replace(probe, **{key: value}).validate()
+            _replace(probe, **{key: value}).validate(typed=key == "checkpoint")
         except ValueError as e:
             _die(str(e))
         if not sessionconfig.save_overlay({key: value}):

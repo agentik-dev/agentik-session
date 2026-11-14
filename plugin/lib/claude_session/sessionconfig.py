@@ -94,7 +94,9 @@ class SessionConfig:
         patch = {k: v for k, v in (overlay or {}).items() if k in known}
         return replace(self, **patch) if patch else self
 
-    def validate(self) -> None:
+    def validate(self, typed: bool = False) -> None:
+        """Raises ValueError on a bad field. `typed`: the checkpoint is what the caller typed
+        on the command line, so an unknown zone is named (ss4 review 1, R1-F2)."""
         if self.posture not in POSTURES:
             raise ValueError(f"posture must be one of {', '.join(POSTURES)}")
         if not 0 < self.reserve_pct < 100:
@@ -120,8 +122,9 @@ class SessionConfig:
                     "setting_sources must include 'user': dropping it removes "
                     "~/.claude/settings.json and every PreToolUse guard in it")
         for zone, n in (self.checkpoint or {}).items():
-            if zone not in CHECKPOINT_ZONES:
-                raise ValueError("checkpoint: a key (withheld) is not a zone; "   # ss4 R6
+            if zone not in CHECKPOINT_ZONES:      # ss4 R6: a zone from a file is withheld,
+                said = f"unknown zone {zone!r}" if typed else "a key (withheld) is not a zone"
+                raise ValueError(f"checkpoint: {said}; "     # one typed prints (R1-F2)
                                  f"zones are {', '.join(CHECKPOINT_ZONES)}")
             if not isinstance(n, int) or n < 0:
                 raise ValueError(f"checkpoint.{zone} must be a non-negative integer")
