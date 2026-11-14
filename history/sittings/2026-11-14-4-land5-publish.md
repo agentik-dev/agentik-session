@@ -22,17 +22,18 @@
 - [x] F2: the word resolved by `rev-parse --disambiguate`, exactly S's second parent
 - [x] lead 1: a `scripts/hygiene` that is there and not executable is `red hygiene exit 126`
 - [x] three NICE rows (S4), n254 to n256
-- [ ] the stamp, its files the last commit; `make check` once, last; both scans exit 0
+- [x] the stamp `2.0.0-alpha.121` (count 4701, n182, n184, n191, n192 to the overflow), its files the last commit
+- [ ] `make check` once, last, on the stamp's commit; both scans exit 0
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
-- A fix round that changes `plugin/` takes the next alpha by `make stamp`, as land4's fix did.
+- A fix round that changes `plugin/` takes the next alpha: `make stamp STAMP_VERSION=<next>`, since a plain stamp keeps a version already above main's.
 
 ## Next act
-The stamp, then `make check` once, last.
+`make check` once on the stamp's commit, then the coordinator's read of the diff.
 
 ## Exit
-Build 3 (fix of review 2): in flight.
+Build 3 (fix of review 2): F1, F2, lead 1 and three NICE rows built; stamped `2.0.0-alpha.121`; `make check` once, last.
 Build 2 (fix of review 1): built; restamped `2.0.0-alpha.120`; its check `exit 0`.
 Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`.
