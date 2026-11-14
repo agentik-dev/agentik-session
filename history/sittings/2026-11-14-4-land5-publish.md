@@ -27,16 +27,20 @@
 - [x] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists; the row's tests 77 of 77 (`.venv`)
 - [x] four NICE rows, n250 to n253 (S4); the file past its bound, the stamp moves the oldest S4 rows
 - [x] both scans exit 0 at `dd908b0` (13 commits); doclint 0 (the packet trimmed under 9,216 B); the row's tests and the key counts green under `.venv-floor` (124, 1 skipped)
-- [ ] the stamp, its files the last commit; `make check` once, last, on it
+- [x] the stamp at alpha.119 (count 4690, n172, n175, n178 to the overflow), then `make check` once: `20261114-101910-1948` exit 2, both suites green (4690; 4541, 128 skipped), red at `plugin-version-check` (gate.py, publish.py changed since 119 was set)
+- [x] restamped `2.0.0-alpha.120` (gate `20261114-104803-1952` exit 0): `plugin-version-check` 0, `readme: fresh`; its files the last commit
+- [ ] `make check` on the restamp: the coordinator's gate (the verify line runs once)
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
-- decide, owner: the coordinator (consumer: review 2). F2's ruling names a `make check` result alone; a landing job runs its own `make check` in the caller's env too, so `MAKEFLAGS=n` on `gate land` makes an ok land line that proves S. Built as ruled: a landing's proof reads no `make_env`.
+- decide, owner: the coordinator (consumer: review 2). F2's ruling names a `make check` result alone; a landing job runs its own `make check` in the caller's env too, but `land.main` pops `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS` and `MAKELEVEL`, not `MAKEFILES` (by reading). Built as ruled: a landing's proof reads no `make_env`.
+
+- decide, owner: the coordinator (consumer: the landing). The brief kept alpha.119; `plugin-version-check` reds any change under `plugin/` after the commit that set the version, so the fix round takes alpha.120, as land4's fix took 117 after 116.
 
 ## Next act
-The stamp through the gate, its files the last commit, then `make check` once; after it, review 2.
+`make check` on the restamp's commit, then review 2.
 
 ## Exit
-Build 2 (fix of review 1): F1 to F3, leads 1 and 2 and four NICE rows built; the stamp and `make check` follow.
+Build 2 (fix of review 1): F1 to F3, leads 1 and 2 and four NICE rows built; restamped `2.0.0-alpha.120`; the one `make check` red only at `plugin-version-check`, which the restamp passes.
 Build 1: R1 to R10 built and committed, stamped `2.0.0-alpha.119`; `make check` once on the stamp's commit.
