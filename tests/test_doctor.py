@@ -1016,3 +1016,43 @@ def test_fk3_l4_the_source_text_withholds_a_secret_as_the_detail_does(machine):
     line = _line(doctor.run(machine.env, machine.repo))
     assert "/cfg/sources.yaml: line 3: mapping values are not allowed" in line
     assert "not-for-print" not in line
+
+
+# ---- fk3 F7: the relay's standing when the plugin list was not read ------------------------
+
+def _list_unread(machine):
+    _exe(machine.bin / "claude", 'if [ "$1" = plugin ]; then echo boom >&2; exit 1; fi\n'
+         'echo "--model --effort --tools --permission-mode '
+         '--max-budget-usd --output-format --session-id"\n')
+    (machine.bin / "relay").unlink()
+
+
+def test_fk3_f7_an_unread_list_and_no_other_road_leaves_the_relay_unknown(machine):
+    _list_unread(machine)
+    _with(machine, drop="relay@agentik")        # the installs file holds no relay
+    rep = doctor.run(machine.env, machine.repo)
+    c = _named(rep, "relay")
+    assert (c.status, c.detail) == ("note", "relay.enabled is auto and the relay plugin was "
+                                    "not checked: no relay expected")
+    assert _named(rep, "git").detail.endswith("; push: never, the relay plugin not checked")
+    assert "relay" not in failing(rep)
+    _exe(machine.bin / "relay", "exit 0\n")     # both programs there: ok as today
+    c = _named(doctor.run(machine.env, machine.repo), "relay")
+    assert (c.status, c.detail) == ("ok", "relay and tmux on PATH")
+
+
+def test_fk3_f7_the_installs_file_answers_for_the_relay(machine):
+    _list_unread(machine)
+    rep = doctor.run(machine.env, machine.repo)
+    assert _named(rep, "git").detail.endswith("guarded by the relay plugin (its check above)")
+    assert _named(rep, "relay").detail == "relay.enabled is auto; not on PATH: relay"
+
+
+def test_fk3_f7_relay_on_still_fails_when_a_program_is_missing(machine):
+    _list_unread(machine)
+    _with(machine, drop="relay@agentik")
+    cfg = machine.repo / ".claude/agentik/config.yaml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('relay: {enabled: "on"}\n')
+    c = _named(doctor.run(machine.env, machine.repo), "relay")
+    assert (c.ok, c.detail) == (False, "relay.enabled is on; not on PATH: relay")

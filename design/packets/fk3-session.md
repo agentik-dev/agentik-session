@@ -31,6 +31,7 @@ Review 1's ruling (the coordinator, 2026-11-14), one round:
 - F3: the plugin list is searched by the id as read; the 200-character cut is the printed copy's alone. F4: no launcher unless `HOME` is absolute.
 - F5, R2 amended: distinct ids are counted, so one id at `user` and `managed` stands; where its entries differ in version, the line prints the id alone.
 - F6, R2 amended: where the file gives no entry for a sibling (no file, unreadable, only `project` or `local`), the pin's read of the plugin list for `<name>@agentik` stands, byte for byte.
+- F7 (the coordinator's word, same round): the relay plugin's standing for `relay` and `git` is present, absent or unknown. A read plugin list decides as at the pin; else the row's other roads (R1, R2); unknown when none answers. Unknown: `relay` at `auto` is a note, `relay.enabled is auto and the relay plugin was not checked: no relay expected`, unless `relay` and `tmux` are on PATH (ok as today); `on` fails as today. `git`: `; push: never, the relay plugin not checked`.
 
 ## 3. Interfaces
 

@@ -618,6 +618,20 @@ def _sibling_absent(plugins, name: str) -> bool:
     return not (p and p.get("enabled"))
 
 
+def _relay_absent(plugins, src):
+    """Review 1, F7: the relay plugin's standing for `relay` and `git`: True absent, False
+    present, None unknown. A read plugin list decides as at the pin; else the row's other
+    road (the suite's answer, the installs file): `absent` is absent, a plugin or folder
+    found is present, anything else (no entry, undecided, a line naming none) unknown."""
+    if plugins is not None:
+        return _sibling_absent(plugins, "relay")
+    if src is None:
+        return None
+    if src["kind"] == "absent":
+        return True
+    return False if src["found"] and src["kind"] in ("own", "plugin", "folder") else None
+
+
 # Build 3, L2: a layer file that cannot be opened, or nests past the parser, is a failed
 # check naming the file and why, as the config read names it; never a traceback.
 _UNREAD = (resolver.ResolveError, OSError, RecursionError)
@@ -773,19 +787,20 @@ def _check_subagent_model(env, sections, cwd=None) -> Check | None:
                  "the session with `agentik session start <profile>`", warn=True)
 
 
-def _check_git(env, sections, guarded: bool = True) -> Check:
+def _check_git(env, sections, guarded: bool | None = True) -> Check:
     exe = _which("git", env)
     if not exe:
         return Check("git", False, "`git` not on PATH")
     push = (sections.get("session") or {}).get("push", "never")
     extra = ""
     if push == "never":
-        extra = ("; push: never, guarded by the relay plugin (its check above)" if guarded
+        extra = ("; push: never, the relay plugin not checked" if guarded is None   # F7
+                 else "; push: never, guarded by the relay plugin (its check above)" if guarded
                  else "; push: never, unguarded without the relay plugin")
     return Check("git", True, exe + extra)
 
 
-def _check_relay(env, sections, sibling_absent: bool = False) -> Check | None:
+def _check_relay(env, sections, sibling_absent: bool | None = False) -> Check | None:
     enabled = (sections.get("relay") or {}).get("enabled", "auto")
     if enabled not in ("auto", "on", True):
         return None
@@ -793,6 +808,9 @@ def _check_relay(env, sections, sibling_absent: bool = False) -> Check | None:
         return Check("relay", True, "relay.enabled is auto and the relay plugin not "
                      "installed: no relay expected", note=True)
     missing = [b for b in ("relay", "tmux") if not _which(b, env)]
+    if missing and enabled == "auto" and sibling_absent is None:     # review 1, F7
+        return Check("relay", True, "relay.enabled is auto and the relay plugin was not "
+                     "checked: no relay expected", note=True)
     if missing:
         return Check("relay", False, "relay.enabled is "
                      f"{enabled}; not on PATH: " + ", ".join(missing))
@@ -873,12 +891,13 @@ def run(env=None, cwd=None) -> Report:
     plugins, err = _plugin_list(env)
     add(_check_plugin(plugins, err))
     rows = _suite_sources(env, cwd) or {}       # fk3 R1: once a run
-    installed = None
+    installed, srcs = None, {}
     for dep in SIBLINGS:
         src = _answered(rows.get(dep["name"]), dep["name"])
         if src is None:                         # fk3 R2: no answer for this sibling
             installed = _installed(env) if installed is None else installed
             src = _recorded(installed, dep["name"])    # None: no entry, the pin's read
+        srcs[dep["name"]] = src
         add(_check_dependency(dep, plugins, err, src))
     add(_check_profiles(env, cwd))
     add(_check_resolved(env))
@@ -886,8 +905,8 @@ def run(env=None, cwd=None) -> Report:
     add(_check_meter_hook(plugins, err))
     cfg, sections = _check_config(env, cwd)
     add(cfg)
-    no_relay = _sibling_absent(plugins, "relay")
-    add(_check_git(env, sections, guarded=not no_relay))
+    no_relay = _relay_absent(plugins, srcs.get("relay"))    # review 1, F7: None unknown
+    add(_check_git(env, sections, guarded=None if no_relay is None else not no_relay))
     relay = _check_relay(env, sections, sibling_absent=no_relay)
     if relay:
         add(relay)
