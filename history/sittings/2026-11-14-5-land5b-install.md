@@ -18,7 +18,7 @@
 - [x] build 2: F4, F6, F7: 67 of 67; the land files 381 passed (.venv), 257 passed 124 skipped (.venv-floor)
 - [x] build 2: NICE n257 to n261 at S4 (the stamp moves S4 rows past the bound)
 - [x] build 2: the stamp again (job `20261114-150053-1987`), `2.0.0-alpha.122`, 4768 tests, n193 to n197 to the overflow; the last commit under `plugin/`
-- [ ] build 2: `make check` once, last, through the gate queue
+- [x] build 2: `make check` once, last, through the gate queue: `20261114-150136-1988` exit 0 on `182649f` (4768 passed; floor 4619 passed, 128 skipped)
 
 ## Handover
 - Choices inside the rulings: the packet's §3 and §7.
@@ -26,7 +26,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-`make check` once through the gate queue on this head; then the row's record.
+None: review 2 by a new adversary.
 
 ## Exit
-Open.
+Build 2 done: F1, F2, F3, F4, F6, F7 built, the check green on `182649f`; this commit holds this file alone.
