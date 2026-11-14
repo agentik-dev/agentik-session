@@ -3,7 +3,7 @@
 | item | value |
 |---|---|
 | goal | `gate publish ... --install` and `gate land ... --install`: after the publish turn, install the repo's plugin (marketplace update, plugin update) and its `make install`, only where main is pushed, held while a relay run, an unattended run or a gate job of the repo is live (R1 to R9) |
-| budget | about 90 tool calls, `claude-opus-5-5`; checkpoint at 80% |
+| budget | about 90 tool calls (the second builder's, the first cut after its first commit), `claude-opus-5-5`; checkpoint at 80% |
 | pin | main at `45b975d` (land5-publish's merge, alpha.121) |
 | branch | `land5b-install`, worktree `.claude/worktrees/land5b-install`, the two venvs linked |
 | level | S3: `design/packets/land5b-install.md` |
@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet and this charter
-- [ ] the tests (`tests/test_land5b_install.py`), red at the pin
+- [x] the tests (`tests/test_land5b_install.py`), red at the pin: 50 failed of 50
 - [ ] R1 to R8: `deliver.py`, `publish.main`/`after_land`'s `install`, the parsers and `_gate_land`
 - [ ] R9: SKILL.md's line; the stamp `2.0.0-alpha.122`, its files the last commit
 - [ ] both scans exit 0; `make check` once, last
@@ -21,7 +21,7 @@
 - Choices inside the rulings: the packet's §3.
 
 ## Next act
-The tests, then the change.
+R1 to R8: `deliver.py`, then `publish.main`/`after_land` and `_gate_land`.
 
 ## Exit
 (open)
