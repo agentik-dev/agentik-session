@@ -24,6 +24,12 @@ did not start and end itself (127's end, 125, 126, a caller's 130 before a start
 keys with those sides null, and `beside` null when it was not read. A result older than the
 keys holds none, and every reader takes an absent key as null. No read holds a start or
 moves a job's `seconds`; `_over` reads the one-minute load apart.
+
+A result's last key, `make_env` (packet land5-publish, review 1 F2), names those of
+`MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS` and `MAKEFILES` that are set in the job's environment,
+sorted, `[]` when none, null where the entry's env is no mapping: a `make check` run under one
+of them may run nothing, and `gate publish` proves a check only where the list is there and
+empty. The gate scrubs nothing; a job's environment stays its caller's.
 """
 
 from __future__ import annotations
@@ -62,7 +68,8 @@ MORE = "{n} more: agentik session gate status"
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
-               "caller", "cut", "head", "key", "load", "beside", "dirty")
+               "caller", "cut", "head", "key", "load", "beside", "dirty", "make_env")
+MAKE_ENV = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES")    # land5 review 1, F2
 SIDES = ("start", "end")    # the two sides of `load` and `dirty` (packet gl1, R1)
 INBOX_KEYS = ("at", "kind", "id", "repo", "exit", "seconds", "log")
 RUNNER_KEYS = ("pid", "since", "running")
@@ -738,6 +745,11 @@ def _machine(e: dict) -> dict:
             "dirty": {k: _count(dirty.get(k)) for k in SIDES}}
 
 
+def make_env(env) -> list | None:
+    """The names of MAKE_ENV set in `env`, sorted; None where `env` is no mapping."""
+    return sorted(k for k in MAKE_ENV if k in env) if isinstance(env, dict) else None
+
+
 def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
             note: str | None = None) -> dict:
     """Write result.json last, atomically; drop the entry; tell the inbox and ntfy."""
@@ -752,7 +764,7 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
               "started": started, "ended": ended, "seconds": seconds,
               "log": str(d / "log"), "caller": e.get("caller"), "cut": cut,
               "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key")),
-              **_machine(e)}
+              **_machine(e), "make_env": make_env(e.get("env"))}
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
     _unlink(_queue(root) / f"{gid}.json")
     _unlink(cancel_path(root, gid))

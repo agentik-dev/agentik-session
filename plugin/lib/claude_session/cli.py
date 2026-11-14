@@ -1444,10 +1444,11 @@ def cmd_run(args) -> int:
 
 
 def cmd_gate(args) -> int:
-    """`agentik session gate run|wait|status|land` (design/gate-r1.md): the per-Mac gate queue.
+    """`agentik session gate run|wait|status|land|publish` (design/gate-r1.md): the per-Mac gate queue.
     `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
     guide's rule: exit codes report the task, not the content), the job's code with
     --strict (packet FW2), 1 past --timeout; `land` exits the landing's code (packet FW4c);
+    `publish` pushes main's proven head in this process (packet land5-publish, publish.py);
     `serve` is the runner, internal."""
     from pathlib import Path
     from . import gate
@@ -1467,6 +1468,9 @@ def cmd_gate(args) -> int:
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
+    if verb == "publish":
+        from . import publish
+        return publish.main(list(args.repos), root, env, dry=args.dry_run)
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
@@ -1575,12 +1579,28 @@ def _gate_land(root, args, env) -> int:
     last line (fold r1, F1); an ok line is exit 0, since the steps write it last, so a code
     after it is the gate's (125, the runner died), not the job's. A job's log with no land
     line of this repo reads `red gate`, never ok. `--in-job` is that job: it runs the steps
-    here, and only inside a gate job."""
-    from . import gate, land
+    here, and only inside a gate job. `--push` (packet land5-publish R9) refuses a caller that
+    may not push before it queues, then runs publish.py's turn for the repo after an ok land
+    line, its line after the land line; never with `--in-job`."""
+    from . import gate, land, publish
     mark = env.get(gate.JOB_MARK) or ""
+    if args.push:
+        if args.in_job:
+            print("land-step: --push runs in the caller's own process, never in the job; "
+                  + land.USAGE, file=sys.stderr)
+            print("land ?: red usage exit 2", flush=True)
+            return 2
+        why = publish.refusal(env)
+        if why:
+            print("land-step: " + why, file=sys.stderr)
+            print("land ?: red caller exit 1", flush=True)
+            return 1
     if args.dry_run:
         # land4 R11: the reads alone, here, in a job or not; nothing queued, nothing written.
-        return land.main(list(args.args), None, dry=True)
+        code = land.main(list(args.args), None, dry=True)
+        if not args.push or code != 0:
+            return code
+        return publish.after_land(args.args[0], root, dry=True)
     if args.in_job:
         if not mark:
             _die("gate land --in-job runs only inside a gate job, which sets "
@@ -1635,6 +1655,8 @@ def _gate_land(root, args, env) -> int:
         if not line.startswith(f"land {name}: red "):
             line = f"land {name}: red gate exit {code}"
     print(line, flush=True)
+    if args.push and code == 0:
+        return publish.after_land(repo, root)
     return code
 
 
@@ -1702,6 +1724,23 @@ class _Parser(argparse.ArgumentParser):
         finally:
             self._mixing = False
         return namespace, [a.lstrip("\0") for a in extras]
+
+
+class _PublishParser(_Parser):
+    """`gate publish`'s parser (packet land5-publish R1): an unknown flag or a bad value is
+    `publish ?: red usage exit 2`, never argparse's own line alone."""
+
+    def error(self, message):
+        print("publish-step: " + message.replace("\0", ""), file=sys.stderr)
+        print("publish ?: red usage exit 2", flush=True)
+        raise SystemExit(2)
+
+    def parse_known_args(self, args=None, namespace=None):
+        outer = not self._mixing
+        namespace, extras = super().parse_known_args(args, namespace)
+        if outer and extras:
+            self.error("unrecognized arguments: " + " ".join(extras))
+        return namespace, extras
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1885,8 +1924,10 @@ def build_parser() -> argparse.ArgumentParser:
     rn.set_defaults(func=cmd_run)
 
     gt = sub.add_parser("gate", help="the gate queue: one running per repo under a load "
-                                      "ceiling, its result to the caller")
-    gsub = gt.add_subparsers(dest="gate_verb", required=True, metavar="run|wait|status|land")
+                                      "ceiling, its result to the caller; publish, and land "
+                                      "--push, push main's head a gate result proves green")
+    gsub = gt.add_subparsers(dest="gate_verb", required=True,
+                             metavar="run|wait|status|land|publish")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")
     gr.add_argument("--session", metavar="SID",
@@ -1920,7 +1961,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="queue nothing and write nothing: make the reads up to the merge of "
                          "main, print what the ready step would do, and exit 0 (a read that "
                          "reds prints its land line and exits its code)")
+    gl.add_argument("--push", action="store_true",
+                    help="then, after an ok land line, publish's steps for the repo in this "
+                         "process: refused before it queues where the caller may not push")
     gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
+    gp = gsub.add_parser("publish", help="prove main's head checked green by a gate result, run "
+                                          "the repo's hygiene on it and its range, and push that "
+                                          "sha to main's upstream; a main sitting alone")
+    gp.__class__ = _PublishParser    # R1: its own errors are the usage line
+    gp.add_argument("repos", nargs="*", metavar="repo",
+                    help="a bare name is that checkout in ~/code, else the one a folder below")
+    gp.add_argument("--dry-run", action="store_true",
+                    help="every step but the push, which it says it would make; no ref written")
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
