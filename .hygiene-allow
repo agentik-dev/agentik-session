@@ -133,3 +133,5 @@ tests/test_ss4_quiet_values.py: sibling
 tests/test_ss3_true_lines.py: sibling
 # g8a: the packet names the ledger file a sibling plugin reads, one line since its first commit (e28379e).
 design/packets/g8a-reader-parts.md: sibling
+# land4: the packet names the ledger file a sibling plugin reads, one line in 3f1a1c6 and c5ab5a9 (631b284 drops it).
+design/packets/land4-ready.md: sibling
