@@ -25,11 +25,13 @@
 - [x] F1 and F3: the landing's command whole, its sha, the prefix resolved (32 of the slice green)
 - [x] F2: `make_env` in the gate's result, a check proves only with it there and empty; `test_fw2.py` and `test_gl1_record.py` count 16 keys
 - [x] leads 1 and 2: `--no-follow-tags`, the remote a name `git remote` lists; the row's tests 77 of 77 (`.venv`)
-- [ ] four NICE rows; the stamp; both scans; `make check` once, last
+- [x] four NICE rows, n250 to n253 (S4); the file past its bound, the stamp moves the oldest S4 rows
+- [ ] the stamp; both scans; `make check` once, last
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - `land.py` keeps no `git push` (`test_e_no_push_in_the_script`): the push is `publish.py`'s.
+- decide, owner: the coordinator (consumer: review 2). F2's ruling names a `make check` result alone; a landing job runs its own `make check` in the caller's env too, so `MAKEFLAGS=n` on `gate land` makes an ok land line that proves S. Built as ruled: a landing's proof reads no `make_env`.
 
 ## Next act
 The fix of review 1: the tests, then F1 to F3 and the two leads, as ticked above.
