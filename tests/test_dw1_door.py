@@ -84,11 +84,12 @@ def home(tmp_path):
 def test_dw1_install_cli_leaves_a_newer_door_byte_for_byte(tmp_path, home):
     plugin = _plugin(tmp_path)
     door = _bins(home) / "agentik"
-    newer = _versioned(DOOR.read_text(), "0.2.0")
+    # ak10-sync: the vendored door is 0.3.0 now, so the newer door is 0.4.0 (was 0.2.0)
+    newer = _versioned(DOOR.read_text(), "0.4.0")
     _put(door, newer)
     r = _verb(plugin, home)
     assert r.returncode == 0, r.stderr
-    assert door.read_text() == newer and "VERSION=0.2.0\n" in door.read_text()
+    assert door.read_text() == newer and "VERSION=0.4.0\n" in door.read_text()
     assert not [line for line in _said(r) if "door" in line], r.stdout
     # the rest of the install as before
     from claude_session import install
@@ -194,7 +195,7 @@ def test_dw1_refresh_moves_the_launcher_and_leaves_a_newer_door(tmp_path, home):
     tool.write_text(tool.read_text().replace("VERSION=2.0.0-alpha.40\n", "VERSION=2.0.0-alpha.39\n"))
     assert "VERSION=2.0.0-alpha.39\n" in tool.read_text()
     door = _bins(home) / "agentik"
-    newer = _versioned(DOOR.read_text(), "0.2.0")
+    newer = _versioned(DOOR.read_text(), "0.4.0")
     _put(door, newer)
     code = ("import os, sys; sys.path.insert(0, %r); from claude_session import install; "
             "print(repr(install.refresh(dict(os.environ))))" % str(plugin / "lib"))
@@ -218,7 +219,7 @@ def _case(where, name):
     elif name == "equal, other bytes":
         _put(there, text + "# a hand's line\n", 0o700)
     elif name == "newer":
-        _put(there, _versioned(text, "0.2.0"), 0o700)
+        _put(there, _versioned(text, "0.4.0"), 0o700)
     elif name == "no line there":
         _put(there, _versioned(text, None), 0o700)
     elif name == "a link":
