@@ -321,7 +321,8 @@ def test_7_run_with_no_prompt_is_refused(monkeypatch):
     monkeypatch.setattr(chain, "on_tty", lambda: True)
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    rc, _, err = run("run", "--", "--model", "opus")
+    # packet akt-run R1: a prompt is added, unless an option would read it as its value
+    rc, _, err = run("run", "--", "--model", "opus", "--add-dir", "/x")
     assert rc == 2 and "run -- \"<first prompt>\"" in err
 
 

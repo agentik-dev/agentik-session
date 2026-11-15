@@ -81,11 +81,13 @@ OLD_RELAY = "agent-relay"
 SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools",
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
                 "builders", "push", "device", "charter", "verify", "respawn", "priority",
-                "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes")
+                "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes", "run")
 # `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
 RESPAWN_KEYS = ("cap", "floor", "settle")
+# Packet akt-run R1: what a bare `run` (and `akt`) sends: its first prompt and its `--model`.
+RUN_KEYS = ("prompt", "model")
 POSTURES = ("off", "signal", "ask", "deny")
 SHIPPED = Path(__file__).with_name("profiles.yaml")
 REPO_DIR = Path(".claude") / "agentik"
@@ -567,6 +569,13 @@ def _validate(s: dict) -> None:
                                f"({', '.join(RESPAWN_KEYS)})")
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise ResolveError(f"respawn.{k} must be a non-negative integer")
+    rn = s.get("run")                     # packet akt-run R1
+    if not isinstance(rn, dict) or any(k not in RUN_KEYS for k in rn):
+        raise ResolveError("run must be a mapping of " + ", ".join(RUN_KEYS))
+    if not isinstance(rn.get("prompt"), str) or not rn["prompt"].strip():
+        raise ResolveError("run.prompt must be a first prompt (a word or more)")
+    if rn.get("model") is not None and (not isinstance(rn["model"], str) or not rn["model"].strip()):
+        raise ResolveError("run.model must be a model name, or null to add none")
     try:
         rules.check(s)                    # priority and pacing (S21)
     except ValueError as e:

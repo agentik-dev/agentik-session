@@ -131,7 +131,7 @@ def test_config_empty_home(box):
         assert len(s["summary"]) < 100 and not s["summary"].startswith("This setting")
     eff = next(s for s in d["settings"] if s["key"] == "effort")
     assert eff["value"] == "high"
-    assert eff["source"] == {"layer": "profile", "path": SHIPPED, "line": 85}
+    assert eff["source"] == {"layer": "profile", "path": SHIPPED, "line": 90}
     assert [v["layer"] for v in eff["values"]] == ["default", "profile"]
     assert {"tiers.build.model", "gate.wall", "ceilings.context", "posture"} <= set(keys)
     assert not {"description", "subagents", "window", "models"} & set(keys)
@@ -150,7 +150,7 @@ def test_config_repo_effort(box):
     assert s["live"] is False
     f.unlink()
     s = one(box, "effort")
-    assert s["source"] == {"layer": "profile", "path": SHIPPED, "line": 85}
+    assert s["source"] == {"layer": "profile", "path": SHIPPED, "line": 90}
     assert s["change"]["path"] == str(home / ".claude" / "agentik" / "profiles.yaml")
 
 

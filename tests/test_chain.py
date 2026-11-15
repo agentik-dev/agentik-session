@@ -275,7 +275,7 @@ def test_s20a_refusals(case, fake, monkeypatch):
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
         rc, _, err = _cli("run", "--chain", name, "--", "--model", "m", *extra,
-                          *(["go"] if case == "lock-held" else []))   # mt1 R7: a prompt
+                          "go")     # mt1 R7: a prompt; akt-run R2: so no default is checked
     finally:
         if held:
             held.close()
@@ -613,16 +613,20 @@ def _fast_cli_chain(monkeypatch):
 
 
 def test_s31_no_prompt_is_refused(fake, monkeypatch):
-    # packet mt1 R7: S31's warning is now a refusal; each restart would open an empty prompt
+    # packet mt1 R7: S31's warning is a refusal. Packet akt-run R1, R2: with no prompt
+    # `run.prompt` is added, and outside a repo set up for agentik that is refused.
     monkeypatch.setattr(C(), "on_tty", lambda: True)
     rc, _, err = _cli("run", "--chain", "c1", "--floor", "0", "--settle", "0", "--",
                       "--model", "m")
     assert rc == 2 and fake.starts() == [], err
+    assert "no agentik setup found here" in err and len(err.splitlines()) == 1
+    rc, _, err = _cli("run", "--chain", "c1", "--", "--model", "m", "--add-dir", "/x")
+    assert rc == 2 and fake.starts() == [], err      # an added prompt would be a value
     assert 'agentik session run -- "<first prompt>"' in err and len(err.splitlines()) == 1
 
 
 @pytest.mark.parametrize("args,sent", [
-    (["go on"], ["--model", "opus", "--effort", "high", "go on"]),   # mt1 R7: the profile's
+    (["go on"], ["--model", "claude-fable-5-2", "go on"]),   # akt-run R1: run.model
     (["--model", "opus", "go on"], ["--model", "opus", "go on"]),     # the line's wins
     (["--model", "opus"], None),                       # opus is --model's value, not a prompt
 ])
@@ -777,7 +781,7 @@ def test_s20a_ids_and_names_match_whole(fake, monkeypatch):
     assert not hooks.CHAIN_RE.match("..") and not hooks.CHAIN_RE.match(".")
     assert hooks.CHAIN_RE.match("a.b") and hooks._SID.match("toolu_x")
     monkeypatch.setattr(C(), "on_tty", lambda: True)
-    rc, _, err = _cli("run", "--chain", "..", "--", "--model", "m")
+    rc, _, err = _cli("run", "--chain", "..", "--", "--model", "m", "go")
     assert rc == 2 and "chain name" in err and fake.starts() == []
 
 

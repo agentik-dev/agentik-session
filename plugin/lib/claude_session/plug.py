@@ -78,6 +78,8 @@ SUMMARIES = {
     "respawn.cap": "The restarts in 24 hours after which `run` stops respawning the sitting.",
     "respawn.floor": "The seconds a sitting must have run before `run` respawns it.",
     "respawn.settle": "The seconds `run` waits after a turn ends before it respawns the sitting.",
+    "run.prompt": "The first prompt a bare `run` or `akt` sends, and adds after arguments that carry none.",
+    "run.model": "The --model a `run` or `akt` adds where its arguments name none; null adds none.",
     "priority.enabled": "Whether the session is given the priority levels S1 to S4.",
     "priority.levels.*": "The words the session is given for this priority level.",
     "pacing.enabled": "Whether the session is given the pacing rules.",
