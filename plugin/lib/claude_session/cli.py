@@ -66,6 +66,12 @@ def cmd_hook(args) -> int:
 
 # --- session configurations -------------------------------------------------
 
+def _nonempty_path(v: str) -> str:
+    if not v:
+        raise argparse.ArgumentTypeError("a path is wanted, not an empty word")
+    return v
+
+
 def _positive_int(v: str) -> int:
     if not v.strip().isdigit() or int(v) <= 0:
         raise argparse.ArgumentTypeError(f"{v!r} is not a positive integer")
@@ -1449,7 +1455,8 @@ def cmd_gate(args) -> int:
     guide's rule: exit codes report the task, not the content), the job's code with
     --strict (packet FW2), 1 past --timeout; `land` exits the landing's code (packet FW4c);
     `publish` pushes main's proven head in this process (packet land5-publish, publish.py);
-    `serve` is the runner, internal."""
+    `status --repo PATH` lists that folder's jobs and every result kept for it, each with its
+    head, a read that exits 0 (packet rw3-gate-repo); `serve` is the runner, internal."""
     from pathlib import Path
     from . import gate
     env = os.environ
@@ -1473,7 +1480,7 @@ def cmd_gate(args) -> int:
         return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
     if verb == "status":
         gate.spawn_serve(root)
-        st = gate.status(root, time.time())
+        st = gate.status(root, time.time(), repo=getattr(args, "repo", None))
         est = gate.entry_estimates(root)
         print(json.dumps(plug.envelope("gate", {**st, "est": est}), indent=2) if args.json
               else "\n".join(gate.status_lines(st, est)))
@@ -1996,6 +2003,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "plugin.json names and its make install; held while a run is live")
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
+    gs.add_argument("--repo", type=_nonempty_path, metavar="PATH",
+                    help="list this folder's jobs and every result kept for it, newest first")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)

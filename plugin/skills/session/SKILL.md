@@ -258,7 +258,7 @@ agentik-session gate wait <id> --timeout <s>   # its result line; run it in a ba
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
 agentik-session gate land <repo> <branch> <sha> <merge-file>   # one landing, one gate job; stdout its land line, exit the job's; a branch behind main is readied (main merged where every conflict is a derived line, then `make stamp`) where the Makefile has `stamp`, else red; red on a nested worktree, a merge file not `Merge <branch>: <text>` or failing hygiene; `--dry-run` reads only
 agentik-session gate publish <repo>... [--install] [--dry-run]   # a main sitting alone: main's head proven green by a gate result (its landing, or a clean `make check`), then `scripts/hygiene` and the range, then `git push <remote> <sha>:refs/heads/main`; `gate land --push` does it after an ok land line; `--install` then installs the plugin and `make install`, held while a run is live
-agentik-session gate status     # what runs, what waits (each with its est), the last five done
+agentik-session gate status [--repo <path>]     # what runs, what waits (each with its est), the last five done; `--repo <path>`: a folder's own results, past the last five, each with the head it checked
 agentik-session commit <paths...> --check <cmd> --message-file <f>   # add by path, check, commit on green; a make check through the gate
 ```
 
