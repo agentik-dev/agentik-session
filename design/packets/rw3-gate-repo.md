@@ -27,15 +27,18 @@
 - R9, the words: the parser's help, `cmd_gate`'s docstring, SKILL.md's `gate status` line. No README line.
 - R10, five rows for NICE at S4, what land5b-install's review 2 left; no code here.
 
+## 3. Interfaces, choices and acceptance
+
+- `gate.status(root, now, alive, fx, repo=None)`: with `repo`, the dict opens with `repo` and its lists hold the folder's alone. `gate.repo_path(path)` (R2), `gate.land_branch(command)` (R3), `gate._branch(repo)` beside `_head`; `REPO_SHOWN`, `MORE_REPO`, `LAND_JOB`. `cli`'s `gate status --repo` takes a non-empty word (`_nonempty_path`).
+
 Choices inside the rulings:
 - R2: both sides go through `os.path.realpath` of the absolute path; for a path that does not exist that is its absolute, normal form with any existing symlinked parent resolved, so a removed worktree under a symlinked temp folder still matches the real path the gate recorded.
 - R3: the landing's branch is the second of the four words after the first `gate land --in-job` triple; fewer than four, no landing. The branch is read once per call, and only when a result is a landing.
 - R4: "still keeps" is `_prune`'s rule: a result whose `ended` is more than `KEEP` before now is passed over, though not yet pruned.
 - R5: the `<m.m>` is `est_text`'s one decimal; a result whose `seconds` is not a number reads `?`. A path's text in `none for` and the `more` line is PATH as resolved.
 
-## 3. Acceptance
 
-All in `tests/test_rw3_gate_repo.py`, on the per-test temp state root holding result files the test writes (a made-up repo `crate`, its worktree `crate/.claude/worktrees/p1-crate`, a second repo `basket`).
+Acceptance: all in `tests/test_rw3_gate_repo.py`, on the per-test temp state root holding result files the test writes (a made-up repo `crate`, its worktree `crate/.claude/worktrees/p1-crate`, a second repo `basket`).
 
 | # | line | at `5aaf29f` |
 |---|---|---|
