@@ -571,11 +571,12 @@ def _validate(s: dict) -> None:
             raise ResolveError(f"respawn.{k} must be a non-negative integer")
     rn = s.get("run")                     # packet akt-run R1
     if not isinstance(rn, dict) or any(k not in RUN_KEYS for k in rn):
-        raise ResolveError("run must be a mapping of " + ", ".join(RUN_KEYS))
+        raise ResolveError("run must be a mapping of " + ", ".join(RUN_KEYS)
+                           + "; fix it in your settings")
     if not isinstance(rn.get("prompt"), str) or not rn["prompt"].strip():
-        raise ResolveError("run.prompt must be a first prompt (a word or more)")
+        raise ResolveError("run.prompt is empty; set it to a first prompt of one word or more")
     if rn.get("model") is not None and (not isinstance(rn["model"], str) or not rn["model"].strip()):
-        raise ResolveError("run.model must be a model name, or null to add none")
+        raise ResolveError("run.model is not a model name; set a model name, or null to add none")
     try:
         rules.check(s)                    # priority and pacing (S21)
     except ValueError as e:

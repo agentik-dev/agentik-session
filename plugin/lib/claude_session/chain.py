@@ -84,34 +84,34 @@ def refusal(args, env, where=True) -> str | None:
     checked by the caller and by `Chain.run`. `where` off (packet akt-run R3, the dry run)
     skips what is checked of where it runs: a chain, Claude Code, a depth, `claude` on PATH."""
     if where and env.get(hooks.CHAIN_VAR):
-        return (f"refusing to start inside a chain ({hooks.CHAIN_VAR} is set); "
-                "a chain never starts another")
+        return (f"already inside a chain ({hooks.CHAIN_VAR} is set); "
+                "run akt from a plain terminal")
     if where and env.get("CLAUDECODE"):
-        return ("refusing to start inside a Claude Code session (CLAUDECODE is set); "
-                "run it at a terminal")
+        return ("inside a Claude Code session (CLAUDECODE is set); "
+                "run akt at a terminal")
     d = launch.depth(env) if where else 0
     if d is None or d >= 1:
-        return (f"refusing to start inside a started session or a relay child "
-                f"({launch.DEPTH_VAR}={str(env.get(launch.DEPTH_VAR))[:20]!r})")
+        return (f"inside a started session or relay child "
+                f"({launch.DEPTH_VAR}={str(env.get(launch.DEPTH_VAR))[:20]!r}); "
+                "run akt from a plain terminal")
     prev = None
     for a in args:
         a = str(a)
         if _COMPACT.search(a):
-            return "refusing /compact: every start is a fresh context"
+            return "/compact is refused; every start is a fresh context"
         if not a.startswith("-"):
             prev = None
             continue
         flag = a.split("=", 1)[0]
         if flag not in ALLOWED:
             if prev is not None:
-                return (f"refusing {a[:80]!r} after {prev}: a value that begins with '-' "
-                        f"reads as a flag; write it as {prev}={a[:80]}")
+                return f"{a[:80]!r} after {prev} reads as a flag; write {prev}={a[:80]}"
             why = ("it resumes, forks, detaches or prints" if flag in FORBIDDEN
                    else "it is not on the launcher's allowlist")
-            return f"refusing the flag {flag[:80]}: {why}"
+            return f"the flag {flag[:80]} is refused; {why}"
         prev = flag if "=" not in a and flag not in _BARE else None
     if where and shutil.which("claude", path=env.get("PATH")) is None:
-        return "no `claude` on PATH; install Claude Code, or put it on PATH"
+        return "no `claude` on PATH; install Claude Code or add it to PATH"
     return None
 
 

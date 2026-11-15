@@ -246,7 +246,7 @@ def respawn_seq(path, at=10, text=RESPAWN_TEXT, helper=False, write_charter=True
 # ---- §3.1: refusals before the first start (criterion 1) -----------------------------
 
 REFUSALS = {
-    "not-a-tty": ("c1", [], {}, "TTY"),
+    "not-a-tty": ("c1", [], {}, "not a terminal"),
     "inside-a-chain": ("c1", [], {"CLAUDE_SESSION_CHAIN": "other"}, "CLAUDE_SESSION_CHAIN"),
     "inside-claude-code": ("c1", [], {"CLAUDECODE": "1"}, "CLAUDECODE"),
     "depth-1": ("c1", [], {"CLAUDE_SESSION_DEPTH": "1"}, "CLAUDE_SESSION_DEPTH"),
@@ -619,10 +619,10 @@ def test_s31_no_prompt_is_refused(fake, monkeypatch):
     rc, _, err = _cli("run", "--chain", "c1", "--floor", "0", "--settle", "0", "--",
                       "--model", "m")
     assert rc == 2 and fake.starts() == [], err
-    assert "no agentik setup found here" in err and len(err.splitlines()) == 1
+    assert "no agentik setup here" in err and len(err.splitlines()) == 1
     rc, _, err = _cli("run", "--chain", "c1", "--", "--model", "m", "--add-dir", "/x")
     assert rc == 2 and fake.starts() == [], err      # an added prompt would be a value
-    assert 'agentik session run -- "<first prompt>"' in err and len(err.splitlines()) == 1
+    assert 'akt "<first prompt>"' in err and len(err.splitlines()) == 1
 
 
 @pytest.mark.parametrize("args,sent", [

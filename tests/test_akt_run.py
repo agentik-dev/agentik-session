@@ -1,5 +1,5 @@
 """Packet akt-run: `run`'s default prompt and model (R1), the no-setup line (R2, R2a), `run
---dry-run` and the `akt` link (R3). No test starts `claude` or a chain: `--dry-run`, a stub
+--dry-run` and the `akt` link (R3), and the respoken lines `akt` prints (R4a). No test starts `claude` or a chain: `--dry-run`, a stub
 `claude` and the launcher's TTY refusal alone. Every test runs under its own temp home, state
 root and repo (the made-up repo `crate`); none reads the live state or home.
 """
@@ -17,8 +17,12 @@ from test_install import BARE, OLD, _bins, _plugin, _session_start, _verb
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT = "Read the newest charter under history/sittings and act from its Next act."
 MODEL = "claude-fable-5-2"
-NO_SETUP = "no agentik setup found here"
+NO_SETUP = "no agentik setup here"
 MAKE_ONE = 'agentik session charter open "<goal>"'
+# R4a: the respoken lines, whole, as `_die` prints them.
+SAID_NO_SETUP = ('error: akt: no agentik setup here (no history/sittings/ in a git repo); '
+                 'make one with: agentik session charter open "<goal>"')
+SAID_TTY = "error: akt: stdin or stdout is not a terminal; run akt at a terminal"
 
 
 def _git_init(path):
@@ -87,7 +91,9 @@ def test_akt_2_a_given_model_or_prompt_wins(box):
 def test_akt_2_a_list_option_that_would_swallow_the_prompt_is_still_refused(box):
     rc, out, err = _run(box, box["crate"], "run", "--dry-run", "--", "--allowedTools", "Bash")
     assert rc == 2 and out == "", (out, err)
-    assert len(err.splitlines()) == 1 and "first prompt" in err
+    assert err.strip() == ("error: akt: no first prompt, since --allowedTools takes every "
+                           "argument after it as its value; write --allowedTools=<value>, or "
+                           'give one: akt "<first prompt>"'), err
 
 
 # ---- R2, R2a: the no-setup line -----------------------------------------------------------
@@ -98,7 +104,7 @@ def test_akt_3_no_setup_refuses_the_default_prompt(box, where, dry):
     rc, out, err = _run(box, box[where], "run", *dry)
     assert rc == 2 and out == "", (out, err)
     assert len(err.splitlines()) == 1, err
-    assert NO_SETUP in err and MAKE_ONE in err and "run.prompt" in err
+    assert err.strip() == SAID_NO_SETUP and MAKE_ONE in err
     assert "init" not in err
 
 
@@ -111,7 +117,7 @@ def test_akt_3_a_given_prompt_is_not_checked(box, where):
 
 def test_akt_3_bare_run_in_a_setup_repo_reaches_the_tty_refusal(box):
     rc, _, err = _run(box, box["crate"], "run")
-    assert rc == 2 and "TTY" in err and NO_SETUP not in err
+    assert rc == 2 and err.strip() == SAID_TTY and NO_SETUP not in err
 
 
 # ---- R1: the settings ---------------------------------------------------------------------
@@ -147,15 +153,20 @@ def test_akt_4_a_null_model_adds_none_and_the_profile_applies(box):
     assert _argv(out)[3:] == ["--model", "opus", "--effort", "high", "do X"]
 
 
-@pytest.mark.parametrize("text", ['session:\n  run: {prompt: ""}\n',
-                                  "session:\n  run: {colour: red}\n",
-                                  "session:\n  run: {model: 3}\n"])
-def test_akt_4_a_bad_run_block_is_refused(box, text):
+@pytest.mark.parametrize("text,said", [
+    ('session:\n  run: {prompt: ""}\n',
+     "run.prompt is empty; set it to a first prompt of one word or more"),
+    ("session:\n  run: {colour: red}\n",
+     "run must be a mapping of prompt, model; fix it in your settings"),
+    ("session:\n  run: {model: 3}\n",
+     "run.model is not a model name; set a model name, or null to add none")])
+def test_akt_4_a_bad_run_block_is_refused(box, text, said):
     d = box["crate"] / ".claude" / "agentik"
     d.mkdir(parents=True)
     (d / "config.yaml").write_text(text)
     rc, out, err = _run(box, box["crate"], "run", "--dry-run")
-    assert rc == 2 and out == "" and "run" in err, (out, err)
+    assert rc == 2 and out == "" and err.strip().startswith("error: akt: "), (out, err)
+    assert err.strip().endswith(said), err
 
 
 # ---- R3: the `akt` link -------------------------------------------------------------------
@@ -178,10 +189,10 @@ def test_akt_5_install_cli_writes_the_link_and_akt_dry_run_prints_r1s_command(bo
     # Every other word goes to claude, and the plain form reaches `run` (its TTY refusal).
     d = subprocess.run([str(akt), "--model", "opus"], cwd=box["crate"], env=_akt_env(box),
                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-    assert d.returncode == 2 and "agentik-session run:" in d.stderr and "TTY" in d.stderr
+    assert d.returncode == 2 and d.stderr.strip() == SAID_TTY, d.stderr
     d = subprocess.run([str(akt)], cwd=box["loose"], env=_akt_env(box),
                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-    assert d.returncode == 2 and NO_SETUP in d.stderr
+    assert d.returncode == 2 and d.stderr.strip() == SAID_NO_SETUP, d.stderr
 
 
 def test_akt_5_a_second_install_changes_nothing(box):
@@ -212,7 +223,8 @@ def test_akt_5_what_a_hand_put_at_akt_is_kept(box, how):
     else:
         assert os.readlink(akt) == "/usr/bin/true"
     said = [l for l in r.stdout.splitlines() if str(akt) in l]
-    assert len(said) == 1 and "kept" in said[0], r.stdout
+    assert said == [f"{akt} is not install-cli's link to agentik-session; left as is, so `akt` "
+                    "is not set up; move that file aside and rerun install-cli"], r.stdout
 
 
 @pytest.mark.parametrize("standing", [True, False])
@@ -253,3 +265,47 @@ def test_akt_6_uninstall_takes_the_link_back(box):
         return
     plan = agentik_install.uninstall("agentik-session", str(prefix), dry=True)
     assert (str(akt), "link", "would remove") in plan, plan
+
+
+# ---- R4a: the respoken lines, whole -------------------------------------------------------
+
+@pytest.mark.parametrize("args,said", [
+    (["/compact"], "/compact is refused; every start is a fresh context"),
+    (["--append-system-prompt", "-x", "go"],
+     "'-x' after --append-system-prompt reads as a flag; write --append-system-prompt=-x"),
+    (["--resume", "go"], "the flag --resume is refused; it resumes, forks, detaches or prints"),
+    (["--frobnicate", "go"], "the flag --frobnicate is refused; it is not on the launcher's "
+                             "allowlist")])
+def test_akt_r4a_the_argument_refusals(box, args, said):
+    rc, out, err = _run(box, box["crate"], "run", "--dry-run", "--", *args)
+    assert rc == 2 and out == "" and err.strip() == f"error: akt: {said}", err
+
+
+def test_akt_r4a_the_chain_name(box):
+    rc, out, err = _run(box, box["crate"], "run", "--dry-run", "--chain", "a/b", "--", "do X")
+    assert rc == 2 and err.strip() == ("error: akt: chain name 'a/b' refused; use 1 to 64 "
+                                       "characters of A-Z a-z 0-9 . _ -"), err
+
+
+def test_akt_r4a_the_long_loop_warning(box):
+    rc, out, err = _run(box, box["crate"], "run", "--dry-run", "--", "/loop 2h go")
+    assert rc == 0, err
+    assert err.strip() == ("warning: the first prompt is a /loop of 120 minutes; 60 or more asks "
+                           "cloud or session before it arms, so each restart waits; use under "
+                           "60m, or none"), err
+
+
+@pytest.mark.parametrize("env,said", [
+    ({"CLAUDE_SESSION_CHAIN": "other"},
+     "already inside a chain (CLAUDE_SESSION_CHAIN is set); run akt from a plain terminal"),
+    ({"CLAUDECODE": "1"}, "inside a Claude Code session (CLAUDECODE is set); run akt at a terminal"),
+    ({"CLAUDE_SESSION_DEPTH": "1"}, "inside a started session or relay child "
+                                    "(CLAUDE_SESSION_DEPTH='1'); run akt from a plain terminal"),
+    ({"PATH": "/nonexistent"}, "no `claude` on PATH; install Claude Code or add it to PATH")])
+def test_akt_r4a_the_where_refusals(box, env, said):
+    sys.path.insert(0, str(ROOT / "plugin" / "lib"))
+    try:
+        from claude_session import chain
+    finally:
+        sys.path.pop(0)
+    assert chain.refusal(["go"], {"PATH": str(box["stubs"]), **env}) == said

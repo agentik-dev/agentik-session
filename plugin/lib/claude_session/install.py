@@ -308,7 +308,8 @@ def _akt(path, write):
         if write:
             _replace(path, lambda temp: os.symlink(NAME, temp))
         return None
-    return "%s is not install-cli's link to %s; kept, so `akt` is not set up" % (path, NAME) if write else None
+    return ("%s is not install-cli's link to %s; left as is, so `akt` is not set up; move that "
+            "file aside and rerun install-cli" % (path, NAME)) if write else None
 
 
 def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
