@@ -19,7 +19,7 @@
 - [x] R6, the words and NICE rows: session SKILL.md (`status`'s flag, `gate status`'s two keys), `commands/status.md`'s hint, unattended SKILL.md's `pid`; NICE n267 to n269; `scripts/stamp`'s `nice_moves` alone moved n207 to n210 to the overflow (recordlint held: 73 rows); doclint 0
 - [x] check 1, job `20261114-182710-2011` on `00139d6`: red expected, `test_bare_machine.py::test_the_table_names_every_reader` (a wider run found it: 1 failed, 2188 passed); `hooks._small_json` joins `READERS`
 - [x] check 1's log: 4 failed, 4790 passed: bare-machine's READERS (mended), `test_s47.py:575` running keys (mended), `test_readme.py` the README's count 4779 against 4795 (the stamp's, the landing's)
-- [ ] check 2, by the gate queue (red expected on the README's count alone); `scripts/hygiene --require-private --commits main..HEAD` exit 0
+- [ ] check 2, job `20261114-184214-2014` on `9fcc5e9`, running at the hand-back (red expected on the README's count alone); `scripts/hygiene --require-private --commits main..HEAD` exit 0
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
@@ -30,7 +30,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The check, by the gate queue.
+Read check 2: `agentik session gate wait 20261114-184214-2014 --strict`.
 
 ## Exit
-Open.
+Build 1 handed back at the tool-call bound: R1 to R6 built and committed to `9fcc5e9`; check 2 running; this commit holds this file alone.
