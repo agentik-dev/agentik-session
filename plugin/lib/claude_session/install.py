@@ -29,8 +29,8 @@ SKIP_FILES = (".DS_Store",)
 OLD_NAME = __package__.replace("_", "-")
 
 LAUNCHER = r'''#!/bin/sh
-# agentik-session launcher, written by `agentik-session install-cli` (design/04 §2, §3); its old
-# name, __OLD_NAME__, is a link to it until r2 (agentik-r1 §4.3).
+# agentik-session launcher, written by `agentik-session install-cli` (hq design/04 §2, §3).
+# Its old name, __OLD_NAME__, is a link to it until r2 (agentik-r1 §4.3).
 #
 # Runs one frozen tree of the plugin's lib/ under /usr/bin/python3. `-I` keeps the cwd,
 # PYTHONPATH and the user site off sys.path, so neither the directory a hook fires in nor a
