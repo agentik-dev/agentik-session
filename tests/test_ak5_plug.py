@@ -89,8 +89,10 @@ def test_describe_json(box):
     man = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
     assert man["repository"] == f"https://github.com/{d['repo']}"     # the manifest's names
     assert d["plugin"] == f"{man['name']}@agentik" and d["version"] == man["version"]
-    assert [r["name"] for r in d["reads"]] == ["config", "doctor", "meter", "gate", "unattended"]
-    assert [r["kind"] for r in d["reads"]] == ["config", "doctor", "status", "status", "status"]
+    assert [r["name"] for r in d["reads"]] == ["config", "doctor", "meter", "gate", "unattended",
+                                               "sittings"]                    # su4 R4
+    assert [r["kind"] for r in d["reads"]] == ["config", "doctor", "status", "status", "status",
+                                               "status"]
     assert d["reads"][0]["argv"] == ["describe", "config", "--json"]
     assert d["reads"][1]["argv"] == ["doctor", "--json"]
     assert all(v["top"] is False for v in d["verbs"])

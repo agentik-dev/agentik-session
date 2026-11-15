@@ -558,6 +558,8 @@ READERS = {
     ("harness", "read_hooks"): ("hooks.jsonl", {"event": "Stop", "ms": 1, "exit": 0},
                                 lambda m, d: m["harness"].read_hooks(d)),
     ("hooks", "_load_json"): ("h.json", {"at": 1.0}, lambda m, d: m["hooks"]._load_json(d / "h.json")),
+    ("hooks", "_small_json"): ("activity.json", {"at": 1.0},          # packet su4, R3
+                               lambda m, d: m["hooks"]._small_json(d / "activity.json")),
     ("instructions", "read_log"): ("instructions.jsonl", {"at": 1.0, "file_path": "/x/CLAUDE.md"},
                                    lambda m, d: m["instructions"].read_log(d)),     # packet g1
     ("instructionguard", "counts"): ("guard.jsonl", {"at": 1.0, "decision": "deny", "path": "/x/CLAUDE.md"},

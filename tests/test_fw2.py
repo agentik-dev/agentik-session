@@ -162,7 +162,8 @@ def test_fw2_status_keeps_its_shape_and_the_cli_adds_est(w, state):
                                                "running": q["id"], "pgid": 1}))
     st = gate.status(w.root, T0, fx=w.fx())
     assert list(st) == ["running", "queued", "done", "runner"]
-    assert list(st["running"][0]) == ["id", "repo", "label", "since", "seconds"]
+    assert list(st["running"][0]) == ["id", "repo", "label", "since", "seconds", "caller",
+                                      "queued"]       # packet su4, R1: the entry's two
     assert gate.status_lines(st, gate.entry_estimates(w.root))[0].endswith(
         " land s38; est 2.0 min")
     e = gate.enqueue(state, str(w.repo), ["a"], {}, [], 60, "", None, T0)

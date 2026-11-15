@@ -14,7 +14,9 @@ the owner's `stop` file. This skill only reads what it wrote.
 
 Arguments: `$ARGUMENTS` is empty, or `report [--run ID]`.
 
-- **Empty:** the newest run's rows by state, the running row and the stop.
+- **Empty:** the newest run's rows by state, the running row and the stop;
+  `--json` adds `pid`, the loop's own from the run's `start` line (null for an
+  older run), with no claim that it still runs.
 
   ```bash
   agentik-session unattended status

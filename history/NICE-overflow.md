@@ -93,6 +93,10 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n202 | S4 | `tests/test_r2.py` | `test_r2_fold_a_stop_during_the_real_pass_ends_it_within_a_second[sigint]` is load-sensitive: red once under `.venv-floor` with three other gate jobs running (two procs where one was expected) | green on the next run | 2026-11-13, a gate job under load |
 | n204 | S4 | `README.md` | The README names neither the charter's part `## Waits on the owner` nor `charter show`; its source stands 18 B under its ceiling | packet in2 R10 | 2026-11-13, in2 build 1 |
 | n206 | S4 | `claude_session/charter.py` | A REPO given as a broken link is skipped under its target's real path, and the text view names the target, not the name given | review 1 of in2, L5 | 2026-11-13, in2 build 2 |
+| n207 | S4 | `claude_session/cli.py` | A `charter.dir` of `../x` reads another repo's charter and shows it under this REPO's name; R5 puts the folder under REPO | review 1 of in2, L6 | 2026-11-13, in2 build 2 |
+| n208 | S4 | `claude_session/charter.py` | `hand_line` refuses a blank after the closing tick while `waits()` cuts trailing blanks first, so `check` and `show` accept a line the function refuses: two readers disagree on one line | review 1 of in2, L8 | 2026-11-13, in2 build 2 |
+| n209 | S4 | `Makefile` | `make help` greps the Makefile's text, so the `stamp` target's `##` line prints `$(STAMP_BASE)` literally; say `main (STAMP_BASE)` there | land3 review 1, L4 (by reading) | 2026-11-13, land3-stamp build 2 |
+| n210 | S4 | `scripts/stamp` | A REF with no `plugin.json`, or unreadable JSON there, is exit 2 even where no version move is needed, where `scripts/plugin-version-check` reads such a base as below any version; read REF's version only where a move is needed | land3 review 1, L5 (by reading) | 2026-11-13, land3-stamp build 2 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 

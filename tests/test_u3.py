@@ -256,7 +256,7 @@ def test_r7_an_unreadable_cell_is_said_early(box):
     assert not [s for s, _ in said if s.startswith("parked-row:") and "acceptance" in s]
     (row, parked) = box.kind("row")
     assert (row["state"], row["reason"]) == ("refused", "acceptance")
-    assert len([e for e in box.ledger if e["kind"] not in ("row", "stop")]) == 0
+    assert len([e for e in box.ledger if e["kind"] not in ("row", "stop", "start")]) == 0  # su4 R2
 
 
 def test_r6_the_long_line_is_cut_at_80(box):
