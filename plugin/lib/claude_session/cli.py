@@ -1470,7 +1470,7 @@ def cmd_gate(args) -> int:
         return _gate_land(root, args, env)
     if verb == "publish":
         from . import publish
-        return publish.main(list(args.repos), root, env, dry=args.dry_run)
+        return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time())
@@ -1581,13 +1581,15 @@ def _gate_land(root, args, env) -> int:
     line of this repo reads `red gate`, never ok. `--in-job` is that job: it runs the steps
     here, and only inside a gate job. `--push` (packet land5-publish R9) refuses a caller that
     may not push before it queues, then runs publish.py's turn for the repo after an ok land
-    line, its line after the land line; never with `--in-job`."""
-    from . import gate, land, publish
+    line, its line after the land line; never with `--in-job`. `--install` (packet land5b-install)
+    refuses as `--push` does, then follows the publish line with deliver.py's install line, or
+    with no `--push` follows an ok land line with it, on the same pushed rule."""
+    from . import deliver, gate, land, publish
     mark = env.get(gate.JOB_MARK) or ""
-    if args.push:
+    if args.push or args.install:
         if args.in_job:
-            print("land-step: --push runs in the caller's own process, never in the job; "
-                  + land.USAGE, file=sys.stderr)
+            print("land-step: --push and --install run in the caller's own process, never in "
+                  "the job; " + land.USAGE, file=sys.stderr)
             print("land ?: red usage exit 2", flush=True)
             return 2
         why = publish.refusal(env)
@@ -1598,9 +1600,11 @@ def _gate_land(root, args, env) -> int:
     if args.dry_run:
         # land4 R11: the reads alone, here, in a job or not; nothing queued, nothing written.
         code = land.main(list(args.args), None, dry=True)
-        if not args.push or code != 0:
+        if code != 0 or not (args.push or args.install):
             return code
-        return publish.after_land(args.args[0], root, dry=True)
+        if args.push:
+            return publish.after_land(args.args[0], root, dry=True, install=args.install, env=env)
+        return _install_line(deliver, args.args[0], root, env, dry=True)
     if args.in_job:
         if not mark:
             _die("gate land --in-job runs only inside a gate job, which sets "
@@ -1656,7 +1660,18 @@ def _gate_land(root, args, env) -> int:
             line = f"land {name}: red gate exit {code}"
     print(line, flush=True)
     if args.push and code == 0:
-        return publish.after_land(repo, root)
+        return publish.after_land(repo, root, install=args.install, env=env)
+    if args.install and code == 0:
+        return _install_line(deliver, repo, root, env)
+    return code
+
+
+def _install_line(deliver, repo, root, env, dry=False) -> int:
+    """`gate land --install` with no `--push`: the install line after an ok land line."""
+    from . import publish
+    publish._clean_env()
+    line, code = deliver.turn(repo, root, env, dry)
+    print(line, flush=True)
     return code
 
 
@@ -1964,6 +1979,9 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--push", action="store_true",
                     help="then, after an ok land line, publish's steps for the repo in this "
                          "process: refused before it queues where the caller may not push")
+    gl.add_argument("--install", action="store_true",
+                    help="then, where main is pushed and no relay run, unattended run or gate "
+                         "job of the repo is live, install its plugin and its make install")
     gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gp = gsub.add_parser("publish", help="prove main's head checked green by a gate result, run "
                                           "the repo's hygiene on it and its range, and push that "
@@ -1973,6 +1991,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="a bare name is that checkout in ~/code, else the one a folder below")
     gp.add_argument("--dry-run", action="store_true",
                     help="every step but the push, which it says it would make; no ref written")
+    gp.add_argument("--install", action="store_true",
+                    help="then, after an ok line, install what was pushed: the plugin its "
+                         "plugin.json names and its make install; held while a run is live")
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn

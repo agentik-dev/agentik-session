@@ -1,11 +1,12 @@
 """publish: main's head, proven checked green by the gate, scanned and pushed (packet land5-publish).
 
-  agentik session gate publish <repo>... [--dry-run]
-  agentik session gate land --push [--dry-run] <repo> <branch> <sha> <merge-file>
+  agentik session gate publish <repo>... [--install] [--dry-run]
+  agentik session gate land --push [--install] [--dry-run] <repo> <branch> <sha> <merge-file>
 
 It runs in the caller's own process, never in a gate job, since only a main sitting may push;
-it installs nothing and queues nothing. Each <repo> is resolved as `land.resolve_repo` does (a
-bare name is that checkout in ~/code, else the one a folder below; a name with a slash is a
+the push queues nothing. `--install` (packet land5b-install, deliver.py) follows each ok
+publish line with that repo's install line, after the caller refusal below has held; its `make
+install` alone is a gate job. Each <repo> is resolved as `land.resolve_repo` does (a bare name is that checkout in ~/code, else the one a folder below; a name with a slash is a
 path) and taken in turn. Notes go to stderr as `publish-step: ...`; stdout is one line a repo,
 each the last of its turn:
 
@@ -82,7 +83,7 @@ import sys
 
 from . import gate, land, state
 
-USAGE = "usage: agentik session gate publish <repo>... [--dry-run]"
+USAGE = "usage: agentik session gate publish <repo>... [--install] [--dry-run]"
 MAIN = land.MAIN
 FULL = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 PREFIX = re.compile(r"\A[0-9a-f]{4,64}\Z")
@@ -314,8 +315,19 @@ def _clean_env():
         os.environ.pop(name, None)
 
 
-def main(repos, root, env, dry=False):
-    """`gate publish`: each repo's line on stdout, the first non-zero code."""
+def _install(arg, root, env, dry, text, code):
+    """The install line after an ok publish line (packet land5b-install R2); its code."""
+    if code != 0:
+        return 0
+    from . import deliver
+    line, code = deliver.turn(arg, root, env, dry, would=": would push " in text)
+    print(line, flush=True)
+    return code
+
+
+def main(repos, root, env, dry=False, install=False):
+    """`gate publish`: each repo's line on stdout (and with `install` its install line), the
+    first non-zero code."""
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     if not repos:
@@ -333,12 +345,18 @@ def main(repos, root, env, dry=False):
         text, code = turn(arg, root, dry)
         print(text, flush=True)
         first = first or code
+        if install:
+            after = _install(arg, root, env, dry, text, code)
+            first = first or after
     return first
 
 
-def after_land(repo, root, dry=False):
-    """`gate land --push`'s half after an ok land line: one turn, its line and code."""
+def after_land(repo, root, dry=False, install=False, env=None):
+    """`gate land --push`'s half after an ok land line: one turn, its line and code; with
+    `install`, the install line after an ok one."""
     _clean_env()
     text, code = turn(repo, root, dry)
     print(text, flush=True)
+    if install:
+        code = code or _install(repo, root, os.environ if env is None else env, dry, text, code)
     return code
