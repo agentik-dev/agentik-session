@@ -572,7 +572,8 @@ def test_s47_status_json_running_is_a_list(w):
     _live_runner(w, [{"id": a["id"], "pgid": 1}, {"id": b["id"], "pgid": 2}], at=T0 - 7)
     st = gate.status(w.root, T0, fx=w.fx())
     assert [x["id"] for x in st["running"]] == [a["id"], b["id"]]
-    assert list(st["running"][0]) == ["id", "repo", "label", "since", "seconds"]
+    assert list(st["running"][0]) == ["id", "repo", "label", "since", "seconds", "caller",
+                                      "queued"]       # packet su4, R1
     assert (st["running"][0]["since"], st["running"][0]["seconds"]) == (at, 500)
     assert st["running"][1]["since"] == T0 - 7          # no directory yet: the runner's file
     assert st["queued"] == []
