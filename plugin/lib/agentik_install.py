@@ -514,6 +514,17 @@ def install(prefix=None, env=None, dry_run=False):
     return done
 
 
+def shown(path, env=None):
+    """A path as a person reads it: from `~` where it is under HOME."""
+    home = ((os.environ if env is None else env).get("HOME") or "").rstrip("/")
+    return "~" + path[len(home):] if home and path.startswith(home + "/") else path
+
+
+def prune_news(lines):
+    """The lines of `done["pruned"]` worth saying: the prune's summary only where a tree went."""
+    return [l for l in lines if not re.fullmatch(r"prune-trees: removed 0, kept \d+ \(\d+ live, the newest \d+\)", l)]
+
+
 def install_cli(prefix=None, env=None):
     """The verb `<tool> install-cli [--prefix P]`, for a tool's command line to call: its exit
     code. 0 done; 1 it could not (the reason on stderr), nothing moved past what it had written."""
@@ -523,9 +534,9 @@ def install_cli(prefix=None, env=None):
     except (OSError, KeyError, ValueError) as e:
         print("install-cli: %s" % e, file=sys.stderr)
         return 1
-    link = "%s links to it; " % done["link"] if done["link"] else ""
-    print("installed %s -> %s (%s); %s%s" % (done["launcher"], done["tree"], done["version"], link, done["door"]))
-    for line in done["pruned"]:
+    link = " %s links to it." % shown(done["link"], env) if done["link"] else ""
+    print("Placed %s %s and %s.%s" % (shown(done["launcher"], env), done["version"], shown(done["door"], env), link))
+    for line in prune_news(done["pruned"]):
         print(line)
     if not done["on_path"]:
         bin_dir = os.path.dirname(done["launcher"])
