@@ -14,7 +14,7 @@
 - [x] the packet and this file
 - [x] the tests, red at `95da908`: 12 failed of 15; the three pin-bytes lines (2, 5) green
 - [x] R1 and R5, the gate: su4 1, 2, 7 green; the gate, rw3, gl1, fw2 and ak5 tests 798 passed (.venv); `tests/test_fw2.py`'s running-keys line moves by the two keys
-- [ ] R2, the loop's pid
+- [x] R2, the loop's pid: kind `start`, `{ts, kind, pid}` once after the run's folder; su4 3 green; the unattended, u1 to u3, h3, band, admit, bare-machine and land5b tests 406 passed (.venv); `tests/test_u3.py`'s no-other-kind line names `start`
 - [ ] R3 and R4, the sittings read and describe
 - [ ] R6, the words and NICE rows
 - [ ] check, by the gate queue; `scripts/hygiene --require-private --commits main..HEAD` exit 0
@@ -25,7 +25,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R2, the loop's pid.
+R3 and R4, the sittings read and describe.
 
 ## Exit
 Open.

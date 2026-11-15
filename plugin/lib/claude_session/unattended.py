@@ -220,6 +220,11 @@ def newest_run(env) -> Path | None:
     return runs_dir(env) / max(names, key=_key) if names else None
 
 
+# The run's first ledger line, `{ts, kind, pid}` (packet su4, R2): a kind no other reader
+# names (`status` reads row, spawn and stop; `report` row, limit, spawn, exit and stop).
+START = "start"
+
+
 def _append(path: Path, text: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a") as fh:
@@ -1688,6 +1693,7 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     rows = plan(read_queue(text), keep, pending.append)
     nid, d = new_run(fx.env, fx.now())
     N = _Run(repo, nid, d, fx, stall, poll, land=lp, until=at, max_rows=max_rows)
+    N.record(START, pid=os.getpid())        # packet su4, R2: the loop's own pid, once
 
 
     for line in pending:
@@ -1763,11 +1769,12 @@ def _last_line(path: Path) -> str:
 
 def status(env, now: float) -> dict | None:
     """The newest run: its rows by state, a running row's last stream line and its age,
-    its stop; None with no run yet."""
+    its stop, and `pid`, its first `start` line's (packet su4, R2), null for a ledger with
+    none; no claim that the process lives. None with no run yet."""
     d = newest_run(env)
     if d is None:
         return None
-    rows, ended, spawned, stop = {}, set(), [], None
+    rows, ended, spawned, stop, pid = {}, set(), [], None, None
     for e in read_ledger(d / "ledger.jsonl"):
         k = e.get("kind")
         if k == "row" and isinstance(e.get("state"), str):
@@ -1778,6 +1785,8 @@ def status(env, now: float) -> dict | None:
             spawned.append(e.get("row"))
         elif k == "stop":
             stop = {"reason": e.get("reason"), "cost": e.get("cost")}
+        elif k == START and pid is None and type(e.get("pid")) is int:
+            pid = e["pid"]
     running = None
     live = [r for r in spawned if r not in ended and isinstance(r, str) and ROW_ID.match(r)]
     if live and stop is None:
@@ -1788,7 +1797,7 @@ def status(env, now: float) -> dict | None:
             age = None
         running = {"row": live[-1], "last": _last_line(path), "age_s": age}
     return {"run": d.name, "dir": str(d), "rows": rows, "running": running,
-            "stop": stop}
+            "stop": stop, "pid": pid}
 
 
 def _row_word(r: dict) -> str:
