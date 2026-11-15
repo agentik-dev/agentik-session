@@ -74,8 +74,10 @@ role it inherits, and keeps its 200k ceilings on either window.
 `role:orchestrator window:1000000`). The **meter** is the PostToolUse hook: it reads the
 transcript's new lines after every tool and writes `meter.json`, the used share
 of each ceiling. `agentik-session status` prints it in one line
-(`/session:status`); `agentik-session report` lists ended sessions from the
-ledger (`/session:report`).
+(`/session:status`); `agentik-session status --all [--json]` lists every sitting a hook
+stamped in the last 30 minutes, newest first, each with its zone, percents and profile
+(`agentik.session.sittings/1`, a read: it writes nothing); `agentik-session report` lists
+ended sessions from the ledger (`/session:report`).
 
 The used share, the larger of the two, sets the **zone**:
 
@@ -258,7 +260,7 @@ agentik-session gate wait <id> --timeout <s>   # its result line; run it in a ba
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
 agentik-session gate land <repo> <branch> <sha> <merge-file>   # one landing, one gate job; stdout its land line, exit the job's; a branch behind main is readied (main merged where every conflict is a derived line, then `make stamp`) where the Makefile has `stamp`, else red; red on a nested worktree, a merge file not `Merge <branch>: <text>` or failing hygiene; `--dry-run` reads only
 agentik-session gate publish <repo>... [--install] [--dry-run]   # a main sitting alone: main's head proven green by a gate result (its landing, or a clean `make check`), then `scripts/hygiene` and the range, then `git push <remote> <sha>:refs/heads/main`; `gate land --push` does it after an ok land line; `--install` then installs the plugin and `make install`, held while a run is live
-agentik-session gate status [--repo <path>]     # what runs, what waits (each with its est), the last five done; `--repo <path>`: a folder's own results, past the last five, each with the head it checked
+agentik-session gate status [--repo <path>]     # what runs, what waits (each with its est), the last five done; `--repo <path>`: a folder's own results, past the last five, each with the head it checked; `--json`: each running and queued item with its `caller` and `queued`
 agentik-session commit <paths...> --check <cmd> --message-file <f>   # add by path, check, commit on green; a make check through the gate
 ```
 

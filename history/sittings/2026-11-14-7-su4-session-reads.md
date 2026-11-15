@@ -16,16 +16,18 @@
 - [x] R1 and R5, the gate: su4 1, 2, 7 green; the gate, rw3, gl1, fw2 and ak5 tests 798 passed (.venv); `tests/test_fw2.py`'s running-keys line moves by the two keys
 - [x] R2, the loop's pid: kind `start`, `{ts, kind, pid}` once after the run's folder; su4 3 green; the unattended, u1 to u3, h3, band, admit, bare-machine and land5b tests 406 passed (.venv); `tests/test_u3.py`'s no-other-kind line names `start`
 - [x] R3 and R4, the sittings read and describe: `hooks.sittings`, the `status` flag `--all` (exclusive with `--transcript`), `plug.SCHEMAS["sittings"]`, describe's sixth read; su4 15 of 15 (.venv); `tests/test_ak5_plug.py`'s two `reads` lines move by the one item
-- [ ] R6, the words and NICE rows
+- [x] R6, the words and NICE rows: session SKILL.md (`status`'s flag, `gate status`'s two keys), `commands/status.md`'s hint, unattended SKILL.md's `pid`; NICE n267 to n269; `scripts/stamp`'s `nice_moves` alone moved n207 to n210 to the overflow (recordlint held: 73 rows); doclint 0
 - [ ] check, by the gate queue; `scripts/hygiene --require-private --commits main..HEAD` exit 0
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
 - decide, owner: the coordinator (consumer: review 1): `tests/test_fw2.py` line 165 pins a running item's keys, so it gains `caller` and `queued` (R1); added to the packet's may-touch row.
+- decide, owner: the coordinator (consumer: the landing): the three NICE rows put the file past recordlint's bound, which would red the check; the stamp's own `nice_moves` was applied alone (no version move), so the landing's stamp finds the file under the bound. Revert that hunk if the landing's stamp is to make the move.
+- decide, owner: the coordinator (consumer: review 1): `tests/test_u3.py` line 259 and `tests/test_ak5_plug.py` lines 92 and 93 move by R2's `start` kind and R4's one read.
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R6, the words and NICE rows.
+The check, by the gate queue.
 
 ## Exit
 Open.
