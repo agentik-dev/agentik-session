@@ -1397,6 +1397,10 @@ def _respawn_flag(key: str, raw: str) -> int:
     return int(raw)
 
 
+# Packet akt-run R4a: the prefix of `run`'s lines, respoken; one whether `akt` or `run` was typed.
+RUN = "akt"
+
+
 def run_args(cwd, env, claude_args) -> list:
     """mt1 R7: the arguments every start of a chain sends: the resolved profile's `--model`
     and `--effort` ahead of the owner's when theirs name no `--model` (on the seat lane
@@ -1406,11 +1410,44 @@ def run_args(cwd, env, claude_args) -> list:
         r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
                              profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
     except resolver.ResolveError as e:
-        _die(f"agentik-session run: {e}", 2)
+        _die(f"{RUN}: {e}", 2)
     s = r.sections["session"]
     if (s.get("lane") or "seat") != "seat":
         return list(claude_args)
     return profile_flags(s.get("model"), s.get("effort"), claude_args) + list(claude_args)
+
+
+NO_SETUP = ("no agentik setup here (no history/sittings/ in a git repo); make one with: "
+            'agentik session charter open "<goal>"')
+
+
+def agentik_setup(cwd) -> bool:
+    """Packet akt-run R2: the cwd's git top holds a `history/sittings/` folder."""
+    rc, top = gitinfo._git(str(cwd), "rev-parse", "--show-toplevel")
+    return rc == 0 and bool(top.strip()) and os.path.isdir(
+        os.path.join(top.strip(), "history", "sittings"))
+
+
+def run_defaults(cwd, env, claude_args) -> tuple:
+    """Packet akt-run R1: (claude's arguments with `run.model` ahead where they name no
+    `--model` and `run.prompt` last where they carry no first prompt; True when the prompt
+    was added; None, or the option that would read an added prompt as its value ("" for a
+    valued option with none), which `run` refuses as mt1 R7 did)."""
+    from . import chain
+    try:
+        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
+                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+    except resolver.ResolveError as e:
+        _die(f"{RUN}: {e}", 2)
+    rn = r.sections["session"].get("run") or {}
+    out, added, swallow = list(claude_args), False, None
+    if chain.prompt_gap(out) is not None:
+        swallow = chain.prompt_gap([*out, "x"])
+        if swallow is None:
+            out, added = out + [rn["prompt"]], True
+    if rn.get("model") and not _on_line(out, "--model"):
+        out = ["--model", rn["model"], *out]
+    return out, added, swallow
 
 
 def cmd_run(args) -> int:
@@ -1420,36 +1457,46 @@ def cmd_run(args) -> int:
     env = dict(os.environ)
     flags = {k: _respawn_flag(k, getattr(args, k)) for k in resolver.RESPAWN_KEYS
              if getattr(args, k) is not None}
-    if not chain.on_tty():
-        _die("agentik-session run: stdin and stdout must be a TTY; the launcher runs in "
-             "the owner's terminal", 2)
-    why = chain.refusal(args.claude_args, env)
-    if why:
-        _die(f"agentik-session run: {why}", 2)
+    dry = getattr(args, "dry_run", False)
     cwd = os.getcwd()
+    given, defaulted, swallow = run_defaults(cwd, env, args.claude_args)
+    why = chain.refusal(given, env, where=False)       # the arguments' own refusals first
+    if why:
+        _die(f"{RUN}: {why}", 2)
+    if defaulted and not agentik_setup(cwd):           # packet akt-run R2, R2a
+        _die(f"{RUN}: {NO_SETUP}", 2)
+    if not dry and not chain.on_tty():
+        _die(f"{RUN}: stdin or stdout is not a terminal; run akt at a terminal", 2)
+    why = chain.refusal(given, env, where=not dry)
+    if why:
+        _die(f"{RUN}: {why}", 2)
     name = args.chain if args.chain is not None else chain.default_name(cwd, env)
     if not hooks.CHAIN_RE.match(name):
-        _die(f"agentik-session run: refusing the chain name {name[:80]!r}: a chain name is "
-             "1 to 64 of A-Z a-z 0-9 . _ -", 2)
+        _die(f"{RUN}: chain name {name[:80]!r} refused; use 1 to 64 characters of "
+             "A-Z a-z 0-9 . _ -", 2)
     try:
         chain.guards(cwd, env, flags)
     except resolver.ResolveError as e:
-        _die(f"agentik-session run: {e}", 2)
+        _die(f"{RUN}: {e}", 2)
     warnings = []
-    gap = chain.prompt_gap(args.claude_args)
-    if gap is not None:                 # mt1 R7: refused (S31 warned): each restart would idle
-        why = (f" ({gap} reads every argument after it as its value: write {gap}=<value>)"
-               if gap else "")
-        _die(f"agentik-session run: claude's arguments carry no first prompt{why}, so every "
-             'restart would open an empty prompt; give one: agentik session run -- '
-             '"<first prompt>"', 2)
-    claude_args = run_args(cwd, env, args.claude_args)
-    minutes = chain.long_loop(args.claude_args)
+    if swallow is not None:             # mt1 R7: refused (S31 warned): each restart would idle
+        why = (f", since {swallow} takes every argument after it as its value; write "
+               f"{swallow}=<value>, or" if swallow else ";")
+        _die(f'{RUN}: no first prompt{why} give one: akt "<first prompt>"', 2)
+    claude_args = run_args(cwd, env, given)
+    minutes = chain.long_loop(given)
     if minutes is not None:
-        warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; a "
-                        "/loop of 60 minutes or more asks its question (cloud or session) "
-                        "before it arms, so every restarted sitting waits there: give an "
-                        "interval under 60m, or none")
+        warnings.append(f"warning: the first prompt is a /loop of {minutes:g} minutes; 60 or "
+                        "more asks cloud or session before it arms, so each restart waits; "
+                        "use under 60m, or none")
+    if dry:                             # packet akt-run R3: the first start, as `start -n`
+        import shutil
+        for w in warnings:
+            print(w, file=sys.stderr)
+        program = shutil.which("claude", path=env.get("PATH")) or "claude"
+        print(f"{hooks.CHAIN_VAR}={shlex.quote(name)} "
+              + shlex.join([program, "--session-id", chain.Effects().uuid(), *claude_args]))
+        return 0
     return chain.Chain(name, claude_args, resolver.state_dir(env),
                        chain.Effects(), lambda: chain.guards(cwd, env, flags),
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
@@ -1943,7 +1990,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.set_defaults(func=cmd_budget)
 
     rn = sub.add_parser("run", help="start claude, and restart it at each RESPAWN "
-                                     "close (the chain)")
+                                     "close (the chain); `akt` is `run` with its words as "
+                                     "claude's")
+    rn.add_argument("-n", "--dry-run", action="store_true",
+                    help="print the first start's command instead of starting the chain")
     rn.add_argument("--chain", metavar="NAME",
                     help="the chain's name (default: <cwd name>-<profile or none>)")
     rn.add_argument("--cap", metavar="N", help="restarts in any 24 h (respawn.cap)")

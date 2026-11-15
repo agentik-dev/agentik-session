@@ -15,6 +15,8 @@ SHARE = "agentik-session"
 NAME = "agentik-session"
 MANIFEST = "plugin.json"
 DOOR = "agentik"
+# Packet akt-run R3: a link to the launcher, which runs `run` under this name.
+AKT = "akt"
 # What Apple's /usr/bin/python3 adds to the environment (design/04 §3), and the prefix under which
 # the launcher records what its parent really had.
 APPLE = ("SDKROOT", "CPATH", "LIBRARY_PATH", "MANPATH", "LC_CTYPE")
@@ -44,6 +46,11 @@ TREE=__TREE__
 # Under the old name, on a terminal, for a verb other than `hook`: one note (§4.3).
 if [ "${0##*/}" = __OLD_NAME__ ] && [ -t 2 ] && [ "$1" != hook ]; then
     echo "__OLD_NAME__: renamed; use 'agentik session …' (ends 2026-12-31)" >&2
+fi
+# Under the name akt (packet akt-run R3): `run`, every word after it claude's; a first word
+# --dry-run is run's own, and prints the first start's command.
+if [ "${0##*/}" = __AKT__ ]; then
+    if [ "$1" = --dry-run ]; then shift; set -- run --dry-run -- "$@"; else set -- run -- "$@"; fi
 fi
 refuse() {   # the path that is gone, then this launcher's own arguments
     gone=$1; shift
@@ -208,7 +215,7 @@ def launcher_text(tree, version):
     """The launcher for one frozen tree."""
     import shlex
     from . import config
-    return (LAUNCHER.replace("__OLD_NAME__", OLD_NAME).replace("__OLD_APP__", config.OLD_APP)
+    return (LAUNCHER.replace("__OLD_NAME__", OLD_NAME).replace("__AKT__", AKT).replace("__OLD_APP__", config.OLD_APP)
             .replace("__APPLE__", " ".join(APPLE))
             .replace("__VERSION__", shlex.quote(version)).replace("__TREE__", shlex.quote(str(tree))))
 
@@ -287,7 +294,25 @@ def _lock(share, wait=True):
     return fh
 
 
-def _locked_install(prefix, share, env, ps_timeout=60):
+def _akt(path, write):
+    """Packet akt-run R3: `akt`, a link whose text is NAME. A standing such link is left as it is;
+    absent, it is written when `write` (install-cli) and never by the refresh, so a person's
+    removal stands; anything else there is kept, and the line that says so returned."""
+    if os.path.islink(path):
+        try:
+            if os.readlink(path) == NAME:
+                return None
+        except OSError:
+            pass
+    elif not os.path.lexists(path):
+        if write:
+            _replace(path, lambda temp: os.symlink(NAME, temp))
+        return None
+    return ("%s is not install-cli's link to %s; left as is, so `akt` is not set up; move that "
+            "file aside and rerun install-cli" % (path, NAME)) if write else None
+
+
+def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
     from . import prune
     bin_dir = os.path.join(prefix, "bin")
     os.makedirs(bin_dir, exist_ok=True)
@@ -299,6 +324,7 @@ def _locked_install(prefix, share, env, ps_timeout=60):
     launcher = os.path.join(bin_dir, NAME)
     note = _door(os.path.join(bin_dir, DOOR), door)
     _replace(os.path.join(bin_dir, OLD_NAME), lambda temp: os.symlink(NAME, temp))
+    akt_note = _akt(os.path.join(bin_dir, AKT), write=akt)
     _write_launcher(launcher, launcher_text(code, version))    # last: what a retry reads
     try:
         pruned, lines = prune.prune(share, tree, ps_timeout=ps_timeout)
@@ -306,6 +332,8 @@ def _locked_install(prefix, share, env, ps_timeout=60):
         pruned, lines = 1, ["prune-trees: %s" % e]
     if pruned:
         lines.append("the prune failed; every old tree kept")
+    if akt_note:
+        lines.insert(0, akt_note)
     if note:
         lines.insert(0, note)
     _clear_marker(env)
@@ -398,7 +426,7 @@ def _refresh(env):
         return None
     try:
         if _behind(path):
-            _locked_install(prefix, share, env, ps_timeout=REFRESH_PS_TIMEOUT)
+            _locked_install(prefix, share, env, ps_timeout=REFRESH_PS_TIMEOUT, akt=False)
     finally:
         lock.close()
     return None

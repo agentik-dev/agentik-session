@@ -136,3 +136,5 @@ tests/test_ss3_true_lines.py: sibling
 design/packets/g8a-reader-parts.md: sibling
 # land4: the packet names the ledger file a sibling plugin reads, one line in 3f1a1c6 and c5ab5a9 (631b284 drops it).
 design/packets/land4-ready.md: sibling
+# akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
+design/packets/akt-run.md: sibling

@@ -251,6 +251,7 @@ whole, as resolved.
 ## Other verbs
 
 ```bash
+akt [ARGS...]                   # `agentik session run -- ARGS`, the repo's chain: bare, it sends run.model and run.prompt (the newest charter's Next act); `akt --dry-run` prints the first start's command
 agentik-session doctor          # the setup, the plugin, its dependencies; exit 2 names the failing check
 agentik-session budget          # the zone and checkpoint cadence
 agentik-session checkpoint      # mark a handoff-ready point (`-m`; `--commit <paths...>` commits the named paths alone, no sweep)

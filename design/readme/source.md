@@ -62,7 +62,7 @@ CLI verbs (`agentik session --help`):
 | `doctor` | `agentik session doctor --json` |
 | `profile` | `agentik session profile balanced` |
 | `set` | `agentik session set tier.build haiku --save` |
-| `checkpoint` | `agentik session checkpoint -m "tests green"`; `agentik-session checkpoint --respawn --charter <file>` |
+| `checkpoint` | `agentik session checkpoint -m "tests green"` |
 | `status` | `agentik session status` |
 | `report` | `agentik session report --since 2026-09-01` |
 | `charter` | `agentik session charter open "render the README"` |
@@ -72,6 +72,7 @@ CLI verbs (`agentik session --help`):
 | `gate` | `agentik session gate run . -- make check` |
 | `reconcile` | `agentik session reconcile` |
 | `unattended` | `agentik session unattended run . --until 06:30` |
+| `akt` | `akt --dry-run`; `akt` is `run --`, alone with `run.prompt` (needs `history/sittings/`) |
 
 Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, refuses writes to files the checkout's, a folder's or the user's gate list names, `*` in one segment), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
 
@@ -116,7 +117,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 - `EXIT: ...` arrives at 100%: land the act in flight and exit.
 - A RESPAWN close is the sitting's last act, through Bash: `agentik-session checkpoint --respawn --charter <file>` reads only the charter's `## Next act`, whose first line opens on `RESPAWN` (else exit 2, nothing written), checkpoints and writes `sessions/<session_id>/respawn.json`; the sitting ends its turn. `--state <s>` hands the successor a checked state file. PostToolUse confirms the mark only for the main thread's own Bash call.
 - The `respawn` key (`cap: 20`, `floor: 600`, `settle: 60`) holds a chain's guards and layers like every session key.
-- `agentik session run` is the respawn chain: the same `claude` arguments at each start, a fresh `--session-id`. Once a RESPAWN close is confirmed and the turn stood `settle` seconds with no helper call open, `run` ends the sitting, waits 10 s, writes a restart line and starts the next; it never compacts, resumes or restarts a crash. The cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`) holds a restart, which `status` names. With no first prompt `run` refuses; with no `--model` each start passes the profile's `--model` and `--effort`.
+- `agentik session run` is the respawn chain: the same `claude` arguments at each start, a fresh `--session-id`. Once a RESPAWN close is confirmed and the turn stood `settle` seconds with no helper call open, `run` ends the sitting, waits 10 s, writes a restart line and starts the next; it never compacts, resumes or restarts a crash. The cap (restarts in any 24 h), the floor (a sitting's minimum age) or a STOP file (`respawn/STOP`, `respawn/<chain>/STOP`) holds a restart, which `status` names. With no first prompt or `--model`, `run` adds `run.prompt` or `run.model` (`null`: the profile's).
 - The spawn gate is the PreToolUse hook, by posture: `off` is silent; `signal` (the default) speaks and never blocks; `ask` asks before a spawn from wind-down on; `deny` also refuses a spawn in the reserve.
 - `agentik session status` prints the one-line meter. `agentik session report` reads the ledger, `<state>/ledger.jsonl`, one row per ended session (a resumed one: its last), from the SessionEnd hook. `report --chains` prints a chain's restart and stop lines. `report --hooks` prints per-event count, p50, p95 and nonzero exits from `hooks.jsonl`, then `claude_md_bytes`. Only this plugin's hooks are measured.
 
@@ -188,13 +189,13 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 `session`, `decisions`, `respeak` and `relay` each work alone, under shared conventions.
 
 - `scripts/hygiene` (the public-hygiene scan) and `scripts/doclint` (the doc gate) are byte-identical across the four repos.
-- The README sidecar: `design/readme/rendered.sha256`, two `shasum -a 256` lines, written only by `make readme`.
+- The README sidecar: `design/readme/rendered.sha256`, two `shasum -a 256` lines.
 - The packet shape: six sections, a `verify` row, the gate line, targeted acceptance lines.
 - Siblings are named by plugin id only.
 
 ## Status
 
-Status: version `v2.0.0-alpha.125`, rendered `2026-11-10`, `4795` tests in the suite.
+Status: version `v2.0.0-alpha.126`, rendered `2026-11-10`, `4828` tests in the suite.
 
 ## Credit
 
