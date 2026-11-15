@@ -12,14 +12,14 @@
 
 ## Done-ness
 - [x] (1) R1 the form, R3 the tests, R2 the proof: `install.py` lines 2 and 3; `test_akt_6` at its full assertion (dbcfb9d's branch reverted); `tests/test_ak10d_launcher.py` (3): the canonical's dry plan and real uninstall of a fresh install, the old form's reads and its refresh. The four: 4 failed at the pin's `install.py`, 4 passed now; the install suites (8 files) 398 passed under `.venv`
-- [ ] (2) R5: `NICE_TO_HAVE.md` one row
+- [x] (2) R5: `NICE_TO_HAVE.md` row n270 (the switch to the canonical module, and its old-name rule); n211, its first S4 row, moved byte for byte to `history/NICE-overflow.md` as the stamp's `nice_moves` does, so recordlint's size bound holds; `scripts/doclint` and `scripts/recordlint` exit 0
 - [ ] (3) R4: `make check` once through the gate; `scripts/hygiene --require-private --commits main..HEAD` exit 0
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-Act (2).
+Act (3).
 
 ## Exit
 (open)

@@ -97,6 +97,7 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n208 | S4 | `claude_session/charter.py` | `hand_line` refuses a blank after the closing tick while `waits()` cuts trailing blanks first, so `check` and `show` accept a line the function refuses: two readers disagree on one line | review 1 of in2, L8 | 2026-11-13, in2 build 2 |
 | n209 | S4 | `Makefile` | `make help` greps the Makefile's text, so the `stamp` target's `##` line prints `$(STAMP_BASE)` literally; say `main (STAMP_BASE)` there | land3 review 1, L4 (by reading) | 2026-11-13, land3-stamp build 2 |
 | n210 | S4 | `scripts/stamp` | A REF with no `plugin.json`, or unreadable JSON there, is exit 2 even where no version move is needed, where `scripts/plugin-version-check` reads such a base as below any version; read REF's version only where a move is needed | land3 review 1, L5 (by reading) | 2026-11-13, land3-stamp build 2 |
+| n211 | S4 | `scripts/stamp` | A REF version with build metadata (`2.0.0-alpha.9+b.3`) exits 2 saying it ends in no number to raise; the exit is right (STAMP_VERSION named), the words are not: say the raised version is not above REF's | land3 review 1, L6 (by reading) | 2026-11-13, land3-stamp build 2 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 
