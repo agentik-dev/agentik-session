@@ -153,6 +153,84 @@ def state(session_id=None, env=None):
     return cfg, budget.zone_for(used_pct(session_id, env), _policy(cfg))
 
 
+# ---- every open sitting (packet su4, R3) ----------------------------------------------------
+
+OPEN_S = 1800       # open: a hook stamped `activity.json` this recently
+SMALL = 65536       # an `activity.json` past this many bytes is no stamp: its folder is passed over
+SITTING_KEYS = ("session_id", "zone", "pct_context", "pct_turns", "profile", "at")
+
+
+def _small_json(path: Path) -> dict | None:
+    """A regular file of at most SMALL bytes holding a JSON object, else None; never blocks
+    on a FIFO and never raises."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        raw = os.read(fd, SMALL + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if len(raw) > SMALL:
+        return None
+    try:
+        d = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _pct(v):
+    return v if _num(v) and math.isfinite(v) else None
+
+
+def sittings(env, now: float) -> list:
+    """Each session under the state root whose `activity.json` holds an `at` within OPEN_S of
+    `now`, newest first: {session_id, zone, pct_context, pct_turns, profile, at}. Only that
+    file is read before a folder is known open; then its `meter.json` and `resolved.json`, a
+    value they do not give null, `zone` as `state` computes it (null with no meter's
+    percents). An `at` up to OPEN_S ahead of now counts (a clock step), one further does not.
+    A read: nothing written, no process list, never raises on a folder."""
+    base = Path(resolver.state_dir(env)) / "sessions"
+    try:
+        names = [d.name for d in os.scandir(base) if _SID.match(d.name)]
+    except OSError:
+        return []
+    found = []
+    for sid in names:
+        a = _small_json(base / sid / ACTIVITY)
+        at = _pct(a.get("at")) if a else None
+        if at is not None and abs(now - at) <= OPEN_S:
+            found.append((at, sid))
+    rows = []
+    for at, sid in sorted(found, reverse=True):
+        m = _load_json(base / sid / "meter.json")
+        s = _load_json(base / sid / "resolved.json").get("session")
+        pc, pt = _pct(m.get("pct_context")), _pct(m.get("pct_turns"))
+        zone = state(sid, env)[1] if pc is not None and pt is not None else None
+        p = s.get("profile") if isinstance(s, dict) else None
+        rows.append(dict(zip(SITTING_KEYS, (sid, zone, pc, pt,
+                                            p if isinstance(p, str) else None, at))))
+    return rows
+
+
+def sittings_lines(rows: list) -> list:
+    """One line a row: `<id> <zone> context <c>% turns <t>% profile <p> at <HH:MM>`, `-` for
+    a null; `no open sitting` with none."""
+    if not rows:
+        return ["no open sitting"]
+
+    def v(x, tok=False):
+        return "-" if x is None else (_token(x) if tok else str(x))
+    return [f"{r['session_id']} {v(r['zone'])} context {v(r['pct_context'])}% "
+            f"turns {v(r['pct_turns'])}% profile {v(r['profile'], True)} "
+            f"at {time.strftime('%H:%M', time.localtime(r['at']))}" for r in rows]
+
+
 def _budget_line(zone: str) -> str:
     return f"Sitting budget: '{zone}' zone."
 

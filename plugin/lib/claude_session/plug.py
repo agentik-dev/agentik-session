@@ -27,7 +27,8 @@ SUMMARY = "Runs Claude Code sittings on named profiles and meters each one's bud
 # read adds no JSON reader of its own: `__init__._pin` is the manifest's one reader.
 REPO, PLUGIN = "agentik-dev/agentik-session", doctor.PLUGIN_ID
 SCHEMAS = {"meter": "agentik.session.meter/1", "gate": "agentik.session.gate/1",
-           "unattended": "agentik.session.unattended/1", "doctor": "agentik.doctor/1"}
+           "unattended": "agentik.session.unattended/1", "doctor": "agentik.doctor/1",
+           "sittings": "agentik.session.sittings/1"}
 LAYERS = ("default", "user-defaults", "profile", "user", "repo", "local", "launch", "session")
 NOT_SETTINGS = ("description", "subagents", "ceilings_1m", "tiers")
 MAPPINGS = ("admission", "reconcile")      # a row a leaf a layer sets, none when unset
@@ -132,7 +133,8 @@ def describe(parser) -> dict:
              {"kind": "doctor", "name": "doctor", "argv": ["doctor", "--json"]},
              {"kind": "status", "name": "meter", "argv": ["status", "--json"]},
              {"kind": "status", "name": "gate", "argv": ["gate", "status", "--json"]},
-             {"kind": "status", "name": "unattended", "argv": ["unattended", "status", "--json"]}]
+             {"kind": "status", "name": "unattended", "argv": ["unattended", "status", "--json"]},
+             {"kind": "status", "name": "sittings", "argv": ["status", "--all", "--json"]}]
     return {"schema": "agentik.describe/1", "ok": True, "tool": TOOL, "version": SEMVER,
             "summary": SUMMARY, "repo": REPO, "plugin": PLUGIN, "needs": needs,
             "verbs": verbs, "reads": reads}

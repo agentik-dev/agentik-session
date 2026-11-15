@@ -208,8 +208,14 @@ def cmd_install_cli(args) -> int:
 
 def cmd_status(args) -> int:
     """The session's meter: one line, or meter.json with --json; then the band, the spend mix
-    and the admission's mode, which the prompt line no longer says (pl1 R3)."""
+    and the admission's mode, which the prompt line no longer says (pl1 R3). `--all` (packet
+    su4, R3): every open sitting, one line each, or `agentik.session.sittings/1`."""
     env = os.environ
+    if getattr(args, "all", False):        # packet su4, R3: every open sitting, a read
+        rows = hooks.sittings(env, time.time())
+        print(plug.dumps(plug.envelope("sittings", {"sittings": rows})) if args.json
+              else "\n".join(hooks.sittings_lines(rows)))
+        return 0
     state = resolver.state_dir(env)
     if args.transcript:
         stem = os.path.splitext(os.path.basename(args.transcript))[0]
@@ -1863,8 +1869,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sm = sub.add_parser("status", help="this session's meter: context, turns, zone")
     sm.add_argument("--json", action="store_true", help="print meter.json")
-    sm.add_argument("--transcript", metavar="PATH",
-                    help="parse this transcript once; write nothing")
+    one = sm.add_mutually_exclusive_group()
+    one.add_argument("--transcript", metavar="PATH",
+                     help="parse this transcript once; write nothing")
+    one.add_argument("--all", action="store_true",
+                     help="every sitting a hook stamped in the last 30 min: its id, zone, "
+                          "percents and profile, newest first; --json the sittings read")
     sm.set_defaults(func=cmd_status)
 
     md = sub.add_parser("mod", help="the session plugin's hooks module's verb: start")
