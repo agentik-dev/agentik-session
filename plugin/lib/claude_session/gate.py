@@ -62,9 +62,12 @@ WAIT_POLL = 5
 KEEP = 14 * 86400
 TAKE = 3
 DONE_SHOWN = 5
+REPO_SHOWN = 20             # `status --repo`'s done lines before its more line (packet rw3, R5)
 CUT_WALL, CUT_DIED, CUT_LOCK = "wall cut", "runner died", "lock wait cut"
 CUT_CALLER, CALLER_EXIT = "caller cut", 130     # a cancel mark's cut (fw5 R4)
 MORE = "{n} more: agentik session gate status"
+MORE_REPO = "{n} more: agentik session gate status --repo {path} --json"
+LAND_JOB = ("gate", "land", "--in-job")     # a landing's job, then repo, branch, sha, merge
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
@@ -285,6 +288,45 @@ def _head(repo: str) -> str | None:
         return None
     out = p.stdout.strip() if p.returncode == 0 else ""
     return out if _HEAD.match(out) else None
+
+
+def _branch(repo: str) -> str | None:
+    """`git -C <repo> symbolic-ref --short -q HEAD`, run as `_head` runs git: the checked-out
+    branch, else None (a detached head, no work tree, git failing; packet rw3, R3). Never
+    raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "symbolic-ref", "--short", "-q", "HEAD"],
+                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    out = p.stdout.strip() if p.returncode == 0 else ""
+    return out or None
+
+
+def repo_path(path) -> str | None:
+    """A folder as `status --repo` compares it (packet rw3, R2): the real path of its absolute
+    form, which for a path that does not exist is its absolute, normal form, any parent that
+    exists resolved. None for what is not a non-empty string. Never raises."""
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        return os.path.realpath(os.path.abspath(path))
+    except (OSError, ValueError):
+        return os.path.normpath(path)
+
+
+def land_branch(command) -> str | None:
+    """The branch of a landing's job, a command holding `gate land --in-job` and then four
+    words, repo, branch, sha and merge file (packet rw3, R3); else None."""
+    if not isinstance(command, list):
+        return None
+    for i in range(len(command) - 6):
+        if tuple(command[i:i + 3]) == LAND_JOB:
+            words = command[i + 3:i + 7]
+            return words[1] if all(isinstance(w, str) and w for w in words) else None
+    return None
 
 
 def _dirty(repo: str) -> int | None:
@@ -1104,13 +1146,17 @@ def _wait_text(why) -> str | None:
     return f"{kind} {why[1]}"
 
 
-def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
+def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = None) -> dict:
     """{running, queued, done, runner}: the entries running, a list; the rest in order, each
     with its key and its wait; the last five results newest first; the live runner or None.
     The wait is the runner's own rule, from `_holds` and `_over`; the load is read only for
     an entry nothing else holds, and only with one running. A `done` item holds `DONE_KEYS`,
     each as the result holds it: `load`, `beside` and `dirty` are null for a result written
-    before them (packet gl1, R4); `status_lines` reads none of the three."""
+    before them (packet gl1, R4); then `head`, the full sha or null, and `land`, a landing's
+    branch or null (packet rw3, R6). With `repo` (packet rw3, R2 to R4) the dict opens with
+    `repo`, the folder as `repo_path` resolves it, and each list holds the folder's alone:
+    an entry or result whose `repo` resolves to it, or a landing's result of the branch the
+    folder has checked out on the folder's key; `done` holds every result `KEEP` keeps."""
     fx = fx or Fx()
     r = runner_info(root)
     live = r if r and alive(r.get("pid")) else None
@@ -1123,6 +1169,17 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
         at = _started_at(root, gid)
         running.append({"id": gid, "repo": e.get("repo"), "label": e.get("label") or "",
                         "since": at, "seconds": (now - at) if at else None})
+    want = repo_path(repo) if repo is not None else None
+    seen: dict = {}
+
+    def mine(r) -> bool:
+        if want is None:
+            return True
+        if not isinstance(r, str):
+            return False
+        if r not in seen:
+            seen[r] = repo_path(r) == want
+        return seen[r]
     waiting = [e for e in es if e["id"] not in run]
     queued, over, last = [], None, None
     for i, (e, why) in enumerate(_holds(waiting, [byid.get(g, {}) for g in run]), 1):
@@ -1134,20 +1191,61 @@ def status(root, now, alive=_alive, fx: Fx | None = None) -> dict:
         queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
                        "label": e.get("label") or "", "key": entry_key(e),
                        "wait": _wait_text(why)})
-    done = []
+    done, tree = [], {}
+
+    def landed(res: dict, branch) -> bool:
+        if branch is None:
+            return False
+        if "branch" not in tree:      # one git read a call, and only for a landing
+            tree["branch"] = _branch(want)
+            tree["key"] = repo_key(want) if tree["branch"] else None
+        return branch == tree["branch"] and res.get("key") == tree["key"]
     for n in _result_names(root):
         res = _load(result_path(root, n))
-        if res is not None:
-            done.append({k: res.get(k) for k in DONE_KEYS})
+        if res is None:
+            continue
+        item = {**{k: res.get(k) for k in DONE_KEYS}, "head": _clean_head(res.get("head")),
+                "land": land_branch(res.get("command"))}
+        if want is None:
+            done.append(item)
             if len(done) == DONE_SHOWN:
                 break
+            continue
+        ended = res.get("ended")
+        if isinstance(ended, (int, float)) and now - ended > KEEP:      # `_prune`'s rule
+            continue
+        if mine(res.get("repo")) or landed(res, item["land"]):
+            done.append(item)
     runner = {"pid": live.get("pid"), "since": live.get("since")} if live else None
-    return {"running": running, "queued": queued, "done": done, "runner": runner}
+    st = {"running": running, "queued": queued, "done": done, "runner": runner}
+    if want is None:
+        return st
+    return {"repo": want, "running": [x for x in running if mine(x.get("repo"))],
+            "queued": [x for x in queued if mine(x.get("repo"))], "done": done,
+            "runner": runner}
+
+
+def _repo_done_line(x: dict) -> str:
+    """A result's line under `status --repo` (packet rw3, R5)."""
+    s = x.get("seconds")
+    m = est_text(s) if isinstance(s, (int, float)) and not isinstance(s, bool) else "?"
+    line = f"done {x['id']} {x['repo']} exit {x['exit']} {m} min"
+    if x.get("head"):
+        line += f" head {x['head'][:7]}"
+    d = x.get("dirty")
+    start = d.get("start") if isinstance(d, dict) else None
+    if isinstance(start, (int, float)) and not isinstance(start, bool) and start > 0:
+        line += f" dirty {start}"
+    if x.get("land"):
+        line += f" land {x['land']}"
+    return line
 
 
 def status_lines(st: dict, est: dict | None = None) -> list[str]:
     """The status as lines; a running or queued entry whose id is in `est` ends
-    `; est <m.m> min` (packet FW2, R5), else today's bytes."""
+    `; est <m.m> min` (packet FW2, R5), else today's bytes. A status with `repo` (packet
+    rw3, R5) writes each result by `_repo_done_line`, the first `REPO_SHOWN` and then a
+    `MORE_REPO` line, or `none for <repo>` when no line names the folder."""
     est = est or {}
 
     def tail(gid):
@@ -1159,8 +1257,16 @@ def status_lines(st: dict, est: dict | None = None) -> list[str]:
     for x in st.get("queued") or []:
         wait = f" waits on {x['wait']}" if x.get("wait") else ""
         out.append(f"queued {x['id']} {x['repo']} position {x['position']}{wait}" + tail(x["id"]))
-    for x in st.get("done") or []:
-        out.append(f"done {x['id']} {x['repo']} exit {x['exit']} {_minutes(x['seconds'])} min")
+    if "repo" in st:
+        done = st.get("done") or []
+        out.extend(_repo_done_line(x) for x in done[:REPO_SHOWN])
+        if len(done) > REPO_SHOWN:
+            out.append(MORE_REPO.format(n=len(done) - REPO_SHOWN, path=st["repo"]))
+        if not out:
+            out.append(f"none for {st['repo']}")
+    else:
+        for x in st.get("done") or []:
+            out.append(f"done {x['id']} {x['repo']} exit {x['exit']} {_minutes(x['seconds'])} min")
     rn = st.get("runner")
     out.append(f"runner: pid {rn['pid']} since {_hm(rn['since'])}" if rn else "runner: none")
     return out

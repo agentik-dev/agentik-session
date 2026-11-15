@@ -266,7 +266,7 @@ def test_gl1_5_status_json_done_items_carry_the_three(tmp_path, monkeypatch):
     rc, out, _ = run_cli("gate", "status", "--json")
     done = json.loads(out)["done"]
     assert rc == 0 and [d["id"] for d in done] == [new, old]
-    assert list(done[0]) == ["id", "repo", "exit", "seconds", "cut", *NEW]
+    assert list(done[0]) == ["id", "repo", "exit", "seconds", "cut", *NEW, "head", "land"]
     assert {k: done[0][k] for k in NEW} == machine
     assert {k: done[1][k] for k in NEW} == {"load": None, "beside": None, "dirty": None}
     rc, out, _ = run_cli("gate", "status")
