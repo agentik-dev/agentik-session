@@ -23,6 +23,8 @@ plugin/lib/claude_session/sessionconfig.py: sibling
 tests/test_launch.py: sibling,renamed
 # The launcher's one-time marker lives under the tool's state path (ADV10-5).
 tests/test_install.py: sibling,renamed
+# ak10d-session-launcher: the test proves uninstall takes back the old-name launcher link (install.py's OLD_NAME).
+tests/test_ak10d_launcher.py: renamed
 # The manifests: the repo's name and the dependency names.
 plugin/lib/claude_session/profiles.yaml: sibling
 plugin/lib/claude_session/resolver.py: sibling,renamed
