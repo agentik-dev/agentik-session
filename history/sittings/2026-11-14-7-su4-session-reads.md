@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet and this file
-- [ ] the tests, red at `95da908`
+- [x] the tests, red at `95da908`: 12 failed of 15; the three pin-bytes lines (2, 5) green
 - [ ] R1 and R5, the gate
 - [ ] R2, the loop's pid
 - [ ] R3 and R4, the sittings read and describe
@@ -24,7 +24,7 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The tests.
+R1 and R5, the gate.
 
 ## Exit
 Open.
