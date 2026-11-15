@@ -122,7 +122,7 @@ def test_su4_7_the_more_line_quotes_a_path_with_a_space(root, tmp_path):
     rc, out, _ = run_cli("gate", "status", "--repo", str(repo))
     more = out.splitlines()[-2]
     assert rc == 0 and more == f"2 more: agentik session gate status --repo {shlex.quote(str(repo))} --json"
-    assert shlex.split(more)[6] == str(repo)
+    assert shlex.split(more)[7] == str(repo)
 
 
 # ---- the loop's pid: R2 --------------------------------------------------------------------

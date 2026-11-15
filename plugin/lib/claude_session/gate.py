@@ -1156,7 +1156,9 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
     branch or null (packet rw3, R6). With `repo` (packet rw3, R2 to R4) the dict opens with
     `repo`, the folder as `repo_path` resolves it, and each list holds the folder's alone:
     an entry or result whose `repo` resolves to it, or a landing's result of the branch the
-    folder has checked out on the folder's key; `done` holds every result `KEEP` keeps."""
+    folder has checked out on the folder's key; `done` holds every result `KEEP` keeps.
+    A `running` or `queued` item ends with the entry's `caller` and `queued`, null where the
+    entry holds none (packet su4, R1)."""
     fx = fx or Fx()
     r = runner_info(root)
     live = r if r and alive(r.get("pid")) else None
@@ -1168,7 +1170,8 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
         e = byid.get(gid, {})
         at = _started_at(root, gid)
         running.append({"id": gid, "repo": e.get("repo"), "label": e.get("label") or "",
-                        "since": at, "seconds": (now - at) if at else None})
+                        "since": at, "seconds": (now - at) if at else None,
+                        "caller": e.get("caller"), "queued": e.get("queued")})
     want = repo_path(repo) if repo is not None else None
     seen: dict = {}
 
@@ -1190,7 +1193,8 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
             why = over
         queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
                        "label": e.get("label") or "", "key": entry_key(e),
-                       "wait": _wait_text(why)})
+                       "wait": _wait_text(why), "caller": e.get("caller"),
+                       "queued": e.get("queued")})
     done, tree = [], {}
 
     def landed(res: dict, branch) -> bool:
@@ -1245,7 +1249,8 @@ def status_lines(st: dict, est: dict | None = None) -> list[str]:
     """The status as lines; a running or queued entry whose id is in `est` ends
     `; est <m.m> min` (packet FW2, R5), else today's bytes. A status with `repo` (packet
     rw3, R5) writes each result by `_repo_done_line`, the first `REPO_SHOWN` and then a
-    `MORE_REPO` line, or `none for <repo>` when no line names the folder."""
+    `MORE_REPO` line, its path quoted for a shell (packet su4, R5), or `none for <repo>`
+    when no line names the folder."""
     est = est or {}
 
     def tail(gid):
@@ -1261,7 +1266,7 @@ def status_lines(st: dict, est: dict | None = None) -> list[str]:
         done = st.get("done") or []
         out.extend(_repo_done_line(x) for x in done[:REPO_SHOWN])
         if len(done) > REPO_SHOWN:
-            out.append(MORE_REPO.format(n=len(done) - REPO_SHOWN, path=st["repo"]))
+            out.append(MORE_REPO.format(n=len(done) - REPO_SHOWN, path=shlex.quote(st["repo"])))
         if not out:
             out.append(f"none for {st['repo']}")
     else:

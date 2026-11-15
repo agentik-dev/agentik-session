@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] the packet and this file
 - [x] the tests, red at `95da908`: 12 failed of 15; the three pin-bytes lines (2, 5) green
-- [ ] R1 and R5, the gate
+- [x] R1 and R5, the gate: su4 1, 2, 7 green; the gate, rw3, gl1, fw2 and ak5 tests 798 passed (.venv); `tests/test_fw2.py`'s running-keys line moves by the two keys
 - [ ] R2, the loop's pid
 - [ ] R3 and R4, the sittings read and describe
 - [ ] R6, the words and NICE rows
@@ -21,10 +21,11 @@
 
 ## Handover
 - Choices inside the rulings: the packet's §3.
+- decide, owner: the coordinator (consumer: review 1): `tests/test_fw2.py` line 165 pins a running item's keys, so it gains `caller` and `queued` (R1); added to the packet's may-touch row.
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R1 and R5, the gate.
+R2, the loop's pid.
 
 ## Exit
 Open.
