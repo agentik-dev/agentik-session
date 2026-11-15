@@ -78,17 +78,18 @@ def on_tty() -> bool:
     return os.isatty(0) and os.isatty(1)
 
 
-def refusal(args, env) -> str | None:
+def refusal(args, env, where=True) -> str | None:
     """The first of §3.1's refusals that `args` (claude's arguments) and `env` meet, as
     one line; None when the chain may start. The TTY, the chain's name and its lock are
-    checked by the caller and by `Chain.run`."""
-    if env.get(hooks.CHAIN_VAR):
+    checked by the caller and by `Chain.run`. `where` off (packet akt-run R3, the dry run)
+    skips what is checked of where it runs: a chain, Claude Code, a depth, `claude` on PATH."""
+    if where and env.get(hooks.CHAIN_VAR):
         return (f"refusing to start inside a chain ({hooks.CHAIN_VAR} is set); "
                 "a chain never starts another")
-    if env.get("CLAUDECODE"):
+    if where and env.get("CLAUDECODE"):
         return ("refusing to start inside a Claude Code session (CLAUDECODE is set); "
                 "run it at a terminal")
-    d = launch.depth(env)
+    d = launch.depth(env) if where else 0
     if d is None or d >= 1:
         return (f"refusing to start inside a started session or a relay child "
                 f"({launch.DEPTH_VAR}={str(env.get(launch.DEPTH_VAR))[:20]!r})")
@@ -109,7 +110,7 @@ def refusal(args, env) -> str | None:
                    else "it is not on the launcher's allowlist")
             return f"refusing the flag {flag[:80]}: {why}"
         prev = flag if "=" not in a and flag not in _BARE else None
-    if shutil.which("claude", path=env.get("PATH")) is None:
+    if where and shutil.which("claude", path=env.get("PATH")) is None:
         return "no `claude` on PATH; install Claude Code, or put it on PATH"
     return None
 

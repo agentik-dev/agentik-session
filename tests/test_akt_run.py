@@ -193,7 +193,7 @@ def test_akt_5_a_second_install_changes_nothing(box):
     assert r.returncode == 0, r.stderr
     after = os.lstat(akt)
     assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
-    assert os.readlink(akt) == "agentik-session" and "akt" not in r.stdout
+    assert os.readlink(akt) == "agentik-session" and str(akt) not in r.stdout
 
 
 @pytest.mark.parametrize("how", ["file", "other-link"])
