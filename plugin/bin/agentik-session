@@ -40,6 +40,10 @@ for v in SDKROOT CPATH LIBRARY_PATH MANPATH LC_CTYPE; do
     eval "[ -z \"\${$v+x}\" ] || export AGENTIK_PARENT_$v=\"\$$v\""
 done
 export AGENTIK_PARENT_ENV=1
+# The word this was started with, for the command a line prints (commons GUIDE §10); a word the
+# root setup handed on is kept.
+[ -n "${AGENTIK_ARGV0-}" ] || AGENTIK_ARGV0=$0
+export AGENTIK_ARGV0
 # Any other interpreter may be no Python at all, and exit 2 on these flags where a hook's 2 is a
 # block, so this shell stays to read its exit. From what cannot print from Python, a hook's 2, 126
 # or 127 exits 0: nothing started, and what that costs is this tool's own PreToolUse block, as
