@@ -193,7 +193,8 @@ def cmd_gates(args) -> int:
 
 
 def cmd_install_cli(args) -> int:
-    """Freeze this code and write the launcher, the link and the door (design/04 §3)."""
+    """Freeze this code and write the launcher, the old name's link where ours stands, and the
+    door (design/04 §3)."""
     try:
         done = install.install(args.prefix)
     except (OSError, KeyError, ValueError) as e:
@@ -1863,7 +1864,8 @@ def build_parser() -> argparse.ArgumentParser:
     ds.set_defaults(func=cmd_describe)
 
     ic = sub.add_parser("install-cli", help="give the terminal the CLI: freeze this code, write "
-                        "the launcher in ~/.local/bin, its link and the agentik door, and prune")
+                        "the launcher in ~/.local/bin and the agentik door, refresh the old "
+                        "name's link where one of ours stands, and prune")
     ic.add_argument("--prefix", help="instead of $HOME/.local")
     ic.set_defaults(func=cmd_install_cli)
 

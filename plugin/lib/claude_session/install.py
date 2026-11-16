@@ -1,9 +1,9 @@
 """install-cli (design/04 §2, §3, §5; packet sc3): the launcher on PATH, with no checkout or venv.
 
 It freezes the code this module runs from, whichever plugin or frozen tree that is, under
-<prefix>/share/agentik-session/<content hash>/, writes <prefix>/bin/agentik-session, its link and,
-where none or an older one is there, the `agentik` door, each by a temp file and a rename, and
-prunes. Stdlib, 3.9, and light at import:
+<prefix>/share/agentik-session/<content hash>/, writes <prefix>/bin/agentik-session, its old name's
+link only where one of ours stands (row is1-old-name) and, where none or an older one is there,
+the `agentik` door, each by a temp file and a rename, and prunes. Stdlib, 3.9, and light at import:
 every hook imports it for `restore_parent_env`.
 """
 import os
