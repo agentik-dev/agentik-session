@@ -198,7 +198,7 @@ def test_r1_install_writes_the_new_name_the_link_and_the_front_door(repo, tmp_pa
     r = _install(repo, home)
     assert r.returncode == 0, r.stderr
     bin_ = home / ".local" / "bin"
-    assert os.readlink(bin_ / "claude-session") == "agentik-session"
+    assert not os.path.lexists(bin_ / "claude-session")     # is1-old-name R2: a new machine, none
     assert (bin_ / "agentik").read_bytes() == (ROOT / "plugin" / "bin" / "agentik").read_bytes()
     assert os.access(bin_ / "agentik", os.X_OK)
     assert [p.name for p in (home / ".local" / "share").iterdir()] == ["agentik-session"]
@@ -206,7 +206,8 @@ def test_r1_install_writes_the_new_name_the_link_and_the_front_door(repo, tmp_pa
                        capture_output=True, text=True, timeout=30)
     assert (v.returncode, v.stdout, v.stderr) == (
         0, "agentik-session %s\n" % json.loads((repo / MANIFEST).read_text())["version"], "")
-    # a reinstall replaces the link in place
+    # is1-old-name R1: a link of ours that stands is replaced in place by a reinstall
+    os.symlink("agentik-session", bin_ / "claude-session")
     assert _install(repo, home).returncode == 0
     assert os.readlink(bin_ / "claude-session") == "agentik-session"
 
@@ -307,7 +308,7 @@ def test_sc3_the_verb_on_a_bare_machine_writes_launcher_link_door_and_tree(tmp_p
     tool = _bins(home) / "agentik-session"
     assert os.access(tool, os.X_OK)
     assert "VERSION=2.0.0-alpha.77\n" in tool.read_text()
-    assert os.readlink(_bins(home) / "claude-session") == "agentik-session"
+    assert not os.path.lexists(_bins(home) / "claude-session")     # is1-old-name R2
     assert (_bins(home) / "agentik").read_bytes() == (plugin / "bin" / "agentik").read_bytes()
     assert os.access(_bins(home) / "agentik", os.X_OK)
     [tree] = _trees(home)
@@ -463,6 +464,7 @@ def test_sc3_decoys_change_nothing_the_launcher_runs(box, tmp_path):
 def test_sc3_the_old_name_notes_once_on_a_terminal_never_in_a_hook(box):
     home, tool, _ = box
     old = _bins(home) / "claude-session"
+    os.symlink("agentik-session", old)      # is1-old-name: a machine that had the link before
     note = "claude-session: renamed; use 'agentik session …' (ends 2026-12-31)"
     code, err = _on_tty([str(old), "--version"], _bare(home))
     assert code == 0 and err.splitlines()[0].strip() == note
@@ -600,7 +602,7 @@ def test_sc3_one_session_start_moves_the_launcher_forward_and_a_second_is_a_no_o
     r = _session_start(plugin, home)
     assert r.returncode == 0 and "systemMessage" not in json.loads(r.stdout), r
     assert "VERSION=%s\n" % NEW in tool.read_text() and _version(tool, home) == NEW
-    assert os.readlink(_bins(home) / "claude-session") == "agentik-session"
+    assert not os.path.lexists(_bins(home) / "claude-session")     # is1-old-name R2, R3
     _whole(home)
     assert len(_trees(home)) == 2
     seen = (tool.read_bytes(), tool.stat().st_mtime_ns, _trees(home))

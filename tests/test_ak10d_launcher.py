@@ -56,6 +56,8 @@ def test_ak10d_r1_line_2_is_the_canonicals_and_the_old_name_note_is_line_3():
 def test_ak10d_r2_the_canonical_plans_every_file_of_a_fresh_install_and_takes_it_back(tmp_path):
     home, prefix = tmp_path / "home", tmp_path / "prefix"
     home.mkdir()
+    (prefix / "bin").mkdir(parents=True)
+    os.symlink(NAME, prefix / "bin" / "claude-session")    # is1-old-name: one that stood before
     r = _verb(_plugin(tmp_path), home, "--prefix", str(prefix))
     assert r.returncode == 0, r.stderr
     bin_dir, share = prefix / "bin", prefix / "share" / NAME

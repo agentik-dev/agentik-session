@@ -312,6 +312,17 @@ def _akt(path, write):
             "file aside and rerun install-cli" % (path, NAME)) if write else None
 
 
+def _old_link(bin_dir):
+    """Row is1-old-name, the canonical `_old_link`'s rule kept to our own link: <bin>/<OLD_NAME>
+    where a link whose text is NAME stands already, to refresh; else None, and nothing there
+    moves (a person's own file or link is theirs, and a new machine gets no old name)."""
+    path = os.path.join(bin_dir, OLD_NAME)
+    try:
+        return path if os.path.islink(path) and os.readlink(path) == NAME else None
+    except OSError:
+        return None
+
+
 def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
     from . import prune
     bin_dir = os.path.join(prefix, "bin")
@@ -323,7 +334,9 @@ def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
     code = os.path.join(share, tree)
     launcher = os.path.join(bin_dir, NAME)
     note = _door(os.path.join(bin_dir, DOOR), door)
-    _replace(os.path.join(bin_dir, OLD_NAME), lambda temp: os.symlink(NAME, temp))
+    link = _old_link(bin_dir)
+    if link:
+        _replace(link, lambda temp: os.symlink(NAME, temp))
     akt_note = _akt(os.path.join(bin_dir, AKT), write=akt)
     _write_launcher(launcher, launcher_text(code, version))    # last: what a retry reads
     try:
@@ -338,7 +351,7 @@ def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
         lines.insert(0, note)
     _clear_marker(env)
     return {"launcher": launcher, "tree": code, "version": version, "door": os.path.join(bin_dir, DOOR),
-            "link": os.path.join(bin_dir, OLD_NAME), "pruned": lines}
+            "link": link, "pruned": lines}
 
 
 def install(prefix=None, env=None) -> dict:

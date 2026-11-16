@@ -93,7 +93,7 @@ def test_dw1_install_cli_leaves_a_newer_door_byte_for_byte(tmp_path, home):
     assert not [line for line in _said(r) if "door" in line], r.stdout
     # the rest of the install as before
     from claude_session import install
-    assert os.readlink(_bins(home) / install.OLD_NAME) == "agentik-session"
+    assert not os.path.lexists(_bins(home) / install.OLD_NAME)     # is1-old-name R2
     assert os.access(_bins(home) / "agentik-session", os.X_OK)
 
 
@@ -165,7 +165,7 @@ def test_dw1_install_cli_leaves_a_fifo_at_the_door_and_never_opens_it(tmp_path, 
     assert _said(r)[:1] == ["the door %s has no version to compare (None there, %s here); left alone"
                             % (door, _ours())], r.stdout
     from claude_session import install
-    assert os.readlink(_bins(home) / install.OLD_NAME) == "agentik-session"
+    assert not os.path.lexists(_bins(home) / install.OLD_NAME)     # is1-old-name R2
     assert os.access(_bins(home) / "agentik-session", os.X_OK)
 
 
