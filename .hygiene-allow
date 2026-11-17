@@ -142,3 +142,7 @@ tests/test_g8_refusals.py: email
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
 design/packets/akt-run.md: sibling
+# sl1: this tool's own ledger says which public tool's verb reads an entry, one line since aa9cccb.
+DECISIONS.md: sibling
+# sl1: the packet names the ledger file and the public ledger tool's verbs that write it, since its first commit (49fb15c).
+design/packets/sl1-session-ledger.md: sibling
