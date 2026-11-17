@@ -17,7 +17,7 @@ from . import instructionguard, resolver, shellreader, store
 
 HEAD = "agentik-session: refused by"
 PRODUCT = "product"                       # armed in every session (question 53: on everywhere)
-PLUGIN = "a rule of the agentik-session plugin, in every session"
+PLUGIN = "entry 11 of agentik-session's DECISIONS.md, in every session"   # g10 R7
 STRICT, LOOSE = instructionguard.STRICT, instructionguard.LOOSE
 ARM_BYTES = 262144                        # R7: the first bytes of each file read for a title
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")

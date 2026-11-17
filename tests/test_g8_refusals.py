@@ -275,7 +275,7 @@ def test_8_the_reason(box):
     assert len(two) == 2 and all(t.startswith(HEAD) for t in two)
     for line in ("rm -rf $T", "git init", "git config user.name x"):
         r = _refused(box, line, box.a)
-        assert "a rule of the agentik-session plugin, in every session" in r
+        assert "entry 11 of agentik-session's DECISIONS.md, in every session" in r   # g10 R7
         assert "36" not in r.replace(str(box.h), "")
 
 
