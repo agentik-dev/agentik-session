@@ -100,6 +100,7 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n211 | S4 | `scripts/stamp` | A REF version with build metadata (`2.0.0-alpha.9+b.3`) exits 2 saying it ends in no number to raise; the exit is right (STAMP_VERSION named), the words are not: say the raised version is not above REF's | land3 review 1, L6 (by reading) | 2026-11-13, land3-stamp build 2 |
 | n212 | S4 | `scripts/stamp` | `write_all` replaces each target with `os.replace`, so a `README.md` that is a symlink becomes a regular file; write the link's target, or refuse a link | land3 review 1, L7 (by reading) | 2026-11-13, land3-stamp build 2 |
 | n213 | S4 | `claude_session/plug.py` | A FIFO as the user file or an overlay hangs `describe config --json` to the suite's 2 s wall (the pin's `profile` too, in `resolver._read`); check `is_file` first and answer `bad_file` | `mkfifo` the user `profiles.yaml`; `describe config --json`: no answer in 4 s | 2026-11-13, ak5 review 1 NICE 1 |
+| n214 | S4 | `claude_session/plug.py` | The config read slows faster than the file grows: `_line` rescans the file per row and `paths` is a list searched per leaf (`_settings`) | 1,000 keys under `defaults: admission:`: 0.91 s; 6,000: over 10 s and 7.4 MB, past the 1 MiB cut | 2026-11-13, ak5 review 1 NICE 2 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 
