@@ -460,6 +460,7 @@ _SHELL_NAMES = frozenset({"sh", "bash", "zsh", "dash"})
 _PY_NAME = re.compile(r"python[0-9.]*\Z")
 _LAND_PUSH = frozenset({"--p", "--pu", "--pus", "--push"})    # what argparse takes, measured
 _LAND_TAKES = ("--session", "--wall")                         # land's options with an operand
+_BRACE_LIST = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
 # review 1 fix 1: a command word another command may run, by its base name (a python name too)
 _STARTS = frozenset({"git", "agentik", *_TOOLS, *_SHELL_NAMES})
 # the commands whose words are data, never a command they run; any other command's are read
@@ -514,7 +515,17 @@ def _tool_words(c):
     base, rest = os.path.basename(got[0]).lower(), got[1]
     if base in _TOOLS:
         return rest
-    return rest[1:] if base == "agentik" and rest[:1] == ["session"] else None
+    if base != "agentik" or not rest:
+        return None
+    if _veiled(rest[0]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
+        return rest
+    return rest[1:] if rest[0] == "session" else None
+
+
+def _veiled(w: str) -> bool:
+    """Review 1 fix 2: a word the shell expands at a verb's place: it holds `$`, a backtick or a
+    brace list, or a space (the reader's text of a backtick substitution)."""
+    return bool(_EXPANDS.search(w) or _BRACE_LIST.search(w)) or any(ch.isspace() for ch in w)
 
 
 def _takes(w: str) -> bool:
@@ -528,7 +539,11 @@ def _pushing_verb(words: list):
     i = 0
     for want in ("gate", None):
         while i < len(words) and words[i].startswith("-"):
+            if _veiled(words[i]):
+                return []                               # review 1 fix 2: a word the shell expands
             i += 1                                      # global and gate's options: no operand
+        if i < len(words) and _veiled(words[i]):
+            return []
         if i >= len(words) or (want and words[i] != want):
             return None
         i += 1
@@ -544,6 +559,8 @@ def _pushing_verb(words: list):
             done = True
         elif w in _LAND_PUSH:
             push = True
+        if not done and _veiled(w):
+            push = True                                 # review 1 fix 2: it may expand to --push
         elif verb == "land" and _takes(w):
             j += 1
         j += 1
@@ -585,7 +602,7 @@ def _pushes(c, k, ctx, cell):
     g = _git(c)
     if g is not None:
         sub = g[1].lower()
-        if sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
+        if _veiled(sub) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
             return _found(c, k, ctx, cell, g[0])
         return None
     words = _tool_words(c)
