@@ -140,3 +140,5 @@ design/packets/g8a-reader-parts.md: sibling
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
 design/packets/akt-run.md: sibling
+# g8: the identity rule's tests named a made-up address at the reserved `.invalid` name, two lines in e9ae475 (b23b0b9 writes it in pieces).
+tests/test_g8_refusals.py: email
