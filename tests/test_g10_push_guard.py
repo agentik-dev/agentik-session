@@ -354,7 +354,7 @@ def test_fix5_the_tools_modules(box):
 
 def test_fix6_a_bare_repo_and_home(box):
     (box.h / "code").mkdir()
-    (box.h / "code" / "tree").symlink_to(box.h / "tree")       # ~/code/*/armed is A
+    (box.h / "code" / "tree").symlink_to(box.h / "tree")       # H/code/*/armed is A
     for cwd in (box.o, box.p, box.h / "tree"):
         for line in ("agentik session gate publish armed", "agentik session gate land armed b s m --push",
                      "agentik session gate publish nowhere armed"):
