@@ -161,6 +161,7 @@ _IDENTITY = frozenset({"user.name", "user.email"})
 _ADD_LONG = frozenset({"--all", "--update"})
 _ADD_OPS = frozenset({".", "./", ":/", "*"})
 _COMMIT_TAKES = frozenset("mFCct")
+_COMMIT_ATTACHED = frozenset("uS")       # an operand only attached: `-uall`, `-S3a5f` (review 1 F3)
 _COMMIT_LONG = frozenset({"--message", "--file", "--reuse-message", "--reedit-message",
                           "--template", "--author", "--date", "--fixup", "--squash", "--cleanup",
                           "--trailer", "--pathspec-from-file", "-m", "-F", "-C", "-c", "-t"})
@@ -266,6 +267,8 @@ def sweeping(sub: str, rest: list) -> bool:
                         return True
                     if ch in _COMMIT_TAKES:
                         i += 1 if n == len(w) - 2 else 0
+                        break
+                    if ch in _COMMIT_ATTACHED:
                         break
             i += 1
     return False

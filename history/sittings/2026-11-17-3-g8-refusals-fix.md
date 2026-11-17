@@ -12,7 +12,7 @@
 ## Done-ness
 - [x] F1: tests red at the pin (`f0147e8`), then the fix: `_unsure` reads the line's text between the assignment and the sweep's word; the assigned folder is judged always, the folder so far beside it where the scope may change
 - [x] F2: tests red at the pin (`f0cb6c7`), then the fix in `_fence`
-- [ ] F3: tests red at the pin, then the fix
+- [x] F3: tests red at the pin (`bac4601`), then the fix: `u` and `S` end a commit cluster and take no next word
 - [ ] Nine NICE rows from review 1's leads
 - [ ] `make stamp` through the gate, its paths committed
 - [ ] The quick gates through the gate: `make lint doclint hygiene plugin-version-check validate`
