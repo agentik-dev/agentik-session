@@ -52,6 +52,10 @@ That the two channels reach a screen and a model is the owner's look after the i
 
 None at the pin. Four leads from the guard table's last review ride this packet as NICE rows (the issue rule's wrappers, `agentik $T issue send`, four harmless wrong refusals, a word split by quotes); this row fixes none.
 
+## 4a. The fix of review 1
+
+A launcher that prints past the keep is answered by what it printed. The hook keeps the first 64 KiB (`_WATCH_READ = 65536`) of stdout; when the stream was longer, the kept bytes are cut at their last newline before they are decoded, so a cut inside a character never turns a line into silence. A first line that fills the keep is cut where it fits (a trailing partial character dropped) and still said. The count in ` and N more: agentik status` is of every non-blank line printed before the launcher ended or the wall cut it: exact on the kept part, and on the rest counted as it is read, without keeping it, as lines holding a byte that is no ASCII blank or control. Three leads that block nothing are NICE rows (escape sequences' tails, a grandchild outside the group, U+2028 and the bidi controls).
+
 ## 5. Forbidden reads
 
 The wall's: the live state, the live user file, the real home and the live launcher (each probe in a temp home with a stub).
