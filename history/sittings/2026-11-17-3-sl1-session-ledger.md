@@ -14,15 +14,17 @@
 - [x] The packet, baseline measured at the pin (decisions 0.23.8)
 - [x] R2: the seven answered lines of `OPEN-QUESTIONS.md`, their `Next:` sentence moved in front of the tail; `render --lint` exits 0 (on a scratch copy beside R1's skeleton)
 - [x] R1 and R3, R3b: the skeleton, then entries 8 to 12 by `new` and `answer` (each `answer` previewed first; no refusal); `show` 8 to 12 exit 0, bodies byte-equal, `render --lint` exit 0, no `CLAUDE.md`
-- [ ] R4: `.claude/edit-gates` removed before the check, or left if a guard refuses
-- [ ] Acceptance lines 1 to 5; hygiene over `main..HEAD`
+- [x] R4: `.claude/edit-gates` left in the worktree: its removal was refused by the edit-gate guard ("is gated: an edit of it is refused in every permission mode")
+- [x] Acceptance lines 1 to 5 pass; the packet mended to doclint's six sections (doclint exit 0)
+- [ ] Hygiene over `main..HEAD` exits 1: group `sibling` (the word for the ledger tool), `DECISIONS.md` line 3 (R1's own paragraph) and 10 lines of the packet; the allow rows are the coordinator's
 - [ ] `make check` through the gate queue, once, last
 
 ## Handover
 - If this sitting is cut: the first unticked line above. No entry is ever written by hand.
+- decide, owner: the coordinator: two `.hygiene-allow` rows, `DECISIONS.md: sibling` and `design/packets/sl1-session-ledger.md: sibling`, as for every packet that names the ledger tool; the tree scan also counts the untracked `.claude/edit-gates` (2 lines). Consumer: the landing's hygiene scan and `make check`'s hygiene step.
 
 ## Next act
-R4's gate list out, acceptance line 5, hygiene, then the check through the gate.
+`make check` through the gate, once, last; its hygiene step is expected red until the allow rows above.
 
 ## Exit
 (open)

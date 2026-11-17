@@ -26,7 +26,9 @@ Measured at the pin with decisions 0.23.8: `agentik decisions show 1` prints `de
 - R5: a refusal is mended within R1 to R3b, else the row stops and reports it; nothing is written by hand in its place.
 - R6, hygiene: the tails name `hq`, as this repo's code already does.
 
-## 3. Acceptance
+## 3. Interfaces, choices and acceptance
+
+No interface moves: the row changes no code. The tool writes each entry's tail as `(<date>; the owner's answer to decision <n>, <source>)`, the source given on its line after its own clause.
 
 | # | line | at the pin |
 |---|---|---|
@@ -37,6 +39,16 @@ Measured at the pin with decisions 0.23.8: `agentik decisions show 1` prints `de
 | 5 | under a temp HOME: `agentik session checkpoint --commit` exits 2 naming the form; `agentik session set checkpoint 70 --save` exits 2 naming the profiles file | both exit 2 |
 | 6 | `scripts/hygiene --require-private --commits main..HEAD` exits 0; `make check` through the gate queue, green; `plugin.json`'s version unchanged | green at alpha.130 |
 
-## 4. Left, and not this row's
+Left, and not this row's: the suite's ledger losing its two entries (the coordinator's, after this lands); whether a tool repo tracks the gate list the decisions tool writes; a lint of this ledger in this repo's `make check`.
 
-The suite's ledger losing its two entries (the coordinator's, after this lands); whether a tool repo tracks the gate list the decisions tool writes; a lint of this ledger in this repo's `make check`.
+## 4. Findings that name this row
+
+None at the pin.
+
+## 5. Forbidden reads
+
+No transcript, live state root or gate result, file under `~/.claude` or relay ledger.
+
+## 6. Report
+
+The record the coordinator names.
