@@ -21,8 +21,9 @@ from test_doctor import machine  # noqa: F401  (the fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
 # g7: the gate's code is the guard and the reader it imports; each source scan reads both
+# g8: and the stray-write refusals (no `ask`, no knob, no process)
 GUARD_SRC = [ROOT / "plugin" / "lib" / "claude_session" / f
-             for f in ("instructionguard.py", "shellreader.py")]
+             for f in ("instructionguard.py", "shellreader.py", "lineguard.py")]
 SKILL = "decision" "s:instruct"            # spelled in two pieces for the hygiene scan
 SID = "g2b-sess-0001"
 TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
