@@ -462,3 +462,14 @@ def test_f2_a_code_span_opens_no_fence(box):
         (r / "CLAUDE.md").write_text(md)
         assert (lineguard.arming("Commits", str(r), box.env) is not None) is armed, k
         (_refused if armed else _passed)(box, "git add -A", r)
+
+
+# F3: commit's `-u<mode>` and `-S<keyid>` take their operand attached, so its `a` is no `-a`.
+def test_f3_attached_operands_in_a_commit_cluster(box):
+    for line in ("git commit -uall -m x", "git commit -S3a5f9e -m x", "git commit -uall",
+                 "git commit -qSa1b2 -m x"):
+        _passed(box, line, box.a)
+    for line in ("git commit -uno -a -m x", "git commit --untracked-files -a -m x",
+                 "git commit -au -m x", "git commit -qa -m x", "git commit -u -a -m x",
+                 "git commit -S -a -m x", "git commit -S -am x"):
+        _refused(box, line, box.a)
