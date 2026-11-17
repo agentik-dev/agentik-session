@@ -11,7 +11,7 @@
 
 ## Done-ness
 - [x] the packet, its baseline measured at the pin
-- [ ] R4: commons' `scripts/sync` against the worktree, its own commit
+- [x] R4: commons' `scripts/sync` (main `626a3f0`) against the worktree: four files moved (the door 0.3.0 to 0.3.1 in two places, `agentik_install.py`, the sums), every placed file `cmp`-equal; `test_ak10d_launcher` R2 moved: commons now reads the old form as session's own
 - [ ] the failing tests: `tests/test_up3s_session_forward.py`
 - [ ] R1, R2, R3, R5
 - [ ] `make stamp`, then `make check`, through the gate; the hygiene scan of the commits
@@ -20,4 +20,4 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R4, the copy.
+The failing tests.
