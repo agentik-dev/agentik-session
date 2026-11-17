@@ -376,9 +376,14 @@ def test_fix7_the_loose_judge_is_linear(box):
     import time
     body = ("agentik session gate land x " * 700)[:16384]
     cases = (("eval '" + body + "'", False),
-             ("eval '" + body + "--push'", True),
-             ("eval '" + ("git x " * 2800)[:16384] + "'", False),
-             ("eval '" + ("git x " * 2800)[:16384] + "push'", True))
+             ("eval '" + body + " --push'", True),
+             ("eval 'git " + ("x y " * 4096)[:16384] + "'", False),
+             ("eval '" + ("x y " * 4096)[:16384] + " git push'", True))
+    many = ("git x " * 2800)[:16384]        # the older rules' loose patterns are not this row's
+    for text, pushes in ((many, False), (many + " push", True)):
+        t0 = time.perf_counter()
+        assert lineguard._loose_push(text) is pushes
+        assert time.perf_counter() - t0 < 0.2
     for line, pushes in cases:
         p = _payload(box, line, box.a, **HELPER)
         best = 9.0

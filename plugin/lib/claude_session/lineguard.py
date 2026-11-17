@@ -716,10 +716,15 @@ _LOOSE_SWEEP = re.compile(
     _W + r"(?i:git)\s.*?(?:(?<![\w-])(?i:add|stage)\s(?:.*?\s)?(?:-A|--all|-u|--update|"
     r"-[A-Za-z]*[Au][A-Za-z]*|\.|\./|:/|\*)(?=[\s'\"]|\Z)|(?<![\w-])(?i:commit)\s(?:.*?\s)?"
     r"(?:--all|-[A-Za-z]*a[A-Za-z]*)(?=[\s'\"]|\Z))", re.S)
-_LOOSE_PUSH = re.compile(
-    _W + r"(?:(?i:git)\s.*?(?<![\w-])(?i:push|send-pack|http-push)(?![\w-])|"
-    r"(?i:agentik(?:-|\s+)session|claude[-_]session)\s.*?(?<![\w-])gate\s+(?:-\S*\s+)*"
-    r"(?:publish(?![\w-])|land\s(?:.*?\s)?--p(?:u(?:sh?)?)?(?=[\s'\"]|\Z)))", re.S)
+# g10 R4, review 1 fix 7: the push's loose words, each part found once in a segment, so the
+# judge is linear in the text: git, then a push word after it; or the tool, then `gate publish`,
+# or `gate land` and then a `--push` (or its abbreviation) after it
+_LOOSE_GIT = re.compile(_W + r"(?i:git)\s")
+_LOOSE_GIT_PUSH = re.compile(r"(?<![\w-])(?i:push|send-pack|http-push)(?![\w-])")
+_LOOSE_TOOL = re.compile(_W + r"(?i:agentik(?:-|\s+)session|claude[-_]session(?:\.\w+)*)\s")
+_LOOSE_PUBLISH = re.compile(r"(?<![\w-])gate\s+(?:-\S*\s+)*publish(?![\w-])")
+_LOOSE_LAND = re.compile(r"(?<![\w-])gate\s+(?:-\S*\s+)*land\s")
+_LOOSE_FLAG = re.compile(r"(?<=\s)--p(?:u(?:sh?)?)?(?=[\s'\"]|\Z)")
 _SEP = re.compile(r"[;&|\n]")
 
 
@@ -729,6 +734,23 @@ def _loosely(pattern):
     return judge
 
 
+def _loose_push(text: str) -> bool:
+    """g10 R4: whether unread text may hold a push, linear in the text (review 1 fix 7)."""
+    for seg in _SEP.split(text):
+        m = _LOOSE_GIT.search(seg)
+        if m and _LOOSE_GIT_PUSH.search(seg, m.end()):
+            return True
+        m = _LOOSE_TOOL.search(seg)
+        if m is None:
+            continue
+        if _LOOSE_PUBLISH.search(seg, m.end()):
+            return True
+        land = _LOOSE_LAND.search(seg, m.end())
+        if land and _LOOSE_FLAG.search(seg, land.end() - 1):
+            return True
+    return False
+
+
 # ---- R3: the table --------------------------------------------------------------------------------
 
 RULES = (
@@ -736,7 +758,7 @@ RULES = (
     ("init", PRODUCT, _init, _loosely(_LOOSE_INIT)),
     ("identity", PRODUCT, _identity, _loosely(_LOOSE_IDENTITY)),
     ("sweep", "Commits", _sweep, _loosely(_LOOSE_SWEEP)),
-    ("push", "Pushes", _push, _loosely(_LOOSE_PUSH)),         # g10: a helper's call alone (R1)
+    ("push", "Pushes", _push, _loose_push),                   # g10: a helper's call alone (R1)
 )
 _GIT_RULES = frozenset({"init", "identity", "sweep", "push"})
 _HELPER_RULES = frozenset({"push"})
