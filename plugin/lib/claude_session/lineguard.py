@@ -625,21 +625,41 @@ def _homed(v: str, c, k: int, ctx, beside: bool = False):
     return _literal(v, c, k, ctx, beside)
 
 
-def _home_cds(k: int, ctx) -> list:
-    """Review 1 fix 6: the folders an earlier `cd` or `pushd` whose word holds `$HOME` or
-    `${HOME}` may move to, which the reader leaves unknown; each is judged beside the others."""
+_MOVES = ("cd", "pushd", "popd")
+
+
+def _home_cd(c, ctx) -> list:
+    """Review 1 fix 6: the folders a `cd` or `pushd` whose word holds `$HOME` or `${HOME}` may
+    move to, which the reader leaves unknown; [] for any other command."""
     home, out = ctx.env.get("HOME"), []
-    if not home:
+    if not home or c.name not in ("cd", "pushd") or len(c.args) != 1 \
+            or not _HOME.search(c.args[0]):
         return out
-    for c in ctx.cmds[:k]:
-        if c.name in ("cd", "pushd") and len(c.args) == 1 and _HOME.search(c.args[0]):
-            w = _HOME.sub(lambda m: home, c.args[0])
-            if _EXPANDS.search(w) or any(ch in w for ch in "*?[{"):
-                continue
-            for s in [*c.heres, ctx.here]:
-                if s is not None or os.path.isabs(w):
-                    out.append(os.path.normpath(os.path.join(s or "/", w)))
+    w = _HOME.sub(lambda m: home, c.args[0])
+    if _EXPANDS.search(w) or any(ch in w for ch in "*?[{"):
+        return out
+    for s in [*c.heres, ctx.here]:
+        if s is not None or os.path.isabs(w):
+            out.append(os.path.normpath(os.path.join(s or "/", w)))
     return out
+
+
+def _home_cds(k: int, ctx) -> list:
+    """Review 1 fix 6: the `$HOME` folders of the moves before command `k`, each judged beside
+    the others."""
+    return [f for c in ctx.cmds[:k] for f in _home_cd(c, ctx)]
+
+
+def _starts_at(c, k: int, ctx) -> list:
+    """The folders command `k` may start in, None for the folder so far, the reader's unknown.
+    Review 2 F4: where the line's one move before it is a `$HOME` cd, its folder stands in place
+    of that unknown; else each `$HOME` folder is judged beside it (review 1 fix 6)."""
+    moves = [d for d in ctx.cmds[:k] if d.name in _MOVES]
+    if len(moves) == 1 and None in c.heres:
+        fs = _home_cd(moves[0], ctx)
+        if fs:
+            return list(dict.fromkeys(f for s in c.heres for f in (fs if s is None else [s])))
+    return [*c.heres, *_home_cds(k, ctx)]
 
 
 def _bare(name: str):
@@ -655,7 +675,7 @@ def _bare(name: str):
 def _pushed(c, k, ctx, cell, globs):
     """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
     each folder it may run in, the followed variable alone and beside the folder so far."""
-    for start in [*c.heres, *_home_cds(k, ctx)]:
+    for start in _starts_at(c, k, ctx):
         for beside in (False, True):
             top = top_of(_git_dir(start, globs, c, k, ctx, beside), ctx.tops)
             got = ctx.armed(cell, top) if top else None
@@ -701,7 +721,7 @@ def _pushes(c, k, ctx, cell, veil: bool = True):
     ops = _pushing_verb(words, veil) if words is not None else None
     if ops is None:
         return None
-    starts = [s if s is not None else ctx.here for s in c.heres] + [ctx.here] + _home_cds(k, ctx)
+    starts = [s if s is not None else ctx.here for s in _starts_at(c, k, ctx)] + [ctx.here]
     folders = list(starts)
     for op in ops:
         w = _homed(op, c, k, ctx)
