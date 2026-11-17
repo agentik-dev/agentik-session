@@ -524,11 +524,19 @@ def _tool_words(c):
     base, rest = os.path.basename(got[0]).lower(), got[1]
     if base in _TOOLS:
         return rest
-    if base != "agentik" or not rest:
+    if base != "agentik":
         return None
-    if _veiled(rest[0]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
-        return rest
-    return rest[1:] if rest[0] == "session" else None
+    # review 1 fix 8: the door takes no option before a tool's name (`--version`, `-h`, `--help`
+    # stand alone); any other leading flag hands the whole line to `agentik-suite`, which may hand
+    # it on, so flags before `session` are read past
+    i = 0
+    while i < len(rest) and rest[i].startswith("-") and not _veiled(rest[i]):
+        i += 1
+    if i >= len(rest):
+        return None
+    if _veiled(rest[i]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
+        return rest[i:]
+    return rest[i + 1:] if rest[i] == "session" else None
 
 
 def _veiled(w: str) -> bool:

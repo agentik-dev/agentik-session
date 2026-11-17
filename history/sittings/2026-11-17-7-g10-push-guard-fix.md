@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The failing tests, seen red: 9 of 20 red at `62178d8` (fix 1 to 8, and A4's moved line)
-- [ ] Fix 1 to 8: the push rule
+- [x] Fix 1 to 8: the push rule, one commit each; 40 of 40 green with the g8 suite under both venvs
 - [ ] Fix 9: the allow rows; fix 10: the NICE rows; the packet current
 - [ ] `make stamp`, then `make check`, through the gate
 
