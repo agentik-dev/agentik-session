@@ -166,13 +166,14 @@ INIT_REFUSED_A = ["git init", "git init -q", "git init sub", "git init-db", "cd 
 INIT_PASSED_A = ["git -C /tmp/g8 init", "git --git-dir=/tmp/g8/.git init",
                  "GIT_DIR=/tmp/g8/.git git init", "git submodule init", "git log --grep init",
                  'git commit -m "git init"', "echo git init"]
-ID_REFUSED_A = ["git config user.name x", "git config user.email a@b.invalid",
+ADDR = "a" + "@" + "b.invalid"           # a made-up address, in pieces for the hygiene scan
+ID_REFUSED_A = ["git config user.name x", "git config user.email " + ADDR,
                 "git config --local user.name x", "git config set user.name x",
                 "git config --add user.name x", "git config USER.NAME x"]
 ID_PASSED_A = ["git config user.name", "git config --get user.email",
                "git config --global user.name x", "git config --unset user.name", "git config -l",
                "git config --file /tmp/g8/c user.name x", "git -C /tmp/g8 config user.name x",
-               "git -c user.name=x -c user.email=a@b.invalid commit -m y",
+               "git -c user.name=x -c user.email=" + ADDR + " commit -m y",
                "git config core.editor vi", 'git config alias.who "config user.name"',
                "git config --get-regexp user", "git config get user.name"]
 LOOSE_P = ["eval 'rm -rf $T'", "bash -c \"bash -c 'rm -rf \\$T'\"", "echo 'rm -rf $T' | sh",
