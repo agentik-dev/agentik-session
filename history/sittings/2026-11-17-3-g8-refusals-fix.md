@@ -14,12 +14,12 @@
 - [x] F2: tests red at the pin (`f0cb6c7`), then the fix in `_fence`
 - [x] F3: tests red at the pin (`bac4601`), then the fix: `u` and `S` end a commit cluster and take no next word
 - [x] Nine NICE rows from review 1's leads, n271 to n279 (n276 at S3); recordlint's size bound moved the oldest S4 rows, n212 to n227, to `history/NICE-overflow.md`, ids kept
-- [ ] `make stamp` through the gate, its paths committed
+- [x] `make stamp` through the gate: job `20261117-070519-2403`, exit 0; the count 4871 to 4874, the version stays alpha.131; its three paths committed
 - [ ] The quick gates through the gate: `make lint doclint hygiene plugin-version-check validate`
 - [ ] `scripts/hygiene --require-private --commits main..HEAD` exits 0
 
 ## Handover
-- The full `make check` job queued before this fix (`20261117-063929-2397`) is not this builder's; its line is read at the end.
+- The full `make check` job queued before this fix (`20261117-063929-2397`, not this builder's) ran on this fix's head `825e08e`: exit 2, 4872 passed, 2 failed, both the README's test count (4871 against 4874, the three new tests), which the stamp then set.
 
 ## Next act
 F1's tests.
