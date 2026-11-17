@@ -156,3 +156,5 @@ design/packets/akt-run.md: sibling
 DECISIONS.md: sibling
 # sl1: the packet names the ledger file and the public ledger tool's verbs that write it, since its first commit (49fb15c).
 design/packets/sl1-session-ledger.md: sibling
+# gl2: the ledger's gate list names the ledger's file and the ledger tool's verbs, two lines since its first commit (6463686).
+.claude/edit-gates: sibling
