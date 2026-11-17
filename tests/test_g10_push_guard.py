@@ -402,3 +402,80 @@ def test_fix8_the_doors_options(box):
         _refused(box, line, box.a, **HELPER)
     for line in ("agentik --verbose other gate publish", "agentik --verbose session gate status"):
         _passed(box, line, box.a, **HELPER)
+
+
+# ---- review 2: the mend ------------------------------------------------------------------------
+
+def test_r2_f1_a_veiled_operand_of_land(box):
+    for line in ('agentik session gate land repo-a topic "$(git rev-parse HEAD)" /tmp/merge.txt '
+                 "--dry-run",
+                 'agentik session gate land r b "$SHA" "$MSG" --dry-run',
+                 'agentik session gate land "$R" "$B" "$S" "$M" --dry-run',
+                 'agentik session gate land r b s "$T/merge.txt"',
+                 'agentik session gate land r b s "/tmp/merge file.txt" --dry-run',
+                 "agentik session gate land repo-a topic $(git rev-parse HEAD) /tmp/m.txt"):
+        _passed(box, line, box.a, **HELPER)
+    for line in ("agentik session gate land r b s m $P", "agentik session gate land r b s m --pu{sh,}",
+                 'agentik session gate land "$R" b s m "$F"', "agentik session gate land r b s m $'--push'"):
+        _refused(box, line, box.a, **HELPER)
+
+
+def test_r2_f2_a_file_command_and_a_slashed_word(box):
+    for line in ('cp /usr/bin/git "$BOX/bin/"', 'chmod +x /tmp/box/bin/git "$BOX/bin/agentik"',
+                 'cp plugin/bin/agentik "$T/bin/" && git status',
+                 'install -m 755 plugin/bin/agentik-session "$PREFIX/bin/" && git status --short',
+                 'ln -s "$PWD/plugin/bin/agentik" "$T/bin/agentik"; git -C "$T" status',
+                 'shasum plugin/bin/agentik "$OTHER/plugin/bin/agentik"; git status',
+                 'mv x/git "$D/"', 'touch a/git "$D"', 'mkdir -p b/agentik "$D"', 'stat ./git "$X"',
+                 'tar -cf "$O" ./git', 'nice /opt/x/git "$V"', 'nice /opt/x/bin/agentik "$S" gate x'):
+        _passed(box, line, box.a, **HELPER)
+    for line in ("timeout 5 /usr/bin/git push", "timeout 5 git $V", "nice /opt/x/git push",
+                 "nice /opt/x/bin/agentik session gate publish", "nice agentik $S gate publish"):
+        _refused(box, line, box.a, **HELPER)
+
+
+def test_r2_f4_the_one_home_cd(box):
+    for line in ('cd "$HOME/open" && git push', "cd ${HOME}/open; git push origin main",
+                 'cd "$HOME/open" && git -C . push'):
+        _passed(box, line, box.a, **HELPER)
+    for line in ('cd "$HOME/tree/armed" && git push', 'cd "$HOME/tree/armed/sub"; git push'):
+        _refused(box, line, box.o, **HELPER)
+    # two moves: the folder so far is judged beside the `$HOME` one, as before
+    for line in ('cd "$HOME/open"; cd x; git push', 'cd "$HOME/open"; cd "$HOME/plain"; git push'):
+        _refused(box, line, box.a, **HELPER)
+    _refused(box, 'cd "$HOME/plain"; cd "$HOME/tree/armed"; git push', box.o, **HELPER)
+
+
+def test_r2_f5_the_runs_repo(box):
+    for cwd in (box.o, box.p):
+        for line in ("agentik session gate run H/tree/armed -- git push origin main",
+                     "agentik session gate run H/tree/armed --wait -- git push",
+                     "agentik session gate run --label x H/tree/armed -- git push",
+                     'agentik session gate run "$HOME/tree/armed" -- git push',
+                     "agentik session gate run H/tree/armed -- agentik session gate publish ."):
+            _refused(box, line, cwd, **HELPER)
+        for line in ("agentik session gate run H/open -- git push",
+                     "agentik session gate run H/tree/armed -- git status",
+                     "agentik session gate run --label H/tree/armed H/open -- git push"):
+            _passed(box, line, cwd, **HELPER)
+    (box.h / "code").mkdir()
+    (box.h / "code" / "tree").symlink_to(box.h / "tree")
+    _refused(box, "agentik session gate run armed -- git push", box.o, **HELPER)
+    assert _run(box, "agentik session gate run H/tree/armed -- git push", box.o) == {}
+
+
+def test_r2_f6_the_home_folders_once_a_call(box):
+    import time
+    for unit, pushes in (('cd "$HOME/open"; git push; ', False),
+                         ('cd "$HOME/open"; agentik session gate publish .; ', False),
+                         ('cd "$HOME/tree/armed"; git push; ', True)):
+        line = (unit * (32768 // len(unit) + 1))[:32768]
+        line = line[:line.rfind(";") + 1]
+        p = _payload(box, line, box.o, **HELPER)
+        best = 9.0
+        for _ in range(3):
+            t0 = time.perf_counter()
+            out = lineguard.check(p, box.env)
+            best = min(best, time.perf_counter() - t0)
+        assert (_reason(out)[0] == "deny") is pushes, unit
+        assert best < 0.3, (unit, best)
