@@ -13,12 +13,11 @@
 ## Done-ness
 - [x] the packet, the baseline at the pin, and the four NICE rows that ride it
 - [x] R1 to R7: `hooks.session_start`'s watcher line; `tests/test_su3_start_check.py`, green under both venvs
-- [ ] `make stamp` through the gate, committed
+- [x] `make stamp` (job `20261117-153544-2540`, exit 0): alpha.137, the count 4926 to 4964, n255 to n257 moved to the overflow
 - [ ] `make check` through the gate, once, last
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
-- Note: `NICE_TO_HAVE.md` is past recordlint's size bound with the four rows (25,514 B); `make stamp` moves the oldest S4 rows, as its target says.
 - Choice: no cap on the plugin's own SessionStart words (none at the pin); the share alone is cut at its first line's end to fit `MAX_OUT` as an output's only context, its ` and N more` tail kept.
 - Choice: lines are stdout split on newline, control characters (C0, DEL, C1) taken out, ends stripped, blank lines not counted; only blank lines is silence.
 - Choice: on the screen the share comes first, then the hook's own message (`FOLLOW_NOTE` or the refresh's failure) after a newline.
@@ -27,4 +26,4 @@
 - decide, owner: coordinator, for hq design/18 item 7. It says SessionStart's additions run "under the hook's one cap (`MAX_OUT`)"; at `accf29f` no SessionStart road reads `MAX_OUT` and the output is 760 to 850 bytes.
 
 ## Next act
-`make stamp` through the gate, then the one check.
+The one check through the gate.
