@@ -4,6 +4,7 @@ temp HOME with its XDG_* under it, a temp cwd, and no CLAUDE_* variable but thos
 import io
 import json
 import os
+import resource
 import subprocess
 import sys
 import time
@@ -77,10 +78,15 @@ def one(box, key, **extra):
 
 # ---- line 1: describe --json ---------------------------------------------------------------
 
+def _children_cpu():
+    r = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime
+
+
 def test_describe_json(box):
-    t0 = time.monotonic()
+    t0, c0 = time.monotonic(), _children_cpu()
     rc, out, _ = sh(box, "describe", "--json")
-    took = time.monotonic() - t0
+    took, cpu = time.monotonic() - t0, _children_cpu() - c0
     assert rc == 0 and "\x1b" not in out and out.endswith("}\n")
     d = json.loads(out)
     assert DESCRIBE_KEYS <= set(d)
@@ -103,7 +109,9 @@ def test_describe_json(box):
     plugins = [n for n in d["needs"] if n["kind"] == "plugin"]
     assert len(plugins) == 3 and all(n["optional"] and n["why"] for n in plugins)
     assert [n["name"] for n in plugins] == [f"{x['name']}@agentik" for x in doctor.SIBLINGS]
-    assert took < 1.0
+    # ck2 R4: the second is the launcher's own CPU, which workers on the cores beside it do not
+    # stretch as they stretch the wall; the wall keeps a bound a wait in `describe` still breaks.
+    assert cpu < 1.0 and took < 3.0, (cpu, took)
 
 
 def test_describe_refusals(box):
