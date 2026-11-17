@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] R5, the tests first: `tests/test_is2_first_read.py`, 9 of 15 failing at the pin (the six that pass pin what stays: a session's unseen mod a warn, on PATH as today, the first form alone, a ps that cannot start)
-- [ ] R1: the doctor's `mod` row with no session on the machine a note
+- [x] R1: the doctor's `mod` row with no session on the machine a note (`not seen: no session has run on this machine yet`); a session's unseen mod still a warn, its detail as at the pin
 - [ ] R2: install-cli off PATH ends on the line that mends this terminal
 - [ ] R4: `prune.processes()` tries procps's BSD form where the first exits non-zero
 - [ ] `make stamp` through the gate
