@@ -56,8 +56,12 @@ def top_of(folder, seen: dict):
 
 
 def _fence(line: str):
+    """A fence's mark at a line's start, or None; a backtick mark whose rest of line holds a
+    backtick is a code span and opens no fence (CommonMark 4.5; review 1 F2)."""
     m = re.match(r" {0,3}(`{3,}|~{3,})", line)
-    return m.group(1) if m else None
+    if not m or (m.group(1)[0] == "`" and "`" in line[m.end():]):
+        return None
+    return m.group(1)
 
 
 def _title_in(path: str, title: str):
