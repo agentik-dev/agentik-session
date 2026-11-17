@@ -136,8 +136,14 @@ tests/test_ss4_quiet_values.py: sibling
 tests/test_ss3_true_lines.py: sibling
 # g8a: the packet names the ledger file a sibling plugin reads, one line since its first commit (e28379e).
 design/packets/g8a-reader-parts.md: sibling
-# g8: the identity rule's tests named a made-up address at the reserved `.invalid` name, two lines in e9ae475 (b23b0b9 writes it in pieces).
-tests/test_g8_refusals.py: email
+# g8: the identity rule's tests named a made-up address at the reserved `.invalid` name, two lines in e9ae475 (b23b0b9 writes it in pieces); g10 R7: the product refusals' words name this repo's own ledger file, one line since d702844.
+tests/test_g8_refusals.py: email,sibling
+# g10: the product refusals name this repo's own ledger file (R7), and the push rule knows the tool's own old command name (R3), one line each since f49cb2d and d702844.
+plugin/lib/claude_session/lineguard.py: sibling,renamed
+# g10: the tests hold the same two words, R7's ledger file and R3's old command name, since 42f7dcf; and `home`, since one test comment of 86aa679 named a made-up home path (reworded in 2b90758, still in the branch's history).
+tests/test_g10_push_guard.py: sibling,renamed,home
+# g10: the packet names this repo's own ledger file (§1 and A9), since its first commit (408ac16).
+design/packets/g10-push-guard.md: sibling
 # land4: the packet names the ledger file a sibling plugin reads, one line in 3f1a1c6 and c5ab5a9 (631b284 drops it).
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).

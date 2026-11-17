@@ -17,7 +17,7 @@ from . import instructionguard, resolver, shellreader, store
 
 HEAD = "agentik-session: refused by"
 PRODUCT = "product"                       # armed in every session (question 53: on everywhere)
-PLUGIN = "a rule of the agentik-session plugin, in every session"
+PLUGIN = "entry 11 of agentik-session's DECISIONS.md, in every session"   # g10 R7
 STRICT, LOOSE = instructionguard.STRICT, instructionguard.LOOSE
 ARM_BYTES = 262144                        # R7: the first bytes of each file read for a title
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
@@ -25,11 +25,18 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 # ---- R5: the first look ---------------------------------------------------------------------
 
 
-def looks(command: str) -> bool:
+def looks(command: str, helper: bool = False) -> bool:
     """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind,
-    once each backslash-newline is taken out. A line it passes is never read."""
+    once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too, and each
+    word read again with its quotes and backslashes taken out (review 1 fix 3). A line it passes
+    is never read."""
     t = command.replace("\\\n", "").lower()
-    return "git" in t or "rm" in t
+    if "git" in t or "rm" in t:
+        return True
+    if not helper:
+        return False
+    t = t.replace("'", "").replace('"', "").replace("\\", "")
+    return "git" in t or "rm" in t or "gate" in t
 
 
 # ---- R6, R7: the folder, the checkout, the arming ---------------------------------------------
@@ -123,7 +130,7 @@ class _Ctx:
     def __init__(self, payload, env, command, here, cmds):
         self.payload, self.env, self.command, self.here, self.cmds = (payload, env, command,
                                                                       here, cmds)
-        self.tops, self.arms, self.passes = {}, {}, []
+        self.tops, self.arms, self.passes, self.plan = {}, {}, [], None
         self.assigns = _assigns(cmds)
 
     def armed(self, cell: str, top):
@@ -436,12 +443,354 @@ def _sweep(c, k, ctx, cell):
             if why:
                 ctx.passes.append(why)
                 return None
+    return _found(c, k, ctx, cell, g[0])
+
+
+def _found(c, k, ctx, cell, globs):
+    """R12's finding: (top, arming) of the first armed checkout a git command may act on, from
+    each folder it may run in, the followed variable alone and beside the folder so far."""
     for start in c.heres:
         for beside in (False, True):
-            top = top_of(_target(start, g[0], c, k, ctx, beside), ctx.tops)
+            top = top_of(_target(start, globs, c, k, ctx, beside), ctx.tops)
             got = ctx.armed(cell, top) if top else None
             if got:
                 return (top, got)
+    return None
+
+
+# ---- g10: the push rule -------------------------------------------------------------------------
+
+_PUSHES = frozenset({"push", "send-pack", "http-push"})
+_TOOLS = frozenset({"agentik-session", "claude-session"})
+_SHELL_NAMES = frozenset({"sh", "bash", "zsh", "dash"})
+_PY_NAME = re.compile(r"python[0-9.]*\Z")
+_LAND_PUSH = frozenset({"--p", "--pu", "--pus", "--push"})    # what argparse takes, measured
+_LAND_TAKES = ("--session", "--wall")                         # land's options with an operand
+_HOME = re.compile(r"\$(?:HOME(?![A-Za-z0-9_])|\{HOME\})")
+_BRACE_LIST = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
+# review 1 fix 1: a command word another command may run, by its base name (a python name too)
+_STARTS = frozenset({"git", "agentik", *_TOOLS, *_SHELL_NAMES})
+# the commands whose words are data, never a command they run; any other command's are read
+_PRINTERS = frozenset({"echo", "printf", "print", "grep", "egrep", "fgrep", "rg", "ag", "ack",
+                       "sed", "awk", "cat", "head", "tail", "less", "more", "wc", "sort", "uniq",
+                       "tee", "ls", "test", "[", "[[", ":", "true", "false", "man", "which",
+                       "type", "whence", "where", "help", "pbcopy", "say", "logger", "jq",
+                       "printenv", "export", "local", "readonly", "declare", "typeset", "read",
+                       "alias", "unalias", "basename", "dirname", "realpath", "readlink", "cut",
+                       "tr", "diff", "cmp",
+                       # review 2 F2: the file commands, whose paths are data
+                       "cp", "mv", "ln", "install", "chmod", "touch", "mkdir", "shasum", "stat",
+                       "tar"})
+
+
+def _py_script(args: list):
+    """(the script word, the words after it) of a python's arguments; `-m claude_session` or
+    `-m claude_session.<x>` reads as the tool. None for `-c`, another module, or a script from
+    the input."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if not a.startswith("-") or a == "-":
+            break
+        j = i + 1
+        if not a.startswith("--"):
+            for n, ch in enumerate(a[1:], 2):
+                if ch == "c":
+                    return None
+                if ch in "mWX":
+                    op = a[n:] or (args[j] if j < len(args) else "")
+                    j += 0 if a[n:] else 1
+                    if ch == "m":                       # review 1 fix 5: any of its modules
+                        tool = op == "claude_session" or op.startswith("claude_session.")
+                        return ("agentik-session", args[j:]) if tool else None
+                    break
+        i = j
+    return (args[i], args[i + 1:]) if i < len(args) and args[i] != "-" else None
+
+
+def _tool_words(c, veil: bool = True):
+    """R3: the words after the session tool's own word(s), or None for a command that runs no
+    session tool: its command word, or an interpreter's script word, by its base name. Without
+    `veil` (review 2 F2), a word the shell expands is read as no tool's word."""
+    name = c.name.lower()
+    if _PY_NAME.match(name):
+        got = _py_script(c.args)
+    elif name in _SHELL_NAMES:
+        how, i = shellreader._script(c.args)
+        got = (c.args[i], c.args[i + 1:]) if how == "file" else None
+    else:
+        got = (c.name, c.args)
+    if got is None:
+        return None
+    base, rest = os.path.basename(got[0]).lower(), got[1]
+    if base in _TOOLS:
+        return rest
+    if base != "agentik":
+        return None
+    # review 1 fix 8: the door takes no option before a tool's name (`--version`, `-h`, `--help`
+    # stand alone); any other leading flag hands the whole line to `agentik-suite`, which may hand
+    # it on, so flags before `session` are read past
+    i = 0
+    while i < len(rest) and rest[i].startswith("-") and not _veiled(rest[i]):
+        i += 1
+    if i >= len(rest):
+        return None
+    if _veiled(rest[i]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
+        return rest[i:] if veil else None
+    return rest[i + 1:] if rest[i] == "session" else None
+
+
+def _veiled(w: str) -> bool:
+    """Review 1 fix 2: a word the shell expands at a verb's place: it holds `$`, a backtick or a
+    brace list, or a space (the reader's text of a backtick substitution)."""
+    return bool(_EXPANDS.search(w) or _BRACE_LIST.search(w)) or any(ch.isspace() for ch in w)
+
+
+def _takes(w: str) -> bool:
+    return len(w) > 2 and "=" not in w and any(o.startswith(w) for o in _LAND_TAKES)
+
+
+def _pushing_verb(words: list, veil: bool = True):
+    """R3: the repo operands of `gate publish`, or of `gate land` with `--push` (or an
+    abbreviation argparse takes) before a `--`, each at the verb's position as the tool's parser
+    places it; None for any other verb. Without `veil` (review 2 F2), a word the shell expands is
+    never the verb's or the flag's."""
+    i = 0
+    for want in ("gate", None):
+        while i < len(words) and words[i].startswith("-"):
+            if _veiled(words[i]):
+                return [] if veil else None             # review 1 fix 2: a word the shell expands
+            i += 1                                      # global and gate's options: no operand
+        if i < len(words) and _veiled(words[i]):
+            return [] if veil else None
+        if i >= len(words) or (want and words[i] != want):
+            return None
+        i += 1
+    verb, rest = words[i - 1], words[i:]
+    if verb not in ("publish", "land"):
+        return None
+    ops, push, done, j = [], False, False, 0
+    while j < len(rest):
+        w = rest[j]
+        if done or not w.startswith("-") or w == "-":
+            ops.append(w)
+        elif w == "--":
+            done = True
+        elif w in _LAND_PUSH:
+            push = True
+        if veil and not done and _veiled(w) and (w.startswith("-") or len(ops) > 4):
+            push = True             # review 1 fix 2, review 2 F1: a flag, or past land's 4 operands
+        elif verb == "land" and _takes(w):
+            j += 1
+        j += 1
+    if verb == "publish":
+        return ops
+    return ops[:1] if push else None
+
+
+def _pathlike(w: str) -> bool:
+    return "/" in w or w in (".", "..") or w.startswith("~")
+
+
+def _git_dir(start, globs, c, k: int, ctx, beside: bool):
+    """Review 1 fix 4: the folder whose repository a push acts on from one starting folder: the
+    `-C` folders, then `--git-dir` or `GIT_DIR` (its `.git` read as the folder above); a work
+    tree is never judged. None where git stops; `beside` as in `_literal`."""
+    f = start if start is not None and os.path.isdir(start) else ctx.here
+    for o, v in globs:
+        if o != "-C" or v is None:
+            continue
+        w = _homed(v, c, k, ctx, beside)
+        if w is None:
+            continue
+        f = os.path.normpath(os.path.join(f, w))
+        if not os.path.isdir(f):
+            return None
+    gd = _named(globs, c, "--git-dir", "GIT_DIR=")
+    gd = None if gd is None else _homed(gd, c, k, ctx, beside)
+    if gd is None:
+        return f
+    g = os.path.normpath(os.path.join(f, gd))
+    return os.path.dirname(g) if os.path.basename(g) == ".git" else g
+
+
+def _homed(v: str, c, k: int, ctx, beside: bool = False):
+    """Review 1 fix 6: `_literal` with `$HOME` and `${HOME}` read from the environment first."""
+    home = ctx.env.get("HOME")
+    if home and _HOME.search(v):
+        v = _HOME.sub(lambda m: home, v)
+    return _literal(v, c, k, ctx, beside)
+
+
+_MOVES = ("cd", "pushd", "popd")
+
+
+def _home_cd(c, ctx) -> list:
+    """Review 1 fix 6: the folders a `cd` or `pushd` whose word holds `$HOME` or `${HOME}` may
+    move to, which the reader leaves unknown; [] for any other command."""
+    home, out = ctx.env.get("HOME"), []
+    if not home or c.name not in ("cd", "pushd") or len(c.args) != 1 \
+            or not _HOME.search(c.args[0]):
+        return out
+    w = _HOME.sub(lambda m: home, c.args[0])
+    if _EXPANDS.search(w) or any(ch in w for ch in "*?[{"):
+        return out
+    for s in [*c.heres, ctx.here]:
+        if s is not None or os.path.isabs(w):
+            out.append(os.path.normpath(os.path.join(s or "/", w)))
+    return out
+
+
+def _plan(ctx):
+    """Review 2 F6, once a call: the line's distinct `$HOME` folders in order; for each command,
+    how many of them stand before it and how many moves; the first move's folders."""
+    if ctx.plan is None:
+        seen, upto, moves, first, n = {}, [], [], [], 0
+        for d in ctx.cmds:
+            upto.append(len(seen))
+            moves.append(n)
+            if d.name in _MOVES:
+                fs = _home_cd(d, ctx)
+                seen.update(dict.fromkeys(fs))
+                first = fs if n == 0 else first
+                n += 1
+        ctx.plan = (list(seen), upto, moves, first)
+    return ctx.plan
+
+
+def _starts_at(c, k: int, ctx) -> list:
+    """The distinct folders command `k` may start in, None for the folder so far, the reader's
+    unknown. Review 2 F4: where the line's one move before it is a `$HOME` cd, its folder stands
+    in place of that unknown; else each `$HOME` folder is judged beside it (review 1 fix 6)."""
+    homes, upto, moves, first = _plan(ctx)
+    if moves[k] == 1 and first and None in c.heres:
+        return list(dict.fromkeys(f for s in c.heres for f in (first if s is None else [s])))
+    return list(dict.fromkeys([*c.heres, *homes[:upto[k]]]))
+
+
+def _bare(name: str):
+    """Review 1 fix 6 (L1): a bare repo operand as the verbs resolve it (`land.resolve_repo`),
+    or None where it resolves to no one checkout."""
+    from . import land                       # only for a bare operand: the hook seldom pays it
+    try:
+        return land.resolve_repo(name)
+    except Exception:                                   # noqa: BLE001 - a Red: judged where it stands
+        return None
+
+
+def _pushed(c, k, ctx, cell, globs, extra=()):
+    """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
+    each folder it may run in (`extra`: a `gate run`'s repo), the followed variable alone and
+    beside the folder so far."""
+    done = set()
+    for start in dict.fromkeys([*_starts_at(c, k, ctx), *extra]):
+        for beside in (False, True):
+            f = _git_dir(start, globs, c, k, ctx, beside)
+            if f in done:
+                continue                                # review 2 F6: each folder judged once
+            done.add(f)
+            top = top_of(f, ctx.tops)
+            got = ctx.armed(cell, top) if top else None
+            if got:
+                return (top, got)
+    return None
+
+
+def _starts(w: str) -> bool:
+    """Review 1 fix 1: whether a word may be the command word of a command another one runs: by
+    its base name git, the tool, the door, a python or a shell; a word with a space never is."""
+    if not w or any(ch.isspace() for ch in w):
+        return False
+    b = os.path.basename(w).lower()
+    return b in _STARTS or bool(_PY_NAME.match(b))
+
+
+def _push(c, k, ctx, cell):
+    """g10 R2, R3, review 1 fix 1: the command itself, then, unless it prints its words, each of
+    its words that may start a command, judged with the words after it as that command."""
+    got = _pushes(c, k, ctx, cell)
+    if got or c.name.lower() in _PRINTERS:
+        return got
+    extra = None
+    for i, w in enumerate(c.args):
+        if _starts(w):                      # review 2 F2: after a slashed word, a veil is data
+            if extra is None:
+                extra = _run_folders(c, k, ctx)
+            got = _pushes(c._replace(name=os.path.basename(w), args=c.args[i + 1:]), k, ctx, cell,
+                          veil="/" not in w, extra=extra)
+            if got:
+                return got
+    return None
+
+
+_RUN_TAKES = ("--session", "--lock", "--wall", "--label")     # gate run's options with an operand
+
+
+def _run_repo(words: list):
+    """Review 2 F5: the repo operand of the tool's `gate run` (the folder its command runs in),
+    or None."""
+    i = 0
+    for want in ("gate", "run"):
+        while i < len(words) and words[i].startswith("-") and words[i] != "--":
+            i += 1
+        if i >= len(words) or words[i] != want:
+            return None
+        i += 1
+    while i < len(words) and words[i] != "--":
+        w = words[i]
+        if not w.startswith("-") or w == "-":
+            return w
+        named = [o for o in (*_RUN_TAKES, "--wait", "--help") if o.startswith(w)]
+        if "=" not in w and len(w) > 2 and named and all(o in _RUN_TAKES for o in named):
+            i += 1
+        i += 1
+    return None
+
+
+def _run_folders(c, k, ctx) -> list:
+    """Review 2 F5: for a `gate run`, its repo operand's folders, a path from each folder the
+    command may start in, a bare name as the verbs resolve it; [] for any other command."""
+    words = _tool_words(c)
+    repo = _run_repo(words) if words is not None else None
+    w = _homed(repo, c, k, ctx) if repo else None
+    if not w:
+        return []
+    if not _pathlike(w):
+        return [f for f in (_bare(w),) if f]
+    starts = dict.fromkeys(s if s is not None else ctx.here for s in _starts_at(c, k, ctx))
+    return [os.path.normpath(os.path.join(s, w)) for s in starts if s is not None]
+
+
+def _pushes(c, k, ctx, cell, veil: bool = True, extra=()):
+    """g10 R2, R3: a git push or its plumbing, or the tool's `gate publish` or `gate land
+    --push`, in an armed checkout; `veil` as in `_tool_words`, `extra` as in `_pushed`."""
+    g = _git(c)
+    if g is not None:
+        sub = g[1].lower()
+        if (veil and _veiled(sub)) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
+            return _pushed(c, k, ctx, cell, g[0], extra)
+        return None
+    words = _tool_words(c, veil)
+    ops = _pushing_verb(words, veil) if words is not None else None
+    if ops is None:
+        return None
+    starts = [s if s is not None else ctx.here for s in _starts_at(c, k, ctx)] + [ctx.here] + \
+        list(extra)
+    folders = list(starts)
+    for op in ops:
+        w = _homed(op, c, k, ctx)
+        if w is not None and _pathlike(w):
+            folders += [os.path.normpath(os.path.join(s, w)) for s in starts if s is not None]
+        elif w:
+            folders.append(_bare(w))
+    for f in dict.fromkeys(folders):
+        top = top_of(f, ctx.tops)
+        got = ctx.armed(cell, top) if top else None
+        if got:
+            return (top, got)
     return None
 
 
@@ -458,6 +807,15 @@ _LOOSE_SWEEP = re.compile(
     _W + r"(?i:git)\s.*?(?:(?<![\w-])(?i:add|stage)\s(?:.*?\s)?(?:-A|--all|-u|--update|"
     r"-[A-Za-z]*[Au][A-Za-z]*|\.|\./|:/|\*)(?=[\s'\"]|\Z)|(?<![\w-])(?i:commit)\s(?:.*?\s)?"
     r"(?:--all|-[A-Za-z]*a[A-Za-z]*)(?=[\s'\"]|\Z))", re.S)
+# g10 R4, review 1 fix 7: the push's loose words, each part found once in a segment, so the
+# judge is linear in the text: git, then a push word after it; or the tool, then `gate publish`,
+# or `gate land` and then a `--push` (or its abbreviation) after it
+_LOOSE_GIT = re.compile(_W + r"(?i:git)\s")
+_LOOSE_GIT_PUSH = re.compile(r"(?<![\w-])(?i:push|send-pack|http-push)(?![\w-])")
+_LOOSE_TOOL = re.compile(_W + r"(?i:agentik(?:-|\s+)session|claude[-_]session(?:\.\w+)*)\s")
+_LOOSE_PUBLISH = re.compile(r"(?<![\w-])gate\s+(?:-\S*\s+)*publish(?![\w-])")
+_LOOSE_LAND = re.compile(r"(?<![\w-])gate\s+(?:-\S*\s+)*land\s")
+_LOOSE_FLAG = re.compile(r"(?<=\s)--p(?:u(?:sh?)?)?(?=[\s'\"]|\Z)")
 _SEP = re.compile(r"[;&|\n]")
 
 
@@ -467,6 +825,23 @@ def _loosely(pattern):
     return judge
 
 
+def _loose_push(text: str) -> bool:
+    """g10 R4: whether unread text may hold a push, linear in the text (review 1 fix 7)."""
+    for seg in _SEP.split(text):
+        m = _LOOSE_GIT.search(seg)
+        if m and _LOOSE_GIT_PUSH.search(seg, m.end()):
+            return True
+        m = _LOOSE_TOOL.search(seg)
+        if m is None:
+            continue
+        if _LOOSE_PUBLISH.search(seg, m.end()):
+            return True
+        land = _LOOSE_LAND.search(seg, m.end())
+        if land and _LOOSE_FLAG.search(seg, land.end() - 1):
+            return True
+    return False
+
+
 # ---- R3: the table --------------------------------------------------------------------------------
 
 RULES = (
@@ -474,8 +849,10 @@ RULES = (
     ("init", PRODUCT, _init, _loosely(_LOOSE_INIT)),
     ("identity", PRODUCT, _identity, _loosely(_LOOSE_IDENTITY)),
     ("sweep", "Commits", _sweep, _loosely(_LOOSE_SWEEP)),
+    ("push", "Pushes", _push, _loose_push),                   # g10: a helper's call alone (R1)
 )
-_GIT_RULES = frozenset({"init", "identity", "sweep"})
+_GIT_RULES = frozenset({"init", "identity", "sweep", "push"})
+_HELPER_RULES = frozenset({"push"})
 
 
 # ---- R15: the reasons -----------------------------------------------------------------------------
@@ -500,6 +877,9 @@ def _reason(name: str, cell: str, top, got, how: str) -> str:
         text = (f"{HEAD} the identity rule, {by}: this sets a git identity in the checkout "
                 f"{top}. Pass it per command: `git -c user.name=<name> -c user.email=<address> "
                 "commit ...`.")
+    elif name == "push":
+        text = (f"{HEAD} the push rule, {by}, arms it for the checkout {top}: a helper never "
+                "pushes. Hand back the branch and its head; the sitting that started you pushes.")
     else:
         text = (f"{HEAD} the sweep rule, {by}, arms it for the checkout {top}: this adds or "
                 "commits every changed file there, another sitting's included. Add paths by "
@@ -544,7 +924,7 @@ def failed(payload: dict, env, exc: BaseException) -> dict:
     line; a line the look passes is passed. Never raises."""
     try:
         command = _command(payload)
-        if command is None or not looks(command):
+        if command is None or not looks(command, bool(payload.get("agent_id"))):
             return {}
         name = type(exc).__name__
         _mark(payload, env, ["error"])
@@ -564,9 +944,9 @@ def _judge(payload: dict, env, command: str) -> list:
     ctx = _Ctx(payload, env, command, here, cmds)
     if here is None and "git" in command.lower():
         ctx.passes.append("no absolute cwd: the git rules judge nothing")
-    hits = []
+    hits, helper = [], bool(payload.get("agent_id"))
     for name, cell, judge, loose in RULES:
-        if name in _GIT_RULES and here is None:
+        if (name in _GIT_RULES and here is None) or (name in _HELPER_RULES and not helper):
             continue
         got = None
         for k, c in enumerate(cmds):
@@ -593,7 +973,7 @@ def _judge(payload: dict, env, command: str) -> list:
 def check(payload: dict, env) -> dict:
     """The rules' answer for one call: {} or one `deny` (R2). An error refuses (R14)."""
     command = _command(payload)
-    if command is None or not looks(command):
+    if command is None or not looks(command, bool(payload.get("agent_id"))):
         return {}
     try:
         hits = _judge(payload, env, command)
