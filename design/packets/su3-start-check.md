@@ -5,7 +5,7 @@
 | from | the hq coordinator, 2026-11-17, brief su3-start-check, rulings R1 to R7; hq design/18 §3.2 item 7 and §11's R1-F5, R1-F7, R1-F8, R1-F14; this repo's entry 12 |
 | pin | `accf29f` on main (gl2-gate-list's merge). Worktree `.claude/worktrees/su3-start-check`, branch `su3-start-check`; the two venvs linked |
 | wall | this worktree; no push, `--amend`, rebase, merge, install or plugin update; `make` only through the gate queue; no `claude` started by a test; no relay verb; no test reads the live state, the live user file or runs the live launcher (a stub in a temp `HOME`); `lineguard.py` and `tests/test_rp7_guard.py` untouched (another row's); `DECISIONS.md` unchanged |
-| may touch | `plugin/lib/claude_session/hooks.py`, `tests/test_su3_start_check.py` (new), `NICE_TO_HAVE.md` (the four rows below), this packet, `history/sittings/2026-11-17-10-su3-start-check.md`; the version, the README's count, the sidecar and `history/NICE-overflow.md` by `make stamp` alone |
+| may touch | `plugin/lib/claude_session/hooks.py`, `tests/test_su3_start_check.py` (new), `NICE_TO_HAVE.md` (the four rows below), `.hygiene-allow` (this packet's row, beside its kin, for the coordinator to rule), this packet, `history/sittings/2026-11-17-10-su3-start-check.md`; the version, the README's count, the sidecar and `history/NICE-overflow.md` by `make stamp` alone |
 | verify | `make stamp`, then `make check`, by the gate queue, once each, last |
 | acceptance | §3; `PY -m pytest -q tests/test_su3_start_check.py tests/test_hook_session_start.py` under `.venv` and `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |

@@ -144,6 +144,8 @@ plugin/lib/claude_session/lineguard.py: sibling,renamed
 tests/test_g10_push_guard.py: sibling,renamed,home
 # g10: the packet names this repo's own ledger file (§1 and A9), since its first commit (408ac16).
 design/packets/g10-push-guard.md: sibling
+# su3: the packet names this repo's own ledger file in its wall row, one line since its first commit (742aaa1).
+design/packets/su3-start-check.md: sibling
 # land4: the packet names the ledger file a sibling plugin reads, one line in 3f1a1c6 and c5ab5a9 (631b284 drops it).
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
