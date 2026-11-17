@@ -14,7 +14,8 @@
 - [x] C3: the su3 allow row and its comment sit after the akt-run row
 - [x] C4: n312 to n314 (F2, F3, F4)
 - [x] C5: packet section 4a
-- [ ] `make stamp`, then `make check`, each through the gate queue
+- [x] `make stamp` (job `20261117-155651-2546`, exit 0): alpha.137, the count 4964 to 4967, n258 to n261 moved to the overflow
+- [ ] `make check` through the gate queue
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
