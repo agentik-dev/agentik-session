@@ -142,8 +142,12 @@ tests/test_g8_refusals.py: email,sibling
 plugin/lib/claude_session/lineguard.py: sibling,renamed
 # g10: the tests hold the same two words, R7's ledger file and R3's old command name, since 42f7dcf; and `home`, since one test comment of 86aa679 named a made-up home path (reworded in 2b90758, still in the branch's history).
 tests/test_g10_push_guard.py: sibling,renamed,home
+# rp7: the tests name this repo's own ledger file, to show the issue rule's reason cites no entry, two lines since bd805e1.
+tests/test_rp7_guard.py: sibling
 # g10: the packet names this repo's own ledger file (§1 and A9), since its first commit (408ac16).
 design/packets/g10-push-guard.md: sibling
+# rp7: the packet names this repo's own ledger file (§1, entry 11 carried verbatim), one line since its first commit (5209ce9).
+design/packets/rp7-guard.md: sibling
 # land4: the packet names the ledger file a sibling plugin reads, one line in 3f1a1c6 and c5ab5a9 (631b284 drops it).
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
