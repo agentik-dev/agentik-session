@@ -306,6 +306,9 @@ def _check_launcher(env, plugins) -> Check:
     if ours is not None and theirs < ours:
         return Check("launcher", True, f"{path} is {version}, older than the plugin's {plugin}; the "
                      f"next session's start moves it, or {remedy}", warn=True, remedy=cmd)
+    if ours is not None and theirs > ours:     # row up3s-session-forward R5: newer, a note
+        return Check("launcher", True, f"{path} is {version}, newer than the plugin's {plugin}; "
+                     "install-cli leaves it as it is", note=True)
     return Check("launcher", True, f"{version} at {path}")
 
 

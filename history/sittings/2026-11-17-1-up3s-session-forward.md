@@ -13,11 +13,14 @@
 - [x] the packet, its baseline measured at the pin
 - [x] R4: commons' `scripts/sync` (main `626a3f0`) against the worktree: four files moved (the door 0.3.0 to 0.3.1 in two places, `agentik_install.py`, the sums), every placed file `cmp`-equal; `test_ak10d_launcher` R2 moved: commons now reads the old form as session's own
 - [x] the failing tests: `tests/test_up3s_session_forward.py`, 6 of 12 failing at the pin (the six that pass pin what stays: an older command placed with the PATH lines, a gone tree, a hand's file, the refresh, the doctor's older and equal rows)
-- [ ] R1, R2, R3, R5
+- [x] R1: `install(prefix, env, force=False)` leaves a command install-cli wrote (`_ours`), its runner standing and `newer` than this tree (`_ahead`), checked before the lock and again under it; the result's `kept`; `_behind` and `_ahead` share `newer`, by `order`
+- [x] R2: `install-cli --force`; kept, one line in commons' words, exit 0, nothing written
+- [x] R3: the one caller of `install()` is `cmd_install_cli` (the verb, behind `/session:install-cli`, `make install`, a launcher's `is gone` remedy); the SessionStart refresh calls `_locked_install`, as today
+- [x] R5: the doctor's `launcher` row compares; a newer command is a note, `newer than the plugin's`; older as at the pin
 - [ ] `make stamp`, then `make check`, through the gate; the hygiene scan of the commits
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R1, R2, R3, R5.
+`make stamp`, then `make check`, through the gate.
