@@ -8,7 +8,8 @@ so both count. Deleting every other tree pulled the code out from under it. The 
 
   - the new tree (its mtime set to now, so a re-install of an old tree counts as newest);
   - every entry a running process names in its command line or its environment, read from
-    `ps -axwwE -o pid=,command=` (macOS shows the environment of the user's own processes);
+    `ps -axwwE -o pid=,command=` (macOS shows the environment of the user's own processes),
+    and where that exits non-zero `ps axwwe -o pid=,command=` (procps's BSD form, on Linux);
     each absolute path there is compared by realpath, so a spelling through a symlink
     (`/tmp` for `/private/tmp`) or with a doubled slash still names its tree;
   - the newest KEEP entries by mtime (default 3): they cover a launcher that read the old
@@ -43,17 +44,30 @@ from pathlib import Path
 PROBE = "CLAUDE_SESSION_PRUNE_PROBE"
 
 
+# The process list's two forms, as the suite's canonical module reads it (is2-first-read R4):
+# BSD's and macOS's `-axwwE`, then procps's BSD form, whose `e` appends the environment to
+# `command`; procps refuses `E` in both of its parsers.
+PS_FORMS = ("-axwwE", "axwwe")
+
+
 def processes(ps, timeout=60):
-    """(every process's command line and environment as one text, None) or (None, why)."""
+    """(every process's command line and environment as one text, None) or (None, why). The second
+    form runs only where the first exits non-zero, and `why` is then the second's: `<ps> exited
+    <n>`, and the first line ps wrote on stderr. A ps that cannot start or times out runs once."""
     token = secrets.token_hex(8)
-    try:
-        r = subprocess.run([ps, "-axwwE", "-o", "pid=,command="], capture_output=True,
-                           text=True, errors="replace", timeout=timeout,
-                           env=dict(os.environ, **{PROBE: token}))
-    except (OSError, subprocess.SubprocessError) as e:
-        return None, f"{ps}: {e}"
-    if r.returncode != 0:
-        return None, f"{ps} exited {r.returncode}"
+    for form in PS_FORMS:
+        try:
+            r = subprocess.run([ps, form, "-o", "pid=,command="], capture_output=True,
+                               text=True, errors="replace", timeout=timeout,
+                               env=dict(os.environ, **{PROBE: token}))
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, f"{ps}: {e}"
+        if r.returncode == 0:
+            break
+    else:
+        said = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), "")
+        said = said[:200].encode("utf-8", "surrogateescape").decode("ascii", "backslashreplace")
+        return None, f"{ps} exited {r.returncode}" + (f": {said}" if said else "")
     if f"{PROBE}={token}" not in r.stdout:
         return None, "no process environment is visible"
     return r.stdout, None
