@@ -14,13 +14,14 @@
 - [x] F1: the cold call's CPU and a warm call's 1.0 s of wall; the test of the test red at `f64adef`, green after
 - [x] L1, L6: `WORKERS = 4`; help names 4 and python3.12; two tests in `tests/test_ck2_workers.py`
 - [x] L8: the packet's §4 (each row green or red, the 8 row, A1's three, why 4) and the first record's A1
-- [ ] NICE: five rows, the file under its bound
+- [x] NICE: n297 to n301; n231 leaves (F1 lands it); n228, n230 and n232 to n234 moved to `history/NICE-overflow.md`
 - [ ] `make stamp`, then one `make check`, through the gate
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 - Choice: the test of the test is a made-up launcher, `sleep 1.5` then the plugin's own; nothing under `plugin/` is touched.
+- Choice: the new ids start at n297, past the n282 to n296 the g10 branch holds; the landing renumbers.
 - Choice: help fills in `$(WORKERS)` and `$(VENV_PYTHON)` alone; `$(PREFIX)` in install's line is as before.
 
 ## Next act
-NICE, then the stamp and the check.
+The stamp and the check, through the gate.
