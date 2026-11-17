@@ -30,7 +30,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import (budget, charter, gate, harness, install, instructionguard, instructions, ledger,
-               meter, policystore, resolver, rules, sessionconfig, store, workflowguard)
+               lineguard, meter, policystore, resolver, rules, sessionconfig, store,
+               workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
@@ -719,6 +720,13 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             return _deny(warn, f"agentik-session: denied a {_token(tool)} spawn before launch.")
         if posture not in ("signal", "ask"):
             warn = None
+    if tool == "Bash":               # g8: the stray-write refusals, a helper's too, no call opened
+        try:
+            line = lineguard.check(payload, os.environ if env is None else env)
+        except Exception as e:                          # noqa: BLE001  (R14: an error refuses)
+            line = lineguard.failed(payload, os.environ if env is None else env, e)
+        if line:
+            return line
     if tool in instructionguard.TOOLS:   # g2b: an edit or a Bash write of a gated file is refused
         try:
             guard = instructionguard.check(payload, os.environ if env is None else env)

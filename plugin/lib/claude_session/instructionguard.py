@@ -505,17 +505,19 @@ def _text(v) -> str | None:
     return v[:TEXT_CAP] if isinstance(v, str) else None
 
 
-def log(payload: dict, env, decision: str, path, why=None) -> None:
+def log(payload: dict, env, decision: str, path, why=None, rule=None) -> None:
     """One line in `sessions/<sid>/guard.jsonl` (0600); a line that would carry the log past
-    LOG_CAP is not written. Never raises."""
+    LOG_CAP is not written. Never raises. `rule` (g8: the rules' names) is written only when
+    given."""
     try:
         sid = payload.get("session_id")
         if not (isinstance(sid, str) and _SID.match(sid)):
             return
-        line = (json.dumps({"at": time.time(), "decision": decision,
-                            "tool": _text(payload.get("tool_name")), "path": _text(path),
-                            "agent_id": _text(payload.get("agent_id")),
-                            "why": _text(why)}, ensure_ascii=False) + "\n").encode()
+        row = {"at": time.time(), "decision": decision, "tool": _text(payload.get("tool_name")),
+               "path": _text(path), "agent_id": _text(payload.get("agent_id")), "why": _text(why)}
+        if rule is not None:
+            row["rule"] = [_text(r) for r in rule]
+        line = (json.dumps(row, ensure_ascii=False) + "\n").encode()
         sdir = resolver.session_dir(resolver.state_dir(env), sid)
         sdir.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(str(sdir / LOG), os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
