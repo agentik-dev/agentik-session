@@ -1,12 +1,15 @@
 """Packet ck2-test-workers: `make test` runs each pass on workers where its venv holds
 pytest-xdist, and exactly as before where it does not, saying `workers: absent in <venv>`."""
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+# The Makefile's own number (R3), as `make test` reads it with no WORKERS in its environment.
+N = re.search(r"^WORKERS \?= (\d+)$", (ROOT / "Makefile").read_text(), re.M).group(1)
 
 # A fake interpreter: `-c 'import xdist'` answers as the venv would, any other call prints its
 # name and its arguments, as a pass would run them.
@@ -21,7 +24,9 @@ def _exe(path, text):
 
 def _make(tmp_path, *args):
     (tmp_path / "Makefile").write_bytes((ROOT / "Makefile").read_bytes())
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
+    # a `make check WORKERS=n` around the suite exports WORKERS; the box reads the default
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("MAKE", "MFLAGS")) and k != "WORKERS"}
     return subprocess.run(["make", "-s", "test", *args], cwd=tmp_path, env=env,
                           capture_output=True, text=True, timeout=60)
 
@@ -38,9 +43,9 @@ def test_each_pass_runs_on_workers_where_its_venv_holds_the_runner(tmp_path, mai
     out = r.stdout
     assert r.returncode == 0, out + r.stderr
     (m,), (f,) = _lines(out, "main-suite"), _lines(out, "floor-suite")
-    assert m.split()[1:] == ["-m", "pytest", "-q"] + (["-n", "4"] if main else [])
+    assert m.split()[1:] == ["-m", "pytest", "-q"] + (["-n", N] if main else [])
     assert f.split()[1:] == (["-m", "pytest", "-q", "-p", "no:cacheprovider",
-                              "--ignore=tests/test_bounded.py"] + (["-n", "4"] if floor else []))
+                              "--ignore=tests/test_bounded.py"] + (["-n", N] if floor else []))
     assert ("workers: absent in .venv" in out.splitlines()) is (not main)
     assert ("workers: absent in .venv-floor" in out.splitlines()) is (not floor)
 
