@@ -19,6 +19,7 @@
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
+- Gate job `20261117-090101-2431` (`make stamp && make check` on the NICE row's commit) was queued at the sitting's bound; when it ends, read its log and commit what the stamp left, by path (`NICE_TO_HAVE.md`, `history/NICE-overflow.md`).
 
 ## Next act
 `make stamp && make check` through the gate on the NICE row's commit; commit what the stamp leaves.
