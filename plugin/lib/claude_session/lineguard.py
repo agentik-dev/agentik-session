@@ -672,10 +672,11 @@ def _bare(name: str):
         return None
 
 
-def _pushed(c, k, ctx, cell, globs):
+def _pushed(c, k, ctx, cell, globs, extra=()):
     """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
-    each folder it may run in, the followed variable alone and beside the folder so far."""
-    for start in _starts_at(c, k, ctx):
+    each folder it may run in (`extra`: a `gate run`'s repo), the followed variable alone and
+    beside the folder so far."""
+    for start in [*_starts_at(c, k, ctx), *extra]:
         for beside in (False, True):
             top = top_of(_git_dir(start, globs, c, k, ctx, beside), ctx.tops)
             got = ctx.armed(cell, top) if top else None
@@ -699,29 +700,71 @@ def _push(c, k, ctx, cell):
     got = _pushes(c, k, ctx, cell)
     if got or c.name.lower() in _PRINTERS:
         return got
+    extra = None
     for i, w in enumerate(c.args):
         if _starts(w):                      # review 2 F2: after a slashed word, a veil is data
+            if extra is None:
+                extra = _run_folders(c, k, ctx)
             got = _pushes(c._replace(name=os.path.basename(w), args=c.args[i + 1:]), k, ctx, cell,
-                          veil="/" not in w)
+                          veil="/" not in w, extra=extra)
             if got:
                 return got
     return None
 
 
-def _pushes(c, k, ctx, cell, veil: bool = True):
+_RUN_TAKES = ("--session", "--lock", "--wall", "--label")     # gate run's options with an operand
+
+
+def _run_repo(words: list):
+    """Review 2 F5: the repo operand of the tool's `gate run` (the folder its command runs in),
+    or None."""
+    i = 0
+    for want in ("gate", "run"):
+        while i < len(words) and words[i].startswith("-") and words[i] != "--":
+            i += 1
+        if i >= len(words) or words[i] != want:
+            return None
+        i += 1
+    while i < len(words) and words[i] != "--":
+        w = words[i]
+        if not w.startswith("-") or w == "-":
+            return w
+        named = [o for o in (*_RUN_TAKES, "--wait", "--help") if o.startswith(w)]
+        if "=" not in w and len(w) > 2 and named and all(o in _RUN_TAKES for o in named):
+            i += 1
+        i += 1
+    return None
+
+
+def _run_folders(c, k, ctx) -> list:
+    """Review 2 F5: for a `gate run`, its repo operand's folders, a path from each folder the
+    command may start in, a bare name as the verbs resolve it; [] for any other command."""
+    words = _tool_words(c)
+    repo = _run_repo(words) if words is not None else None
+    w = _homed(repo, c, k, ctx) if repo else None
+    if not w:
+        return []
+    if not _pathlike(w):
+        return [f for f in (_bare(w),) if f]
+    starts = dict.fromkeys(s if s is not None else ctx.here for s in _starts_at(c, k, ctx))
+    return [os.path.normpath(os.path.join(s, w)) for s in starts if s is not None]
+
+
+def _pushes(c, k, ctx, cell, veil: bool = True, extra=()):
     """g10 R2, R3: a git push or its plumbing, or the tool's `gate publish` or `gate land
-    --push`, in an armed checkout; `veil` as in `_tool_words`."""
+    --push`, in an armed checkout; `veil` as in `_tool_words`, `extra` as in `_pushed`."""
     g = _git(c)
     if g is not None:
         sub = g[1].lower()
         if (veil and _veiled(sub)) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
-            return _pushed(c, k, ctx, cell, g[0])
+            return _pushed(c, k, ctx, cell, g[0], extra)
         return None
     words = _tool_words(c, veil)
     ops = _pushing_verb(words, veil) if words is not None else None
     if ops is None:
         return None
-    starts = [s if s is not None else ctx.here for s in _starts_at(c, k, ctx)] + [ctx.here]
+    starts = [s if s is not None else ctx.here for s in _starts_at(c, k, ctx)] + [ctx.here] + \
+        list(extra)
     folders = list(starts)
     for op in ops:
         w = _homed(op, c, k, ctx)
