@@ -16,7 +16,7 @@
 - [x] L8: the packet's §4 (each row green or red, the 8 row, A1's three, why 4) and the first record's A1
 - [x] NICE: n297 to n301; n231 leaves (F1 lands it); n228, n230 and n232 to n234 moved to `history/NICE-overflow.md`
 - [x] `make stamp`, job `20261117-133932-2494` exit 0: the count 4898 to 4901
-- [ ] one `make check`, through the gate
+- [x] one `make check`, job `20261117-135111-2501` on `8e2fd12` exit 0 in 5 min: `4901 passed` (250 s) and `4752 passed, 128 skipped` (263 s); hygiene 0 hits
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
@@ -25,4 +25,4 @@
 - Choice: help fills in `$(WORKERS)` and `$(VENV_PYTHON)` alone; `$(PREFIX)` in install's line is as before.
 
 ## Next act
-The check, through the gate.
+None: every item of the fix is built, and the check is green. This record's own commit follows the check and touches this file alone.
