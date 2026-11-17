@@ -10,7 +10,7 @@
 | agents | 0 |
 
 ## Done-ness
-- [ ] F1: tests red at the pin, then the fix
+- [x] F1: tests red at the pin (`f0147e8`), then the fix: `_unsure` reads the line's text between the assignment and the sweep's word; the assigned folder is judged always, the folder so far beside it where the scope may change
 - [ ] F2: tests red at the pin, then the fix
 - [ ] F3: tests red at the pin, then the fix
 - [ ] Nine NICE rows from review 1's leads

@@ -121,7 +121,6 @@ class _Ctx:
                                                                       here, cmds)
         self.tops, self.arms, self.passes = {}, {}, []
         self.assigns = _assigns(cmds)
-        self.scoped = bool(_SCOPED.search(command))
 
     def armed(self, cell: str, top):
         """What arms a rule for a checkout: (`product`,) for a product rule, else the title's
@@ -277,9 +276,12 @@ _HOLDS_VAR = re.compile(r"\$(?:[A-Za-z_]|\{)")
 _SAFE_VAR = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:\?")
 _MKTEMP = re.compile(r"(?:\$\(|`)\s*mktemp(?:\s|\)|`|\Z)")
 _EXPANDS = re.compile(r"[$`]")
-# a subshell, a pipe or a background job may hold an assignment the reader gives at level 0:
-# a variable is not followed on such a line (the `Cmd` carries no scope; the record's finding)
+# a subshell, a pipe or a background job may hold an assignment the reader gives at level 0, and
+# the `Cmd` carries no scope (R1): such a line is read again in its text (`_unsure`, review 1 F1)
 _SCOPED = re.compile(r"[(|`]|(?<![&>])&(?![&>])")
+_CLOSES = re.compile(r"[)}`|]|(?<![&>|])&(?![&>])")
+_PIPE = re.compile(r"(?<!\|)\|(?!\|)")
+_BRACED = re.compile(r"\$\{[^{}]*\}")
 
 
 def _assigns(cmds) -> dict:
@@ -315,8 +317,28 @@ def _tilde(w: str, env):
     return None if w.startswith("~") else w
 
 
+def _unsure(name: str, text: str) -> bool:
+    """Whether something on the line may change the scope of `name`'s assignment before the
+    sweep reads it (review 1 F1): a pipe before the sweep's word, or a `)`, a `}`, a backtick or a
+    lone `&` between the assignment and that word. The text is read as written, quotes and all,
+    so a doubt answers yes; a line with none of `( | ` &` answers no at once."""
+    if not _SCOPED.search(text):
+        return False
+    n = re.escape(name)
+    starts = [m.start() for m in re.finditer(r"(?<![\w$])" + n + "=", text)]
+    word = r"\$(?:\{" + n + r"\}|" + n + r"(?!\w))"
+    ends = [m.start() for m in re.finditer(r"(?<![\w-])-C\s*['\"]?" + word, text)] or \
+        [m.start() for m in re.finditer(r"\$(?:\{" + n + r"[}:]|" + n + r"(?!\w))", text)]
+    if not starts or not ends or starts[0] > ends[-1]:
+        return True
+    if _PIPE.search(text, 0, ends[-1]):
+        return True
+    return bool(_CLOSES.search(_BRACED.sub("", text[starts[0]:ends[-1]])))
+
+
 def _assigned(name: str, c, k: int, ctx):
-    """The one assignment R12 follows: (`literal`, value), (`mktemp`, None) or None."""
+    """The one assignment R12 follows: (`literal`, value, unsure), (`mktemp`, None, False) or
+    None. `unsure`: the line may run the sweep where the assignment does not hold (`_unsure`)."""
     got = ctx.assigns.get(name, [])
     if len(got) != 1:
         return None
@@ -324,11 +346,11 @@ def _assigned(name: str, c, k: int, ctx):
     if j >= k or level != c.level or not alone or val is None:
         return None
     if _MKTEMP.match(val):
-        return ("mktemp", None)
-    if _EXPANDS.search(val) or ctx.scoped:
+        return ("mktemp", None, False)
+    if _EXPANDS.search(val):
         return None
     lit = _tilde(val, ctx.env)
-    return ("literal", lit) if lit is not None else None
+    return ("literal", lit, _unsure(name, ctx.command)) if lit is not None else None
 
 
 def _spelled(v: str, c, k: int, ctx):
@@ -345,12 +367,15 @@ def _spelled(v: str, c, k: int, ctx):
     return None
 
 
-def _literal(v: str, c, k: int, ctx):
-    """A `-C`, `--work-tree` or `--git-dir` word as a path, or None to skip it."""
+def _literal(v: str, c, k: int, ctx, beside: bool = False):
+    """A `-C`, `--work-tree` or `--git-dir` word as a path, or None to skip it. With `beside`, a
+    followed variable whose scope may change is skipped: the folder so far (review 1 F1)."""
     m = _ONEVAR.match(v)
     if m:
         got = _assigned(m.group(1) or m.group(2), c, k, ctx)
-        return got[1] if got and got[0] == "literal" else None
+        if not got or got[0] != "literal" or (beside and got[2]):
+            return None
+        return got[1]
     if _EXPANDS.search(v):
         return None
     return _tilde(v, ctx.env)
@@ -368,13 +393,14 @@ def _named(globs, c, opt: str, var: str):
     return None
 
 
-def _target(start, globs, c, k: int, ctx):
-    """The folder a sweep writes from one starting folder, or None where git stops."""
+def _target(start, globs, c, k: int, ctx, beside: bool = False):
+    """The folder a sweep writes from one starting folder, or None where git stops; `beside` as
+    in `_literal`."""
     f = start if start is not None and os.path.isdir(start) else ctx.here
     for o, v in globs:
         if o != "-C" or v is None:
             continue
-        w = _literal(v, c, k, ctx)
+        w = _literal(v, c, k, ctx, beside)
         if w is None:
             continue
         f = os.path.normpath(os.path.join(f, w))
@@ -382,8 +408,8 @@ def _target(start, globs, c, k: int, ctx):
             return None
     wt = _named(globs, c, "--work-tree", "GIT_WORK_TREE=")
     gd = _named(globs, c, "--git-dir", "GIT_DIR=")
-    wt = None if wt is None else _literal(wt, c, k, ctx)
-    gd = None if gd is None else _literal(gd, c, k, ctx)
+    wt = None if wt is None else _literal(wt, c, k, ctx, beside)
+    gd = None if gd is None else _literal(gd, c, k, ctx, beside)
     if wt is not None:
         return os.path.normpath(os.path.join(f, wt))
     if gd is not None:
@@ -404,10 +430,11 @@ def _sweep(c, k, ctx, cell):
                 ctx.passes.append(why)
                 return None
     for start in c.heres:
-        top = top_of(_target(start, g[0], c, k, ctx), ctx.tops)
-        got = ctx.armed(cell, top) if top else None
-        if got:
-            return (top, got)
+        for beside in (False, True):
+            top = top_of(_target(start, g[0], c, k, ctx, beside), ctx.tops)
+            got = ctx.armed(cell, top) if top else None
+            if got:
+                return (top, got)
     return None
 
 

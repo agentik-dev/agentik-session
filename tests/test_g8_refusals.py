@@ -428,8 +428,8 @@ F1_WRONG_REFUSAL_A = ['T=H/open; git -C "$T" add -A | tail -3',
                       'T=H/open; git -C "$T" add -A && echo "(done)"']
 # something between the assignment and the sweep may change its scope: both folders judged
 F1_BESIDE = ['(T=H/tree/armed); git -C "$T" add -A', 'true | T=H/tree/armed; git -C "$T" add -A',
-             'T=H/tree/armed & git -C "$T" add -A', 'echo `T=H/tree/armed`; git -C "$T" add -A',
-             'f() { T=H/tree/armed; }; git -C "$T" add -A']
+             'T=H/tree/armed & git -C "$T" add -A', 'echo `T=H/tree/armed`; git -C "$T" add -A']
+# a function's body is no assignment R12 follows: the folder so far alone, as the shell runs it
 F1_BESIDE_A = ['(T=H/open); git -C "$T" add -A', 'T=H/open | cat; git -C "$T" add -A',
                'f() { T=H/open; }; git -C "$T" add -A']
 
@@ -446,3 +446,4 @@ def test_f1_the_followed_variable(box):
         _refused(box, line, box.a)
     _passed(box, 'T=H/open; { git -C "$T" add -A; } | cat', box.a)
     _passed(box, '(T=H/open; git -C "$T" add -A)', box.a)
+    _passed(box, 'f() { T=H/tree/armed; }; git -C "$T" add -A', box.o)
