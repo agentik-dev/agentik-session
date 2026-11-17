@@ -1,8 +1,9 @@
-"""Row is1-old-name: a person's own `claude-session` survives `install-cli` and the SessionStart
-refresh. The old name's link is written only where a link of ours (its text `agentik-session`)
-already stands in the bin folder, as the canonical `_old_link` refreshes one; a regular file of
-that name, or a link that is not ours, is left byte for byte, and a new machine gets none. The
-install's line says `<bin>/claude-session links to it` only where the link was written.
+"""Row is1-old-name: a person's own file at the old name (`install.OLD_NAME`) survives
+`install-cli` and the SessionStart refresh. The old name's link is written only where a link of
+ours (its text `agentik-session`) already stands in the bin folder, as the canonical `_old_link`
+refreshes one; a regular file of that name, or a link that is not ours, is left byte for byte,
+and a new machine gets none. The install's line says `<bin>/<old name> links to it` only where
+the link was written.
 
 Every case runs in a temp HOME or prefix with a copy of this tree's plugin; never the real
 `~/.local`.
@@ -11,11 +12,11 @@ import json
 import os
 import subprocess
 
-from test_install import (NEW, OLD, _bare, _bins, _plugin, _session_start, _version)
+from claude_session.install import OLD_NAME
 from test_ak10d_launcher import _canonical
+from test_install import (NEW, OLD, _bare, _bins, _plugin, _session_start, _version)
 
 NAME = "agentik-session"
-OLD_NAME = "claude-session"
 MINE = '#!/bin/sh\n# mine\nexec claude --model opus "$@"\n'
 
 
@@ -105,7 +106,7 @@ def test_is1_old_link_reads_ours_alone(tmp_path):
     path.write_text(MINE)
     assert install._old_link(str(bin_dir)) is None             # a regular file
     path.unlink()
-    os.symlink("/elsewhere/claude-session", path)
+    os.symlink("/elsewhere/" + OLD_NAME, path)
     assert install._old_link(str(bin_dir)) is None             # a link that is not ours
     path.unlink()
     os.symlink(NAME, path)                                     # ours, dangling or not
@@ -153,7 +154,7 @@ def test_is1_uninstall_plans_our_link_never_a_persons_file(tmp_path):
         if kind == "file":
             path.write_text(MINE)
         else:
-            os.symlink(NAME if kind == "ours" else "/elsewhere/claude-session", path)
+            os.symlink(NAME if kind == "ours" else "/elsewhere/" + OLD_NAME, path)
         assert _verb(_plugin(tmp_path / kind), home, "--prefix", str(prefix)).returncode == 0
         plan = canonical.uninstall(NAME, str(prefix), dry=True)
         planned = [row for row in plan if row[0] == str(path)]
