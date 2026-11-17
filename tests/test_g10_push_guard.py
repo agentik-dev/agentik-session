@@ -142,11 +142,14 @@ def test_a3_an_unarmed_checkout_passes(box):
 
 def test_a4_the_checkout_the_push_acts_on(box):
     for line in ("git -C <A> push", "GIT_DIR=<A>/.git git push", 'T=<A>; git -C "$T" push',
-                 "git --git-dir=<A>/.git push", "git --work-tree <A> push", "cd <A> && git push",
+                 "git --git-dir=<A>/.git push", "cd <A> && git push",
                  "git -C H/tree -C armed push", "git -C <A>/sub push"):
         assert _refused(box, line, box.o, **HELPER).endswith("the sitting that started you pushes."), line
     for line in ("git -C H/open push", "cd H/open && git push", 'T=H/open; git -C "$T" push'):
         _passed(box, line, box.p, **HELPER)
+    # review 1 F7: a work tree named on the line is never judged; this push acts on the git dir
+    # where the shell stands, O's, which nothing arms
+    _passed(box, "git --work-tree <A> push", box.o, **HELPER)
 
 
 # ---- A5: git's verbs ---------------------------------------------------------------------------
@@ -260,3 +263,136 @@ def test_the_fifth_rule(box):
     _, reason = _reason(_run(box, "git add -A && git push", box.a))
     assert "the push rule" not in reason
     _passed(box, "git push", None, **HELPER)
+
+
+# ---- review 1, fix 1 (F1, F2, F3): a push behind any command is read from its word on ---------
+
+def test_fix1_a_push_behind_a_command_the_reader_does_not_open(box):
+    for line in ("timeout 60 git push", "xargs git push", "echo origin | xargs git push",
+                 "find . -maxdepth 0 -exec git push \\;", "caffeinate -i git push",
+                 "noglob git push", "nocorrect git push", "ssh-agent git push",
+                 "script -q /dev/null git push", "timeout 5 xargs git -C . push origin main",
+                 "agentik session gate run . -- git push",
+                 "agentik session gate run . --wait -- git push origin main",
+                 "agentik session gate run . -- agentik session gate publish x",
+                 "function f { git push; }; f", "function f { agentik session gate publish; }; f",
+                 "xargs agentik session gate publish", "timeout 99 agentik session gate publish",
+                 "find . -maxdepth 0 -exec agentik session gate publish \\;",
+                 "caffeinate -i agentik-session gate land r b s m --push",
+                 "noglob python3 -m claude_session gate publish"):
+        _refused(box, line, box.a, **HELPER)
+    for line in ('git commit -m "timeout 5 git push"', "echo git push", 'grep -r "git push" .',
+                 "grep -rn git push docs", "printf '%s\\n' git push", "ls git push",
+                 "agentik session gate run . -- make check", "agentik session gate run . -- git log",
+                 "timeout 60 git fetch", "xargs git status", "find . -name git",
+                 "timeout 5 sh -c 'echo ok'"):
+        _passed(box, line, box.a, **HELPER)
+    _passed(box, "timeout 60 git push", box.o, **HELPER)
+    assert _run(box, "timeout 60 git push", box.a) == {}
+
+
+# ---- fix 2 (F4): a verb word the shell expands -------------------------------------------------
+
+def test_fix2_a_verb_word_the_shell_expands(box):
+    for line in ("V=push; git $V", "git ${X:-push}", "git {push,}", "git $(echo push)",
+                 "git `echo push`", "git $'push'", "timeout 5 git $V",
+                 "V=publish; agentik session gate $V x", "G=gate; agentik session $G publish",
+                 "S=session; agentik $S gate publish", "P=--push; agentik session gate land r b s m $P",
+                 "agentik session gate land r b s m ${P:---push}", "agentik session gate {publish,}",
+                 "agentik session gate land r b s m --pu{sh,}", "agentik session gate $'publish'",
+                 "agentik session gate $(echo publish)"):
+        _refused(box, line, box.a, **HELPER)
+    for line in ('git log "$REV"', 'git -C "$T" status', "git log {a,b}", 'git show "$(cat x)"',
+                 "agentik session gate status", "agentik session gate land r b s m"):
+        _passed(box, line, box.a, **HELPER)
+    assert _run(box, "V=push; git $V", box.a) == {}
+
+
+# ---- fix 3 (F5): a helper's look reads past quotes and backslashes ----------------------------
+
+def test_fix3_the_look_past_quotes(box):
+    line = 'agentik session ga"te" publish'
+    assert lineguard.looks(line) is False and lineguard.looks(line, helper=True) is True
+    assert lineguard.looks("g\\it push", helper=True) is True
+    for line in ('agentik session ga"te" publish', "g\\it push", 'gi""t push'):
+        _refused(box, line, box.a, **HELPER)
+    assert _run(box, 'agentik session ga"te" publish', box.a) == {}
+
+
+# ---- fix 4 (F7): the push rule judges the git dir, never the work tree -------------------------
+
+def test_fix4_the_git_dir_is_judged(box):
+    for line in ("git --work-tree=H/open push", "git --work-tree /tmp push origin main",
+                 "GIT_WORK_TREE=/tmp git push", "git --git-dir=.git --work-tree=/tmp push",
+                 "GIT_DIR=.git git push"):
+        _refused(box, line, box.a, **HELPER)
+    for line in ("GIT_DIR=<A>/.git GIT_WORK_TREE=H/open git push",
+                 "git --git-dir=<A>/.git --work-tree=H/open push",
+                 "git --git-dir <A>/.git --work-tree . push origin main",
+                 "git --git-dir=<A>/.git/worktrees/w push"):
+        _refused(box, line, box.o, **HELPER)
+    for line in ("git --work-tree <A> push", "GIT_WORK_TREE=<A> git push"):
+        _passed(box, line, box.o, **HELPER)
+    d, reason = _reason(_run(box, "git --work-tree <A> add -A", box.o))   # the sweep: unchanged
+    assert d == "deny" and "the sweep rule" in reason
+
+
+# ---- fix 5 (F9): a module of the tool's package -------------------------------------------------
+
+def test_fix5_the_tools_modules(box):
+    for line in ("python3 -m claude_session.cli gate publish",
+                 "python3 -mclaude_session.cli gate land r b s m --push",
+                 "python3 -I -m claude_session.__main__ gate publish"):
+        _refused(box, line, box.a, **HELPER)
+    for line in ("python3 -m claude_sessionx gate publish", "python3 -m other.claude_session gate publish",
+                 "python3 -m claude_session.cli gate status"):
+        _passed(box, line, box.a, **HELPER)
+
+
+# ---- fix 6 (L1, F10): a bare repo operand as the verb resolves it; $HOME read --------------------
+
+def test_fix6_a_bare_repo_and_home(box):
+    (box.h / "code").mkdir()
+    (box.h / "code" / "tree").symlink_to(box.h / "tree")       # ~/code/*/armed is A
+    for cwd in (box.o, box.p, box.h / "tree"):
+        for line in ("agentik session gate publish armed", "agentik session gate land armed b s m --push",
+                     "agentik session gate publish nowhere armed"):
+            _refused(box, line, cwd, **HELPER)
+    for line in ('agentik session gate publish "$HOME/tree/armed"',
+                 "agentik session gate publish ${HOME}/tree/armed",
+                 'git -C "$HOME/tree/armed" push', 'git -C "${HOME}/tree/armed" push',
+                 'cd "$HOME/tree/armed" && git push', 'GIT_DIR="$HOME/tree/armed/.git" git push'):
+        _refused(box, line, box.o, **HELPER)
+    for line in ("agentik session gate publish nowhere", "agentik session gate publish open",
+                 'git -C "$HOME/open" push', 'cd "$HOME/plain" && git push',
+                 "agentik session gate land armed b s m", 'git -C "$HOMEX/tree/armed" push'):
+        _passed(box, line, box.o, **HELPER)
+
+
+# ---- fix 7 (L9): the loose judge is linear in the text -----------------------------------------
+
+def test_fix7_the_loose_judge_is_linear(box):
+    import time
+    body = ("agentik session gate land x " * 700)[:16384]
+    cases = (("eval '" + body + "'", False),
+             ("eval '" + body + "--push'", True),
+             ("eval '" + ("git x " * 2800)[:16384] + "'", False),
+             ("eval '" + ("git x " * 2800)[:16384] + "push'", True))
+    for line, pushes in cases:
+        p = _payload(box, line, box.a, **HELPER)
+        best = 9.0
+        for _ in range(3):
+            t0 = time.perf_counter()
+            out = lineguard.check(p, box.env)
+            best = min(best, time.perf_counter() - t0)
+        assert (_reason(out)[0] == "deny") is pushes, line[:40]
+        assert best < 0.2, (line[:40], best)
+
+
+# ---- fix 8 (L10): the door's options before `session` ------------------------------------------
+
+def test_fix8_the_doors_options(box):
+    for line in ("agentik --verbose session gate publish", "agentik -x --y session gate land r b s m --push"):
+        _refused(box, line, box.a, **HELPER)
+    for line in ("agentik --verbose other gate publish", "agentik --verbose session gate status"):
+        _passed(box, line, box.a, **HELPER)
