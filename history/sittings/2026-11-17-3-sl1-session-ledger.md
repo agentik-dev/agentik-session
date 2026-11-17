@@ -16,15 +16,16 @@
 - [x] R1 and R3, R3b: the skeleton, then entries 8 to 12 by `new` and `answer` (each `answer` previewed first; no refusal); `show` 8 to 12 exit 0, bodies byte-equal, `render --lint` exit 0, no `CLAUDE.md`
 - [x] R4: `.claude/edit-gates` left in the worktree: its removal was refused by the edit-gate guard ("is gated: an edit of it is refused in every permission mode")
 - [x] Acceptance lines 1 to 5 pass; the packet mended to doclint's six sections (doclint exit 0)
-- [ ] Hygiene over `main..HEAD` exits 1: group `sibling` (the word for the ledger tool), `DECISIONS.md` line 3 (R1's own paragraph) and 10 lines of the packet; the allow rows are the coordinator's
-- [ ] `make check` through the gate on `f7630e2`: job `20261117-055228-2381`, exit 2, cut by the 1800 s wall in the floor pass at 59% (load 30 to 74; its first pass green, 4854 passed). Not queued again: the tool-call bound, and its hygiene step is red until the allow rows below
+- [x] The coordinator's two allow rows (`DECISIONS.md: sibling`, `design/packets/sl1-session-ledger.md: sibling`), their shas checked (aa9cccb, 49fb15c) in `5f8d93b`; hygiene over `main..HEAD` exit 0, 6 commits, no hit outside the list
+- [x] The quick gates (`lint doclint plugin-version-check validate`) through the gate: job `20261117-063910-2396`, exit 0 on `5f8d93b`
+- [ ] `make check` on the tip: the landing's own job (job `20261117-055228-2381` on `f7630e2` was cut at its 1800 s wall)
 
 ## Handover
 - If this sitting is cut: the first unticked line above. No entry is ever written by hand.
-- decide, owner: the coordinator: two `.hygiene-allow` rows, `DECISIONS.md: sibling` and `design/packets/sl1-session-ledger.md: sibling`, as for every packet that names the ledger tool; the tree scan also counts the untracked `.claude/edit-gates` (2 lines). Consumer: the landing's hygiene scan and `make check`'s hygiene step.
+- The untracked `.claude/edit-gates` stays; its removal is the owner's hand.
 
 ## Next act
-The coordinator: the two allow rows, then `make check` at a lower load; the tip's tree equals `f7630e2` but for this file.
+The landing: its `make check` on the tip.
 
 ## Exit
-Stopped at the tool-call bound after the check was cut at its wall; R1 to R4 built and committed, hygiene and the check owed.
+The allow rows landed and the quick gates green; R1 to R4 built and committed, the landing's `make check` owed.
