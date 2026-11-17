@@ -576,8 +576,8 @@ def _pushing_verb(words: list):
             done = True
         elif w in _LAND_PUSH:
             push = True
-        if not done and _veiled(w):
-            push = True                                 # review 1 fix 2: it may expand to --push
+        if not done and _veiled(w) and (w.startswith("-") or len(ops) > 4):
+            push = True             # review 1 fix 2, review 2 F1: a flag, or past land's 4 operands
         elif verb == "land" and _takes(w):
             j += 1
         j += 1
