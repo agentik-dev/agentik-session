@@ -480,8 +480,9 @@ _PRINTERS = frozenset({"echo", "printf", "print", "grep", "egrep", "fgrep", "rg"
 
 
 def _py_script(args: list):
-    """(the script word, the words after it) of a python's arguments; `-m claude_session` reads
-    as the tool. None for `-c`, another module, or a script from the input."""
+    """(the script word, the words after it) of a python's arguments; `-m claude_session` or
+    `-m claude_session.<x>` reads as the tool. None for `-c`, another module, or a script from
+    the input."""
     i = 0
     while i < len(args):
         a = args[i]
@@ -498,8 +499,9 @@ def _py_script(args: list):
                 if ch in "mWX":
                     op = a[n:] or (args[j] if j < len(args) else "")
                     j += 0 if a[n:] else 1
-                    if ch == "m":
-                        return ("agentik-session", args[j:]) if op == "claude_session" else None
+                    if ch == "m":                       # review 1 fix 5: any of its modules
+                        tool = op == "claude_session" or op.startswith("claude_session.")
+                        return ("agentik-session", args[j:]) if tool else None
                     break
         i = j
     return (args[i], args[i + 1:]) if i < len(args) and args[i] != "-" else None
