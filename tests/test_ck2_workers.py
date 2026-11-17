@@ -9,7 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 # The Makefile's own number (R3), as `make test` reads it with no WORKERS in its environment.
-N = re.search(r"^WORKERS \?= (\d+)$", (ROOT / "Makefile").read_text(), re.M).group(1)
+N = re.search(r"^WORKERS = (\d+)$", (ROOT / "Makefile").read_text(), re.M).group(1)
 
 # A fake interpreter: `-c 'import xdist'` answers as the venv would, any other call prints its
 # name and its arguments, as a pass would run them.
@@ -22,12 +22,14 @@ def _exe(path, text):
     path.chmod(0o755)
 
 
-def _make(tmp_path, *args):
+def _make(tmp_path, *args, target="test", **extra):
     (tmp_path / "Makefile").write_bytes((ROOT / "Makefile").read_bytes())
-    # a `make check WORKERS=n` around the suite exports WORKERS; the box reads the default
+    # a `make check WORKERS=n` around the suite passes WORKERS in MAKEFLAGS; the box reads the
+    # default, or what the test names
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("MAKE", "MFLAGS")) and k != "WORKERS"}
-    return subprocess.run(["make", "-s", "test", *args], cwd=tmp_path, env=env,
+    env.update(extra)
+    return subprocess.run(["make", "-s", target, *args], cwd=tmp_path, env=env,
                           capture_output=True, text=True, timeout=60)
 
 
@@ -66,7 +68,7 @@ def test_workers_is_a_fixed_number_the_caller_overrides(tmp_path):
     assert all(ln.split()[-2:] == ["-n", "6"] for ln in _lines(r.stdout, "main-suite")
                + _lines(r.stdout, "floor-suite"))
     assert "auto" not in [ln for ln in (ROOT / "Makefile").read_text().splitlines()
-                          if ln.startswith("WORKERS ?=")][0]
+                          if ln.startswith("WORKERS =")][0]
 
 
 def test_a_failing_pass_on_workers_still_fails_the_target(tmp_path):
@@ -88,3 +90,25 @@ def test_the_dev_extra_and_both_venv_targets_name_the_runner():
     for target in ("venv-floor:", "venv:"):
         body = mk[mk.index("\n" + target):].split("\n\techo ", 1)[0]
         assert "'$(RUNNER)'" in body and "import xdist" in body, target
+
+
+def test_a_workers_in_the_environment_never_sets_the_count_and_the_command_line_does(tmp_path):
+    # review 1's L1: `WORKERS = n`, plain, so an inherited name is ignored
+    _exe(tmp_path / ".venv" / "bin" / "python", FAKE % (0, "main-suite"))
+    _exe(tmp_path / ".venv-floor" / "bin" / "python", FAKE % (0, "floor-suite"))
+    for args, want in (((), N), (("WORKERS=6",), "6")):
+        r = _make(tmp_path, *args, WORKERS="7")
+        assert r.returncode == 0, r.stdout + r.stderr
+        runs = _lines(r.stdout, "main-suite") + _lines(r.stdout, "floor-suite")
+        assert len(runs) == 2 and all(ln.split()[-2:] == ["-n", want] for ln in runs), runs
+
+
+def test_help_names_the_number_and_the_interpreter(tmp_path):
+    # review 1's L6: help greps the Makefile's text and fills in the two names it carries
+    py = re.search(r"^VENV_PYTHON \?= (\S+)$", (ROOT / "Makefile").read_text(), re.M).group(1)
+    r = _make(tmp_path, target="help", WORKERS="7")
+    assert r.returncode == 0, r.stderr
+    assert "$(WORKERS)" not in r.stdout and "$(VENV_PYTHON)" not in r.stdout
+    lines = dict(ln.split("\t", 1) for ln in r.stdout.splitlines())
+    assert f"each on {N} workers" in lines["test"] and f"on {N} workers" in lines["test-floor"]
+    assert f"build .venv under {py} " in lines["venv"]

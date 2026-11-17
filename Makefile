@@ -6,12 +6,14 @@ RESPEAK_RENDER ?= $(shell for f in $(HOME)/.claude/plugins/cache/*/respeak/*/scr
 	v=$${f%/scripts/*}; echo "$${v\#\#*/} $$f"; done | sort -V | tail -1 | cut -d' ' -f2-)
 export RESPEAK_PYTHON ?= $(CURDIR)/.venv/bin/python
 help:
-	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
+	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed -e 's/:.*## /\t/' \
+	  -e 's|\$$(WORKERS)|$(WORKERS)|g' -e 's|\$$(VENV_PYTHON)|$(VENV_PYTHON)|g'
 # The workers (ck2): each pass runs on $(WORKERS) pytest-xdist workers where its venv holds the
 # runner, else in one process as before, and says `workers: absent in <venv>` after it. A fixed
 # number, measured (design/packets/ck2-test-workers.md): two passes share the cores and the gate
-# holds a job above a load of 12, so never `auto`. `make test WORKERS=6` overrides it.
-WORKERS ?= 4
+# holds a job above a load of 12, so never `auto`. `make test WORKERS=6` overrides it; a WORKERS
+# in the caller's environment does not (a plain `=`, review 1's L1).
+WORKERS = 4
 test:  ## run the suite (no quota, fake claude), under .venv and .venv-floor side by side, each on $(WORKERS) workers where it holds pytest-xdist, test_bounded.py excepted in the floor (design/04 §6)
 	@w=$$(./.venv/bin/python -c 'import xdist' >/dev/null 2>&1 && echo "-n $(WORKERS)"); \
 	if [ ! -x .venv-floor/bin/python ]; then ./.venv/bin/python -m pytest -q $$w; main=$$?; \
