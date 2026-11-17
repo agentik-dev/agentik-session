@@ -17,10 +17,13 @@
 - [x] R2: `install-cli --force`; kept, one line in commons' words, exit 0, nothing written
 - [x] R3: the one caller of `install()` is `cmd_install_cli` (the verb, behind `/session:install-cli`, `make install`, a launcher's `is gone` remedy); the SessionStart refresh calls `_locked_install`, as today
 - [x] R5: the doctor's `launcher` row compares; a newer command is a note, `newer than the plugin's`; older as at the pin
-- [ ] `make stamp`, then `make check`, through the gate; the hygiene scan of the commits
+- [x] `make stamp` through the gate (job `20261117-045721-2370`, exit 0): 2.0.0-alpha.131, 4866 tests
+- [x] the hygiene scan, `--require-private --commits main..HEAD`: exit 0, 0 hits
+- [ ] `make check` through the gate: jobs `20261117-045748-2371` and `20261117-052801-2378` each cut by the 1800 s wall in the floor pass (load 25, then 57), their first pass green (4866 passed); the third, `20261117-060100-2387`, queued sixth when the sitting reached its bound
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
+- decide, owner: the coordinator: the third check's result; a fourth run is past the brief's three.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+The coordinator: read job `20261117-060100-2387`; green, review and landing.
