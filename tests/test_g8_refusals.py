@@ -447,3 +447,18 @@ def test_f1_the_followed_variable(box):
     _passed(box, 'T=H/open; { git -C "$T" add -A; } | cat', box.a)
     _passed(box, '(T=H/open; git -C "$T" add -A)', box.a)
     _passed(box, 'f() { T=H/tree/armed; }; git -C "$T" add -A', box.o)
+
+
+# F2: a backtick mark opens no fence when the rest of its line holds a backtick (CommonMark 4.5).
+def test_f2_a_code_span_opens_no_fence(box):
+    entry = "36. **Commits.** Commit by path.\n"
+    for k, md, armed in [("span", "```make check``` is the gate.\n\n" + entry, True),
+                         ("tick", "``` a `b`\n\n" + entry, True),
+                         ("inline", "Use ```make check``` to gate.\n\n" + entry, True),
+                         ("info", "```bash\n" + entry + "```\n", False),
+                         ("tilde", "~~~ a `b`\n" + entry + "~~~\n", False)]:
+        r = box.h / k
+        (r / ".git").mkdir(parents=True)
+        (r / "CLAUDE.md").write_text(md)
+        assert (lineguard.arming("Commits", str(r), box.env) is not None) is armed, k
+        (_refused if armed else _passed)(box, "git add -A", r)
