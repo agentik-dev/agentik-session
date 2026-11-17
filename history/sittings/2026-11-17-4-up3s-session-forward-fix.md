@@ -16,7 +16,7 @@
 - [x] F1's tests: three doctor cases, 2 of 3 failing at `300f905` (a hand's file, a runner gone)
 - [x] F1's fix: `_check_launcher` prints `install-cli leaves it as it is` only where `install._ahead` is true; the row's, doctor's, install's and cli's files 325 passed under each venv
 - [x] L3: `plugin/commands/install-cli.md`
-- [x] L1 and L2: one NICE row, n271
+- [x] L1 and L2: one NICE row, n272
 - [x] `make stamp`, job `20261117-071238-2406`, exit 0: 4869 tests; n212, n213 to the overflow
 - [ ] `make lint doclint hygiene plugin-version-check validate`, job `20261117-081041-2418`: queued (waits on another worktree's key) at the bound
 - [x] the hygiene scan, `--require-private --commits main..HEAD`: exit 0, 12 commits, 0 hits
