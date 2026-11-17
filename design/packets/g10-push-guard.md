@@ -67,7 +67,7 @@ Every change is behind `agent_id`: a main thread's line is decided, marked, logg
 
 ## 4. Findings that name this row
 
-None at the pin. Review 1 of the first build: ten findings and eleven leads; §2a holds the ruling's fixes, the rest are NICE rows n286 to n296. Review 2 of the fix: six findings and ten leads; §2b holds the mend, the rest are NICE rows n297 to n302 and §2b's L6 and L7 lines.
+None at the pin. Review 1 of the first build: ten findings and eleven leads; §2a holds the ruling's fixes, the rest are NICE rows n286 to n296. Review 2 of the fix: six findings and ten leads; §2b holds the mend, the rest are NICE rows n303 to n302 and §2b's L6 and L7 lines.
 
 ## 5. Forbidden reads
 

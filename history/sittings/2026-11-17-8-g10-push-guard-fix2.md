@@ -14,7 +14,7 @@
 - [x] The failing tests, 5 of 5 red at `c35f75b` (`13acf0c`)
 - [x] Items 1 to 5: F1 `25d274e`, F2 `4ad70be`, F4 `e4341ba`, F5 `02659d6`, F6 `1187428`; the g10 and g8 suites 45 passed under both venvs
 - [x] Item 6: the `home` group (`7953fe8`); `hygiene --require-private --commits main..HEAD`: 0 hits outside
-- [x] Item 7: NICE rows n297 to n302; the packet's §2a pressed and §2b (L6, L7) to stay under its ceiling
+- [x] Item 7: NICE rows n303 to n302; the packet's §2a pressed and §2b (L6, L7) to stay under its ceiling
 - [x] C1 to C3 by review 2's corpora: c1 refuses F3's two, L3's one, L5's one; the 628 main-thread lines match the pin under both interpreters
 - [x] Item 8: `make stamp STAMP_VERSION=2.0.0-alpha.135` through the gate, job `20261117-141106-2513` exit 0: alpha.134 to alpha.135, count 4909 to 4914, n242 to n247 to the overflow
 - [ ] `make check` through the gate on the stamp's commit

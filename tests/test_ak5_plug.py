@@ -4,6 +4,7 @@ temp HOME with its XDG_* under it, a temp cwd, and no CLAUDE_* variable but thos
 import io
 import json
 import os
+import resource
 import subprocess
 import sys
 import time
@@ -42,9 +43,9 @@ def _env(home, **extra):
     return env
 
 
-def sh(box, *argv, **extra):
+def sh(box, *argv, launcher=S, **extra):
     home, cwd = box
-    p = subprocess.run([str(S), *argv], cwd=str(cwd), env=_env(home, **extra),
+    p = subprocess.run([str(launcher), *argv], cwd=str(cwd), env=_env(home, **extra),
                        capture_output=True, timeout=60)
     return p.returncode, p.stdout.decode(), p.stderr.decode()
 
@@ -77,10 +78,28 @@ def one(box, key, **extra):
 
 # ---- line 1: describe --json ---------------------------------------------------------------
 
-def test_describe_json(box):
+def _children_cpu():
+    r = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime
+
+
+def _describe_in_bounds(box, launcher=S):
+    """ak5's line 1, `under 1 s` (ck2's review 1, F1): the first, cold call's own CPU, which
+    workers on the cores beside it do not stretch, and a second, warm call's wall, which a wait
+    in `describe` breaks; a cold first spawn on a loaded box took 1.001 s of wall, a warm 0.08 s."""
+    c0 = _children_cpu()
+    rc, out, _ = sh(box, "describe", "--json", launcher=launcher)
+    cpu = _children_cpu() - c0
     t0 = time.monotonic()
-    rc, out, _ = sh(box, "describe", "--json")
+    rc2, out2, _ = sh(box, "describe", "--json", launcher=launcher)
     took = time.monotonic() - t0
+    assert cpu < 1.0 and took < 1.0, (cpu, took)
+    assert (rc2, out2) == (rc, out)
+    return rc, out
+
+
+def test_describe_json(box):
+    rc, out = _describe_in_bounds(box)
     assert rc == 0 and "\x1b" not in out and out.endswith("}\n")
     d = json.loads(out)
     assert DESCRIBE_KEYS <= set(d)
@@ -103,7 +122,16 @@ def test_describe_json(box):
     plugins = [n for n in d["needs"] if n["kind"] == "plugin"]
     assert len(plugins) == 3 and all(n["optional"] and n["why"] for n in plugins)
     assert [n["name"] for n in plugins] == [f"{x['name']}@agentik" for x in doctor.SIBLINGS]
-    assert took < 1.0
+
+
+def test_the_describe_bound_is_red_for_a_describe_that_waits(box, tmp_path):
+    # the test of the test (ck2's review 1, F1): a made-up launcher that waits 1.5 s, then runs
+    # the plugin's own; the plugin's code is not touched
+    slow = tmp_path / "slow-describe"
+    slow.write_text(f"#!/bin/sh\nsleep 1.5\nexec '{S}' \"$@\"\n")
+    slow.chmod(0o755)
+    with pytest.raises(AssertionError):
+        _describe_in_bounds(box, launcher=slow)
 
 
 def test_describe_refusals(box):

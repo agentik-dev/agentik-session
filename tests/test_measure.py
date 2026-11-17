@@ -160,13 +160,36 @@ def test_status_prints_the_drift_when_the_two_are_within_120_s(state, tmp_path):
                         r"\(\d+s apart\)", out.splitlines()[1]), out
 
 
+def _before_the_meter(sdir, seconds):
+    """A stamp `seconds` before the meter's own `ts` (ck2 R5). Both stamps are whole seconds, so
+    the gap is `seconds` exactly; a stamp taken from a second clock read crosses a second's edge
+    whenever that read falls in a later second than the meter's, and reads one second short."""
+    return datetime.fromisoformat(meter.load(sdir)["ts"]) - timedelta(seconds=seconds)
+
+
+NOT_COMPARABLE = r"measure: not comparable \(3\d\ds apart\)"
+
+
 def test_status_prints_not_comparable_past_120_s(state, tmp_path):
     sdir, _, _ = _metered(tmp_path)
-    then = datetime.now(timezone.utc) - timedelta(seconds=300)
-    M().record(SID, json.dumps(MEASURE), dict(os.environ), now=then)
+    M().record(SID, json.dumps(MEASURE), dict(os.environ), now=_before_the_meter(sdir, 300))
     rc, out, _ = run("status")
     assert rc == 0
-    assert re.fullmatch(r"measure: not comparable \(3\d\ds apart\)", out.splitlines()[1]), out
+    assert re.fullmatch(NOT_COMPARABLE, out.splitlines()[1]), out
+    assert M().drift(sdir)["apart"] == 300
+
+
+def test_the_stamp_holds_where_the_pins_arithmetic_crosses_a_seconds_edge(state, tmp_path):
+    """The test of the test, by a fixed clock: the clock read 1.1 s after the meter's stamp."""
+    sdir, _, _ = _metered(tmp_path)
+    later = datetime.fromisoformat(meter.load(sdir)["ts"]) + timedelta(seconds=1.1)
+    M().record(SID, json.dumps(MEASURE), dict(os.environ), now=later - timedelta(seconds=300))
+    rc, out, _ = run("status")
+    assert rc == 0 and not re.fullmatch(NOT_COMPARABLE, out.splitlines()[1]), out
+    assert out.splitlines()[1] == "measure: not comparable (299s apart)"
+    M().record(SID, json.dumps(MEASURE), dict(os.environ), now=_before_the_meter(sdir, 300))
+    rc, out, _ = run("status")
+    assert rc == 0 and re.fullmatch(NOT_COMPARABLE, out.splitlines()[1]), out
 
 
 def test_doctor_measure_row_ok_without_the_file_or_under_10_percent(state, tmp_path):
