@@ -460,6 +460,16 @@ _SHELL_NAMES = frozenset({"sh", "bash", "zsh", "dash"})
 _PY_NAME = re.compile(r"python[0-9.]*\Z")
 _LAND_PUSH = frozenset({"--p", "--pu", "--pus", "--push"})    # what argparse takes, measured
 _LAND_TAKES = ("--session", "--wall")                         # land's options with an operand
+# review 1 fix 1: a command word another command may run, by its base name (a python name too)
+_STARTS = frozenset({"git", "agentik", *_TOOLS, *_SHELL_NAMES})
+# the commands whose words are data, never a command they run; any other command's are read
+_PRINTERS = frozenset({"echo", "printf", "print", "grep", "egrep", "fgrep", "rg", "ag", "ack",
+                       "sed", "awk", "cat", "head", "tail", "less", "more", "wc", "sort", "uniq",
+                       "tee", "ls", "test", "[", "[[", ":", "true", "false", "man", "which",
+                       "type", "whence", "where", "help", "pbcopy", "say", "logger", "jq",
+                       "printenv", "export", "local", "readonly", "declare", "typeset", "read",
+                       "alias", "unalias", "basename", "dirname", "realpath", "readlink", "cut",
+                       "tr", "diff", "cmp"})
 
 
 def _py_script(args: list):
@@ -546,7 +556,30 @@ def _pathlike(w: str) -> bool:
     return "/" in w or w in (".", "..") or w.startswith("~")
 
 
+def _starts(w: str) -> bool:
+    """Review 1 fix 1: whether a word may be the command word of a command another one runs: by
+    its base name git, the tool, the door, a python or a shell; a word with a space never is."""
+    if not w or any(ch.isspace() for ch in w):
+        return False
+    b = os.path.basename(w).lower()
+    return b in _STARTS or bool(_PY_NAME.match(b))
+
+
 def _push(c, k, ctx, cell):
+    """g10 R2, R3, review 1 fix 1: the command itself, then, unless it prints its words, each of
+    its words that may start a command, judged with the words after it as that command."""
+    got = _pushes(c, k, ctx, cell)
+    if got or c.name.lower() in _PRINTERS:
+        return got
+    for i, w in enumerate(c.args):
+        if _starts(w):
+            got = _pushes(c._replace(name=os.path.basename(w), args=c.args[i + 1:]), k, ctx, cell)
+            if got:
+                return got
+    return None
+
+
+def _pushes(c, k, ctx, cell):
     """g10 R2, R3: a git push or its plumbing, or the tool's `gate publish` or `gate land
     --push`, in an armed checkout."""
     g = _git(c)
