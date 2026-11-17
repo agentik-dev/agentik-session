@@ -322,6 +322,7 @@ def test_fix3_the_look_past_quotes(box):
 # ---- fix 4 (F7): the push rule judges the git dir, never the work tree -------------------------
 
 def test_fix4_the_git_dir_is_judged(box):
+    (box.a / ".git" / "worktrees" / "w").mkdir(parents=True)
     for line in ("git --work-tree=H/open push", "git --work-tree /tmp push origin main",
                  "GIT_WORK_TREE=/tmp git push", "git --git-dir=.git --work-tree=/tmp push",
                  "GIT_DIR=.git git push"):

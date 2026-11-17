@@ -579,6 +579,40 @@ def _pathlike(w: str) -> bool:
     return "/" in w or w in (".", "..") or w.startswith("~")
 
 
+def _git_dir(start, globs, c, k: int, ctx, beside: bool):
+    """Review 1 fix 4: the folder whose repository a push acts on from one starting folder: the
+    `-C` folders, then `--git-dir` or `GIT_DIR` (its `.git` read as the folder above); a work
+    tree is never judged. None where git stops; `beside` as in `_literal`."""
+    f = start if start is not None and os.path.isdir(start) else ctx.here
+    for o, v in globs:
+        if o != "-C" or v is None:
+            continue
+        w = _literal(v, c, k, ctx, beside)
+        if w is None:
+            continue
+        f = os.path.normpath(os.path.join(f, w))
+        if not os.path.isdir(f):
+            return None
+    gd = _named(globs, c, "--git-dir", "GIT_DIR=")
+    gd = None if gd is None else _literal(gd, c, k, ctx, beside)
+    if gd is None:
+        return f
+    g = os.path.normpath(os.path.join(f, gd))
+    return os.path.dirname(g) if os.path.basename(g) == ".git" else g
+
+
+def _pushed(c, k, ctx, cell, globs):
+    """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
+    each folder it may run in, the followed variable alone and beside the folder so far."""
+    for start in c.heres:
+        for beside in (False, True):
+            top = top_of(_git_dir(start, globs, c, k, ctx, beside), ctx.tops)
+            got = ctx.armed(cell, top) if top else None
+            if got:
+                return (top, got)
+    return None
+
+
 def _starts(w: str) -> bool:
     """Review 1 fix 1: whether a word may be the command word of a command another one runs: by
     its base name git, the tool, the door, a python or a shell; a word with a space never is."""
@@ -609,7 +643,7 @@ def _pushes(c, k, ctx, cell):
     if g is not None:
         sub = g[1].lower()
         if _veiled(sub) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
-            return _found(c, k, ctx, cell, g[0])
+            return _pushed(c, k, ctx, cell, g[0])
         return None
     words = _tool_words(c)
     ops = _pushing_verb(words) if words is not None else None
