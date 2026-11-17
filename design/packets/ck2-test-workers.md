@@ -42,7 +42,10 @@ At the pin `make test` runs `.venv` (3.12.7, pytest 9.1.1) and `.venv-floor` (3.
 
 ## 4. Findings that name this row
 
-To be filled from the measurements: the workers table (R3), the tests R4 mends, R6's finding.
+- The pin's counts, read again: the brief's 4,854 and 4,704 + 128 are ef0ba32's (ck1); at `fd8f3af` the README's Status line reads 4,889 collected, and the floor pass 4,740 passed + 128 skipped (this row's first floor pass, 4,749 + 128, less its 9 tests). This row adds 9 tests: 8 in `tests/test_ck2_workers.py`, 1 in `tests/test_measure.py`.
+- R4, mended: `test_ak5_plug.py::test_describe_json` bound `describe --json` at 1.0 s of wall and took 1.001 s on 4 workers at a load near 12. It shares the cores. Its 1 s now reads the launcher's own CPU (`RUSAGE_CHILDREN`), and the wall keeps 3 s, which a wait in `describe` still breaks. No group is kept in one process.
+- R6, not found; ruled out: (a) a process removing the box under `git`: creating a file or folder in a removed folder gives `ENOENT`, not `EINVAL` (probed on this Mac), and pytest's retention cleanup of `pytest-of-<user>` skips every numbered folder whose `.lock` is live (`_pytest/pathlib.py` `ensure_deletable`, both venvs), so neither pass removes the other's; (b) a name collision: `git` retries `tmp_obj_XXXXXX` on `EEXIST`; (c) the box's `git` reading the user's config: `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` isolate it; (d) a shared folder: each test's box is its own `tmp_path`, and xdist gives each worker its own basetemp under its pass's. The test is left as it is.
+- R3, the workers' table: see the sitting's record.
 
 ## 5. Forbidden reads
 
