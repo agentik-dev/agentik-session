@@ -15,7 +15,8 @@
 - [x] L1, L6: `WORKERS = 4`; help names 4 and python3.12; two tests in `tests/test_ck2_workers.py`
 - [x] L8: the packet's §4 (each row green or red, the 8 row, A1's three, why 4) and the first record's A1
 - [x] NICE: n297 to n301; n231 leaves (F1 lands it); n228, n230 and n232 to n234 moved to `history/NICE-overflow.md`
-- [ ] `make stamp`, then one `make check`, through the gate
+- [x] `make stamp`, job `20261117-133932-2494` exit 0: the count 4898 to 4901
+- [ ] one `make check`, through the gate
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
@@ -24,4 +25,4 @@
 - Choice: help fills in `$(WORKERS)` and `$(VENV_PYTHON)` alone; `$(PREFIX)` in install's line is as before.
 
 ## Next act
-The stamp and the check, through the gate.
+The check, through the gate.
