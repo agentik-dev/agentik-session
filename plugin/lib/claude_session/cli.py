@@ -193,14 +193,15 @@ def cmd_gates(args) -> int:
 
 
 def cmd_install_cli(args) -> int:
-    """Freeze this code and write the launcher, the link and the door (design/04 §3)."""
+    """Freeze this code and write the launcher, the old name's link where ours stands, and the
+    door (design/04 §3)."""
     try:
         done = install.install(args.prefix)
     except (OSError, KeyError, ValueError) as e:
         print(f"agentik-session: install-cli: {e}", file=sys.stderr)
         return 1
-    print(f"installed {done['launcher']} -> {done['tree']} ({done['version']}); "
-          f"{done['link']} links to it; {done['door']}")
+    link = f"{done['link']} links to it; " if done["link"] else ""    # is1-old-name R4
+    print(f"installed {done['launcher']} -> {done['tree']} ({done['version']}); {link}{done['door']}")
     for line in done["pruned"]:
         print(line)
     return 0
@@ -1863,7 +1864,8 @@ def build_parser() -> argparse.ArgumentParser:
     ds.set_defaults(func=cmd_describe)
 
     ic = sub.add_parser("install-cli", help="give the terminal the CLI: freeze this code, write "
-                        "the launcher in ~/.local/bin, its link and the agentik door, and prune")
+                        "the launcher in ~/.local/bin and the agentik door, refresh the old "
+                        "name's link where one of ours stands, and prune")
     ic.add_argument("--prefix", help="instead of $HOME/.local")
     ic.set_defaults(func=cmd_install_cli)
 
