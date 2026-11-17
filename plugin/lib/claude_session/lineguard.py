@@ -477,7 +477,10 @@ _PRINTERS = frozenset({"echo", "printf", "print", "grep", "egrep", "fgrep", "rg"
                        "type", "whence", "where", "help", "pbcopy", "say", "logger", "jq",
                        "printenv", "export", "local", "readonly", "declare", "typeset", "read",
                        "alias", "unalias", "basename", "dirname", "realpath", "readlink", "cut",
-                       "tr", "diff", "cmp"})
+                       "tr", "diff", "cmp",
+                       # review 2 F2: the file commands, whose paths are data
+                       "cp", "mv", "ln", "install", "chmod", "touch", "mkdir", "shasum", "stat",
+                       "tar"})
 
 
 def _py_script(args: list):
@@ -508,9 +511,10 @@ def _py_script(args: list):
     return (args[i], args[i + 1:]) if i < len(args) and args[i] != "-" else None
 
 
-def _tool_words(c):
+def _tool_words(c, veil: bool = True):
     """R3: the words after the session tool's own word(s), or None for a command that runs no
-    session tool: its command word, or an interpreter's script word, by its base name."""
+    session tool: its command word, or an interpreter's script word, by its base name. Without
+    `veil` (review 2 F2), a word the shell expands is read as no tool's word."""
     name = c.name.lower()
     if _PY_NAME.match(name):
         got = _py_script(c.args)
@@ -535,7 +539,7 @@ def _tool_words(c):
     if i >= len(rest):
         return None
     if _veiled(rest[i]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
-        return rest[i:]
+        return rest[i:] if veil else None
     return rest[i + 1:] if rest[i] == "session" else None
 
 
@@ -549,18 +553,19 @@ def _takes(w: str) -> bool:
     return len(w) > 2 and "=" not in w and any(o.startswith(w) for o in _LAND_TAKES)
 
 
-def _pushing_verb(words: list):
+def _pushing_verb(words: list, veil: bool = True):
     """R3: the repo operands of `gate publish`, or of `gate land` with `--push` (or an
     abbreviation argparse takes) before a `--`, each at the verb's position as the tool's parser
-    places it; None for any other verb."""
+    places it; None for any other verb. Without `veil` (review 2 F2), a word the shell expands is
+    never the verb's or the flag's."""
     i = 0
     for want in ("gate", None):
         while i < len(words) and words[i].startswith("-"):
             if _veiled(words[i]):
-                return []                               # review 1 fix 2: a word the shell expands
+                return [] if veil else None             # review 1 fix 2: a word the shell expands
             i += 1                                      # global and gate's options: no operand
         if i < len(words) and _veiled(words[i]):
-            return []
+            return [] if veil else None
         if i >= len(words) or (want and words[i] != want):
             return None
         i += 1
@@ -576,7 +581,7 @@ def _pushing_verb(words: list):
             done = True
         elif w in _LAND_PUSH:
             push = True
-        if not done and _veiled(w) and (w.startswith("-") or len(ops) > 4):
+        if veil and not done and _veiled(w) and (w.startswith("-") or len(ops) > 4):
             push = True             # review 1 fix 2, review 2 F1: a flag, or past land's 4 operands
         elif verb == "land" and _takes(w):
             j += 1
@@ -675,24 +680,25 @@ def _push(c, k, ctx, cell):
     if got or c.name.lower() in _PRINTERS:
         return got
     for i, w in enumerate(c.args):
-        if _starts(w):
-            got = _pushes(c._replace(name=os.path.basename(w), args=c.args[i + 1:]), k, ctx, cell)
+        if _starts(w):                      # review 2 F2: after a slashed word, a veil is data
+            got = _pushes(c._replace(name=os.path.basename(w), args=c.args[i + 1:]), k, ctx, cell,
+                          veil="/" not in w)
             if got:
                 return got
     return None
 
 
-def _pushes(c, k, ctx, cell):
+def _pushes(c, k, ctx, cell, veil: bool = True):
     """g10 R2, R3: a git push or its plumbing, or the tool's `gate publish` or `gate land
-    --push`, in an armed checkout."""
+    --push`, in an armed checkout; `veil` as in `_tool_words`."""
     g = _git(c)
     if g is not None:
         sub = g[1].lower()
-        if _veiled(sub) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
+        if (veil and _veiled(sub)) or sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
             return _pushed(c, k, ctx, cell, g[0])
         return None
-    words = _tool_words(c)
-    ops = _pushing_verb(words) if words is not None else None
+    words = _tool_words(c, veil)
+    ops = _pushing_verb(words, veil) if words is not None else None
     if ops is None:
         return None
     starts = [s if s is not None else ctx.here for s in c.heres] + [ctx.here] + _home_cds(k, ctx)

@@ -427,10 +427,13 @@ def test_r2_f2_a_file_command_and_a_slashed_word(box):
                  'ln -s "$PWD/plugin/bin/agentik" "$T/bin/agentik"; git -C "$T" status',
                  'shasum plugin/bin/agentik "$OTHER/plugin/bin/agentik"; git status',
                  'mv x/git "$D/"', 'touch a/git "$D"', 'mkdir -p b/agentik "$D"', 'stat ./git "$X"',
-                 'tar -cf "$O" ./git', 'nice /opt/x/git "$V"', 'nice /opt/x/bin/agentik "$S" gate x'):
+                 'tar -cf "$O" ./git', 'timeout 5 /opt/x/git "$V"',
+                 'timeout 5 /opt/x/bin/agentik "$S" gate x'):
         _passed(box, line, box.a, **HELPER)
-    for line in ("timeout 5 /usr/bin/git push", "timeout 5 git $V", "nice /opt/x/git push",
-                 "nice /opt/x/bin/agentik session gate publish", "nice agentik $S gate publish"):
+    # `nice` is a wrapper the reader opens: its git is the command itself, a veil and all
+    for line in ("timeout 5 /usr/bin/git push", "timeout 5 git $V", "timeout 5 /opt/x/git push",
+                 "timeout 5 /opt/x/bin/agentik session gate publish", "timeout 5 agentik $S gate publish",
+                 'nice /opt/x/git "$V"'):
         _refused(box, line, box.a, **HELPER)
 
 
