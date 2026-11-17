@@ -7,6 +7,7 @@
 | pin | `300f905` on this branch (2.0.0-alpha.131) |
 | branch | `up3s-session-forward`, worktree `.claude/worktrees/up3s-session-forward`, the two venvs linked |
 | level | S3, packet `design/packets/up3s-session-forward.md` (unchanged) |
+| window | 200k |
 | agents | 0 |
 | exit | every ruling built and committed; the quick gates' job queued behind another worktree's key at the tool-call bound |
 

@@ -14,7 +14,7 @@
 
 The owner, 2026-11-16: "Use up to 2 Fable agents to review our upgrade/install so far. Use up to 8 opus agents to build anything to help us with install/upgrade concerns." His standing ask: "setup and doctor usable today".
 
-The review's finding 5: an older plugin's `install-cli` replaces a newer command. That is the line `/session:install-cli` runs in any session started before an update, and the remedy every launcher's `is gone` line names. Commons' `install()` now leaves such a command (`kept`, `--force` to place anyway); session's own `install()` has no such check, though its `refresh` does (`_behind`, by `order`).
+The source is the install review's finding 5 (§4).
 
 Measured at the pin, temp HOME and prefix, a copy of the plugin at a made-up 2.0.0-alpha.999 placed first: the pin's `install-cli` prints `installed <prefix>/bin/agentik-session -> … (2.0.0-alpha.130); …`, exits 0, and the command reads alpha.130; `--force` is argparse's `unrecognized arguments`, exit 2. Over a command at 2.0.0-alpha.1 it places alpha.130 with is2's two PATH lines.
 
@@ -41,10 +41,14 @@ Acceptance: `tests/test_up3s_session_forward.py`, per-test temp HOME and prefix.
 | 3 | every file sync places `cmp`-equal to commons' canonical; `shasum -a 256 -c scripts/vendored.sha256` exit 0 | four copies behind commons main |
 | 4 | `make stamp`, `make check` by the gate; `scripts/hygiene --require-private --commits main..HEAD` exit 0 | green at alpha.130 |
 
-## 4. Forbidden reads
+## 4. Findings that name this row
+
+The install review's finding 5: an older plugin's `install-cli` replaces a newer command. That is the line `/session:install-cli` runs in any session started before an update, and the remedy every launcher's `is gone` line names. Commons' `install()` now leaves such a command (`kept`, `--force` to place anyway); session's own `install()` has no such check, though its `refresh` does (`_behind`, by `order`).
+
+## 5. Forbidden reads
 
 No transcript, live state root or gate result, file under `~/.claude`, or relay ledger.
 
-## 5. Report
+## 6. Report
 
 The record the coordinator names.

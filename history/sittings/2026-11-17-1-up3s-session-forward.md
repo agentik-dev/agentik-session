@@ -7,6 +7,7 @@
 | pin | `ef0ba32` on main (2.0.0-alpha.130); commons main `626a3f0` |
 | branch | `up3s-session-forward`, worktree `.claude/worktrees/up3s-session-forward`, the two venvs linked |
 | level | S3, packet `design/packets/up3s-session-forward.md` |
+| window | 200k |
 | agents | 0 |
 
 ## Done-ness
