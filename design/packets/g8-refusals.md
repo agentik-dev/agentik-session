@@ -16,15 +16,16 @@ The owner, 2026-11-13, question 49: the suite's guards live in the session plugi
 
 At the pin `hooks.pre_tool_use` (`hooks.py:690`, not `:611` as the brief has it) refuses a helper's charter write, then a spawn by the spawn rule, then an edit or Bash write of a gated file (`instructionguard.check`, failing open). No rule judges a sweep, a recursive `rm` of a variable, a `git init` or an identity set. `instructionguard.log` writes six fixed keys. `shellreader.commands` gives `([Cmd], [Unread])`; a `Cmd` carries no subshell scope.
 
-## 2. Rulings and interfaces
+## 2. Rulings
 
-- `lineguard.check(payload, env) -> dict`: `{}` or one `deny`; never `ask`; no process, no knob. `lineguard.failed(payload, env, exc) -> dict`: R14's answer for an exception that escapes `check`; never raises.
 - `lineguard.RULES`: rows `(name, armed, judge, loose)`. `rm`, `init`, `identity` armed `product`; `sweep` armed by the title `Commits`. Question 53's other answer is three cells, `product` to `Stray writes`.
 - R5's first look; R6's folder (the payload's absolute `cwd`, a `.git` entry walked up from the real path); R7's arming (the checkout's `CLAUDE.md`, each above it in the home, the user's; 262,144 bytes; column 0; outside a fence); R8 to R11 the four judges; R12 the checkout the sweep writes; R13 the loose look at unread text; R14 an error refuses; R15 the reasons; R16 the mark `sessions/<sid>/refused/<tool_use_id>`; R17 `guard.jsonl`, with `log(..., rule=[...])`.
 - The block in `hooks.pre_tool_use`: for `Bash`, after the helper's charter rule, before the edit gates, a helper's call alike; a refused call opens no call file.
-- Choices inside the rulings are in the sitting record's handover.
 
-## 3. Acceptance (the brief's ten lines)
+## 3. Interfaces and acceptance (the brief's ten lines)
+
+- `lineguard.check(payload, env) -> dict`: `{}` or one `deny`; never `ask`; no process, no knob. `lineguard.failed(payload, env, exc) -> dict`: R14's answer for an exception that escapes `check`; never raises.
+- The mark's path, `sessions/<sid>/refused/<tool_use_id>` (R16), and `instructionguard.log(..., rule=[...])`'s `rule` key in `guard.jsonl` (R17), as in §2.
 
 | # | line | at the pin |
 |---|---|---|
@@ -38,3 +39,15 @@ At the pin `hooks.pre_tool_use` (`hooks.py:690`, not `:611` as the brief has it)
 | 8 | `git diff <pin>` names only this packet's files | — |
 | 9 | no `subprocess`, `environ`, `"ask"` in `lineguard.py`; the g2b scans read it | — |
 | 10 | `scripts/recordlint`, `scripts/hygiene` | 0 |
+
+## 4. Findings that name this row
+
+None at the pin.
+
+## 5. Forbidden reads
+
+The wall's: the live state and the real home (each probe in a temp home); the replay is read in counts only.
+
+## 6. Report
+
+The sitting's record, `history/sittings/2026-11-17-2-g8-refusals.md`: the choices inside the rulings are in its handover.

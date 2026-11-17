@@ -7,6 +7,7 @@
 | pin | `c21446a` on `g8-refusals` |
 | branch | `g8-refusals`, worktree `.claude/worktrees/g8-refusals`, the two venvs linked |
 | level | S1, packet `design/packets/g8-refusals.md` (unchanged) |
+| window | 200k |
 | agents | 0 |
 
 ## Done-ness
