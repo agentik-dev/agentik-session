@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] F1: the cold call's CPU and a warm call's 1.0 s of wall; the test of the test red at `f64adef`, green after
 - [x] L1, L6: `WORKERS = 4`; help names 4 and python3.12; two tests in `tests/test_ck2_workers.py`
-- [ ] L8: the packet's §4 and the first record's A1
+- [x] L8: the packet's §4 (each row green or red, the 8 row, A1's three, why 4) and the first record's A1
 - [ ] NICE: five rows, the file under its bound
 - [ ] `make stamp`, then one `make check`, through the gate
 
@@ -23,4 +23,4 @@
 - Choice: help fills in `$(WORKERS)` and `$(VENV_PYTHON)` alone; `$(PREFIX)` in install's line is as before.
 
 ## Next act
-L8, then NICE, then the stamp and the check.
+NICE, then the stamp and the check.

@@ -17,8 +17,8 @@
 - [x] R5: the stamp 300 s before the meter's own `ts`; the test of the test by a fixed clock; 200 of 200 green in each venv
 - [x] R4: `test_ak5_plug.py::test_describe_json`'s bound on CPU; R6: not found, what was ruled out in the packet's §4
 - [x] `make stamp` (job `20261117-123635-2473`): the count 4889 to 4898, committed
-- [x] R3: checks at 3, 4 and 6 workers (jobs `20261117-123028-2468`, `20261117-125335-2479`); 4 the fastest, the table in the packet's §4
-- [ ] A1: three checks in a row at the default, one gate job running three `make check`
+- [x] R3: checks at 3, 4 and 6 workers, red (jobs `20261117-123028-2468`, `20261117-125335-2479`), and at 8, green; 4 kept for the load 8 makes (22 against the gate's hold of 12), the table in the packet's §4
+- [x] A1: three green checks in a row at 4, job `20261117-131238-2483` on `f64adef`: 323, 274 and 305 s at loads of 9.6 to 13.0, each `4898 passed` and `4749 passed, 128 skipped`
 - [x] R7: the Makefile's help lines; the README source names no minutes, so no render
 
 ## Handover
@@ -29,4 +29,4 @@
 - decide, owner: coordinator. The brief's A3 baseline (4,854; 4,704 + 128) is ef0ba32's; at `fd8f3af` the count is 4,889 and the floor 4,740 + 128.
 
 ## Next act
-Wait on the three-check job; enter its lines in the packet's table and A1.
+None: every act is done. Review 1's fix is the record `2026-11-17-8-ck2-test-workers-fix.md`.
