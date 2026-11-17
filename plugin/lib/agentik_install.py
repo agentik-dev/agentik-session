@@ -12,12 +12,12 @@ light at import: a hook imports it for `restore_parent_env`, and no import here 
 The prune: a launcher already running keeps its tree for its whole life, which for a respawn chain
 is hours, so deleting every other tree pulls the code out from under it. It keeps the new tree (its
 mtime set to now, so a re-install of an old tree counts as newest); every entry a running process
-names in its command line or environment, read from `ps -axwwE -o pid=,command=` and compared by
-realpath; and the newest KEEP by mtime, which cover a launcher that has read the old file and not
-yet exec'd, and any process ps could not see. An entry whose name starts with a dot is the
-install's own and no tree. It fails safe: when ps cannot run, exits non-zero, or shows no
-environment (a probe variable set in ps's own environment is missing from its output), nothing is
-removed. The limit: macOS hides the environment of its platform binaries even from their own user,
+names in its command line or environment, read from `ps -axwwE -o pid=,command=`, or where that
+exits non-zero from `ps axwwe -o pid=,command=` (procps's BSD form), and compared by realpath; and
+the newest KEEP by mtime, which cover a launcher that has read the old file and not yet exec'd,
+and any process ps could not see. An entry whose name starts with a dot is the install's own and
+no tree. It fails safe: when ps cannot run, both forms exit non-zero, or ps shows no environment
+(a probe variable set in ps's own environment is missing from its output), nothing is removed. The limit: macOS hides the environment of its platform binaries even from their own user,
 so a tree named only in such a process's environment is removed unless it is among the newest KEEP.
 """
 import os
@@ -280,9 +280,10 @@ def _replace(path, write):
         raise
 
 
-def launcher_text(tree, ver, conf=None):
+def launcher_text(tree, ver, conf=None, checkout=None):
     """The launcher for one frozen tree. One pass, so a path or a version cannot hold a token
-    that a later replacement would read."""
+    that a later replacement would read. With `checkout`, the line `CHECKOUT=<path>` follows
+    `TREE=`: the checkout this install ran from (row up2 R1); without it the text is as before."""
     import shlex
     conf = conf or names()
     word = conf["tool_name"][len("agentik-"):]
@@ -292,7 +293,39 @@ def launcher_text(tree, ver, conf=None):
               "__STATE_FALLBACK__": STATE_FALLBACK % {"old": old_state} if old_state else "",
               "__APPLE__": " ".join(APPLE), "__VERSION__": shlex.quote(ver),
               "__TREE__": shlex.quote(str(tree))}
-    return re.sub(r"__[A-Z_]+__", lambda m: values[m.group(0)], LAUNCHER)
+    text = re.sub(r"__[A-Z_]+__", lambda m: values[m.group(0)], LAUNCHER)
+    if checkout:
+        line = "\nTREE=%s\n" % values["__TREE__"]
+        text = text.replace(line, line + "CHECKOUT=%s\n" % shlex.quote(checkout), 1)
+    return text
+
+
+def _plain_checkout(path):
+    """True where `path` is a checkout `setup` can run from: absolute, no control character and
+    no `=` (so `_ours`' count of `TREE=` and `VERSION=` holds), holding `.git` and an executable
+    `setup` file."""
+    return (isinstance(path, str) and os.path.isabs(path) and not re.search(r"[\x00-\x1f\x7f=]", path)
+            and os.path.lexists(os.path.join(path, ".git"))
+            and os.path.isfile(os.path.join(path, "setup")) and os.access(os.path.join(path, "setup"), os.X_OK))
+
+
+def checkout_of(lib, env, launcher=None):
+    """The checkout an install from `lib` names in its launcher (row up2 R1), or None. A plugin
+    at `<checkout>/plugins/<name>` outside Claude Code's plugins folder names its checkout; a
+    frozen tree names the one the launcher at `launcher` names, where that still stands; a
+    plugin's folder names none."""
+    if is_frozen(lib):
+        found = read_launcher(launcher) if launcher else None
+        kept = (found or {}).get("checkout")
+        return kept if _plain_checkout(kept) else None
+    plugins = os.path.dirname(os.path.dirname(lib))
+    if os.path.basename(plugins) != "plugins":
+        return None
+    root = os.path.dirname(plugins)
+    config = env.get("CLAUDE_CONFIG_DIR") or os.path.join(env.get("HOME") or "/", ".claude")
+    if _under(root, os.path.join(os.path.realpath(config), "plugins")):
+        return None
+    return root if _plain_checkout(root) else None
 
 
 def _write_launcher(path, text):
@@ -469,7 +502,8 @@ def _locked_install(prefix, share, env, conf, ps_timeout=60):
     link = _old_link(bin_dir, old)
     if link:
         _replace(link, lambda temp: os.symlink(name, temp))
-    _write_launcher(launcher, launcher_text(code, ver, conf))    # last: what a retry reads
+    checkout = checkout_of(lib, env, launcher)
+    _write_launcher(launcher, launcher_text(code, ver, conf, checkout))    # last: what a retry reads
     try:
         pruned, lines = prune(share, tree, ps_timeout=ps_timeout)
     except Exception as e:                                       # noqa: BLE001
@@ -482,13 +516,15 @@ def _locked_install(prefix, share, env, conf, ps_timeout=60):
     if home and os.path.realpath(prefix) == os.path.realpath(os.path.join(home, ".local")):
         _clear_marker(env, conf)    # HOME's marker is its own launcher's; another prefix's is not
     return {"launcher": launcher, "tree": code, "version": ver, "door": os.path.join(bin_dir, DOOR),
-            "link": link, "pruned": lines}
+            "link": link, "pruned": lines, "checkout": checkout}
 
 
-def install(prefix=None, env=None, dry_run=False):
+def install(prefix=None, env=None, dry_run=False, force=False):
     """The verb's work; what it wrote, or an OSError, KeyError or ValueError. `door_fate` is read
     before any write; `on_path` is true when <prefix>/bin is an entry of the env's PATH. With
-    `dry_run` it takes no lock and writes nothing: `tree` is None and `pruned` empty."""
+    `dry_run` it takes no lock and writes nothing: `tree` is None and `pruned` empty. `kept` is
+    the version of a command install-cli wrote that is newer than this tree and whose code stands:
+    then nothing is written, unless `force` (row up3-forward-only R1); else None."""
     env = os.environ if env is None else env
     conf = names()
     if prefix == "~" or (prefix or "").startswith("~/"):    # make quotes PREFIX, so no shell did
@@ -500,17 +536,24 @@ def install(prefix=None, env=None, dry_run=False):
     seen = {"door_fate": door_fate(door, _source()[2]),
             "on_path": os.path.normpath(bin_dir) in [
                 os.path.normpath(p) for p in (env.get("PATH") or "").split(os.pathsep) if p]}
-    if dry_run:
+    launcher = os.path.join(bin_dir, conf["tool_name"])
+    kept = None if force else _ahead(launcher, conf, share)
+    if dry_run or kept:
         old = conf["old_name"]
-        done = {"launcher": os.path.join(bin_dir, conf["tool_name"]), "tree": None, "version": version(),
-                "door": door, "link": _old_link(bin_dir, old), "pruned": []}
+        done = {"launcher": launcher, "tree": None, "version": version(),
+                "door": door, "link": None if kept else _old_link(bin_dir, old), "pruned": [],
+                "checkout": checkout_of(_source()[0], env, launcher)}
     else:
         lock = _lock(share)
         try:
-            done = _locked_install(prefix, share, env, conf)
+            kept = None if force else _ahead(launcher, conf, share)    # again, under the lock
+            done = None if kept else _locked_install(prefix, share, env, conf)
         finally:
             lock.close()
-    done.update(seen)
+        if kept:
+            done = {"launcher": launcher, "tree": None, "version": version(), "door": door,
+                    "link": None, "pruned": [], "checkout": None}
+    done.update(seen, kept=kept)
     return done
 
 
@@ -525,15 +568,23 @@ def prune_news(lines):
     return [l for l in lines if not re.fullmatch(r"prune-trees: removed 0, kept \d+ \(\d+ live, the newest \d+\)", l)]
 
 
-def install_cli(prefix=None, env=None):
-    """The verb `<tool> install-cli [--prefix P]`, for a tool's command line to call: its exit
-    code. 0 done; 1 it could not (the reason on stderr), nothing moved past what it had written."""
+def install_cli(prefix=None, env=None, force=False, takes_force=False):
+    """The verb `<tool> install-cli [--prefix P] [--force]`, for a tool's command line to call: its
+    exit code. 0 done, or a newer command left as it is (one line says so; `force` places this
+    tree anyway); 1 it could not (the reason on stderr), nothing moved past what it had written.
+    The line names `--force` only where `takes_force` says the caller's verb takes that flag
+    (row up3-forward-only, review 1 F1)."""
     import sys
     try:
-        done = install(prefix, env)
+        done = install(prefix, env, force=force)
     except (OSError, KeyError, ValueError) as e:
         print("install-cli: %s" % e, file=sys.stderr)
         return 1
+    if done["kept"]:
+        flag = "; --force places it" if takes_force else ""   # each version once (review 1 L5)
+        print("Left %s at %s, newer than this plugin's %s%s."
+              % (shown(done["launcher"], env), done["kept"], done["version"], flag))
+        return 0
     link = " %s links to it." % shown(done["link"], env) if done["link"] else ""
     print("Placed %s %s and %s.%s" % (shown(done["launcher"], env), done["version"], shown(done["door"], env), link))
     for line in prune_news(done["pruned"]):
@@ -546,19 +597,30 @@ def install_cli(prefix=None, env=None):
 
 # ---- the prune -----------------------------------------------------------------------------
 
+# The process list's two forms: BSD's and macOS's `-axwwE`, then procps's BSD form, whose `e`
+# appends the environment to `command`; procps refuses `E` in both of its parsers.
+PS_FORMS = ("-axwwE", "axwwe")
+
+
 def processes(ps, timeout=60):
-    """(every process's command line and environment as one text, None) or (None, why)."""
+    """(every process's command line and environment as one text, None) or (None, why). The second
+    form runs only where the first exits non-zero, and `why` is then the second's: `<ps> exited
+    <n>`, and the first line ps wrote on stderr. A ps that cannot start or times out runs once."""
     import secrets
     import subprocess
     token = secrets.token_hex(8)
-    try:
-        r = subprocess.run([ps, "-axwwE", "-o", "pid=,command="], capture_output=True,
-                           text=True, errors="replace", timeout=timeout,
-                           env=dict(os.environ, **{PROBE: token}))
-    except (OSError, subprocess.SubprocessError) as e:
-        return None, "%s: %s" % (ps, e)
-    if r.returncode != 0:
-        return None, "%s exited %d" % (ps, r.returncode)
+    for form in PS_FORMS:
+        try:
+            r = subprocess.run([ps, form, "-o", "pid=,command="], capture_output=True,
+                               text=True, errors="replace", timeout=timeout,
+                               env=dict(os.environ, **{PROBE: token}))
+        except (OSError, subprocess.SubprocessError) as e:
+            return None, "%s: %s" % (ps, e)
+        if r.returncode == 0:
+            break
+    else:
+        said = next((l.strip() for l in r.stderr.splitlines() if l.strip()), "")
+        return None, "%s exited %d%s" % (ps, r.returncode, ": " + _ascii(said[:200]) if said else "")
     if "%s=%s" % (PROBE, token) not in r.stdout:
         return None, "no process environment is visible"
     return r.stdout, None
@@ -641,6 +703,11 @@ LAUNCHER_MAX = 65536              # a launcher install-cli wrote is under this m
 _TREE_NAME = re.compile(r"^[0-9a-f]{40}$")    # _freeze's name for a tree: _hash()[:40]
 DOOR_LINE = "# agentik: the front door"
 NOT_OURS = "not the launcher install-cli wrote"
+# The second line the session tool's own install-cli wrote before its alpha.127, exactly as written
+# there for its name (row rm1-leave-clean); taken for OLD_FORM_NAME alone (its review 1, F2). The name
+# is joined from two parts, since this module's text names no tool (test_the_canonical_forms_name_no_tool).
+OLD_FORM = "# __NAME__ launcher, written by `__NAME__ install-cli` (design/04 §2, §3); its old"
+OLD_FORM_NAME = "agentik-" + "session"
 
 
 def _homes(env):
@@ -670,7 +737,8 @@ def _under(path, root):
 
 def _launcher_form(path, name):
     """R3's first three tests: a regular file and no link, under LAUNCHER_MAX bytes, whose second
-    line is LAUNCHER's for `name` (the one form that line has had). It reads a regular file only."""
+    line is LAUNCHER's for `name`, or OLD_FORM's where `name` is OLD_FORM_NAME (row rm1-leave-clean).
+    It reads a regular file only."""
     import stat
     try:
         st = os.lstat(path)
@@ -682,7 +750,8 @@ def _launcher_form(path, name):
     if data is None:
         return False
     lines = data.decode("utf-8", "surrogateescape").split("\n")
-    return len(lines) > 1 and lines[1] == LAUNCHER.split("\n")[1].replace("__NAME__", name)
+    forms = (LAUNCHER.split("\n")[1],) + ((OLD_FORM,) if name == OLD_FORM_NAME else ())
+    return len(lines) > 1 and lines[1] in [f.replace("__NAME__", name) for f in forms]
 
 
 def _ours(path, name, share):
@@ -963,13 +1032,22 @@ def launcher_path(env, conf=None):
     return os.path.join(env.get("HOME") or "", ".local", "bin", conf["tool_name"])
 
 
-_LINE = re.compile(r"^(VERSION|TREE|CODE|PYTHON)=(.*)$", re.M)
+_LINE = re.compile(r"^(VERSION|TREE|CODE|PYTHON|CHECKOUT)=(.*)$", re.M)
+
+
+def _unquoted(value):
+    import shlex
+    try:
+        return "".join(shlex.split(value))
+    except ValueError:
+        return value
 
 
 def read_launcher(path):
-    """{"version", "tree", "python"} as the launcher's lines say, each None when absent; the
-    new form's TREE or an older form's CODE; None when no launcher is there to read, a path that
-    is no regular file included. Never raises."""
+    """{"version", "tree", "python", "checkout"} as the launcher's lines say, each None when
+    absent; the new form's TREE or an older form's CODE; CHECKOUT where install-cli ran from a
+    checkout (row up2 R1); None when no launcher is there to read, a path that is no regular file
+    included. Never raises."""
     data = read_regular(path, 65536)
     if data is None:
         return None
@@ -979,13 +1057,10 @@ def read_launcher(path):
         lines.setdefault(name, value.strip())
     tree = lines.get("TREE") or lines.get("CODE")
     if tree:
-        import shlex
-        try:
-            tree = "".join(shlex.split(tree))
-        except ValueError:
-            pass
-    python = lines.get("PYTHON")
-    return {"version": lines.get("VERSION"), "tree": tree, "python": python.strip('"') if python else None}
+        tree = _unquoted(tree)
+    python, checkout = lines.get("PYTHON"), lines.get("CHECKOUT")
+    return {"version": lines.get("VERSION"), "tree": tree, "python": python.strip('"') if python else None,
+            "checkout": _unquoted(checkout) or None if checkout else None}
 
 
 _VER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
@@ -1003,18 +1078,41 @@ def order(ver):
         (0, p, "") if isinstance(p, int) else (1, 0, p) for p in pre)
 
 
+def newer(a, b):
+    """Version `a` sorts above version `b`: the one comparison refresh, install and setup's step 4
+    make (row up3-forward-only R1). Equal, absent or a version `order` cannot read: False."""
+    if not a or not b or a == b:
+        return False
+    a, b = order(a), order(b)
+    return a is not None and b is not None and a > b
+
+
 def _behind(path):
     """The launcher at `path` is older than this plugin. Absent, a link, no line, no reading or
     equal: left alone."""
     if os.path.islink(path):
         return False
     found = read_launcher(path)
-    theirs = found and found["version"]
-    ours = version()
-    if not theirs or theirs == ours:
-        return False
-    theirs, ours = order(theirs), order(ours)
-    return theirs is not None and ours is not None and ours > theirs
+    return newer(version(), found and found["version"])
+
+
+def runner_stands(path):
+    """The runner at `path` is one the launcher runs: a file it can read, the launcher's own
+    `[ -f … ] && [ -r … ]` (row up3-forward-only, review 1 F2). Else its code is gone."""
+    return os.path.isfile(path) and os.access(path, os.R_OK)
+
+
+def _ahead(path, conf, share):
+    """The version of the launcher at `path` where install-cli wrote it (`_ours`), its runner
+    stands in its TREE (`runner_stands`) and it is newer than this plugin; else None. A command
+    whose code is gone is never kept: its own line names this install-cli as the way back."""
+    if not _ours(path, conf["tool_name"], share):
+        return None
+    found = read_launcher(path) or {}
+    tree, theirs = found.get("tree"), found.get("version")
+    if not tree or not runner_stands(os.path.join(tree, conf["runner"])):
+        return None
+    return theirs if newer(theirs, version()) else None
 
 
 def _refresh(env, conf):

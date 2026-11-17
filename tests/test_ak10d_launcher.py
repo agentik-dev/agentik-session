@@ -96,8 +96,9 @@ def test_ak10d_r2_an_old_form_launcher_reads_as_before_and_the_refresh_moves_it(
     assert vars(doctor._check_launcher(env, None)) == vars(new_check)
     r = _call(tool, home, "--version")
     assert r.returncode == 0 and r.stdout.split()[-1] != NEW, r
-    # commons' uninstall keeps it, as at alpha.126
-    assert not canonical._ours(str(tool), NAME, str(_share(home)))
+    # commons' uninstall reads it as session's own since commons' row rm1-leave-clean (its OLD_FORM;
+    # row up3s-session-forward's sync moved this line: at alpha.126 it kept it)
+    assert canonical._ours(str(tool), NAME, str(_share(home)))
     # the SessionStart refresh writes the new form, which commons reads as its own
     r = _session_start(plugin, home)
     assert r.returncode == 0, r

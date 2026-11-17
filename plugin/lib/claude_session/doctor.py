@@ -306,6 +306,12 @@ def _check_launcher(env, plugins) -> Check:
     if ours is not None and theirs < ours:
         return Check("launcher", True, f"{path} is {version}, older than the plugin's {plugin}; the "
                      f"next session's start moves it, or {remedy}", warn=True, remedy=cmd)
+    if ours is not None and theirs > ours:     # row up3s-session-forward R5: newer, a note
+        # review 1 F1: the clause only where install-cli keeps it, read as install() reads it
+        share = os.path.join(env.get("HOME") or "", ".local", "share", install.SHARE)
+        kept = "; install-cli leaves it as it is" if install._ahead(path, share) else ""
+        return Check("launcher", True, f"{path} is {version}, newer than the plugin's {plugin}"
+                     f"{kept}", note=True)
     return Check("launcher", True, f"{version} at {path}")
 
 

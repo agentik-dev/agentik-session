@@ -194,12 +194,17 @@ def cmd_gates(args) -> int:
 
 def cmd_install_cli(args) -> int:
     """Freeze this code and write the launcher, the old name's link where ours stands, and the
-    door (design/04 §3)."""
+    door (design/04 §3); a newer command install-cli wrote is left, unless --force (row
+    up3s-session-forward R2)."""
     try:
-        done = install.install(args.prefix)
+        done = install.install(args.prefix, force=args.force)
     except (OSError, KeyError, ValueError) as e:
         print(f"agentik-session: install-cli: {e}", file=sys.stderr)
         return 1
+    if done["kept"]:     # row up3s-session-forward R2: commons' line; no link, door or prune moved
+        print(f"Left {_from_home(done['launcher'], os.environ)} at {done['kept']}, newer than this "
+              f"plugin's {done['version']}; --force places it.")
+        return 0
     link = f"{done['link']} links to it; " if done["link"] else ""    # is1-old-name R4
     print(f"installed {done['launcher']} -> {done['tree']} ({done['version']}); {link}{done['door']}")
     for line in done["pruned"]:
@@ -207,6 +212,12 @@ def cmd_install_cli(args) -> int:
     for line in _path_lines(os.path.dirname(done["launcher"]), os.environ):
         print(line)
     return 0
+
+
+def _from_home(path, env) -> str:
+    """A path as a person reads it: from `~` where it is under HOME, as commons' `shown`."""
+    home = (env.get("HOME") or "").rstrip("/")
+    return "~" + path[len(home):] if home and path.startswith(home + "/") else path
 
 
 def _path_lines(bin_dir, env) -> list:
@@ -1887,6 +1898,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "the launcher in ~/.local/bin and the agentik door, refresh the old "
                         "name's link where one of ours stands, and prune")
     ic.add_argument("--prefix", help="instead of $HOME/.local")
+    ic.add_argument("--force", action="store_true", help="place this tree even over a newer "
+                    "command install-cli wrote, which is otherwise left as it is")
     ic.set_defaults(func=cmd_install_cli)
 
     pf = sub.add_parser("profile", help="list the profiles, or show one resolved here")

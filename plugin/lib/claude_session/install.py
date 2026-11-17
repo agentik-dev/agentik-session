@@ -354,16 +354,27 @@ def _locked_install(prefix, share, env, ps_timeout=60, akt=True):
             "link": link, "pruned": lines}
 
 
-def install(prefix=None, env=None) -> dict:
-    """The verb's work; what it wrote, or an OSError."""
+def install(prefix=None, env=None, force=False) -> dict:
+    """The verb's work; what it wrote, or an OSError. `kept` is the version of a command
+    install-cli wrote that is newer than this tree and whose code stands: then nothing is written
+    (no tree, link, door or prune) unless `force`, as commons' `install()` (row up3s-session-forward
+    R1); else None. The check is made before the lock and again under it."""
     env = os.environ if env is None else env
     prefix = os.path.abspath(prefix or os.path.join(env["HOME"], ".local"))
     share = os.path.join(prefix, "share", SHARE)
-    lock = _lock(share)
-    try:
-        return _locked_install(prefix, share, env)
-    finally:
-        lock.close()
+    bin_dir = os.path.join(prefix, "bin")
+    launcher = os.path.join(bin_dir, NAME)
+    kept = None if force else _ahead(launcher, share)
+    if not kept:
+        lock = _lock(share)
+        try:
+            kept = None if force else _ahead(launcher, share)    # again, under the lock
+            if not kept:
+                return dict(_locked_install(prefix, share, env), kept=None)
+        finally:
+            lock.close()
+    return {"launcher": launcher, "tree": None, "version": SEMVER, "door": os.path.join(bin_dir, DOOR),
+            "link": None, "pruned": [], "kept": kept}
 
 
 # ---- the forward refresh (design/04 §3, §5; packet sc3 ruling 5) ---------------------------
@@ -407,17 +418,64 @@ def order(version):
     return _key(parsed[0], parsed[1])
 
 
+def newer(a, b):
+    """Version `a` sorts above version `b` by `order`: the one comparison the refresh and
+    install-cli make (row up3s-session-forward R1). Equal, absent or unreadable: False."""
+    if not a or not b or a == b:
+        return False
+    a, b = order(a), order(b)
+    return a is not None and b is not None and a > b
+
+
 def _behind(path):
     """The launcher at `path` is older than this plugin. Absent, a link, no line, no reading or
     equal: left alone; the doctor names what wants naming."""
     if os.path.islink(path):
         return False
     found = read_launcher(path)
-    version = found and found["version"]
-    if not version or version == SEMVER:
+    return newer(SEMVER, found and found["version"])
+
+
+def _ours(path, share):
+    """The launcher install-cli wrote, as commons' `_ours` reads one: a regular file under 64 KiB
+    whose second line is LAUNCHER's; `TREE=` and `VERSION=` each once, the `TREE=` line its value
+    quoted as `launcher_text` quotes it; that tree under `share`, both real paths."""
+    import shlex
+    import stat
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size >= 65536:
+            return False
+        with open(path, encoding="utf-8", errors="surrogateescape") as fh:
+            text = fh.read(65536)
+    except OSError:
         return False
-    theirs, ours = order(version), order(SEMVER)
-    return theirs is not None and ours is not None and ours > theirs
+    lines = text.split("\n")
+    if len(lines) < 2 or lines[1] != LAUNCHER.split("\n")[1]:
+        return False
+    if text.count("TREE=") != 1 or text.count("VERSION=") != 1:
+        return False
+    line = re.search(r"(?m)^TREE=(.*)$", text)
+    try:
+        words = shlex.split(line.group(1)) if line else []
+    except ValueError:
+        return False
+    if len(words) != 1 or shlex.quote(words[0]) != line.group(1):
+        return False
+    return os.path.realpath(words[0]).startswith(os.path.realpath(share).rstrip("/") + "/")
+
+
+def _ahead(path, share):
+    """Row up3s-session-forward R1: the version of the launcher at `path` where install-cli wrote
+    it (`_ours`), its runner stands in its TREE, as the launcher's own test reads it, and it is
+    newer than this tree; else None. A command whose code is gone is never kept."""
+    if not _ours(path, share):
+        return None
+    found = read_launcher(path) or {}
+    runner = os.path.join(found.get("tree") or "", NAME)
+    if not found.get("tree") or not (os.path.isfile(runner) and os.access(runner, os.R_OK)):
+        return None
+    return found["version"] if newer(found["version"], SEMVER) else None
 
 
 def _refresh(env):
