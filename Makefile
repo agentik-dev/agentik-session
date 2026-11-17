@@ -1,4 +1,4 @@
-.PHONY: help test test-floor venv-floor doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme stamp
+.PHONY: help test test-floor venv-floor venv doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme stamp
 # The virtualenv first: `python3` and the scripts' shebangs resolve to it, never Apple's.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 # The newest installed respeak renderer, under either marketplace name.
@@ -7,11 +7,19 @@ RESPEAK_RENDER ?= $(shell for f in $(HOME)/.claude/plugins/cache/*/respeak/*/scr
 export RESPEAK_PYTHON ?= $(CURDIR)/.venv/bin/python
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
-test:  ## run the suite (no quota, fake claude), under .venv and .venv-floor side by side, test_bounded.py excepted (design/04 §6)
-	@if [ ! -x .venv-floor/bin/python ]; then ./.venv/bin/python -m pytest -q && echo "floor: absent"; exit; fi; \
+# The workers (ck2): each pass runs on $(WORKERS) pytest-xdist workers where its venv holds the
+# runner, else in one process as before, and says `workers: absent in <venv>` after it. A fixed
+# number, measured (design/packets/ck2-test-workers.md): two passes share the cores and the gate
+# holds a job above a load of 12, so never `auto`. `make test WORKERS=6` overrides it.
+WORKERS ?= 4
+test:  ## run the suite (no quota, fake claude), under .venv and .venv-floor side by side, each on $(WORKERS) workers where it holds pytest-xdist, test_bounded.py excepted in the floor (design/04 §6)
+	@w=$$(./.venv/bin/python -c 'import xdist' >/dev/null 2>&1 && echo "-n $(WORKERS)"); \
+	if [ ! -x .venv-floor/bin/python ]; then ./.venv/bin/python -m pytest -q $$w; main=$$?; \
+	  [ -n "$$w" ] || echo "workers: absent in .venv"; [ $$main = 0 ] && echo "floor: absent"; exit $$main; fi; \
 	log=$$(mktemp -t agentik-floor) || exit 2; \
 	$(MAKE) --no-print-directory test-floor > "$$log" 2>&1 & floor=$$!; \
-	./.venv/bin/python -m pytest -q; main=$$?; wait $$floor; fl=$$?; cat "$$log"; rm -f "$$log"; \
+	./.venv/bin/python -m pytest -q $$w; main=$$?; [ -n "$$w" ] || echo "workers: absent in .venv"; \
+	wait $$floor; fl=$$?; cat "$$log"; rm -f "$$log"; \
 	[ $$main = 0 ] || echo "test: the .venv pass failed, exit $$main" >&2; \
 	[ $$fl = 0 ] || echo "test: the .venv-floor pass failed, exit $$fl" >&2; \
 	[ $$main = 0 ] && [ $$fl = 0 ]
@@ -19,16 +27,34 @@ test:  ## run the suite (no quota, fake claude), under .venv and .venv-floor sid
 # a fresh Mac and this one share. It is built once in the main checkout, and a worktree links
 # it there, as with .venv. `make test` runs it when it is there (sc2 ruling 9).
 FLOOR_PYTHON ?= /usr/bin/python3
-venv-floor:  ## build .venv-floor under /usr/bin/python3 in the main checkout (pytest from pip), and link it from a worktree
+# The runner (ck2 R1): pytest-xdist, installed where a venv holds pytest and not the runner.
+RUNNER ?= pytest-xdist>=3
+venv-floor:  ## build .venv-floor under /usr/bin/python3 in the main checkout (pytest and pytest-xdist from pip), add pytest-xdist where it holds pytest alone, and link it from a worktree
 	@set -e; main=$$(git worktree list --porcelain | sed -n '1s/^worktree //p'); \
 	if [ ! -x "$$main/.venv-floor/bin/pytest" ]; then \
 	  $(FLOOR_PYTHON) -m venv "$$main/.venv-floor"; \
-	  "$$main/.venv-floor/bin/python" -m pip install -q --disable-pip-version-check 'pytest>=8'; fi; \
+	  "$$main/.venv-floor/bin/python" -m pip install -q --disable-pip-version-check 'pytest>=8' '$(RUNNER)'; \
+	elif ! "$$main/.venv-floor/bin/python" -c 'import xdist' >/dev/null 2>&1; then \
+	  "$$main/.venv-floor/bin/python" -m pip install -q --disable-pip-version-check '$(RUNNER)'; fi; \
 	if [ "$$main" != "$(CURDIR)" ] && [ ! -e .venv-floor ]; then ln -s "$$main/.venv-floor" .venv-floor; fi; \
 	echo "venv-floor: $$main/.venv-floor, $$("$$main/.venv-floor/bin/python" --version)"
-test-floor:  ## run the suite under .venv-floor, test_bounded.py excepted (scripts/bounded is a 3.11 dev tool, never run time); no .pytest_cache, which the .venv pass beside it writes
+# .venv, the same shape: built once in the main checkout under $(VENV_PYTHON) where it is absent.
+VENV_PYTHON ?= python3.12
+venv:  ## build .venv under $(VENV_PYTHON) in the main checkout (pytest and pytest-xdist from pip), add pytest-xdist where it holds pytest alone, and link it from a worktree
+	@set -e; main=$$(git worktree list --porcelain | sed -n '1s/^worktree //p'); \
+	if [ ! -x "$$main/.venv/bin/pytest" ]; then \
+	  $(VENV_PYTHON) -m venv "$$main/.venv"; \
+	  "$$main/.venv/bin/python" -m pip install -q --disable-pip-version-check 'pytest>=8' '$(RUNNER)'; \
+	elif ! "$$main/.venv/bin/python" -c 'import xdist' >/dev/null 2>&1; then \
+	  "$$main/.venv/bin/python" -m pip install -q --disable-pip-version-check '$(RUNNER)'; fi; \
+	if [ "$$main" != "$(CURDIR)" ] && [ ! -e .venv ]; then ln -s "$$main/.venv" .venv; fi; \
+	echo "venv: $$main/.venv, $$("$$main/.venv/bin/python" --version)"
+test-floor:  ## run the suite under .venv-floor, on $(WORKERS) workers where it holds pytest-xdist, test_bounded.py excepted (scripts/bounded is a 3.11 dev tool, never run time); no .pytest_cache, which the .venv pass beside it writes
 	@[ -x .venv-floor/bin/python ] || { echo "test-floor: no .venv-floor; run make venv-floor" >&2; exit 2; }
-	PATH="$(CURDIR)/.venv-floor/bin:$$PATH" ./.venv-floor/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_bounded.py
+	@w=$$(./.venv-floor/bin/python -c 'import xdist' >/dev/null 2>&1 && echo "-n $(WORKERS)"); \
+	echo "PATH=\"$(CURDIR)/.venv-floor/bin:\$$PATH\" ./.venv-floor/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_bounded.py $$w"; \
+	PATH="$(CURDIR)/.venv-floor/bin:$$PATH" ./.venv-floor/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_bounded.py $$w; \
+	fl=$$?; [ -n "$$w" ] || echo "workers: absent in .venv-floor"; exit $$fl
 doctor:  ## check the tool, the plugin and its dependencies on this machine
 	PYTHONPATH=plugin/lib python3 -m claude_session doctor
 # The install's destination; a test overrides HOME or PREFIX. For a developer: the one guard a

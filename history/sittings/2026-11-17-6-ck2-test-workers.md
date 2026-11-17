@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet
-- [ ] R1, R2: the runner in the dev extra, `make venv`, `make venv-floor`; `-n $(WORKERS)` or `workers: absent`; `tests/test_ck2_workers.py`
+- [x] R1, R2: the runner in the dev extra, `make venv`, `make venv-floor`; `-n $(WORKERS)` or `workers: absent`; `tests/test_ck2_workers.py`
 - [ ] R1's install through the gate
 - [ ] R5: the measure test's stamp and its test of the test
 - [ ] R4, R6: what fails on workers; the `git add -A` cause
@@ -23,4 +23,4 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R1 and R2's commit, then the install through the gate.
+The install through the gate (`make venv-floor venv`), then R5.
