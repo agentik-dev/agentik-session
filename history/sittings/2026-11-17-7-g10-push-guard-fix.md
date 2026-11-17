@@ -15,14 +15,15 @@
 - [x] Fix 1 to 8: the push rule, one commit each; 40 of 40 green with the g8 suite under both venvs
 - [x] Fix 9: the allow rows; fix 10: NICE rows n286 to n296, n230 to n241 (S4) to the overflow; the packet current (§2a, B1 to B5)
 - [x] B1, B2, B3 by the review's probes: 270 main-thread lines give the pin's decision, mark, log and `looks` under 3.12 and 3.9.6
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: job `20261117-133059-2489`, exit 0; the count 4901 to 4909, alpha.134 kept (`cbb7b01`)
+- [ ] `make check` through the gate on `cbb7b01`: job `20261117-133338-2490`, running at the tool-call bound
 
 ## Handover
 - decide, owner: the coordinator; consumer: the landing's `hygiene --commits`. Commit `86aa679` holds one `home` hit in `tests/test_g10_push_guard.py` (a test comment naming the home's code folder, reworded in `2b90758`): a `home` group on that file's row, or a squash at landing. The tree scan is clean.
 - Choices: the printers (packet §2a) pass their words; any other command's are read, so `xargs echo git push` refuses. A word with a space is no command word and, at a verb's place, is the push. The door's leading flags are read past.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+Read job `20261117-133338-2490`: `agentik session gate wait 20261117-133338-2490 --strict`. On a red, read its log and fix; on either of the two known chance failures, run the check once more.
 
 ## Exit
-Open.
+Fix 1 to 10 built and committed; the g10 and g8 suites green under both venvs; the check queued on `cbb7b01`, running at the tool-call bound.
