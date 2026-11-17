@@ -130,7 +130,7 @@ class _Ctx:
     def __init__(self, payload, env, command, here, cmds):
         self.payload, self.env, self.command, self.here, self.cmds = (payload, env, command,
                                                                       here, cmds)
-        self.tops, self.arms, self.passes = {}, {}, []
+        self.tops, self.arms, self.passes, self.plan = {}, {}, [], None
         self.assigns = _assigns(cmds)
 
     def armed(self, cell: str, top):
@@ -644,22 +644,31 @@ def _home_cd(c, ctx) -> list:
     return out
 
 
-def _home_cds(k: int, ctx) -> list:
-    """Review 1 fix 6: the `$HOME` folders of the moves before command `k`, each judged beside
-    the others."""
-    return [f for c in ctx.cmds[:k] for f in _home_cd(c, ctx)]
+def _plan(ctx):
+    """Review 2 F6, once a call: the line's distinct `$HOME` folders in order; for each command,
+    how many of them stand before it and how many moves; the first move's folders."""
+    if ctx.plan is None:
+        seen, upto, moves, first, n = {}, [], [], [], 0
+        for d in ctx.cmds:
+            upto.append(len(seen))
+            moves.append(n)
+            if d.name in _MOVES:
+                fs = _home_cd(d, ctx)
+                seen.update(dict.fromkeys(fs))
+                first = fs if n == 0 else first
+                n += 1
+        ctx.plan = (list(seen), upto, moves, first)
+    return ctx.plan
 
 
 def _starts_at(c, k: int, ctx) -> list:
-    """The folders command `k` may start in, None for the folder so far, the reader's unknown.
-    Review 2 F4: where the line's one move before it is a `$HOME` cd, its folder stands in place
-    of that unknown; else each `$HOME` folder is judged beside it (review 1 fix 6)."""
-    moves = [d for d in ctx.cmds[:k] if d.name in _MOVES]
-    if len(moves) == 1 and None in c.heres:
-        fs = _home_cd(moves[0], ctx)
-        if fs:
-            return list(dict.fromkeys(f for s in c.heres for f in (fs if s is None else [s])))
-    return [*c.heres, *_home_cds(k, ctx)]
+    """The distinct folders command `k` may start in, None for the folder so far, the reader's
+    unknown. Review 2 F4: where the line's one move before it is a `$HOME` cd, its folder stands
+    in place of that unknown; else each `$HOME` folder is judged beside it (review 1 fix 6)."""
+    homes, upto, moves, first = _plan(ctx)
+    if moves[k] == 1 and first and None in c.heres:
+        return list(dict.fromkeys(f for s in c.heres for f in (first if s is None else [s])))
+    return list(dict.fromkeys([*c.heres, *homes[:upto[k]]]))
 
 
 def _bare(name: str):
@@ -676,9 +685,14 @@ def _pushed(c, k, ctx, cell, globs, extra=()):
     """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
     each folder it may run in (`extra`: a `gate run`'s repo), the followed variable alone and
     beside the folder so far."""
-    for start in [*_starts_at(c, k, ctx), *extra]:
+    done = set()
+    for start in dict.fromkeys([*_starts_at(c, k, ctx), *extra]):
         for beside in (False, True):
-            top = top_of(_git_dir(start, globs, c, k, ctx, beside), ctx.tops)
+            f = _git_dir(start, globs, c, k, ctx, beside)
+            if f in done:
+                continue                                # review 2 F6: each folder judged once
+            done.add(f)
+            top = top_of(f, ctx.tops)
             got = ctx.armed(cell, top) if top else None
             if got:
                 return (top, got)
