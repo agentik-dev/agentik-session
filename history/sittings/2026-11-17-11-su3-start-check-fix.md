@@ -7,6 +7,7 @@
 | pin | `1eb53f8` on `su3-start-check` |
 | branch | `su3-start-check`, worktree `.claude/worktrees/su3-start-check` |
 | level | S3, packet `design/packets/su3-start-check.md` |
+| window | 200k |
 | agents | 0 |
 
 ## Done-ness
