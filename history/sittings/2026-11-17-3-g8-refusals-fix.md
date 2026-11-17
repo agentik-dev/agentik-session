@@ -16,13 +16,13 @@
 - [x] Nine NICE rows from review 1's leads, n271 to n279 (n276 at S3); recordlint's size bound moved the oldest S4 rows, n212 to n227, to `history/NICE-overflow.md`, ids kept
 - [x] `make stamp` through the gate: job `20261117-070519-2403`, exit 0; the count 4871 to 4874, the version stays alpha.131; its three paths committed
 - [ ] The quick gates through the gate: `make lint doclint hygiene plugin-version-check validate`
-- [ ] `scripts/hygiene --require-private --commits main..HEAD` exits 0
+- [x] `scripts/hygiene --require-private --commits main..HEAD` exits 0
 
 ## Handover
 - The full `make check` job queued before this fix (`20261117-063929-2397`, not this builder's) ran on this fix's head `825e08e`: exit 2, 4872 passed, 2 failed, both the README's test count (4871 against 4874, the three new tests), which the stamp then set.
 
 ## Next act
-F1's tests.
+Read the quick gates' job `20261117-073014-2408` (queued on this commit): a red is the next builder's work.
 
 ## Exit
-(open)
+F1, F2, F3, the NICE rows and the stamp built and committed; the branch's hygiene scan exits 0; the quick gates queued, their line owed at the hand-back.
