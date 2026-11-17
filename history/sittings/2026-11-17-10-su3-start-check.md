@@ -14,7 +14,7 @@
 - [x] the packet, the baseline at the pin, and the four NICE rows that ride it
 - [x] R1 to R7: `hooks.session_start`'s watcher line; `tests/test_su3_start_check.py`, green under both venvs
 - [x] `make stamp` (job `20261117-153544-2540`, exit 0): alpha.137, the count 4926 to 4964, n255 to n257 moved to the overflow
-- [ ] `make check` through the gate, once, last
+- [x] `make check` (job `20261117-153830-2541`, exit 0 on `d792d73`): 4964 passed; 4815 passed, 128 skipped; hygiene 0 outside the allowlist
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
@@ -26,4 +26,4 @@
 - decide, owner: coordinator, for hq design/18 item 7. It says SessionStart's additions run "under the hook's one cap (`MAX_OUT`)"; at `accf29f` no SessionStart road reads `MAX_OUT` and the output is 760 to 850 bytes.
 
 ## Next act
-The one check through the gate.
+None: every act is done; the branch waits on the coordinator's review.
