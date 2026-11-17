@@ -7,9 +7,14 @@ RESPEAK_RENDER ?= $(shell for f in $(HOME)/.claude/plugins/cache/*/respeak/*/scr
 export RESPEAK_PYTHON ?= $(CURDIR)/.venv/bin/python
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
-test:  ## run the suite (no quota, fake claude), under .venv and then under .venv-floor, test_bounded.py excepted (design/04 §6)
-	./.venv/bin/python -m pytest -q
-	@if [ -x .venv-floor/bin/python ]; then $(MAKE) --no-print-directory test-floor; else echo "floor: absent"; fi
+test:  ## run the suite (no quota, fake claude), under .venv and .venv-floor side by side, test_bounded.py excepted (design/04 §6)
+	@if [ ! -x .venv-floor/bin/python ]; then ./.venv/bin/python -m pytest -q && echo "floor: absent"; exit; fi; \
+	log=$$(mktemp -t agentik-floor) || exit 2; \
+	$(MAKE) --no-print-directory test-floor > "$$log" 2>&1 & floor=$$!; \
+	./.venv/bin/python -m pytest -q; main=$$?; wait $$floor; fl=$$?; cat "$$log"; rm -f "$$log"; \
+	[ $$main = 0 ] || echo "test: the .venv pass failed, exit $$main" >&2; \
+	[ $$fl = 0 ] || echo "test: the .venv-floor pass failed, exit $$fl" >&2; \
+	[ $$main = 0 ] && [ $$fl = 0 ]
 # The floor (hq entry 6, design/04): .venv-floor is the suite's venv under the one interpreter
 # a fresh Mac and this one share. It is built once in the main checkout, and a worktree links
 # it there, as with .venv. `make test` runs it when it is there (sc2 ruling 9).
@@ -21,9 +26,9 @@ venv-floor:  ## build .venv-floor under /usr/bin/python3 in the main checkout (p
 	  "$$main/.venv-floor/bin/python" -m pip install -q --disable-pip-version-check 'pytest>=8'; fi; \
 	if [ "$$main" != "$(CURDIR)" ] && [ ! -e .venv-floor ]; then ln -s "$$main/.venv-floor" .venv-floor; fi; \
 	echo "venv-floor: $$main/.venv-floor, $$("$$main/.venv-floor/bin/python" --version)"
-test-floor:  ## run the suite under .venv-floor, test_bounded.py excepted (scripts/bounded is a 3.11 dev tool, never run time)
+test-floor:  ## run the suite under .venv-floor, test_bounded.py excepted (scripts/bounded is a 3.11 dev tool, never run time); no .pytest_cache, which the .venv pass beside it writes
 	@[ -x .venv-floor/bin/python ] || { echo "test-floor: no .venv-floor; run make venv-floor" >&2; exit 2; }
-	PATH="$(CURDIR)/.venv-floor/bin:$$PATH" ./.venv-floor/bin/python -m pytest -q --ignore=tests/test_bounded.py
+	PATH="$(CURDIR)/.venv-floor/bin:$$PATH" ./.venv-floor/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_bounded.py
 doctor:  ## check the tool, the plugin and its dependencies on this machine
 	PYTHONPATH=plugin/lib python3 -m claude_session doctor
 # The install's destination; a test overrides HOME or PREFIX. For a developer: the one guard a
