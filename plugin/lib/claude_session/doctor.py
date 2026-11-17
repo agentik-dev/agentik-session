@@ -902,13 +902,16 @@ def _check_relay(env, sections, sibling_absent: bool | None = False) -> Check | 
 
 def _check_mod(env) -> Check:
     """The band's module: seen (mod.json from `mod start`) or not. A `-p` child or a refused
-    or absent module is not an error: warn, never FAIL (packet M1 ruling 3)."""
+    or absent module is not an error: warn, never FAIL (packet M1 ruling 3). With no session on
+    the machine there is nothing to have seen: a note, so a correct install reads as set up
+    (is2-first-read R1)."""
     state = resolver.state_dir(env)
     sid = env.get("CLAUDE_CODE_SESSION_ID") or resolver.newest_session(state)
-    sdir = resolver.session_dir(state, sid) if sid else None
+    if not sid:
+        return Check("mod", True, "not seen: no session has run on this machine yet", note=True)
+    sdir = resolver.session_dir(state, sid)
     line = mod.line(sdir)
-    where = f" ({sdir / mod.MOD})" if sdir else " (no session)"
-    return Check("mod", True, line + where, warn=not line.endswith(" ago"))
+    return Check("mod", True, f"{line} ({sdir / mod.MOD})", warn=not line.endswith(" ago"))
 
 
 def _check_measure(env) -> Check:

@@ -1,0 +1,26 @@
+# Sitting 2026-11-16-2: agentik-session, is2-first-read
+
+| item | value |
+|---|---|
+| goal | a correct install reads as set up: the doctor's `mod` row, install-cli's PATH line, the README's Workflow clause, the prune's `ps` |
+| budget | about 80 tool calls, `claude-opus-5-5`; checkpoint at 80% |
+| pin | `f6f5d14` on main (2.0.0-alpha.129) |
+| branch | `is2-first-read`, worktree `.claude/worktrees/is2-first-read`, the two venvs linked |
+| level | S3, no packet: a small row |
+| window | 200k |
+| agents | 0 |
+
+## Done-ness
+- [x] R5, the tests first: `tests/test_is2_first_read.py`, 9 of 15 failing at the pin (the six that pass pin what stays: a session's unseen mod a warn, on PATH as today, the first form alone, a ps that cannot start)
+- [x] R1: the doctor's `mod` row with no session on the machine a note (`not seen: no session has run on this machine yet`); a session's unseen mod still a warn, its detail as at the pin
+- [x] R2: install-cli off PATH ends on the line that mends this terminal (`export PATH="$HOME/.local/bin:$PATH"` for the default prefix, the prefix's bin folder otherwise, single-quoted where double quotes would not hold it), one line above it saying why; on PATH as at the pin
+- [x] R4: `prune.processes()` tries `ps axwwe` where `-axwwE` exits non-zero, as commons main's `processes()`; the probe kept; a list that cannot be read says `<ps> exited <n>: <ps's first stderr line>`
+- [x] `make stamp` through the gate (job `20261116-185753-2219`, exit 0): 2.0.0-alpha.130, 4854 tests; before R3, since the stamp reds a source the README was not rendered from
+- [x] R3 leaves the row (the coordinator, 2026-11-17): its source edit is reverted, so the source is as the README was rendered from; the README's Workflow clause and its render become their own row (four renders here: one passed but bent a line, three were refused by respeak's verifier)
+- [x] `make check` through the gate on `8fa8cb4` (the stamp's commit, before R3): job `20261116-192911-2229`, exit 0 (4854 passed; floor 4705 passed, 128 skipped; lint, README top, doclint, recordlint, hygiene, plugin-version-check, validate, the mod's tests, README fresh). Before it, job `20261116-185815-2220` cut by the 1800 s wall in the floor pass (load near 7; its first pass green, 4854 passed)
+
+## Handover
+- If this sitting is cut: the first unticked line above.
+
+## Next act
+The coordinator: review and landing; the tip's tree equals `8fa8cb4` but for this file, the head the green check `20261116-192911-2229` ran on.

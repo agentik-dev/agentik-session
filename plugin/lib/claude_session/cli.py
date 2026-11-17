@@ -204,7 +204,27 @@ def cmd_install_cli(args) -> int:
     print(f"installed {done['launcher']} -> {done['tree']} ({done['version']}); {link}{done['door']}")
     for line in done["pruned"]:
         print(line)
+    for line in _path_lines(os.path.dirname(done["launcher"]), os.environ):
+        print(line)
     return 0
+
+
+def _path_lines(bin_dir, env) -> list:
+    """is2-first-read R2: none where `bin_dir` is on PATH; else why, then last the line that mends
+    this terminal, a command that runs as printed: `$HOME/.local/bin` for the default prefix,
+    the folder itself otherwise, single-quoted where double quotes would not hold it."""
+    entries = [os.path.normpath(p) for p in (env.get("PATH") or "").split(os.pathsep) if p]
+    if os.path.normpath(bin_dir) in entries:
+        return []
+    home = env.get("HOME") or ""
+    if home and os.path.normpath(bin_dir) == os.path.join(os.path.abspath(home), ".local", "bin"):
+        mend = 'export PATH="$HOME/.local/bin:$PATH"'
+    elif any(c in bin_dir for c in '"$`\\!\n'):
+        mend = f'export PATH={shlex.quote(bin_dir)}:"$PATH"'
+    else:
+        mend = f'export PATH="{bin_dir}:$PATH"'
+    return [f"{bin_dir} is not on PATH, so this terminal does not find {install.NAME}; "
+            "this line adds it:", mend]
 
 
 def cmd_status(args) -> int:
