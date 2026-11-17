@@ -13,14 +13,16 @@
 ## Done-ness
 - [x] The failing tests, seen red: 9 of 20 red at `62178d8` (fix 1 to 8, and A4's moved line)
 - [x] Fix 1 to 8: the push rule, one commit each; 40 of 40 green with the g8 suite under both venvs
-- [ ] Fix 9: the allow rows; fix 10: the NICE rows; the packet current
+- [x] Fix 9: the allow rows; fix 10: NICE rows n286 to n296, n230 to n241 (S4) to the overflow; the packet current (§2a, B1 to B5)
+- [x] B1, B2, B3 by the review's probes: 270 main-thread lines give the pin's decision, mark, log and `looks` under 3.12 and 3.9.6
 - [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
-None yet.
+- decide, owner: the coordinator; consumer: the landing's `hygiene --commits`. Commit `86aa679` holds one `home` hit in `tests/test_g10_push_guard.py` (a test comment naming the home's code folder, reworded in `2b90758`): a `home` group on that file's row, or a squash at landing. The tree scan is clean.
+- Choices: the printers (packet §2a) pass their words; any other command's are read, so `xargs echo git push` refuses. A word with a space is no command word and, at a verb's place, is the push. The door's leading flags are read past.
 
 ## Next act
-The failing tests.
+`make stamp`, then `make check`, through the gate.
 
 ## Exit
 Open.
