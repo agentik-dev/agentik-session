@@ -25,11 +25,12 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 # ---- R5: the first look ---------------------------------------------------------------------
 
 
-def looks(command: str) -> bool:
+def looks(command: str, helper: bool = False) -> bool:
     """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind,
-    once each backslash-newline is taken out. A line it passes is never read."""
+    once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too. A line it
+    passes is never read."""
     t = command.replace("\\\n", "").lower()
-    return "git" in t or "rm" in t
+    return "git" in t or "rm" in t or (helper and "gate" in t)
 
 
 # ---- R6, R7: the folder, the checkout, the arming ---------------------------------------------
@@ -436,12 +437,139 @@ def _sweep(c, k, ctx, cell):
             if why:
                 ctx.passes.append(why)
                 return None
+    return _found(c, k, ctx, cell, g[0])
+
+
+def _found(c, k, ctx, cell, globs):
+    """R12's finding: (top, arming) of the first armed checkout a git command may act on, from
+    each folder it may run in, the followed variable alone and beside the folder so far."""
     for start in c.heres:
         for beside in (False, True):
-            top = top_of(_target(start, g[0], c, k, ctx, beside), ctx.tops)
+            top = top_of(_target(start, globs, c, k, ctx, beside), ctx.tops)
             got = ctx.armed(cell, top) if top else None
             if got:
                 return (top, got)
+    return None
+
+
+# ---- g10: the push rule -------------------------------------------------------------------------
+
+_PUSHES = frozenset({"push", "send-pack", "http-push"})
+_TOOLS = frozenset({"agentik-session", "claude-session"})
+_SHELL_NAMES = frozenset({"sh", "bash", "zsh", "dash"})
+_PY_NAME = re.compile(r"python[0-9.]*\Z")
+_LAND_PUSH = frozenset({"--p", "--pu", "--pus", "--push"})    # what argparse takes, measured
+_LAND_TAKES = ("--session", "--wall")                         # land's options with an operand
+
+
+def _py_script(args: list):
+    """(the script word, the words after it) of a python's arguments; `-m claude_session` reads
+    as the tool. None for `-c`, another module, or a script from the input."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if not a.startswith("-") or a == "-":
+            break
+        j = i + 1
+        if not a.startswith("--"):
+            for n, ch in enumerate(a[1:], 2):
+                if ch == "c":
+                    return None
+                if ch in "mWX":
+                    op = a[n:] or (args[j] if j < len(args) else "")
+                    j += 0 if a[n:] else 1
+                    if ch == "m":
+                        return ("agentik-session", args[j:]) if op == "claude_session" else None
+                    break
+        i = j
+    return (args[i], args[i + 1:]) if i < len(args) and args[i] != "-" else None
+
+
+def _tool_words(c):
+    """R3: the words after the session tool's own word(s), or None for a command that runs no
+    session tool: its command word, or an interpreter's script word, by its base name."""
+    name = c.name.lower()
+    if _PY_NAME.match(name):
+        got = _py_script(c.args)
+    elif name in _SHELL_NAMES:
+        how, i = shellreader._script(c.args)
+        got = (c.args[i], c.args[i + 1:]) if how == "file" else None
+    else:
+        got = (c.name, c.args)
+    if got is None:
+        return None
+    base, rest = os.path.basename(got[0]).lower(), got[1]
+    if base in _TOOLS:
+        return rest
+    return rest[1:] if base == "agentik" and rest[:1] == ["session"] else None
+
+
+def _takes(w: str) -> bool:
+    return len(w) > 2 and "=" not in w and any(o.startswith(w) for o in _LAND_TAKES)
+
+
+def _pushing_verb(words: list):
+    """R3: the repo operands of `gate publish`, or of `gate land` with `--push` (or an
+    abbreviation argparse takes) before a `--`, each at the verb's position as the tool's parser
+    places it; None for any other verb."""
+    i = 0
+    for want in ("gate", None):
+        while i < len(words) and words[i].startswith("-"):
+            i += 1                                      # global and gate's options: no operand
+        if i >= len(words) or (want and words[i] != want):
+            return None
+        i += 1
+    verb, rest = words[i - 1], words[i:]
+    if verb not in ("publish", "land"):
+        return None
+    ops, push, done, j = [], False, False, 0
+    while j < len(rest):
+        w = rest[j]
+        if done or not w.startswith("-") or w == "-":
+            ops.append(w)
+        elif w == "--":
+            done = True
+        elif w in _LAND_PUSH:
+            push = True
+        elif verb == "land" and _takes(w):
+            j += 1
+        j += 1
+    if verb == "publish":
+        return ops
+    return ops[:1] if push else None
+
+
+def _pathlike(w: str) -> bool:
+    return "/" in w or w in (".", "..") or w.startswith("~")
+
+
+def _push(c, k, ctx, cell):
+    """g10 R2, R3: a git push or its plumbing, or the tool's `gate publish` or `gate land
+    --push`, in an armed checkout."""
+    g = _git(c)
+    if g is not None:
+        sub = g[1].lower()
+        if sub in _PUSHES or (sub == "subtree" and "push" in g[2]):
+            return _found(c, k, ctx, cell, g[0])
+        return None
+    words = _tool_words(c)
+    ops = _pushing_verb(words) if words is not None else None
+    if ops is None:
+        return None
+    starts = [s if s is not None else ctx.here for s in c.heres] + [ctx.here]
+    folders = list(starts)
+    for op in ops:
+        w = _literal(op, c, k, ctx)
+        if w is not None and _pathlike(w):
+            folders += [os.path.normpath(os.path.join(s, w)) for s in starts if s is not None]
+    for f in dict.fromkeys(folders):
+        top = top_of(f, ctx.tops)
+        got = ctx.armed(cell, top) if top else None
+        if got:
+            return (top, got)
     return None
 
 
@@ -458,6 +586,10 @@ _LOOSE_SWEEP = re.compile(
     _W + r"(?i:git)\s.*?(?:(?<![\w-])(?i:add|stage)\s(?:.*?\s)?(?:-A|--all|-u|--update|"
     r"-[A-Za-z]*[Au][A-Za-z]*|\.|\./|:/|\*)(?=[\s'\"]|\Z)|(?<![\w-])(?i:commit)\s(?:.*?\s)?"
     r"(?:--all|-[A-Za-z]*a[A-Za-z]*)(?=[\s'\"]|\Z))", re.S)
+_LOOSE_PUSH = re.compile(
+    _W + r"(?:(?i:git)\s.*?(?<![\w-])(?i:push|send-pack|http-push)(?![\w-])|"
+    r"(?i:agentik(?:-|\s+)session|claude[-_]session)\s.*?(?<![\w-])gate\s+(?:-\S*\s+)*"
+    r"(?:publish(?![\w-])|land\s(?:.*?\s)?--p(?:u(?:sh?)?)?(?=[\s'\"]|\Z)))", re.S)
 _SEP = re.compile(r"[;&|\n]")
 
 
@@ -474,8 +606,10 @@ RULES = (
     ("init", PRODUCT, _init, _loosely(_LOOSE_INIT)),
     ("identity", PRODUCT, _identity, _loosely(_LOOSE_IDENTITY)),
     ("sweep", "Commits", _sweep, _loosely(_LOOSE_SWEEP)),
+    ("push", "Pushes", _push, _loosely(_LOOSE_PUSH)),         # g10: a helper's call alone (R1)
 )
-_GIT_RULES = frozenset({"init", "identity", "sweep"})
+_GIT_RULES = frozenset({"init", "identity", "sweep", "push"})
+_HELPER_RULES = frozenset({"push"})
 
 
 # ---- R15: the reasons -----------------------------------------------------------------------------
@@ -500,6 +634,9 @@ def _reason(name: str, cell: str, top, got, how: str) -> str:
         text = (f"{HEAD} the identity rule, {by}: this sets a git identity in the checkout "
                 f"{top}. Pass it per command: `git -c user.name=<name> -c user.email=<address> "
                 "commit ...`.")
+    elif name == "push":
+        text = (f"{HEAD} the push rule, {by}, arms it for the checkout {top}: a helper never "
+                "pushes. Hand back the branch and its head; the sitting that started you pushes.")
     else:
         text = (f"{HEAD} the sweep rule, {by}, arms it for the checkout {top}: this adds or "
                 "commits every changed file there, another sitting's included. Add paths by "
@@ -544,7 +681,7 @@ def failed(payload: dict, env, exc: BaseException) -> dict:
     line; a line the look passes is passed. Never raises."""
     try:
         command = _command(payload)
-        if command is None or not looks(command):
+        if command is None or not looks(command, bool(payload.get("agent_id"))):
             return {}
         name = type(exc).__name__
         _mark(payload, env, ["error"])
@@ -564,9 +701,9 @@ def _judge(payload: dict, env, command: str) -> list:
     ctx = _Ctx(payload, env, command, here, cmds)
     if here is None and "git" in command.lower():
         ctx.passes.append("no absolute cwd: the git rules judge nothing")
-    hits = []
+    hits, helper = [], bool(payload.get("agent_id"))
     for name, cell, judge, loose in RULES:
-        if name in _GIT_RULES and here is None:
+        if (name in _GIT_RULES and here is None) or (name in _HELPER_RULES and not helper):
             continue
         got = None
         for k, c in enumerate(cmds):
@@ -593,7 +730,7 @@ def _judge(payload: dict, env, command: str) -> list:
 def check(payload: dict, env) -> dict:
     """The rules' answer for one call: {} or one `deny` (R2). An error refuses (R14)."""
     command = _command(payload)
-    if command is None or not looks(command):
+    if command is None or not looks(command, bool(payload.get("agent_id"))):
         return {}
     try:
         hits = _judge(payload, env, command)
