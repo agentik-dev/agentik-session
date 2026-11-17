@@ -466,6 +466,7 @@ _SHELL_NAMES = frozenset({"sh", "bash", "zsh", "dash"})
 _PY_NAME = re.compile(r"python[0-9.]*\Z")
 _LAND_PUSH = frozenset({"--p", "--pu", "--pus", "--push"})    # what argparse takes, measured
 _LAND_TAKES = ("--session", "--wall")                         # land's options with an operand
+_HOME = re.compile(r"\$(?:HOME(?![A-Za-z0-9_])|\{HOME\})")
 _BRACE_LIST = re.compile(r"\{[^{}]*(?:,|\.\.)[^{}]*\}")
 # review 1 fix 1: a command word another command may run, by its base name (a python name too)
 _STARTS = frozenset({"git", "agentik", *_TOOLS, *_SHELL_NAMES})
@@ -589,24 +590,59 @@ def _git_dir(start, globs, c, k: int, ctx, beside: bool):
     for o, v in globs:
         if o != "-C" or v is None:
             continue
-        w = _literal(v, c, k, ctx, beside)
+        w = _homed(v, c, k, ctx, beside)
         if w is None:
             continue
         f = os.path.normpath(os.path.join(f, w))
         if not os.path.isdir(f):
             return None
     gd = _named(globs, c, "--git-dir", "GIT_DIR=")
-    gd = None if gd is None else _literal(gd, c, k, ctx, beside)
+    gd = None if gd is None else _homed(gd, c, k, ctx, beside)
     if gd is None:
         return f
     g = os.path.normpath(os.path.join(f, gd))
     return os.path.dirname(g) if os.path.basename(g) == ".git" else g
 
 
+def _homed(v: str, c, k: int, ctx, beside: bool = False):
+    """Review 1 fix 6: `_literal` with `$HOME` and `${HOME}` read from the environment first."""
+    home = ctx.env.get("HOME")
+    if home and _HOME.search(v):
+        v = _HOME.sub(lambda m: home, v)
+    return _literal(v, c, k, ctx, beside)
+
+
+def _home_cds(k: int, ctx) -> list:
+    """Review 1 fix 6: the folders an earlier `cd` or `pushd` whose word holds `$HOME` or
+    `${HOME}` may move to, which the reader leaves unknown; each is judged beside the others."""
+    home, out = ctx.env.get("HOME"), []
+    if not home:
+        return out
+    for c in ctx.cmds[:k]:
+        if c.name in ("cd", "pushd") and len(c.args) == 1 and _HOME.search(c.args[0]):
+            w = _HOME.sub(lambda m: home, c.args[0])
+            if _EXPANDS.search(w) or any(ch in w for ch in "*?[{"):
+                continue
+            for s in [*c.heres, ctx.here]:
+                if s is not None or os.path.isabs(w):
+                    out.append(os.path.normpath(os.path.join(s or "/", w)))
+    return out
+
+
+def _bare(name: str):
+    """Review 1 fix 6 (L1): a bare repo operand as the verbs resolve it (`land.resolve_repo`),
+    or None where it resolves to no one checkout."""
+    from . import land                       # only for a bare operand: the hook seldom pays it
+    try:
+        return land.resolve_repo(name)
+    except Exception:                                   # noqa: BLE001 - a Red: judged where it stands
+        return None
+
+
 def _pushed(c, k, ctx, cell, globs):
     """R2 with review 1 fix 4: (top, arming) of the first armed checkout a push acts on, from
     each folder it may run in, the followed variable alone and beside the folder so far."""
-    for start in c.heres:
+    for start in [*c.heres, *_home_cds(k, ctx)]:
         for beside in (False, True):
             top = top_of(_git_dir(start, globs, c, k, ctx, beside), ctx.tops)
             got = ctx.armed(cell, top) if top else None
@@ -651,12 +687,14 @@ def _pushes(c, k, ctx, cell):
     ops = _pushing_verb(words) if words is not None else None
     if ops is None:
         return None
-    starts = [s if s is not None else ctx.here for s in c.heres] + [ctx.here]
+    starts = [s if s is not None else ctx.here for s in c.heres] + [ctx.here] + _home_cds(k, ctx)
     folders = list(starts)
     for op in ops:
-        w = _literal(op, c, k, ctx)
+        w = _homed(op, c, k, ctx)
         if w is not None and _pathlike(w):
             folders += [os.path.normpath(os.path.join(s, w)) for s in starts if s is not None]
+        elif w:
+            folders.append(_bare(w))
     for f in dict.fromkeys(folders):
         top = top_of(f, ctx.tops)
         got = ctx.armed(cell, top) if top else None
