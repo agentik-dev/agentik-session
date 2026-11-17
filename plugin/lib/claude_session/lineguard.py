@@ -27,10 +27,16 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 
 def looks(command: str, helper: bool = False) -> bool:
     """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind,
-    once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too. A line it
-    passes is never read."""
+    once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too, and each
+    word read again with its quotes and backslashes taken out (review 1 fix 3). A line it passes
+    is never read."""
     t = command.replace("\\\n", "").lower()
-    return "git" in t or "rm" in t or (helper and "gate" in t)
+    if "git" in t or "rm" in t:
+        return True
+    if not helper:
+        return False
+    t = t.replace("'", "").replace('"', "").replace("\\", "")
+    return "git" in t or "rm" in t or "gate" in t
 
 
 # ---- R6, R7: the folder, the checkout, the arming ---------------------------------------------
