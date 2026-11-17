@@ -2,11 +2,11 @@
 
 | item | value |
 |---|---|
-| from | the hq coordinator, 2026-11-17, brief g10-push-guard (S1), rulings R1 to R8; review 1's ruling, its fix 1 to 10 (§2a) |
+| from | the hq coordinator, 2026-11-17, brief g10-push-guard (S1), rulings R1 to R8; review 1's ruling, its fix 1 to 10 (§2a); review 2's ruling, its items 1 to 8 (§2b) |
 | pin | `fd8f3af` on main (g8-refusals' merge, alpha.133). Worktree `.claude/worktrees/g10-push-guard`, branch `g10-push-guard`; the two venvs linked |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; `make` only through the gate queue; no `claude`; no relay verb; no test reads the live state or home; `shellreader.py`, `hooks.py`, `cli.py`, `plugin/hooks`, the manifest and the doctor unchanged |
-| may touch | `plugin/lib/claude_session/lineguard.py`, `tests/test_g10_push_guard.py` (new), `tests/test_g8_refusals.py` (R7's words alone), `NICE_TO_HAVE.md` and `history/NICE-overflow.md` (R8, fix 10), `.hygiene-allow` (fix 9, the rows ruled), this packet, `history/sittings/2026-11-17-6-g10-push-guard.md` and `-7-g10-push-guard-fix.md`; the version, the README's count and the sidecar by `make stamp` alone |
-| verify | `make stamp`, then `make check`, by the gate queue, once each, last |
+| may touch | `plugin/lib/claude_session/lineguard.py`, `tests/test_g10_push_guard.py` (new), `tests/test_g8_refusals.py` (R7's words alone), `NICE_TO_HAVE.md` and `history/NICE-overflow.md` (R8, fix 10), `.hygiene-allow` (fix 9, the rows ruled), this packet, `history/sittings/2026-11-17-6-g10-push-guard.md`, `-7-g10-push-guard-fix.md` and `-8-g10-push-guard-fix2.md`; the version, the README's count and the sidecar by `make stamp` alone |
+| verify | `make stamp` (review 2: `STAMP_VERSION=2.0.0-alpha.135`), then `make check`, by the gate queue, once each, last |
 | acceptance | §3; `PY -m pytest -q tests/test_g10_push_guard.py tests/test_g8_refusals.py` under `.venv` and `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
 
@@ -27,15 +27,16 @@ The parser, measured at the pin under 3.12.7 and 3.9.6 (`cli.build_parser().pars
 
 ## 2a. Review 1's fix
 
-The bound: the push rule holds what a helper writes in good faith and what one cheap reading closes, and it fails closed for a helper alone. A line built to hide the verb is held by the brief's wall, not by this rule. Every change is behind `agent_id`: a main thread's line is decided, marked, logged and looked at exactly as at `fd8f3af`.
+Every change is behind `agent_id`: a main thread's line is decided, marked, logged and looked at as at `fd8f3af`. The rule fails closed for a helper where its reading cannot tell; a line built to hide the verb is the wall's.
 
-- Fix 1 (F1 to F3): a command that is no printer has each word whose base name is `git`, `agentik`, a tool name, a python or a shell judged, with the words after it, as that command (`timeout`, `xargs`, `find -exec`, `caffeinate`, `noglob`, `gate run`'s argv, `function f {`'s body). A word with a space never starts one. The printers, whose words are data: `echo`, `printf`, `print`, the greps (`grep`, `rg`, `ag`, `ack`), `sed`, `awk`, `cat`, `head`, `tail`, `less`, `more`, `wc`, `sort`, `uniq`, `tee`, `ls`, `test`, `[`, `[[`, `:`, `true`, `false`, `man`, `which`, `type`, `whence`, `where`, `help`, `pbcopy`, `say`, `logger`, `jq`, `printenv`, the declarations, `read`, `alias`, `basename`, `dirname`, `realpath`, `readlink`, `cut`, `tr`, `diff`, `cmp`. Any other command's words are read, so `xargs echo git push` refuses. `shellreader.py` does not change.
-- Fix 2 (F4): a word at git's subcommand place, or the tool's `session`, `gate`, verb or flag place, holding `$`, a backtick, a brace list or a space (the reader's text of a backtick substitution) is the push.
-- Fix 3 (F5): a helper's `looks` also reads the line with `'`, `"` and `\` taken out.
-- Fix 4 (F7): the push judges the git dir (`GIT_DIR`, `--git-dir`, else the folder after `-C`), never the work tree; the sweep's finding is unchanged.
-- Fix 5 (F9): `-m claude_session.<x>` reads as the tool. Fix 6 (L1, F10): a bare operand is resolved by `land.resolve_repo` (imported) and judged with the cwd; `$HOME`, `${HOME}` in `-C`, `--git-dir`, `GIT_DIR`, a `cd` or `pushd` word and the operand read from the environment.
-- Fix 7 (L9): the loose judge finds each part once per segment, linear. Fix 8 (L10), measured in `plugin/bin/agentik`: the door takes no option before a tool's name (`--version`, `-h`, `--help` stand alone; another leading flag hands the whole line to `agentik-suite`), so flags before `session` are read past.
-- Fix 9, 10: the allow rows ruled; NICE rows n286 to n296.
+- Fix 1, 2: a command off `_PRINTERS` has each word named git, the tool, a python or a shell judged, with the words after it, as a command (`timeout`, `xargs`, `gate run`'s argv); at a verb's place a word holding `$`, a backtick, a brace list or a space is the push.
+- Fix 3 to 8: a helper's `looks` reads past quotes; the git dir is judged, never the work tree; `-m claude_session.<x>`; a bare operand by `land.resolve_repo`, `$HOME` from the environment; a linear loose judge; the door's leading flags read past.
+
+## 2b. Review 2's mend
+
+- F1: a veiled land word is `--push` only where it opens with `-` or stands past the four operands. F2: `cp`, `mv`, `ln`, `install`, `chmod`, `touch`, `mkdir`, `shasum`, `stat`, `tar` print; after a found word with a slash a veil is data (`nice`, which the reader opens, runs git itself).
+- F4: the line's one move before a command, a `$HOME` cd, stands in place of the unknown folder; with more, each is judged beside it. F5: a command behind `gate run <repo> --` is judged at the repo too. F6: the `$HOME` folders read once a call (`_plan`), each judged once.
+- L6: for a helper the four older rules read their quoted spellings. L7: `eval git push` is read strictly, no longer loosely.
 
 ## 3. Interfaces and acceptance
 
@@ -58,10 +59,15 @@ The bound: the push rule holds what a helper writes in good faith and what one c
 | B3 | a main thread's every probe line: the pin's decision, mark, log and `looks` | held |
 | B4 | 16 KB of unread text, with and without the push words, judged in under 0.2 s under both venvs | 8 s |
 | B5 | `tests/test_g10_push_guard.py`, `tests/test_g8_refusals.py` green under both venvs; the check green | red at hygiene |
+| C1 | review 2's 297 ordinary helper lines pass but F3's two, L3's one and L5's `--dry-run --push`, under both interpreters | 9 refused |
+| C2 | every line the two reviews list as refused is still refused, but for the lines items 1 to 3 move to the passes; F5's two lines are refused | F5 passes |
+| C3 | the 628 main-thread probe lines: the pin's decision, mark, log and `looks` | held |
+| C4 | 32 KB of `cd "$HOME/open"; git push; ` pairs, and the `gate publish .` twin, judged in under 0.3 s under both venvs (best of three); B4 still holds | 8 s |
+| C5 | the whole check green, the version check with it | red at the version |
 
 ## 4. Findings that name this row
 
-None at the pin. Review 1 of the first build: ten findings and eleven leads; §2a holds the ruling's fixes, the rest are NICE rows n286 to n296.
+None at the pin. Review 1 of the first build: ten findings and eleven leads; §2a holds the ruling's fixes, the rest are NICE rows n286 to n296. Review 2 of the fix: six findings and ten leads; §2b holds the mend, the rest are NICE rows n297 to n302 and §2b's L6 and L7 lines.
 
 ## 5. Forbidden reads
 

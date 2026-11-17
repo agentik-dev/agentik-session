@@ -11,17 +11,19 @@
 | agents | 0 |
 
 ## Done-ness
-- [ ] Items 1 to 5: the failing tests, then the push rule, one commit each
-- [ ] Item 6: the `home` group on the g10 test row
-- [ ] Item 7: NICE rows (F3, L1 with L2, L3, L4, L5, L10); the packet says L6 and L7
-- [ ] Item 8: `make stamp STAMP_VERSION=2.0.0-alpha.135` through the gate
+- [x] The failing tests, 5 of 5 red at `c35f75b` (`13acf0c`)
+- [x] Items 1 to 5: F1 `25d274e`, F2 `4ad70be`, F4 `e4341ba`, F5 `02659d6`, F6 `1187428`; the g10 and g8 suites 45 passed under both venvs
+- [x] Item 6: the `home` group (`7953fe8`); `hygiene --require-private --commits main..HEAD`: 0 hits outside
+- [x] Item 7: NICE rows n297 to n302; the packet's §2a pressed and §2b (L6, L7) to stay under its ceiling
+- [x] C1 to C3 by review 2's corpora: c1 refuses F3's two, L3's one, L5's one; the 628 main-thread lines match the pin under both interpreters
+- [ ] Item 8: `make stamp STAMP_VERSION=2.0.0-alpha.135` through the gate (it moves the oldest S4 NICE rows to the overflow)
 - [ ] `make check` through the gate
 
 ## Handover
-- none yet
+- Choices: a wrapper the reader opens (`nice`) runs its git as the command itself, so `nice /opt/x/git "$V"` stays refused; F2's slash rule is for found words. "The one cd" counts cd, pushd and popd before the command.
 
 ## Next act
-Item 1.
+Item 8, then the check.
 
 ## Exit
 open
