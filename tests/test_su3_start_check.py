@@ -237,6 +237,37 @@ def test_a_wide_first_line_is_cut_by_its_encoded_size(tmp_path):
     assert share.startswith("w: \u00e9") and _alone(share) <= hooks.MAX_OUT
 
 
+# Fix of review 1 (C1, C2): a launcher that prints past the keep is answered by what it printed.
+
+def _big_stub(tmp_path, data: bytes, code=1):
+    (tmp_path / "home").mkdir(parents=True, exist_ok=True)
+    big = tmp_path / "home" / "big.txt"
+    big.write_bytes(data)
+    return stub(tmp_path, f'/bin/cat "$HOME/big.txt"\nexit {code}\n')
+
+
+def test_a_cut_inside_a_character_is_not_silence(tmp_path):
+    _big_stub(tmp_path, b"ab\n" + "\u00e9".encode() * 40000 + b"\n")
+    start = time.monotonic()
+    share = hooks.watcher_share(payload(), env_for(tmp_path))
+    assert time.monotonic() - start < hooks.WATCH_WALL
+    assert share == "ab" + MORE.format(n=1)
+
+
+def test_the_count_is_of_every_line_the_launcher_printed(tmp_path):
+    _big_stub(tmp_path, b"first: down\n" + b"x: down\n" * 200000)
+    start = time.monotonic()
+    share = hooks.watcher_share(payload(), env_for(tmp_path))
+    assert time.monotonic() - start < hooks.WATCH_WALL
+    assert share == "first: down" + MORE.format(n=200000)
+
+
+def test_a_first_line_longer_than_the_keep_is_cut_and_still_said(tmp_path):
+    _big_stub(tmp_path, ("w: " + "\u00e9" * 80000 + "\nm: down\n").encode())
+    share = hooks.watcher_share(payload(), env_for(tmp_path))
+    assert share.startswith("w: \u00e9") and share.endswith(MORE.format(n=1))
+
+
 def test_the_unknown_profile_road_says_the_line(tmp_path):
     lines_stub(tmp_path, "w: " + "x" * 597)
     out = hooks.session_start(payload(), env_for(tmp_path, CLAUDE_SESSION_PROFILE="nosuch"))

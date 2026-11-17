@@ -18,6 +18,7 @@ Hook output contract (from the CLI's own documentation):
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import math
@@ -1004,6 +1005,7 @@ WATCH_ARGS = ("status", "--check")
 WATCH_MORE = " and {n} more: agentik status"
 _WATCH_READ = 65536                     # stdout kept; the rest is drained, never held
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # C0, DEL and C1, as chain._CONTROL
+_BLANKS = bytes(b for b in [*range(0x21), 0x7f] if b != 0x0a)   # bytes that make no text
 
 
 def _watch_stop(p) -> None:
@@ -1018,16 +1020,45 @@ def _watch_stop(p) -> None:
     p.wait()
 
 
-def _watch_run(exe: str, env) -> bytes | None:
-    """The launcher's stdout when it exits 1 within WATCH_WALL, else None. No shell, its stdin
-    empty, its stderr dropped, in a group of its own so a cut takes its children too."""
+class _Beyond:
+    """The lines of the stdout past the keep, counted as it is read and never held. A line
+    counts when it holds a byte that is no ASCII blank or control (the decoded test is made on
+    the kept part alone, which is exact there)."""
+
+    def __init__(self) -> None:
+        self.head = self.seen = self.cur = False    # the first fragment, a newline seen, open line
+        self.done = 0                               # whole lines after the first newline
+
+    def feed(self, chunk: bytes) -> None:
+        parts = chunk.translate(None, _BLANKS).split(b"\n")
+        self.cur = self.cur or bool(parts[0])
+        if len(parts) > 1:
+            if self.seen:
+                self.done += self.cur
+            else:
+                self.head, self.seen = self.cur, True
+            mid = parts[1:-1]
+            self.done += len(mid) - mid.count(b"")
+            self.cur = bool(parts[-1])
+
+    def lines_after(self, tail: bytes) -> int:
+        """Lines from `tail`, the kept bytes after their last newline, to the stream's end."""
+        first = (self.head if self.seen else self.cur) or bool(tail.translate(None, _BLANKS))
+        return int(first) + ((self.done + self.cur) if self.seen else 0)
+
+
+def _watch_run(exe: str, env):
+    """The launcher's stdout when it exits 1 within WATCH_WALL, else None: a pair, the first
+    _WATCH_READ bytes at most and, when the stream was longer, a _Beyond holding its rest (else
+    None). No shell, its stdin empty, its stderr dropped, in a group of its own so a cut takes
+    its children too."""
     try:
         p = subprocess.Popen([exe, *WATCH_ARGS], stdin=subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              close_fds=True, start_new_session=True, env=dict(env))
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         return None
-    end, buf = time.monotonic() + WATCH_WALL, bytearray()
+    end, buf, rest = time.monotonic() + WATCH_WALL, bytearray(), None
     try:
         fd = p.stdout.fileno()
         with selectors.DefaultSelector() as sel:
@@ -1041,14 +1072,18 @@ def _watch_run(exe: str, env) -> bytes | None:
                 chunk = os.read(fd, 65536)
                 if not chunk:
                     break
-                buf += chunk[:max(0, _WATCH_READ - len(buf))]
+                room = max(0, _WATCH_READ - len(buf))
+                buf += chunk[:room]
+                if len(chunk) > room:
+                    rest = rest or _Beyond()
+                    rest.feed(chunk[room:])
         code = p.wait(timeout=max(end - time.monotonic(), 0.001))
     except Exception:                                   # noqa: BLE001 - a cut is silence
         _watch_stop(p)
         return None
     finally:
         p.stdout.close()
-    return bytes(buf) if code == 1 else None
+    return (bytes(buf), rest) if code == 1 else None
 
 
 def _watch_cut(first: str, tail: str) -> str:
@@ -1063,6 +1098,11 @@ def _watch_cut(first: str, tail: str) -> str:
     return first + tail
 
 
+def _watch_lines(text: str) -> list[str]:
+    """The non-blank lines of `text`, a control character taken out and the ends stripped."""
+    return [ln for ln in (_CONTROL.sub("", raw).strip() for raw in text.split("\n")) if ln]
+
+
 def watcher_share(payload: dict, env) -> str | None:
     """R1 to R3, R6: the one line, or None for a helper's start, a HOME that is unset or not
     absolute, and every outcome but exit 1 with text. Never raises."""
@@ -1072,14 +1112,27 @@ def watcher_share(payload: dict, env) -> str | None:
         home = env.get("HOME")
         if not isinstance(home, str) or not os.path.isabs(home):
             return None
-        out = _watch_run(os.path.join(home, ".local", "bin", "agentik-suite"), env)
-        if not out:
+        got = _watch_run(os.path.join(home, ".local", "bin", "agentik-suite"), env)
+        if not got or not got[0]:
             return None
-        lines = [ln for ln in (_CONTROL.sub("", raw).strip()
-                               for raw in out.decode("utf-8").split("\n")) if ln]
+        kept, rest = got
+        tail = b""
+        if rest is not None:            # longer than the keep: cut at the last newline (C1)
+            cut = kept.rfind(b"\n") + 1
+            kept, tail = kept[:cut], kept[cut:]
+        lines = _watch_lines(kept.decode("utf-8"))
+        more = len(lines) - 1
+        if rest is not None:
+            after = rest.lines_after(tail)
+            if not lines:               # the first line alone fills the keep: cut where it fits
+                lines = _watch_lines(codecs.getincrementaldecoder("utf-8")().decode(tail))
+                after -= 1
+                more = 0
+                after = max(after, 0)
+            more += after
         if not lines:
             return None
-        return _watch_cut(lines[0], WATCH_MORE.format(n=len(lines) - 1) if len(lines) > 1 else "")
+        return _watch_cut(lines[0], WATCH_MORE.format(n=more) if more > 0 else "")
     except Exception:                                   # noqa: BLE001 - never a failed hook
         return None
 
