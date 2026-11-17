@@ -16,14 +16,14 @@
 - [x] Item 6: the `home` group (`7953fe8`); `hygiene --require-private --commits main..HEAD`: 0 hits outside
 - [x] Item 7: NICE rows n297 to n302; the packet's §2a pressed and §2b (L6, L7) to stay under its ceiling
 - [x] C1 to C3 by review 2's corpora: c1 refuses F3's two, L3's one, L5's one; the 628 main-thread lines match the pin under both interpreters
-- [ ] Item 8: `make stamp STAMP_VERSION=2.0.0-alpha.135` through the gate (it moves the oldest S4 NICE rows to the overflow)
-- [ ] `make check` through the gate
+- [x] Item 8: `make stamp STAMP_VERSION=2.0.0-alpha.135` through the gate, job `20261117-141106-2513` exit 0: alpha.134 to alpha.135, count 4909 to 4914, n242 to n247 to the overflow
+- [ ] `make check` through the gate on the stamp's commit
 
 ## Handover
 - Choices: a wrapper the reader opens (`nice`) runs its git as the command itself, so `nice /opt/x/git "$V"` stays refused; F2's slash rule is for found words. "The one cd" counts cd, pushd and popd before the command.
 
 ## Next act
-Item 8, then the check.
+Read the check's job (`agentik session gate status`, the label `g10-check3`); on a red, read its log and fix; on either known chance failure, run it once more.
 
 ## Exit
 open
