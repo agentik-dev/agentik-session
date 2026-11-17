@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet, baseline measured at the pin (decisions 0.23.8)
-- [ ] R2: the seven answered lines of `OPEN-QUESTIONS.md`, their `Next:` sentence moved in front of the tail; `render --lint` exits 0
+- [x] R2: the seven answered lines of `OPEN-QUESTIONS.md`, their `Next:` sentence moved in front of the tail; `render --lint` exits 0 (on a scratch copy beside R1's skeleton)
 - [ ] R1 and R3, R3b: the skeleton, then five entries by `new` and `answer` (each `answer` previewed first)
 - [ ] R4: `.claude/edit-gates` removed before the check, or left if a guard refuses
 - [ ] Acceptance lines 1 to 5; hygiene over `main..HEAD`
@@ -22,7 +22,7 @@
 - If this sitting is cut: the first unticked line above. No entry is ever written by hand.
 
 ## Next act
-R2.
+R1, then R3 and R3b by the tool.
 
 ## Exit
 (open)
