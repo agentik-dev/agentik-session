@@ -186,3 +186,43 @@ def test_r5_the_doctor_reads_newer_as_a_note_and_older_as_older(home, version, s
     else:
         assert c.detail == f"{version} at {launcher}"
     assert ("older than" in c.detail) == (version == OLDER)
+
+
+# ---- review 1 F1: the note says install-cli leaves the command only where it does ---------------
+
+KEPT = "; install-cli leaves it as it is"
+
+
+def _newer_note(home):
+    launcher = home / ".local" / "bin" / NAME
+    c = doctor._check_launcher({"HOME": str(home)}, None)
+    assert (c.ok, c.status) == (True, "note"), c
+    return c.detail, f"{launcher} is {NEWER}, newer than the plugin's {SEMVER}"
+
+
+def test_f1_a_newer_command_install_cli_keeps_reads_the_clause(home, plugins):
+    _, newer, _ = plugins
+    assert _verb(newer, home).returncode == 0          # the temp HOME's own .local, the prefix
+    detail, words = _newer_note(home)
+    assert detail == words + KEPT, detail
+
+
+def test_f1_a_newer_hand_written_command_reads_no_clause(home, plugins):
+    _, newer, _ = plugins
+    assert _verb(newer, home).returncode == 0
+    launcher = home / ".local" / "bin" / NAME
+    tree = install.read_launcher(str(launcher))["tree"]
+    launcher.write_text(f"#!/bin/sh\n# a hand's own\nVERSION={NEWER}\nTREE={tree}\n")
+    assert os.path.isdir(tree)
+    detail, words = _newer_note(home)
+    assert detail == words, detail
+
+
+def test_f1_a_newer_command_whose_runner_is_gone_reads_no_clause(home, plugins):
+    _, newer, _ = plugins
+    assert _verb(newer, home).returncode == 0
+    tree = install.read_launcher(str(home / ".local" / "bin" / NAME))["tree"]
+    os.unlink(os.path.join(tree, NAME))
+    assert os.path.isdir(tree)
+    detail, words = _newer_note(home)
+    assert detail == words, detail
