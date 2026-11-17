@@ -407,3 +407,42 @@ def test_arming_by_title(box):
 def test_the_table(box):
     assert [(r[0], r[1]) for r in lineguard.RULES] == [
         ("rm", "product"), ("init", "product"), ("identity", "product"), ("sweep", "Commits")]
+
+
+# ---- the fix of review 1 -----------------------------------------------------------------------
+
+# F1: R12's followed variable on a line that holds a pipe, a paren, a backtick or a lone `&`.
+# The assigned folder is judged on every line; alone where nothing between the assignment and
+# the sweep can change the variable's scope, beside the folder so far where something can.
+F1_WRONG_PASS = [
+    ('T=H/tree/armed; git -C "$T" add -A | tail -3', "o"),
+    ('T=H/tree/armed; git -C "$T" add -A 2>&1 | tail -3', "p"),
+    ('T=H/tree/armed; git -C "$T" add -A && echo "done (ok)"', "o"),
+    ('T=H/tree/armed; git -C "$T" commit -am x; git -C "$T" log --oneline | head -1', "o"),
+    ('T=H/tree/armed; git -C "$T" add -A # (all)', "o"),
+    ('T=H/tree/armed; git -C "$T" add -A; echo `date`', "o"),
+    ('T=H/tree/armed; git -C "$T" add -A & wait', "o"),
+    ('T=H/tree/armed; git -C "$T" add -A', "o"),                       # the control
+]
+F1_WRONG_REFUSAL_A = ['T=H/open; git -C "$T" add -A | tail -3',
+                      'T=H/open; git -C "$T" add -A && echo "(done)"']
+# something between the assignment and the sweep may change its scope: both folders judged
+F1_BESIDE = ['(T=H/tree/armed); git -C "$T" add -A', 'true | T=H/tree/armed; git -C "$T" add -A',
+             'T=H/tree/armed & git -C "$T" add -A', 'echo `T=H/tree/armed`; git -C "$T" add -A',
+             'f() { T=H/tree/armed; }; git -C "$T" add -A']
+F1_BESIDE_A = ['(T=H/open); git -C "$T" add -A', 'T=H/open | cat; git -C "$T" add -A',
+               'f() { T=H/open; }; git -C "$T" add -A']
+
+
+def test_f1_the_followed_variable(box):
+    for line, where in F1_WRONG_PASS:
+        _refused(box, line, getattr(box, where))
+    for line in F1_WRONG_REFUSAL_A:
+        _passed(box, line, box.a)
+    for line in F1_BESIDE:
+        for cwd in (box.o, box.a):
+            _refused(box, line, cwd)
+    for line in F1_BESIDE_A:
+        _refused(box, line, box.a)
+    _passed(box, 'T=H/open; { git -C "$T" add -A; } | cat', box.a)
+    _passed(box, '(T=H/open; git -C "$T" add -A)', box.a)
