@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] the packet, the baseline at the pin (6 of the 11 retry cases red, 5 held)
 - [x] R1 to R4: the retry in `scripts/readme-render`, the wall 2900 s in its header and the Makefile; 11 cases appended to `tests/test_readme.py`, green under both venvs
-- [ ] R6: NICE rows for `claude_session/lines.py`
+- [x] R6: NICE n322 (a close dead after its claim) and n323 (a crash's temp file); the file past recordlint's size bound until `make stamp` moves the oldest S4 rows
 - [ ] R5: the needs line in the source, paid by a trim
 - [ ] `make stamp` through the gate
 - [ ] `make readme` through the gate
@@ -28,7 +28,7 @@
 - decide, owner: the coordinator; consumer: the landing's range scan. Commit `8c4d1fe` holds the packet's first text, which names the renderer's plugin five times (`sibling`); the tree's text names it no more. A row `design/packets/is3-readme-needs.md: sibling`, as `s11-readme-r7.md` has, clears the range scan.
 
 ## Next act
-R6: the NICE rows.
+R5: the needs line.
 
 ## Exit
 Open.
