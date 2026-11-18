@@ -22,6 +22,6 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-C5: `make readme` (gate job 20261117-173212-2575), then lint and doclint, `make stamp`, `make check`, each through the gate. Hygiene over `main..HEAD`: exit 0 at `6268c24`.
+`make check` through the gate on the head. Done: `make stamp` then `make lint doclint`, gate job 20261117-173718-2576 exit 0 (stamp moved n262 to n264 to the overflow; alpha.138, 5010 tests); hygiene over `main..HEAD` exit 0.
 
 Exit:
