@@ -716,6 +716,12 @@ def _kill_group(pgid, fx: Fx) -> bool:
 
 
 def _prune(root, now: float) -> None:
+    """Results past KEEP leave; so do closed lines past theirs, in this pass (packet in3 R8)."""
+    try:
+        from . import lines
+        lines.prune(root, now)
+    except Exception:                                   # noqa: BLE001 - the gate's own pass goes on
+        pass
     try:
         names = os.listdir(gate_dir(root))
     except OSError:
