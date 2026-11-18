@@ -3,6 +3,7 @@
 <img src="assets/icon.svg" alt="" width="56" align="left">
 
 `session` is a Claude Code plugin that gives each session a budget it can see: a meter over context and turns, a checkpoint at 80%, and a note of what is done and what is next.
+
 Use it when a session runs long enough to lose its thread.
 
 Install it in a terminal, then type the second line in a new Claude Code session:
