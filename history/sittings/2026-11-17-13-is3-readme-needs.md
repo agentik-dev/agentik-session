@@ -15,8 +15,9 @@
 - [x] R1 to R4: the retry in `scripts/readme-render`, the wall 2900 s in its header and the Makefile; 11 cases appended to `tests/test_readme.py`, green under both venvs
 - [x] R6: NICE n322 (a close dead after its claim) and n323 (a crash's temp file); the file past recordlint's size bound until `make stamp` moves the oldest S4 rows
 - [x] R5: the needs line in the source (c738c82's wording), paid by the family sentence's trim: 16,373 to 16,369 bytes; a test on both docs, the README's red until the render
+- [x] `make stamp` (job `20261117-194732-2607`, exit 2): red sidecar, the source changed; the render goes first
+- [x] `make readme` (job `20261117-194740-2608`, exit 0, 12 min): two renders, the retry fired; render 1 (316 s) refused, 13 code spans and a number lost; render 2 (407 s, one round) passed
 - [ ] `make stamp` through the gate
-- [ ] `make readme` through the gate
 - [ ] `make check` through the gate, green
 
 ## Handover
@@ -28,7 +29,7 @@
 - decide, owner: the coordinator; consumer: the landing's range scan. Commit `8c4d1fe` holds the packet's first text, which names the renderer's plugin five times (`sibling`); the tree's text names it no more. A row `design/packets/is3-readme-needs.md: sibling`, as `s11-readme-r7.md` has, clears the range scan.
 
 ## Next act
-`make stamp`, then `make readme`, through the gate.
+`make stamp`, then `make check`, through the gate.
 
 ## Exit
 Open.
