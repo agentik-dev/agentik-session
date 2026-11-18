@@ -16,10 +16,12 @@
 - [x] C4: n312 to n314 (F2, F3, F4)
 - [x] C5: packet section 4a
 - [x] `make stamp` (job `20261117-155651-2546`, exit 0): alpha.137, the count 4964 to 4967, n258 to n261 moved to the overflow
+- [x] `make stamp STAMP_VERSION=2.0.0-alpha.138` (job `20261117-160222-2548`, exit 0): the first `make check` (job `20261117-155706-2547`) was red at plugin-version-check alone, since hooks.py changed after the version last moved
 - [ ] `make check` through the gate queue
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
+- decide, owner: coordinator. The version is 138 by STAMP_VERSION, since plugin-version-check reads any plugin/ change after the version moved; the landing's stamp keeps it (above main's 136).
 - Choice: past the keep, a line counts when it holds a byte that is no ASCII blank or control; the kept part is counted exactly, decoded.
 - Choice: a first line that fills the keep is decoded incrementally, a trailing partial character dropped.
 
