@@ -15,7 +15,7 @@
 - [x] C2: plain budget lines under the waiver; the cadence line is not given (one commit with C1 and C4: one function carries all three)
 - [x] C3: the bare-machine proof names no profile; a second step names frontier for the block (`test_bare_machine -k proof`, 1 passed)
 - [ ] C5: README's "Use it when" line, by the source and `make readme`
-- [ ] C6: NICE rows for F4, F6, F7; the packet's fix section
+- [x] C6: NICE rows n315 to n317 for F4, F6, F7; the packet's fix rulings in §2 (C1 to C4), §3 and §4 (doclint clean; recordlint's size bound left to `make stamp`)
 - [ ] the gates: lint and doclint, hygiene, `make stamp`, `make check`
 
 ## Handover
