@@ -321,8 +321,8 @@ def test_3_two_sessions_in_one_checkout_one_prints_it(two):
 def test_4_a_line_beside_three_gate_results(two, tmp_path, event):
     alpha, beta = two
     # real-length paths, as this machine's: a 43-byte repo, a 41-byte state root
-    rs = results(3, repo="/Users/me/code/agentik/agentik-session",
-                 log="/Users/me/.local/state/agentik-session")
+    rs = results(3, repo="/opt/work/code/agentik/agentik-session",
+                 log="/opt/work/.local/state/agentik-session")
     for r in rs:
         gate.inbox_write(state(), SID, r)
     lid = send(beta, alpha, "x" * 300)
