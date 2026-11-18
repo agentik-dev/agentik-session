@@ -160,3 +160,7 @@ DECISIONS.md: sibling
 design/packets/sl1-session-ledger.md: sibling
 # gl2: the ledger's gate list names the ledger's file and the ledger tool's verbs, two lines since its first commit (6463686).
 .claude/edit-gates: sibling
+# in3-line: the packet's wall row named this repo's own ledger file, one line, in c20d418 until 65dc99c.
+design/packets/in3-line.md: sibling
+# in3-line: acceptance 4's test held two made-up paths in a home folder's form, in c9d99bd until 2516157.
+tests/test_in3_line.py: home

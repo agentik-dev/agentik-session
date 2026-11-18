@@ -2,10 +2,10 @@
 
 | item | value |
 |---|---|
-| from | the hq coordinator, 2026-11-17, brief in3-line, rulings R1 to R9; hq design/17 §3 items 7 to 10, §5, §10's R1-F7, R1-F9, R1-F11, R1-F13; hq entries 6 and 37 |
+| from | the hq coordinator, 2026-11-17: brief in3-line (R1 to R9) and its fix (C1 to C8); hq design/17 §3 items 7 to 10 and §10; hq entries 6 and 37 |
 | pin | `69d0824` on main (plugin 2.0.0-alpha.137). Worktree `.claude/worktrees/in3-line`, branch `in3-line`; the two venvs linked |
 | wall | this worktree; no push, `--amend`, rebase, merge, install or plugin update; `make` only through the gate queue; no `claude` started by a test; no relay verb; no test reads or writes the live state root or sends to a real checkout; the repo's ledger unchanged |
-| may touch | `plugin/lib/claude_session/lines.py` (new), `hooks.py` (`_gate_lines`, `_gate_ups`, `post_tool_use`, `session_start`, a block after `_with_gate`), `cli.py` (the `line` parser and `cmd_line`), `gate.py` (`_prune` calls the lines' prune), `tests/test_in3_line.py` and `tests/fixtures/in3-baseline.json` (new), this packet, `history/sittings/2026-11-17-12-in3-line.md`; the version, the README's count and the sidecar by `make stamp` alone |
+| may touch | `plugin/lib/claude_session/lines.py` (new), `NICE_TO_HAVE.md` and `.hygiene-allow` (fix 1's rows), `hooks.py` (`_gate_lines`, `_gate_ups`, `post_tool_use`, `session_start`, a block after `_with_gate`), `cli.py` (the `line` parser and `cmd_line`), `gate.py` (`_prune` calls the lines' prune), `tests/test_in3_line.py` and `tests/fixtures/in3-baseline.json` (new), this packet, `history/sittings/2026-11-17-12-in3-line.md`; the version, the README's count and the sidecar by `make stamp` alone |
 | verify | `make stamp`, then `make check`, by the gate queue, once each, last |
 | acceptance | §3; `PY -m pytest -q tests/test_in3_line.py` under `.venv` and `.venv-floor` |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
@@ -18,37 +18,35 @@ At the pin no hook reads a line; the gate's inbox is taken at UserPromptSubmit a
 
 Asked how a line crosses from one tree's sitting to another's: "The sitting sends it."
 
-Carried verbatim, the entries that bind a hook's output at a session's start:
-
-> 10. **A machine with no user file runs the starter profile.** With no user file the plugin runs the `starter` profile, its shipped default: the meter on, no charter asked, and no priority or pacing text. A first session on a new machine is told nothing of the sitting discipline, which a person takes up by naming the `frontier` profile in the user file.
+Carried verbatim, the entry that binds a hook's output at a session's start (entry 10 binds the profile's text, untouched here):
 
 > 12. **A declared watcher that is not running is said at session start.** Where a watcher the user file declares is not running, a session says so when it starts: one line, printed only while something declared is missing, on the person's screen and to the session itself, which can act on it. When every declared watcher runs, nothing is printed. The prompt band carries no mark for it.
 
-No entry is written or amended. Cited: hq entry 6 (the plugin repos' build conventions), hq entry 37 (made-up names in fixtures and this packet).
+No entry is written or amended. Cited: hq entries 6 (build conventions) and 37 (made-up names).
 
 ## 2. Rulings
 
-- R1, the send: `agentik session line send <checkout> --file <path>`. The address is the named checkout's top level by its real path; a path that is no checkout's top, or is a worktree of one, is exit 2 with the reason. The file is a file inside the sender's own checkout. The verb writes one pointer under the tool's state root, `lines/<address>/<id>.json`: the sender's checkout, the file's full path, and the text's first line. It prints the id. It changes no file of either checkout.
-- R2, `line show <id>` prints one pointer whole with the file's path; `line list [--json]` prints the lines addressed to this checkout and the lines it sent, each with its state (waiting, taken, closed and how).
-- R3, who takes: a session whose project directory (`CLAUDE_PROJECT_DIR`; the payload's `cwd` only where that is unset), by its real path, is the address's top level and not a worktree of it. Never a helper (a payload with `agent_id`, or `CLAUDE_SESSION_HELPER=1`), never a `claude -p` child. A session that has `cd`'d away still takes.
-- R4, when: at UserPromptSubmit and PostToolUse, after the gate's lines, and at SessionStart, after the watcher's line and in `additionalContext`. A hook carries one line; a second waits for the next hook. While a line waits, 256 of the hook's 640 bytes are the line's, so that hook carries the line, one gate result and the gate's count of more; with no line waiting every output is byte for byte what it is at the pin.
-- R5, the printed line, made by the take and never by the send: `line <id> from <repo> (another sitting's words, not the owner's): <head>; whole: agentik session line show <id>`. The take writes the label and the id itself, reads `from` as a checkout's name and nothing more, cuts the head to one line of 120 bytes with control bytes taken out, and sets aside, unprinted, a pointer whose fields are not a pointer's.
-- R6, once: a line is taken by one session, by a step that two sessions in one checkout cannot both win. A taken line not yet closed is printed once more at the receiver's next SessionStart, and not again.
-- R7, the close: `line close <id> --as done|declined|waits [--note T]` records the close on the pointer and sends one line back to the sender's checkout, taken there as any line. A close of a line not addressed to this checkout, or already closed, is exit 2.
-- R8, the prune: closed pointers leave after 14 days, by the gate's prune pass; an open pointer never leaves.
-- R9, nothing else: no new hook event, no network, no write outside the state root, no change to the gate's lines when no line waits.
+- R1: `line send <checkout> --file <path>` addresses a checkout's top by its real path (no top, or a worktree: exit 2 with the reason); the file is inside the sender's checkout; one pointer under the state root, `lines/<address>/<id>.json` (sender, file's path, first line); prints the id; changes no checkout file.
+- R2: `line show <id>` prints a pointer whole; `line list [--json]` the lines to and from this checkout, each with its state (waiting, taken, closed and how).
+- R3: a session takes when its project directory (`CLAUDE_PROJECT_DIR`, else the payload's `cwd`) is the address's top and no worktree; never a helper (`agent_id`, `CLAUDE_SESSION_HELPER=1`) or a `claude -p` child; a `cd` does not matter.
+- R4: at UserPromptSubmit and PostToolUse after the gate's lines, at SessionStart after the watcher's line in `additionalContext`; one line a hook; while a line waits it has 256 of the 640 bytes (the line, one gate result, the count of more); with none, every output is the pin's.
+- R5: the take makes `line <id> from <repo> (another sitting's words, not the owner's): <head>; whole: agentik session line show <id>`, `from` read as a name only, the head one line of 120 bytes without control bytes; a pointer whose fields are not a pointer's is set aside.
+- R6: one session takes a line; a taken, unclosed line is printed once more at the next SessionStart, not again.
+- R7: `line close <id> --as done|declined|waits [--note T]` records the close and sends one line back; not addressed here, or already closed: exit 2.
+- R8: closed pointers leave after 14 days in the gate's prune pass; open ones never.
+- R9: no new hook event, no network, no write outside the state root.
 
-Not built: `reply` and the inbox's answer verb; the intake file's form and status; any ledger amendment.
+Not built: `reply`, the inbox's answer verb, the intake file's form, any ledger amendment.
 
 ## 3. Interfaces and acceptance
 
-The state, under the root: `lines/<name>-<hash16>/` per address (the checkout's name made safe, then the first 16 hex of the SHA-256 of its real path, case-folded where the volume folds case; the gate keys a repo by the device and inode of its common dir, which a move keeps, so it has no spelling to borrow). In it `<id>.json` waits; `taken/`, `again/` (printed again at a SessionStart), `closed/` and `aside/` hold the rest. A pointer: `id` (12 hex, its file's name), `from` and `to` (checkout tops), `file`, `head`, `sent`; `closes` on a line a close sent back; `taken`, `again` (`at`, `session`) and `closed` (`as`, `note`, `at`) as they happen. Each step is a rename, which one session wins.
+The state: `lines/<name>-<hash16>/` per address (the name made safe, then 16 hex of the SHA-256 of the real path, both folded where the volume folds case; the gate's repo key, device and inode, survives a move). `<id>.json` waits; `taken/`, `again/` (printed again), `closing/`, `closed/` and `aside/` hold the rest. A pointer: `id` (12 hex, its file's name), `from`, `to`, `file`, `head`, `sent`; `closes` on a line back; `closed` (`as`, `note`, `at`). The folder is the state (§4a, C4).
 
-The sign of a `claude -p` child: `CLAUDE_CODE_ENTRYPOINT` is `sdk-cli` (Claude Code sets it in print mode, rewriting an inherited `cli`), or `sdk-ts` or `sdk-py` under the Agent SDK; a hook inherits it. The take skips those three.
+The `claude -p` sign: `CLAUDE_CODE_ENTRYPOINT` `sdk-cli` (print mode, rewriting an inherited `cli`; F8 in §4a), `sdk-ts` or `sdk-py` (the Agent SDK); the take skips them.
 
-`line list --json`: `{"checkout": top, "to": [item], "sent": [item]}`, an item `{"id", "state", "from", "to", "file", "head", "sent", "closes", "taken", "closed": null or {"as", "note", "at"}}`, `state` one of `waiting`, `taken`, `closed as <how>`, `set aside` (a set-aside item holds `id` and `state` alone); `head` as the take prints it. The suite's inbox reads `questions`, `backlog` and `charter` and expects no `line` read: this is the shape a later commons row reads.
+`line list --json`: `{"checkout": top, "to": [item], "sent": [item]}`, an item `{"id", "state", "from", "to", "file", "head", "sent", "closes", "closed": null or {"as", "note", "at"}}`, `state` one of `waiting`, `taken`, `closed as <how>`, `set aside` (a set-aside item holds `id` and `state` alone); `head` as the take prints it. The suite's inbox expects no `line` read: a later commons row reads this shape.
 
-Baseline at `69d0824`: `tests/fixtures/in3-baseline.json`, the three hooks for a session at a temp checkout with zero, one and three gate results waiting, a line waiting for another checkout and one of its own closed (SessionStart 804 bytes each; UserPromptSubmit 2, 165, 327; PostToolUse 2, 160, 322).
+Baseline at `69d0824`: `tests/fixtures/in3-baseline.json`, the three hooks with zero, one and three gate results, a line for another checkout and one of the session's own closed.
 
 | # | line | at the pin |
 |---|---|---|
@@ -65,6 +63,19 @@ Baseline at `69d0824`: `tests/fixtures/in3-baseline.json`, the three hooks for a
 ## 4. Findings that name this row
 
 None.
+
+## 4a. The fix of review 1
+
+- C1 (F1, F2): the stored first line is cut to 512 UTF-8 bytes; a `--note` over 240 bytes or holding a break is exit 2. Each verb packs its bytes first and refuses past the 4096-byte read bound, nothing written.
+- C2 (F3, F11): one cleaner takes out every character `splitlines` breaks on, every Cc, Cf and lone surrogate, for the id, the name, the head and the note; a checkout path holding one cannot send, a pointer naming one is set aside. The made line is checked whole last: more than one line, or over its share, and it is set aside.
+- C3 (F4): a close records itself when `from` is no checkout, sends nothing back, says so in one line, exit 0.
+- C4 (F5): a state change is one rename; nothing is written after it. A step reads, then claims by a rename (into `taken/`, `again/`). A close reads, packs the closed pointer with its record, claims into `closing/`, publishes its written temp by a rename into `closed/`, then removes the `closing/` copy. The take keeps no stamp, so `line list --json` has no `taken` field.
+- C5 (F6): `to` and `from` compare by the box's key (folded where the volume folds case); the name printed is the folder's own spelling.
+- C6 (F7, F9, F11): the prune skips a symlinked `lines/`, box or `closed/`; a hook sets aside 16 at most; `file` must be under `from` (under `to` for a line back).
+- F10: acceptance 4's "whole" is the gate's block with the line, measured as the pin measures a block.
+- F8, R3's gap: print mode rewrites an inherited entrypoint only when it is `cli`, so a `claude -p` child of a `claude-vscode`, `claude-desktop`, `local-agent`, `remote` or `mcp` session keeps that value and would take.
+
+F1 to F6's payloads are `test_c1_*` to `test_c5_*`, red at `cd16ceb`; C6's are `test_c6_*`.
 
 ## 5. Forbidden reads
 
