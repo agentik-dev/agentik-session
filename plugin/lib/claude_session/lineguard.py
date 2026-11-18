@@ -18,6 +18,7 @@ from . import instructionguard, resolver, shellreader, store
 HEAD = "agentik-session: refused by"
 PRODUCT = "product"                       # armed in every session (question 53: on everywhere)
 PLUGIN = "entry 11 of agentik-session's DECISIONS.md, in every session"   # g10 R7
+ISSUE_BY = "a rule of the agentik-session plugin, in every session"     # rp7 R7: no entry holds it
 STRICT, LOOSE = instructionguard.STRICT, instructionguard.LOOSE
 ARM_BYTES = 262144                        # R7: the first bytes of each file read for a title
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
@@ -26,17 +27,18 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 
 
 def looks(command: str, helper: bool = False) -> bool:
-    """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind,
+    """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind
+    (rp7 R6: or `issue` and `send` both),
     once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too, and each
     word read again with its quotes and backslashes taken out (review 1 fix 3). A line it passes
     is never read."""
     t = command.replace("\\\n", "").lower()
-    if "git" in t or "rm" in t:
+    if "git" in t or "rm" in t or ("issue" in t and "send" in t):     # rp7 R6: in every session
         return True
     if not helper:
         return False
     t = t.replace("'", "").replace('"', "").replace("\\", "")
-    return "git" in t or "rm" in t or "gate" in t
+    return "git" in t or "rm" in t or "gate" in t or ("issue" in t and "send" in t)
 
 
 # ---- R6, R7: the folder, the checkout, the arming ---------------------------------------------
@@ -511,10 +513,9 @@ def _py_script(args: list):
     return (args[i], args[i + 1:]) if i < len(args) and args[i] != "-" else None
 
 
-def _tool_words(c, veil: bool = True):
-    """R3: the words after the session tool's own word(s), or None for a command that runs no
-    session tool: its command word, or an interpreter's script word, by its base name. Without
-    `veil` (review 2 F2), a word the shell expands is read as no tool's word."""
+def _launched(c):
+    """R3, rp7 R8: (the base name, case-blind, of the word that runs, the words after it): the
+    command word, or an interpreter's script word; None for an interpreter that runs no file."""
     name = c.name.lower()
     if _PY_NAME.match(name):
         got = _py_script(c.args)
@@ -523,19 +524,32 @@ def _tool_words(c, veil: bool = True):
         got = (c.args[i], c.args[i + 1:]) if how == "file" else None
     else:
         got = (c.name, c.args)
+    return None if got is None else (os.path.basename(got[0]).lower(), got[1])
+
+
+def _past_door(rest: list) -> int:
+    """Review 1 fix 8: the index of the door's tool word. The door takes no option before a
+    tool's name (`--version`, `-h`, `--help` stand alone); any other leading flag hands the whole
+    line to `agentik-suite`, which may hand it on, so flags before the tool word are read past."""
+    i = 0
+    while i < len(rest) and rest[i].startswith("-") and not _veiled(rest[i]):
+        i += 1
+    return i
+
+
+def _tool_words(c, veil: bool = True):
+    """R3: the words after the session tool's own word(s), or None for a command that runs no
+    session tool: its command word, or an interpreter's script word, by its base name. Without
+    `veil` (review 2 F2), a word the shell expands is read as no tool's word."""
+    got = _launched(c)
     if got is None:
         return None
-    base, rest = os.path.basename(got[0]).lower(), got[1]
+    base, rest = got
     if base in _TOOLS:
         return rest
     if base != "agentik":
         return None
-    # review 1 fix 8: the door takes no option before a tool's name (`--version`, `-h`, `--help`
-    # stand alone); any other leading flag hands the whole line to `agentik-suite`, which may hand
-    # it on, so flags before `session` are read past
-    i = 0
-    while i < len(rest) and rest[i].startswith("-") and not _veiled(rest[i]):
-        i += 1
+    i = _past_door(rest)
     if i >= len(rest):
         return None
     if _veiled(rest[i]):                    # review 1 fix 2: at `session`'s place, read as `gate`'s
@@ -794,6 +808,35 @@ def _pushes(c, k, ctx, cell, veil: bool = True, extra=()):
     return None
 
 
+# ---- rp7: the issue rule ------------------------------------------------------------------------
+
+_SUITE = "agentik-suite"
+_HELP = frozenset({"-h", "--help"})
+
+
+def _issue(c, k, ctx, cell):
+    """rp7 R1, R2, R9: the door, past its leading flags, or the suite's launcher, then `issue`,
+    then `send` as the next word that does not open with `-`; `-h` or `--help` anywhere after
+    `issue` passes. A word the shell expands is no verb's (g10's door, its veil off)."""
+    got = _launched(c)
+    if got is None:
+        return None
+    base, rest = got
+    if base == "agentik":
+        rest = rest[_past_door(rest):]
+    elif base != _SUITE:
+        return None
+    if not rest or rest[0] != "issue" or _HELP.intersection(rest[1:]):
+        return None
+    verb = next((w for w in rest[1:] if not w.startswith("-")), None)
+    return (None, (PRODUCT,)) if verb == "send" else None
+
+
+def _never(text: str) -> bool:
+    """rp7 R8: the issue rule's loose judge: an unread part passes (design/20 item 16)."""
+    return False
+
+
 # ---- R13: unread text ---------------------------------------------------------------------------
 
 _W = r"(?:^|(?<=[\s/'\"(`{]))"
@@ -850,6 +893,7 @@ RULES = (
     ("identity", PRODUCT, _identity, _loosely(_LOOSE_IDENTITY)),
     ("sweep", "Commits", _sweep, _loosely(_LOOSE_SWEEP)),
     ("push", "Pushes", _push, _loose_push),                   # g10: a helper's call alone (R1)
+    ("issue", PRODUCT, _issue, _never),                       # rp7: every call, no cwd needed
 )
 _GIT_RULES = frozenset({"init", "identity", "sweep", "push"})
 _HELPER_RULES = frozenset({"push"})
@@ -877,6 +921,10 @@ def _reason(name: str, cell: str, top, got, how: str) -> str:
         text = (f"{HEAD} the identity rule, {by}: this sets a git identity in the checkout "
                 f"{top}. Pass it per command: `git -c user.name=<name> -c user.email=<address> "
                 "commit ...`.")
+    elif name == "issue":                                   # rp7 R4, R7: no entry holds it
+        text = (f"{HEAD} the issue rule, {ISSUE_BY}: `issue send` files a public issue and wants "
+                "a person's typed word on a terminal. Hand the user the line to run in a terminal "
+                "of their own.")
     elif name == "push":
         text = (f"{HEAD} the push rule, {by}, arms it for the checkout {top}: a helper never "
                 "pushes. Hand back the branch and its head; the sitting that started you pushes.")

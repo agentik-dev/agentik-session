@@ -407,7 +407,8 @@ def test_arming_by_title(box):
 def test_the_table(box):
     assert [(r[0], r[1]) for r in lineguard.RULES] == [
         ("rm", "product"), ("init", "product"), ("identity", "product"), ("sweep", "Commits"),
-        ("push", "Pushes")]                                    # g10 R1: the fifth rule
+        ("push", "Pushes"),                                     # g10 R1: the fifth rule
+        ("issue", "product")]                                   # rp7 R1: the sixth rule
 
 
 # ---- the fix of review 1 -----------------------------------------------------------------------
