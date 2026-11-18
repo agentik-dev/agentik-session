@@ -205,7 +205,8 @@ def test_pl1_4_rules_name_status_for_the_next_family(monkeypatch):
     from claude_session import resolver
     p = resolver._user_file(os.environ)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("defaults:\n  admission:\n    mix:\n      shares:\n        fable: 3\n        opus: 1\n")
+    p.write_text("defaults:\n  profile: frontier\n"                   # st1: frontier's pacing, on
+                 "  admission:\n    mix:\n      shares:\n        fable: 3\n        opus: 1\n")
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     rc, out, _ = run("rules")
     text = " ".join(out.split())
