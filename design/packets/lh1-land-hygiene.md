@@ -51,6 +51,15 @@ The tests whose assertion of a printed line changed: none. The pin's 381 land an
 
 None at the pin. Not built here: a `hygiene-range` target in any other repo (each repo's own sitting adds it), and any change to the scanner.
 
+## 4a. The fix of review 1
+
+Review 1 found a make road that skips the scan and exits 0: a `hygiene:` or `hygiene-range:` line that is no rule after all (inside a false `ifeq` or a `define`, or written `hygiene:=x`) or an empty rule, with the target named in `.PHONY`, makes make say "Nothing to be done"; a target that is not `.PHONY`, beside a file or folder of its name, is "up to date". Both landed and pushed at `f3405d7`; the pin was red.
+
+- C1: before each `make hygiene` and `make hygiene-range RANGE=<span>`, in `land` and in `publish`, the same call with `-q` (`land.run_scan`), in the same tree with the same environment and variables. Exit 1, a recipe would run: the scan goes on. Exit 0: red at the scan's step (`hygiene`, or `merge-file` for the message's span), exit 1, a note that the target would run no recipe; nothing merged or pushed. Any other exit: red with make's code. The bare script is never the fallback of a target that was seen. `-q` still runs a recipe line led by `+` or holding `$(MAKE)`, so a scan target holds neither.
+- C2: whether a target exists is read from the first of `GNUmakefile`, `makefile`, `Makefile` that is there, as make chooses (`land.MAKEFILES_READ`). `stamps` keeps the pin's read (R5).
+- The cases, each landing or pushing at `f3405d7`, red as ruled now: for the tree's target, `.PHONY` with a false `ifeq`, with a `define`, with `hygiene:=x`, with an empty rule, and no `.PHONY` beside a tracked folder `hygiene`; for the range's target, `.PHONY` with `ifdef NEVER`, and no `.PHONY` beside a tracked folder `hygiene-range`; a `GNUmakefile` beside a `Makefile`, each way round. This repo's own two targets answer `make -q` with 1.
+- What a scan target must be, for the suite's guide: named in `.PHONY`, with a recipe, exiting non-zero on any hit, and no recipe line that scans led by `-` (make ignores that line's failure).
+
 ## 5. Forbidden reads
 
 The wall's: the live state, the relay's state, and the two branches waiting to land beside this one.

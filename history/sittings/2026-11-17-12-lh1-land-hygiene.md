@@ -22,11 +22,17 @@
 - Choice: a target is a Makefile line that opens `hygiene:` (or `hygiene-range:`), the rule `stamps` reads `stamp:` by; a target defined only in an included file is not seen, and the bare script runs.
 - Choice: a make road's red carries make's own code (2 for a failed recipe), as the check step's does.
 - Choice: make runs without the caller's MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, MAKEFILES, MAKELEVEL (land's job drops them already; publish runs in a sitting's shell).
+- Choice (fix 1): `make -q` exit 0 reds with code 1, this module's own refusal code; `stamps` keeps reading `Makefile` alone (R5: the ready step unchanged).
 - Choice: each scan picks its road alone; `range not scanned` is said when a tree scan ran and no range road was there, so a repo with neither scan prints as at the pin.
 - Choice: publish's 126 refusal stands wherever `scripts/hygiene` is there and not executable, a target beside it or not, as at the pin.
 
+## The fix of review 1 (brief-2, from `f3405d7`)
+- [x] C1: `land.run_scan`, `make -q` before each make road, exit 0 red at the scan's step; C2: the makefile make reads; 7 land and 7 publish cases, each landed or pushed at `f3405d7`
+- [x] C4: the packet's section 4a, NICE n315
+- [ ] `make stamp`, then `make check`, through the gate queue
+
 ## Next act
-None: every act is done; the branch waits on the coordinator's review.
+`make stamp`, then `make check`.
 
 ## Exit
-Every ruling built; the check green on `d5ebb69`; this commit adds the charter alone.
+Build 1: every ruling built, the check green on `d5ebb69`. Fix 1: in flight.
