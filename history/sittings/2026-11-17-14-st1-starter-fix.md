@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] C1 and C4: `charter.discipline` (starter's alone); a chain with nothing named runs frontier. Probe: the review's 62 fixtures re-run on this tree; every named one equals the pin's outputs but for the shipped file's hash and resolved_at
 - [x] C2: plain budget lines under the waiver; the cadence line is not given (one commit with C1 and C4: one function carries all three)
-- [ ] C3: the bare-machine proof names no profile
+- [x] C3: the bare-machine proof names no profile; a second step names frontier for the block (`test_bare_machine -k proof`, 1 passed)
 - [ ] C5: README's "Use it when" line, by the source and `make readme`
 - [ ] C6: NICE rows for F4, F6, F7; the packet's fix section
 - [ ] the gates: lint and doclint, hygiene, `make stamp`, `make check`
