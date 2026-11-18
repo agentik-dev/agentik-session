@@ -29,10 +29,11 @@
 ## The fix of review 1 (brief-2, from `f3405d7`)
 - [x] C1: `land.run_scan`, `make -q` before each make road, exit 0 red at the scan's step; C2: the makefile make reads; 7 land and 7 publish cases, each landed or pushed at `f3405d7`
 - [x] C4: the packet's section 4a, NICE n315
-- [ ] `make stamp`, then `make check`, through the gate queue
+- [x] `make stamp` (job `20261117-191437-2596`, exit 0): alpha.138 kept, the count 4996 to 5009, n262 moved to the overflow
+- [ ] `make check` through the gate queue
 
 ## Next act
-`make stamp`, then `make check`.
+`make check`.
 
 ## Exit
 Build 1: every ruling built, the check green on `d5ebb69`. Fix 1: in flight.
