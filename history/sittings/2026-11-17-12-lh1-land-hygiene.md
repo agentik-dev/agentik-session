@@ -30,7 +30,8 @@
 - [x] C1: `land.run_scan`, `make -q` before each make road, exit 0 red at the scan's step; C2: the makefile make reads; 7 land and 7 publish cases, each landed or pushed at `f3405d7`
 - [x] C4: the packet's section 4a, NICE n315
 - [x] `make stamp` (job `20261117-191437-2596`, exit 0): alpha.138 kept, the count 4996 to 5009, n262 moved to the overflow
-- [ ] `make check` through the gate queue
+- [x] `make check` job `20261117-191455-2597`, exit 2: red `plugin-version-check` alone (5009 and 4845 passed), the stamp kept alpha.138 set at `d5ebb69`; `make stamp STAMP_VERSION=2.0.0-alpha.139` (job `20261117-192016-2599`, exit 0)
+- [ ] `make check` again through the gate queue
 
 ## Next act
 `make check`.
