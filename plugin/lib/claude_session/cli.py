@@ -1534,6 +1534,49 @@ def cmd_run(args) -> int:
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
 
+def cmd_line(args) -> int:
+    """`agentik session line send|list|show|close` (packet in3-line): a pointer under the
+    state root, never a file of a checkout. This checkout is `CLAUDE_PROJECT_DIR`'s, else
+    the shell's. A refusal is exit 2 with its reason."""
+    from . import lines
+    env = os.environ
+    root = resolver.state_dir(env)
+    start = lines.here(env)
+    verb = args.line_verb
+    try:
+        if verb == "send":
+            print(lines.send(root, args.checkout, args.file, start))
+            return 0
+        if verb == "show":
+            got = lines.show(root, args.id)
+            if got is None:
+                raise lines.Refused(f"line show: no line {args.id[:40]!r}")
+            print(json.dumps(got, indent=2))
+            return 0
+        here = lines.own_checkout(start)
+        if here is None:
+            raise lines.Refused(f"line {verb}: {start} is in no checkout")
+        if verb == "close":
+            print(lines.close(root, here, args.id, args.how, args.note))
+            return 0
+        got = lines.listing(root, here)
+        if args.json:
+            print(json.dumps(got, indent=2))
+            return 0
+        for part, word in (("to", "from"), ("sent", "to")):
+            print(f"{'addressed to this checkout' if part == 'to' else 'sent'}: "
+                  f"{len(got[part]) or 'none'}")
+            for it in got[part]:
+                who = os.path.basename(it.get(word) or "") or "?"
+                print(f"  {it['id']}  {it['state']}  {word} {who}: {it.get('head') or ''}"
+                      .rstrip(": "))
+        return 0
+    except lines.Refused as e:
+        _die(str(e), 2)
+    except OSError as e:
+        _die(f"line {verb}: {e.strerror or e}", 2)
+
+
 def cmd_gate(args) -> int:
     """`agentik session gate run|wait|status|land|publish` (design/gate-r1.md): the per-Mac gate queue.
     `run` and `wait` refuse with 2; `wait` exits 0 whatever the gate's code (the agentik
@@ -2103,6 +2146,25 @@ def build_parser() -> argparse.ArgumentParser:
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
+
+    ln = sub.add_parser("line", help="a line between sittings: send a file's pointer to a "
+                                      "checkout, list, show, close (packet in3-line)")
+    lsub = ln.add_subparsers(dest="line_verb", required=True, metavar="send|list|show|close")
+    ls_ = lsub.add_parser("send", help="send a file of this checkout to another checkout's "
+                                       "sitting; print the line's id")
+    ls_.add_argument("checkout", help="the checkout's top level the line is addressed to")
+    ls_.add_argument("--file", required=True, metavar="PATH",
+                     help="a file inside this checkout, the line's whole text")
+    ll = lsub.add_parser("list", help="the lines addressed to this checkout, and those it sent")
+    ll.add_argument("--json", action="store_true")
+    lw = lsub.add_parser("show", help="one line's pointer whole")
+    lw.add_argument("id")
+    lc = lsub.add_parser("close", help="close a line addressed to this checkout and send one "
+                                       "line back to its sender")
+    lc.add_argument("id")
+    lc.add_argument("--as", dest="how", required=True, choices=("done", "declined", "waits"))
+    lc.add_argument("--note", metavar="TEXT")
+    ln.set_defaults(func=cmd_line)
 
     rk = sub.add_parser("reconcile", help="the reconciler's detectors when due "
                                           "(session.reconcile): one record, 0 clean or not "
