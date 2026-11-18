@@ -263,6 +263,11 @@ class Proof:
                 fh.write(DECOY)
         with open(os.path.join(self.repo, ".git", "info", "exclude"), "a") as fh:
             fh.write("claude_session\njson.py\n")
+        # Packet st1-starter: the repo names frontier, so each hook runs its whole road, the
+        # PreCompact block included, which starter, a bare machine's default, waives (D3).
+        os.makedirs(os.path.join(self.repo, ".claude", "agentik"))
+        with open(os.path.join(self.repo, ".claude", "agentik", "config.yaml"), "w") as fh:
+            fh.write("session: {profile: frontier}\n")
 
     # ---- the children --------------------------------------------------------
 
