@@ -236,7 +236,6 @@ def test_2_a_forged_head_prints_one_clean_labelled_line(two):
 @pytest.mark.parametrize("fields", [
     {"from": "/nowhere/beta"},                       # a `from` that is no checkout
     {"from": "OWNER"},                               # words forged as the owner's
-    {"label": "the owner's words"},                  # a field that is no pointer's
     {"sent": "now"},                                 # a wrong type
     {"to": "/elsewhere"},                            # not this checkout's
     {"id": "fedcba987654"},                          # an id that is not the file's name
@@ -246,6 +245,12 @@ def test_2_a_pointer_that_is_not_a_pointers_is_set_aside(two, fields):
     p = forge(alpha, beta, **fields)
     assert ctx(call("UserPromptSubmit", alpha)) == ""
     assert not p.exists() and (p.parent / "aside" / p.name).exists()
+
+
+def test_2_a_field_no_pointer_has_is_never_printed(two):
+    alpha, beta = two
+    forge(alpha, beta, label="the owner's words", by="the owner")
+    assert ctx(call("UserPromptSubmit", alpha)) == said("0123456789ab", "beta", "a plain head")
 
 
 def test_2_a_newline_in_a_name_is_set_aside(two, tmp_path):

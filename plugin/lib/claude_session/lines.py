@@ -116,14 +116,13 @@ def _dump(ptr: dict) -> str:
 
 
 def _load(p: Path):
+    """The gate's reader, for a file no longer than `_SIDE` bytes; else None."""
     try:
-        with open(p, "rb") as fh:
-            data = fh.read(_SIDE + 1)
-        if len(data) > _SIDE:
+        if os.stat(p).st_size > _SIDE:
             return None
-        return json.loads(data.decode("utf-8"))
-    except (OSError, ValueError):
+    except OSError:
         return None
+    return gate._load(p)
 
 
 def _new(root, to: str, frm: str, file: str, head: str, closes=None, now=None) -> str:
@@ -191,11 +190,10 @@ def _stamp_ok(v) -> bool:
 
 
 def valid(ptr, name: str, to: str | None) -> dict | None:
-    """The pointer when its fields are a pointer's (R5), else None: every key known and of
-    its type, `id` the file's name, `from` a checkout's top and no worktree, `to` the taker's
+    """The pointer when its fields are a pointer's (R5), else None: each known key of its
+    type (an unknown one is ignored, as every reader here ignores one, and never printed), `id` the file's name, `from` a checkout's top and no worktree, `to` the taker's
     checkout (when given), no control character in a path."""
-    if not isinstance(ptr, dict) or not set(REQUIRED) <= set(ptr) \
-            or not set(ptr) <= set(REQUIRED) | set(OPTIONAL):
+    if not isinstance(ptr, dict) or not set(REQUIRED) <= set(ptr):
         return None
     for k, t in REQUIRED.items():
         if not isinstance(ptr[k], t) or isinstance(ptr[k], bool):
