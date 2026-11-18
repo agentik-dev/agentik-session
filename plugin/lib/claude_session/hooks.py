@@ -99,6 +99,8 @@ MAX_OUT = 640                                   # S33 ruling 4: at most 640
 CHECKPOINT_EVERY = 10
 EXIT_RULE = ("EXIT: land the act in flight at a checkpoint, then exit; "
              "respawn, never compact")
+# Packet st1-starter D3: the last line where the profile asks no charter, in plain words.
+PLAIN_EXIT = "EXIT: the context is full; start a fresh session"
 
 # The respawn's files under `sessions/<sid>/` (respawn-r1 §3.2, §3.3): the verb writes the
 # marker; the hooks write the main thread's stamps, a helper's stamp and the confirmation.
@@ -1398,7 +1400,7 @@ def _checkpoint_out(m: meter.Meter, charter: str | None,
     for tail in tails:
         line = head + tail + WIND_DOWN.format(pct=m.used_pct)
         if m.used_pct >= 100.0:
-            line += "\n" + EXIT_RULE
+            line += "\n" + (PLAIN_EXIT if charter is None else EXIT_RULE)     # st1 D3
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                       "additionalContext": line}}
         if len(json.dumps(out)) <= MAX_OUT:
@@ -1601,13 +1603,30 @@ COMPACT_BLOCKED = ("This setup restarts a sitting rather than compacting it: bri
                    "sitting's charter>`; a /compact you type yourself still runs.")
 
 
+def blocks_compaction(session) -> bool:
+    """Packet st1-starter D3: False where the resolved `session` section's
+    `charter.blocks_compaction` is false (as `starter`'s); True otherwise, a section that
+    names none, or none read, included."""
+    c = session.get("charter") if isinstance(session, dict) else None
+    return not (isinstance(c, dict) and c.get("blocks_compaction") is False)
+
+
 def pre_compact(payload: dict, env=None) -> dict:
     """Block an automatic compaction; an owner-typed `/compact` (trigger `manual`) and any
     trigger not known pass with an empty reply, which dispatch prints as nothing (QUIET_PASS).
-    It reads and writes no state."""
-    if payload.get("trigger") == "auto":
-        return {"decision": "block", "reason": COMPACT_BLOCKED}
-    return {}
+    An automatic one passes too where the session's resolved file waives the block
+    (`blocks_compaction`, st1 D3); a file not read blocks, as before. It writes no state."""
+    if payload.get("trigger") != "auto":
+        return {}
+    try:
+        sdir = _session_dir(payload.get("session_id"), os.environ if env is None else env,
+                            fallback=False)
+        session = _load_json(sdir / "resolved.json").get("session") if sdir else None
+    except Exception:                                   # noqa: BLE001
+        session = None
+    if not blocks_compaction(session):
+        return {}
+    return {"decision": "block", "reason": COMPACT_BLOCKED}
 
 
 def subagent_stop(payload: dict, env=None) -> dict:

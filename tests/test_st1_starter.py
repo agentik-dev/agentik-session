@@ -148,3 +148,47 @@ def test_6_frontier_s_checkpoint_line_is_the_pin_s(tmp_path):
     assert hooks.asks_charter(s) is True
     line = hooks._checkpoint_out(_meter(80.0), "history/sittings")
     assert json.dumps(line).count("charter history/sittings; bring the charter current") == 1
+
+
+# ---- D3: the two lines a starter session no longer gets ----------------------------------
+
+def _resolve_into_state(tmp_path, env, profile=None):
+    cwd = repo(tmp_path)
+    resolver.write(resolver.resolve(cwd, SID, env, profile=profile, overlay={}),
+                   resolver.state_dir(env))
+    return {"session_id": SID, "transcript_path": "/nonexistent/t.jsonl", "cwd": str(cwd),
+            "hook_event_name": "PreCompact", "trigger": "auto", "custom_instructions": ""}
+
+
+def test_d3_starter_s_compaction_is_not_blocked(tmp_path):
+    env = env_for(tmp_path)
+    p = _resolve_into_state(tmp_path, env)
+    assert resolved_session(tmp_path, env)["charter"]["blocks_compaction"] is False
+    assert hooks.pre_compact(p, env) == {}
+
+
+@pytest.mark.parametrize("name", PIN_PROFILES)
+def test_d3_every_pin_profile_still_blocks_an_automatic_compaction(tmp_path, name):
+    env = env_for(tmp_path)
+    p = _resolve_into_state(tmp_path, env, profile=name)
+    assert hooks.pre_compact(p, env) == {"decision": "block", "reason": hooks.COMPACT_BLOCKED}
+
+
+def test_d3_no_resolved_file_blocks_as_at_the_pin(tmp_path):
+    env = env_for(tmp_path)
+    p = {"session_id": SID, "trigger": "auto", "cwd": str(tmp_path)}
+    assert hooks.pre_compact(p, env)["decision"] == "block"
+    assert hooks.pre_compact({**p, "trigger": "manual"}, env) == {}
+
+
+def test_d3_starter_s_last_line_says_start_a_fresh_session(tmp_path):
+    line = hooks._checkpoint_out(_meter(100.0), None)["hookSpecificOutput"]["additionalContext"]
+    assert line.endswith("\n" + hooks.PLAIN_EXIT)
+    assert "context is full" in hooks.PLAIN_EXIT and "fresh session" in hooks.PLAIN_EXIT
+    for word in ("respawn", "compact", "successor", "charter", "launcher"):
+        assert word not in line.lower(), word
+
+
+def test_d3_frontier_s_last_line_is_the_pin_s(tmp_path):
+    line = hooks._checkpoint_out(_meter(100.0), "history/sittings")
+    assert line["hookSpecificOutput"]["additionalContext"].endswith("\n" + hooks.EXIT_RULE)

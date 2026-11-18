@@ -189,10 +189,11 @@ profiles:
     ceilings_1m: {context: 400000, turns: 400}
   # What runs when nothing names a profile (packet st1-starter, entry 10): the shipped
   # defaults with the meter on, and the three fields that would ask more of a session off.
-  # A person takes up the sitting discipline by naming `frontier` under `defaults.profile`
-  # in the user file.
+  # `charter.blocks_compaction` (st1 D3, the one new field; absent is true) lets an
+  # automatic compaction run. A person takes up the sitting discipline by naming `frontier`
+  # under `defaults.profile` in the user file.
   starter:
     description: The meter on, and nothing more asked of the session.
-    charter: {required: false}
+    charter: {required: false, blocks_compaction: false}
     priority: {enabled: false}
     pacing: {enabled: false}
