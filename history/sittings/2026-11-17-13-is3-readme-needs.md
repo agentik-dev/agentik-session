@@ -18,7 +18,7 @@
 - [x] `make stamp` (job `20261117-194732-2607`, exit 2): red sidecar, the source changed; the render goes first
 - [x] `make readme` (job `20261117-194740-2608`, exit 0, 12 min): two renders, the retry fired; render 1 (316 s) refused, 13 code spans and a number lost; render 2 (407 s, one round) passed
 - [x] `make stamp` (job `20261117-200104-2612`, exit 0): alpha.139 kept, 5078 tests, n268 and n269 moved to the overflow; nothing under `plugin/` changes on this branch, so the version needs no move
-- [ ] `make check` through the gate, green
+- [x] `make check` (job `20261117-200132-2614`, exit 0 on `5b6d8f6`): 5078 passed; 4914 passed, 143 skipped; hygiene 0 outside the allowlist; readme fresh
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
@@ -26,10 +26,12 @@
 - Choice: a refusal is the verifier's exit 1 alone; any other exit is exit 2 at once, as at the pin.
 - Choice: the note's bound is bytes (`head -c`), so a cut may split a multibyte character; the renderer reads it into a prompt.
 - Choice: the retry renders into the same temp output, emptied first; one round (`RETRY_ROUNDS=1`), as R3 asks.
+- Choice: the wall 2900 s over a sum of 2886 s, as 2000 s stood over 1984 s.
+- Lead: the render turned the trimmed "Its family answers" into "Together they answer", which drops the family; a later source edit may say it plainly.
 - decide, owner: the coordinator; consumer: the landing's range scan. Commit `8c4d1fe` holds the packet's first text, which names the renderer's plugin five times (`sibling`); the tree's text names it no more. A row `design/packets/is3-readme-needs.md: sibling`, as `s11-readme-r7.md` has, clears the range scan.
 
 ## Next act
-`make check`, through the gate.
+None: the branch waits on the coordinator's review and the allow row's ruling.
 
 ## Exit
-Open.
+Build 1: R1 to R6 built, the check green on `5b6d8f6`; this commit adds the record alone. The range scan reds on `8c4d1fe` alone, until the coordinator rules the `sibling` row above.
