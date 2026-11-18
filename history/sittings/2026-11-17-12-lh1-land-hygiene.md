@@ -12,12 +12,17 @@
 
 ## Done-ness
 - [x] the packet, the baseline at the pin (land and publish `red hygiene exit 1`; 14 of the 19 new cases red, the pin's own roads green)
-- [ ] R1 to R3, R5: `land.py` and `publish.py` take the target where it is; `tests/test_lh1_land_hygiene.py` green
+- [x] R1 to R3, R5: `land.py` and `publish.py` take the target where it is; `tests/test_lh1_land_hygiene.py` 19 green; the pin's 381 land and publish tests unchanged and green; the new file and two publish files green under `.venv-floor` too
 - [ ] R4: this repo's `hygiene-range` target
 - [ ] `make stamp`, then `make check`, once each through the gate queue
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
+- Choice: a target is a Makefile line that opens `hygiene:` (or `hygiene-range:`), the rule `stamps` reads `stamp:` by; a target defined only in an included file is not seen, and the bare script runs.
+- Choice: a make road's red carries make's own code (2 for a failed recipe), as the check step's does.
+- Choice: make runs without the caller's MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, MAKEFILES, MAKELEVEL (land's job drops them already; publish runs in a sitting's shell).
+- Choice: each scan picks its road alone; `range not scanned` is said when a tree scan ran and no range road was there, so a repo with neither scan prints as at the pin.
+- Choice: publish's 126 refusal stands wherever `scripts/hygiene` is there and not executable, a target beside it or not, as at the pin.
 
 ## Next act
-R1 to R3 in `land.py` and `publish.py`.
+R4: this repo's `hygiene-range` target.

@@ -6,11 +6,18 @@
 
 A bare <repo> is that checkout in ~/code, else the one a folder below; one with a slash is a
 path; the cwd never decides. <sha> is a prefix of the commit, never a ref's name. Runs, in
-order: the merge message's scan (below), `make check` in the branch's worktree, `scripts/hygiene`
-there when present, then
-`scripts/hygiene --require-private --commits refs/heads/main..<sha>` there when its --help names
-`--commits`, `git merge --no-ff --commit -F <merge-file> <sha>` in the repo's main checkout,
-`git worktree remove`, `git branch -D`. Stdout is one line, the verdict, and it comes last:
+order: the merge message's scan (below), `make check` in the branch's worktree, the tree's scan
+there, then the range's scan of `refs/heads/main..<sha>` there,
+`git merge --no-ff --commit -F <merge-file> <sha>` in the repo's main checkout,
+`git worktree remove`, `git branch -D`. The scans' roads (packet lh1-land-hygiene) are the
+worktree's own: the tree's scan is `make hygiene` where its Makefile holds a line that opens
+`hygiene:`, else `scripts/hygiene` when present; a range's scan (the branch's, the merge
+message's) is `make hygiene-range RANGE=<span>` where a line opens `hygiene-range:`, else
+`scripts/hygiene --require-private --commits <span>` when its --help names `--commits`. The
+Makefile is read, no recipe run, to tell; make runs without the caller's MAKEFLAGS, MFLAGS,
+GNUMAKEFLAGS, MAKEFILES or MAKELEVEL, and its code is the red line's, so a line that is no rule
+after all, or a Makefile that does not parse, is red, never a skipped scan. The note names what
+ran. Stdout is one line, the verdict, and it comes last:
 
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
@@ -65,8 +72,9 @@ line is the step's, make's own. The check writes to this run's stderr as at the 
 lines are read from the job's own log (`main`'s `log`, the file that stderr is, by device and
 inode), from where the check began, its last 64 KiB, a first line the 64 KiB cut not read; with
 no such log the line is the pin's. A
-`scripts/hygiene` that predates `--commits`, its --help failing or not naming the flag, scans the
-tree alone: a note says so, and the ok line ends `, range not scanned`. The steps'
+tree scanned with no range road (no `hygiene-range:` line, and a `scripts/hygiene` that predates
+`--commits`, its --help failing or not naming the flag, or none) is scanned alone: a note says
+so, and the ok line ends `, range not scanned`. The steps'
 own output and these notes go to stderr. In the job both streams reach the job's log, so the
 verdict is the job's last line before the gate's own; `gate land` prints that line on its stdout
 and exits the job's code (`gate wait --strict`'s). A job's cwd is its repo.
@@ -81,10 +89,10 @@ being this worktree by device and inode, clean or dirty, which `worktree remove`
 dirty so a check there would not prove the sha, or its .venv is neither a link nor absent), sha
 (not the branch's head, or already on main, or behind main: the merge would make a tree other than
 <sha>'s, so the check would not run on what main would hold; merge main into the branch and land
-its new head), merge-file again (when `scripts/hygiene --help` names --commits, the merge commit is
+its new head), merge-file again (when the worktree has a range road, the merge commit is
 made as a dangling object, `git commit-tree <tree> -p <main as read> -p <sha> -F <merge-file>`, its
-stderr to the log, and `scripts/hygiene --require-private --commits <sha>..<it>` scans its message
-in the worktree, a non-zero exit red merge-file with hygiene's code; no ref is written), check,
+stderr to the log, and the range's scan of `<sha>..<it>` scans its message
+in the worktree, a non-zero exit red merge-file with the scan's code; no ref is written), check,
 hygiene, merge (a conflict, read before the check, and read again after it; or git merge's own
 red), remove, branch (its sha is not on main, or it has moved), cut. After the check, before the
 merge, the nested worktrees, main's lead and the merge file's text and scan are read again with
@@ -188,11 +196,12 @@ def read_z(cwd, *args):
     return p.returncode, [os.fsdecode(f) for f in p.stdout.split(b"\0") if f]
 
 
-def run(cwd, *argv):
+def run(cwd, *argv, env=None):
     """A step: its output on stderr, its exit a plain number (a signal reads 128 + n)."""
     sys.stderr.flush()
     try:
-        child = subprocess.Popen(argv, cwd=cwd, stdin=DEVNULL, stdout=sys.stderr, stderr=sys.stderr)
+        child = subprocess.Popen(argv, cwd=cwd, stdin=DEVNULL, stdout=sys.stderr, stderr=sys.stderr,
+                                 env=env)
     except FileNotFoundError:
         return 127
     except PermissionError:
@@ -524,11 +533,11 @@ def require_merge_text(message, branch):
 
 
 def scan_message(repo, tree, full, ours, merged, message):
-    """The merge's message through the worktree's hygiene, when its --help names --commits: the
+    """The merge's message through the worktree's range scan (lh1 R2), when it has one: the
     merge commit made as a dangling object, scanned as the range <sha>..<that commit>. It writes
     one object and no ref, and touches neither main's index nor its files."""
-    script = os.path.join(tree, "scripts", "hygiene")
-    if not os.path.lexists(script) or not takes_commits(tree, script):
+    scan = range_scan(tree)
+    if scan is None:
         return
     # Its stderr goes to the log: an unset identity or a NUL in the file reads its own reason.
     sys.stderr.flush()
@@ -540,11 +549,13 @@ def scan_message(repo, tree, full, ours, merged, message):
         raise Red("merge-file", note="git commit-tree exit %d: no merge commit to scan; its "
                   "reason is above" % code)
     span = "%s..%s" % (full, commit)
-    note("merge-file: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
-    code = run(tree, script, "--require-private", "--commits", span)
+    shown, argv, env = scan(span)
+    note("merge-file: %s in %s" % (shown, tree))
+    code = run(tree, *argv, env=env)
     if code != 0:
-        raise Red("merge-file", code, "scripts/hygiene exit %d on the merge message; see its "
-                  "stderr above (%s)" % (code, message))
+        raise Red("merge-file", code, "%s exit %d on the merge message; see its stderr above "
+                  "(%s)" % (argv[0] == "make" and "make hygiene-range" or "scripts/hygiene",
+                            code, message))
 
 
 def require_sha(repo, branch, sha):
@@ -660,16 +671,67 @@ def takes_commits(tree, script):
     return p.returncode == 0 and "--commits" in p.stdout
 
 
+# The scans' roads (packet lh1-land-hygiene): the repo's own Makefile targets where it has them,
+# else the bare scripts/hygiene as before.
+
+MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")
+
+
+def has_target(tree, name):
+    """R1: the tree's Makefile holds a line that opens `<name>:`; read, no recipe run."""
+    try:
+        with open(os.path.join(tree, "Makefile"), encoding="utf-8", errors="replace") as fh:
+            return any(line.startswith(name + ":") for line in fh)
+    except OSError:
+        return False
+
+
+def make_env():
+    """The caller's environment without make's inherited variables, so the target's make reads
+    the tree's Makefile alone, as the check's own make does in a job."""
+    return {k: v for k, v in os.environ.items() if k not in MAKE_VARS}
+
+
+def tree_scan(tree):
+    """R1: the tree's scan, (shown, argv, env): `make hygiene` where the Makefile has the
+    target, else the bare scripts/hygiene where it is there; None when neither is."""
+    if has_target(tree, "hygiene"):
+        return "make hygiene", ("make", "hygiene"), make_env()
+    script = os.path.join(tree, "scripts", "hygiene")
+    if os.path.lexists(script):
+        return "scripts/hygiene", (script,), None
+    return None
+
+
+def range_scan(tree):
+    """R2: a range's road, a function of the span giving (shown, argv, env): `make
+    hygiene-range RANGE=<span>` where the Makefile has the target, else the bare script with
+    --require-private --commits when its --help names the flag (--require-private: an
+    unreadable private list would otherwise read clean); None when neither is. The --help is
+    read here, once, where the pin read it."""
+    if has_target(tree, "hygiene-range"):
+        return lambda span: ("make hygiene-range RANGE=" + span,
+                             ("make", "hygiene-range", "RANGE=" + span), make_env())
+    script = os.path.join(tree, "scripts", "hygiene")
+    if os.path.lexists(script) and takes_commits(tree, script):
+        return lambda span: ("scripts/hygiene --require-private --commits " + span,
+                             (script, "--require-private", "--commits", span), None)
+    return None
+
+
+def unscanned(tree, span):
+    """The note for a tree scanned with no road for its range."""
+    if os.path.lexists(os.path.join(tree, "scripts", "hygiene")):
+        return "hygiene: scripts/hygiene has no --commits; %s not scanned" % span
+    return "hygiene: no hygiene-range target and no scripts/hygiene; %s not scanned" % span
+
+
 # The ready step (packet land4): main merged into a reviewed branch where every conflict is a
 # line a landing derives, then the stamp, each as one commit closing with the trailer.
 
 def stamps(tree):
     """R1: the worktree's Makefile holds a line that opens `stamp:`."""
-    try:
-        with open(os.path.join(tree, "Makefile"), encoding="utf-8", errors="replace") as fh:
-            return any(line.startswith("stamp:") for line in fh)
-    except OSError:
-        return False
+    return has_target(tree, "stamp")
 
 
 def git_bytes(cwd, *args):
@@ -1320,22 +1382,24 @@ def land(repo, branch, sha, message, log=None, dry=False):
     if code != 0:
         raise Red("check", code, unrun=refused(log, begin) if begin is not None else "")
     at("hygiene")
-    script = os.path.join(tree, "scripts", "hygiene")
-    if os.path.lexists(script):
-        note("hygiene: scripts/hygiene in " + tree)
-        code = run(tree, script)
+    span = "%s..%s" % (MAIN, full)
+    scan = tree_scan(tree)
+    if scan is not None:
+        shown, argv, env = scan
+        note("hygiene: %s in %s" % (shown, tree))
+        code = run(tree, *argv, env=env)
         if code != 0:
             raise Red("hygiene", code)
-        span = "%s..%s" % (MAIN, full)
-        if takes_commits(tree, script):
-            # --require-private: an unreadable private list would otherwise read clean.
-            note("hygiene: scripts/hygiene --require-private --commits %s in %s" % (span, tree))
-            code = run(tree, script, "--require-private", "--commits", span)
-            if code != 0:
-                raise Red("hygiene", code)
-        else:
-            UNSCANNED = "range not scanned"
-            note("hygiene: scripts/hygiene has no --commits; %s not scanned" % span)
+    road = range_scan(tree)
+    if road is not None:
+        shown, argv, env = road(span)
+        note("hygiene: %s in %s" % (shown, tree))
+        code = run(tree, *argv, env=env)
+        if code != 0:
+            raise Red("hygiene", code)
+    elif scan is not None:
+        UNSCANNED = "range not scanned"
+        note(unscanned(tree, span))
 
     at("sha")
     require_sha(repo, branch, sha)

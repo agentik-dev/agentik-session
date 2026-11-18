@@ -29,7 +29,7 @@ At the pin the merge message's scan runs twice, before the check and again befor
 
 ## 3. Interfaces and acceptance
 
-- `land.has_target(tree, name) -> bool`: the tree's Makefile holds a line that opens `<name>:`, the rule `stamps` already reads `stamp:` by (now `has_target(tree, "stamp")`); no recipe runs. `land.tree_scan(tree)` and `land.range_scan(tree, span)` give `(shown, argv, env)` or None: `make hygiene` or `make hygiene-range RANGE=<span>`, run with make's inherited variables (`MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`, `MAKELEVEL`) left out, else the bare script's argv. `land.run` gains `env=None`. A `make` road's code on the red line is make's own (2 for a recipe that failed), as the check step's is.
+- `land.has_target(tree, name) -> bool`: the tree's Makefile holds a line that opens `<name>:`, the rule `stamps` already reads `stamp:` by (now `has_target(tree, "stamp")`); no recipe runs. `land.tree_scan(tree)` gives `(shown, argv, env)` or None, and `land.range_scan(tree)` a function of the span giving the same, or None, its `--help` probe read once where the pin read it: `make hygiene` or `make hygiene-range RANGE=<span>`, run with make's inherited variables (`MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`, `MAKELEVEL`) left out, else the bare script's argv. `land.run` gains `env=None`. A `make` road's code on the red line is make's own (2 for a recipe that failed), as the check step's is.
 - The step's note names what ran: `land-step: hygiene: make hygiene in <tree>`, `... make hygiene-range RANGE=<span> in <tree>`, `land-step: merge-file: make hygiene-range RANGE=<span> in <tree>`, and publish's `publish-step: hygiene: ...` alike. The bare roads' notes are the pin's.
 
 | # | line | at the pin |
@@ -43,7 +43,7 @@ At the pin the merge message's scan runs twice, before the check and again befor
 
 No test runs a landing or a publish outside a temp repo with a temp remote, and none pushes anywhere real.
 
-The tests whose assertion of a printed line changed: none so far (this list is brought current with the change).
+The tests whose assertion of a printed line changed: none. The pin's 381 land and publish tests (`tests/test_land*.py`) pass unchanged, since every bare road's notes, probes and lines are the pin's.
 
 ## 4. Findings that name this row
 
