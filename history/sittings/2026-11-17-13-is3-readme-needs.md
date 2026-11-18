@@ -11,8 +11,8 @@
 | agents | 0 |
 
 ## Done-ness
-- [ ] the packet, the baseline at the pin
-- [ ] R1 to R4: the retry in `scripts/readme-render`, the wall in its header and the Makefile; `tests/test_is3_readme_retry.py`
+- [x] the packet, the baseline at the pin (6 of the 11 retry cases red, 5 held)
+- [x] R1 to R4: the retry in `scripts/readme-render`, the wall 2900 s in its header and the Makefile; 11 cases appended to `tests/test_readme.py`, green under both venvs
 - [ ] R6: NICE rows for `claude_session/lines.py`
 - [ ] R5: the needs line in the source, paid by a trim
 - [ ] `make stamp` through the gate
@@ -21,9 +21,14 @@
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
+- Choice: the retry's cases sit in `tests/test_readme.py`, whose allow row covers the renderer's names; a new test file would need a `sibling` row.
+- Choice: a refusal is the verifier's exit 1 alone; any other exit is exit 2 at once, as at the pin.
+- Choice: the note's bound is bytes (`head -c`), so a cut may split a multibyte character; the renderer reads it into a prompt.
+- Choice: the retry renders into the same temp output, emptied first; one round (`RETRY_ROUNDS=1`), as R3 asks.
+- decide, owner: the coordinator; consumer: the landing's range scan. Commit `8c4d1fe` holds the packet's first text, which names the renderer's plugin five times (`sibling`); the tree's text names it no more. A row `design/packets/is3-readme-needs.md: sibling`, as `s11-readme-r7.md` has, clears the range scan.
 
 ## Next act
-The packet.
+R6: the NICE rows.
 
 ## Exit
 Open.
