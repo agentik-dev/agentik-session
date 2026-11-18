@@ -126,6 +126,8 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n265 | S4 | `claude_session/deliver.py`, `cli.py` | `gate land --install` in a main checkout where the landing let an unstaged edit or an untracked file outside `.claude/` stand is `red tree`, so that landing cannot install in one call | land5b review 2 | 2026-11-14, land5b review 2 |
 | n266 | S4 | `design/packets/land5b-install.md` | The packet states R5 and R7 in its §2 as first cut, where its §7 amends them | land5b review 2 | 2026-11-14, land5b review 2 |
 | n267 | S4 | `claude_session/hooks.py` | `status --all`'s `zone` is `state`'s, today's policy on the meter's percents, where `status --json` prints the `zone` meter.json stored when written; after a policy change the two reads can name two zones for one sitting | su4 build 1, by reading: `hooks.state` against `meter.save` | 2026-11-14, su4 build 1 |
+| n268 | S4 | `claude_session/hooks.py` | `sittings` opens every session folder's `activity.json` on each call, and nothing prunes the folders (1,865 at su4's cut); a stat of its mtime first, or a pruned root, keeps the read flat | 2,000 folders: under 1 s (su4 line 4) | 2026-11-14, su4 build 1 |
+| n269 | S4 | `claude_session/unattended.py` | `unattended status --json`'s `pid` is read from the ledger alone, so a run that died leaves a pid another process may reuse; rw5's pid file, or the suite's `ps` read, holds it | su4 R2, by design | 2026-11-14, su4 build 1 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 

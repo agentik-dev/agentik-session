@@ -17,7 +17,7 @@
 - [x] R5: the needs line in the source (c738c82's wording), paid by the family sentence's trim: 16,373 to 16,369 bytes; a test on both docs, the README's red until the render
 - [x] `make stamp` (job `20261117-194732-2607`, exit 2): red sidecar, the source changed; the render goes first
 - [x] `make readme` (job `20261117-194740-2608`, exit 0, 12 min): two renders, the retry fired; render 1 (316 s) refused, 13 code spans and a number lost; render 2 (407 s, one round) passed
-- [ ] `make stamp` through the gate
+- [x] `make stamp` (job `20261117-200104-2612`, exit 0): alpha.139 kept, 5078 tests, n268 and n269 moved to the overflow; nothing under `plugin/` changes on this branch, so the version needs no move
 - [ ] `make check` through the gate, green
 
 ## Handover
@@ -29,7 +29,7 @@
 - decide, owner: the coordinator; consumer: the landing's range scan. Commit `8c4d1fe` holds the packet's first text, which names the renderer's plugin five times (`sibling`); the tree's text names it no more. A row `design/packets/is3-readme-needs.md: sibling`, as `s11-readme-r7.md` has, clears the range scan.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+`make check`, through the gate.
 
 ## Exit
 Open.
