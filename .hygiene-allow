@@ -152,6 +152,8 @@ design/packets/rp7-guard.md: sibling
 design/packets/land4-ready.md: sibling
 # akt-run: the packet names the suite's public respeak tool, two lines since its first commit (7a61cd6): the owner's R4a quote and R4a (the coordinator's ruling).
 design/packets/akt-run.md: sibling
+# su3: the packet names this repo's own ledger file in its wall row, one line since its first commit (742aaa1).
+design/packets/su3-start-check.md: sibling
 # sl1: this tool's own ledger says which public tool's verb reads an entry, one line since aa9cccb.
 DECISIONS.md: sibling
 # sl1: the packet names the ledger file and the public ledger tool's verbs that write it, since its first commit (49fb15c).

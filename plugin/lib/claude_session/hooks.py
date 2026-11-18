@@ -18,12 +18,16 @@ Hook output contract (from the CLI's own documentation):
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import math
 import os
 import re
+import selectors
+import signal
 import stat
+import subprocess
 import sys
 import time
 from dataclasses import replace
@@ -991,7 +995,178 @@ def _follow_said(out: dict, env) -> dict:
     return out
 
 
+# Packet su3 (entry 12): a declared watcher that is not running, said once at session start.
+# The launcher at its fixed place, never the door or PATH (R1); one line of its stdout on exit
+# 1, else silence (R2, R3). The share is cut at its first line's end so that an output holding
+# it alone fits MAX_OUT, as UserPromptSubmit's inbox block alone does; the plugin's own words
+# are not capped at SessionStart, as at the pin.
+WATCH_WALL = 2.0
+WATCH_ARGS = ("status", "--check")
+WATCH_MORE = " and {n} more: agentik status"
+_WATCH_READ = 65536                     # stdout kept; the rest is drained, never held
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # C0, DEL and C1, as chain._CONTROL
+_BLANKS = bytes(b for b in [*range(0x21), 0x7f] if b != 0x0a)   # bytes that make no text
+
+
+def _watch_stop(p) -> None:
+    """The wall cut: the child's process group killed, the child reaped (R2)."""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        try:
+            p.kill()
+        except OSError:
+            pass
+    p.wait()
+
+
+class _Beyond:
+    """The lines of the stdout past the keep, counted as it is read and never held. A line
+    counts when it holds a byte that is no ASCII blank or control (the decoded test is made on
+    the kept part alone, which is exact there)."""
+
+    def __init__(self) -> None:
+        self.head = self.seen = self.cur = False    # the first fragment, a newline seen, open line
+        self.done = 0                               # whole lines after the first newline
+
+    def feed(self, chunk: bytes) -> None:
+        parts = chunk.translate(None, _BLANKS).split(b"\n")
+        self.cur = self.cur or bool(parts[0])
+        if len(parts) > 1:
+            if self.seen:
+                self.done += self.cur
+            else:
+                self.head, self.seen = self.cur, True
+            mid = parts[1:-1]
+            self.done += len(mid) - mid.count(b"")
+            self.cur = bool(parts[-1])
+
+    def lines_after(self, tail: bytes) -> int:
+        """Lines from `tail`, the kept bytes after their last newline, to the stream's end."""
+        first = (self.head if self.seen else self.cur) or bool(tail.translate(None, _BLANKS))
+        return int(first) + ((self.done + self.cur) if self.seen else 0)
+
+
+def _watch_run(exe: str, env):
+    """The launcher's stdout when it exits 1 within WATCH_WALL, else None: a pair, the first
+    _WATCH_READ bytes at most and, when the stream was longer, a _Beyond holding its rest (else
+    None). No shell, its stdin empty, its stderr dropped, in a group of its own so a cut takes
+    its children too."""
+    try:
+        p = subprocess.Popen([exe, *WATCH_ARGS], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             close_fds=True, start_new_session=True, env=dict(env))
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return None
+    end, buf, rest = time.monotonic() + WATCH_WALL, bytearray(), None
+    try:
+        fd = p.stdout.fileno()
+        with selectors.DefaultSelector() as sel:
+            sel.register(fd, selectors.EVENT_READ)
+            while True:
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError
+                if not sel.select(left):
+                    continue
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                room = max(0, _WATCH_READ - len(buf))
+                buf += chunk[:room]
+                if len(chunk) > room:
+                    rest = rest or _Beyond()
+                    rest.feed(chunk[room:])
+        code = p.wait(timeout=max(end - time.monotonic(), 0.001))
+    except Exception:                                   # noqa: BLE001 - a cut is silence
+        _watch_stop(p)
+        return None
+    finally:
+        p.stdout.close()
+    return (bytes(buf), rest) if code == 1 else None
+
+
+def _watch_cut(first: str, tail: str) -> str:
+    """The share, its first line cut at its end until an output holding it alone fits."""
+    room = MAX_OUT - len(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "SessionStart", "additionalContext": tail}}))
+    kept = 0
+    for i, ch in enumerate(first):
+        kept += len(json.dumps(ch)) - 2
+        if kept > room:
+            return first[:i] + tail
+    return first + tail
+
+
+def _watch_lines(text: str) -> list[str]:
+    """The non-blank lines of `text`, a control character taken out and the ends stripped."""
+    return [ln for ln in (_CONTROL.sub("", raw).strip() for raw in text.split("\n")) if ln]
+
+
+def watcher_share(payload: dict, env) -> str | None:
+    """R1 to R3, R6: the one line, or None for a helper's start, a HOME that is unset or not
+    absolute, and every outcome but exit 1 with text. Never raises."""
+    try:
+        if env.get("CLAUDE_SESSION_HELPER") == "1" or payload.get("agent_id"):
+            return None
+        home = env.get("HOME")
+        if not isinstance(home, str) or not os.path.isabs(home):
+            return None
+        got = _watch_run(os.path.join(home, ".local", "bin", "agentik-suite"), env)
+        if not got or not got[0]:
+            return None
+        kept, rest = got
+        tail = b""
+        if rest is not None:            # longer than the keep: cut at the last newline (C1)
+            cut = kept.rfind(b"\n") + 1
+            kept, tail = kept[:cut], kept[cut:]
+        lines = _watch_lines(kept.decode("utf-8"))
+        more = len(lines) - 1
+        if rest is not None:
+            after = rest.lines_after(tail)
+            if not lines:               # the first line alone fills the keep: cut where it fits
+                lines = _watch_lines(codecs.getincrementaldecoder("utf-8")().decode(tail))
+                after -= 1
+                more = 0
+                after = max(after, 0)
+            more += after
+        if not lines:
+            return None
+        return _watch_cut(lines[0], WATCH_MORE.format(n=more) if more > 0 else "")
+    except Exception:                                   # noqa: BLE001 - never a failed hook
+        return None
+
+
+def _with_watcher(out: dict, share: str) -> dict:
+    """R4: the share on the owner's screen before the hook's own message, and first in the
+    session's context, before the start line."""
+    out = dict(out)
+    said = out.get("systemMessage")
+    out["systemMessage"] = share + (f"\n{said}" if said else "")
+    hso = dict(out.get("hookSpecificOutput") or {})
+    ctx = hso.get("additionalContext") or ""
+    hso["hookEventName"] = "SessionStart"
+    hso["additionalContext"] = share + (f"\n\n{ctx}" if ctx else "")
+    out["hookSpecificOutput"] = hso
+    return out
+
+
 def session_start(payload: dict, env=None) -> dict:
+    """SessionStart: the watcher's line (packet su3; R5: first of the additions, since no
+    guards' write is built), then the start itself, `_start`. With no line the output is the
+    pin's, an exception included; with one, a start that raises reads as `{}`."""
+    env = os.environ if env is None else env
+    share = watcher_share(payload, env)
+    if share is None:
+        return _start(payload, env)
+    try:
+        out = _start(payload, env)
+    except Exception:                                   # noqa: BLE001 - R4: still said
+        out = {}
+    return _with_watcher(out, share)
+
+
+def _start(payload: dict, env=None) -> dict:
     """Resolve every layer for this session and write resolved.json (§2.3).
 
     Every `session_start_reason` lands here. On any failure: nothing written,
