@@ -698,18 +698,25 @@ def _show_resolved() -> int:
     return 0
 
 
+# Packet st1 R6: the list's mark on the profile a session runs when no launch, local or repo
+# layer names one: the user file's `defaults.profile`, else `starter`.
+FALLBACK_MARK = " (the default)"
+
+
 def cmd_profile(args) -> int:
     try:
         defaults, profiles = resolver.load_profiles(os.environ)
     except resolver.ResolveError as e:
         _die(str(e), 2)
     if not args.name:
+        fallback = resolver.user_profile(os.environ) or resolver.DEFAULT_PROFILE
         for name, body in profiles.items():
             eff = {**defaults, **(body or {})}
             build = tiers.merge(defaults.get("tiers") or {}, (body or {}).get("tiers"))
             print(f"{name:<17} {str(eff.get('model')):<14} {str(eff.get('effort')):<7} "
                   f"build={str((build.get('build') or {}).get('model')):<14} "
-                  f"{str(eff.get('posture')):<7} {eff.get('description') or ''}")
+                  f"{str(eff.get('posture')):<7} {eff.get('description') or ''}"
+                  f"{FALLBACK_MARK if name == fallback else ''}")
         return 0
     if args.name not in profiles:
         _die(f"unknown profile {args.name!r}. Known: {resolver.known(profiles, os.environ)}")

@@ -6,6 +6,8 @@
 # windows and wins over the role (models.py, resolver.py).
 # `defaults` carries every field; a profile names only what it changes, except
 # frontier, which states every field so the whole shape is readable in one place.
+# `starter` runs when nothing names a profile (resolver.DEFAULT_PROFILE); frontier is
+# resolver.FULL_PROFILE, the base `agentik session settings` reads a default from.
 # `tiers` (packet mt1, hq design/13 §3) maps the five roles to {model, effort}: the
 # shipped table is in `defaults`; a profile names only the roles it changes, and the five
 # whose body said `subagents: opus` state `build` (mt1 R2-F2), so a start that names them
@@ -185,3 +187,12 @@ profiles:
     charter: {required: true}
     ceilings: {context: 180000, turns: 400}
     ceilings_1m: {context: 400000, turns: 400}
+  # What runs when nothing names a profile (packet st1-starter, entry 10): the shipped
+  # defaults with the meter on, and the three fields that would ask more of a session off.
+  # A person takes up the sitting discipline by naming `frontier` under `defaults.profile`
+  # in the user file.
+  starter:
+    description: The meter on, and nothing more asked of the session.
+    charter: {required: false}
+    priority: {enabled: false}
+    pacing: {enabled: false}

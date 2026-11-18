@@ -1206,7 +1206,8 @@ def _start(payload: dict, env=None) -> dict:
     # Packet b1 R3: no ceiling, window or turn cap reaches the model; the band above the
     # prompt, which only the owner sees, keeps every figure.
     line = (f"agentik-session: profile '{_token(s['profile'])}'"
-            f"{'' if launched(env) else NOT_LAUNCHED}; {START_METER}; "
+            f"{'' if launched(env) else NOT_LAUNCHED}; "
+            f"{START_METER if asks_charter(s) else START_METER_PLAIN}; "
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
@@ -1261,12 +1262,21 @@ def _first_meter(sdir: Path, tp, env) -> None:
 
 START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
                "when it is time to bring the charter current and hand off")
+# Packet st1-starter R5: a session whose profile asks no charter (`charter.required` not true,
+# as `starter`'s) is told the meter with no word of a charter.
+START_METER_PLAIN = ("the meter shows this session's percent on its schedule and prints "
+                     "CHECKPOINT when it is time to commit and stop")
+
+
+def asks_charter(session) -> bool:
+    """Does the resolved `session` section ask for a charter (`charter.required` is true)?"""
+    c = session.get("charter") if isinstance(session, dict) else None
+    return isinstance(c, dict) and c.get("required") is True
 
 
 def _charter_reminder(session: dict, cwd) -> str:
     """When `charter.required` and no `<dir>/<today>-*.md` exists under cwd."""
-    c = session.get("charter")
-    if not isinstance(c, dict) or c.get("required") is not True:
+    if not asks_charter(session):
         return ""
     d = _charter({"session": session})
     if not d.startswith("?") and any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
@@ -1341,6 +1351,8 @@ CHARTER_REC = "charter.json"
 NO_CHARTER = "<this sitting's charter>"
 # Packet b1 R5: the owner tells an intentional wind-down from an early stop by this.
 WIND_DOWN = "; tell the owner you are winding down at the meter's line, at {pct}%"
+# Packet st1-starter R5: the checkpoint's tail where the profile asks no charter, on either road.
+PLAIN_TAIL = "commit what is done, then stop"
 RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
                 "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
                 "the launcher restarts this sitting")
@@ -1368,14 +1380,18 @@ def _charter_file(cwd, sdir: Path, d: str) -> list[str]:
     return [f for f in out if _SAFE_PATH.match(f)] + [NO_CHARTER]
 
 
-def _checkpoint_out(m: meter.Meter, charter: str, files: list[str] | None = None) -> dict:
+def _checkpoint_out(m: meter.Meter, charter: str | None,
+                    files: list[str] | None = None) -> dict:
     """The pin's line off a launcher (`files` None); under one (S33), a line per spelling
-    of the charter file in `files`, the first that fits MAX_OUT."""
+    of the charter file in `files`, the first that fits MAX_OUT. `charter` None (a profile
+    that asks none, packet st1 R5): PLAIN_TAIL alone, on either road."""
     c = m.ceilings
     head = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
-            f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); charter ")
-    tails = ([f"{f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None else
-             [f"{path}; bring the charter current, commit, then exit" for path in (charter, "?")])
+            f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); ")
+    tails = ([PLAIN_TAIL] if charter is None else
+             [f"charter {f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None
+             else [f"charter {path}; bring the charter current, commit, then exit"
+                   for path in (charter, "?")])
     for tail in tails:
         line = head + tail + WIND_DOWN.format(pct=m.used_pct)
         if m.used_pct >= 100.0:
@@ -1466,6 +1482,8 @@ def _post_tool_use(payload: dict, env) -> dict:
         _meter_stamp(sdir, now, True)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                        "additionalContext": _meter_words(m.as_dict())}}
+    if not asks_charter(resolved.get("session")):              # st1 R5
+        return _checkpoint_out(m, None)
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
     return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None)

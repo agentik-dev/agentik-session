@@ -13,7 +13,7 @@ Layers, lowest first (D7):
 The invocation flag sits above all of them and belongs to whoever reads the
 file. The profile *name* is taken from the highest layer that names one
 (launch, then local, then repo, then the user file's `defaults.profile`: packet mt1 R3),
-else `frontier`; its values form the base, and a named launch profile re-applies its own
+else `starter` (DEFAULT_PROFILE, entry 10); its values form the base, and a named launch profile re-applies its own
 fields above the repo files.
 
 `tiers` (packet mt1) is layered apart, role by role, lowest first (mt1 round 1, F1 F2):
@@ -93,7 +93,11 @@ SHIPPED = Path(__file__).with_name("profiles.yaml")
 REPO_DIR = Path(".claude") / "agentik"
 # agentik-r1 §6.3 c4, c5: the repo's and the user's folders before the rename.
 OLD_REPO_DIR = Path(".claude") / "claude-code-session"
-DEFAULT_PROFILE = "frontier"
+# Packet st1-starter R3: the name used when nothing names one (entry 10), and the profile
+# that states every field (profiles.yaml's header), which `describe config` reads a
+# setting's default from (packet ak5 R5).
+DEFAULT_PROFILE = "starter"
+FULL_PROFILE = "frontier"
 
 # The overlay keeps its pre-profile knob names; these are the ones that differ.
 OVERLAY_RENAMES = {"subagent_model": "subagents"}

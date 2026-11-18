@@ -230,7 +230,7 @@ class _Files:
         self.sp = _dict(_dict(sh.get("profiles")).get(self.name))
         self.ud = _dict(us.get("defaults"))
         self.up = _dict(_dict(us.get("profiles")).get(self.name))
-        frontier = _dict(_dict(sh.get("profiles")).get(resolver.DEFAULT_PROFILE))
+        frontier = _dict(_dict(sh.get("profiles")).get(resolver.FULL_PROFILE))   # st1 R3
         self.default = resolver._merge(self.sd, frontier)
         self.frontier = frontier
         self.session = r.sections["session"]
