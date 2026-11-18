@@ -63,8 +63,7 @@ def _shipped_names():
 
 @pytest.mark.parametrize("name", ["frontier", "balanced"])
 def test_a_plain_session_is_told_its_model_and_effort_were_not_set(box, name):
-    if name != "frontier":
-        repo_file(box[1], f"session: {{profile: {name}}}\n")
+    repo_file(box[1], f"session: {{profile: {name}}}\n")   # st1: frontier is named, as balanced
     rc, ctx, _ = _start(box)
     assert rc == 0 and ctx.startswith(f"agentik-session: profile '{name}'{R1}; "), ctx
     assert len(R1.split()) <= 20 and "opus" not in R1 and "sonnet" not in R1
@@ -81,7 +80,8 @@ def test_a_chain_session_counts_as_launched(box):
     """`agentik session run` with no CLAUDE_SESSION_PROFILE passes the default profile's model
     and effort to claude itself and marks the child with the chain's name alone."""
     rc, ctx, _ = _start(box, CLAUDE_SESSION_CHAIN="cwd-none")
-    assert rc == 0 and ctx.startswith("agentik-session: profile 'frontier'; the meter "), ctx
+    # st1: the default profile is starter
+    assert rc == 0 and ctx.startswith("agentik-session: profile 'starter'; the meter "), ctx
 
 
 def test_a_helper_counts_as_launched(box):
@@ -97,10 +97,13 @@ def test_status_says_once_whether_the_launcher_started_the_session(box, launched
     assert _start(box, **extra)[0] == 0
     rc, out, err = _run(box, "status", **extra)
     first = out.splitlines()[0]
-    assert rc == 0 and "role:frontier" in first, (out, err)
+    # st1: the fallback is starter, whose ceilings are the shipped defaults: its line's limits
+    # source reads `defaults`, with no `role:<name>`, so the note ends the line
+    src = "role:frontier" if launched else "defaults window:"
+    assert rc == 0 and src in first, (out, err)
     assert out.count(R2) == (0 if launched else 1), out
     if not launched:
-        assert f"role:frontier{R2}" in first and len(R2.split()) <= 8
+        assert first.endswith(R2) and len(R2.split()) <= 8
     rc, out, err = _run(box, "status", "--json", **extra)
     d = json.loads(out)
     assert rc == 0 and d["launched"] is launched, out
