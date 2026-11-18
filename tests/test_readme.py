@@ -112,6 +112,14 @@ def test_readme_names_no_other_session_variable():
     assert "CLAUDE_SESSION_ID" not in README.read_text()
 
 
+@pytest.mark.parametrize("doc", [README, SOURCE], ids=["readme", "source"])
+def test_the_needs_line_names_the_workflow_refusal(doc):
+    # is3 R5: the line that names the Python the plugin needs (its `3.9`, kept byte-identical
+    # by the verifier) says that the plugin refuses Claude Code's Workflow tool.
+    needs = [l for l in doc.read_text().splitlines() if "Python 3.9" in l]
+    assert len(needs) == 1 and "workflow" in needs[0].lower() and "refuse" in needs[0], needs
+
+
 def test_source_under_ceiling():
     assert 0 < SOURCE.stat().st_size < SOURCE_CEILING
 
