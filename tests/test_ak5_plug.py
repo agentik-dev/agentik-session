@@ -159,7 +159,7 @@ def test_config_empty_home(box):
         assert set(s["change"]) == {"kind", "command", "path", "block", "note"}
         if s["key"] in STARTER_OFF:     # st1: the empty home runs starter, where these are off
             assert not s["value"] and s["default"], s["key"]
-        elif s["key"] == "charter.blocks_compaction":   # st1 D3: starter's alone, absent is true
+        elif s["key"] == "charter.discipline":   # st1 fix C1: starter's alone, absent is true
             assert s["value"] is False and s["default"] is None
         else:
             assert s["value"] == s["default"], s["key"]

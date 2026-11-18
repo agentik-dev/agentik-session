@@ -104,8 +104,8 @@ PLAIN_EXIT = "EXIT: the context is full; start a fresh session"
 
 # The respawn's files under `sessions/<sid>/` (respawn-r1 §3.2, §3.3): the verb writes the
 # marker; the hooks write the main thread's stamps, a helper's stamp and the confirmation.
-CHAIN_VAR = "CLAUDE_SESSION_CHAIN"
-CHAIN_RE = re.compile(r"^(?!\.+\Z)[A-Za-z0-9._-]{1,64}\Z")    # a file name: never . or ..
+CHAIN_VAR = resolver.CHAIN_VAR                  # one spelling, which the resolver reads too
+CHAIN_RE = resolver.CHAIN_RE                    # a file name: never . or ..
 MARKER = "respawn.json"
 CONFIRMED = "respawn-main.json"
 ACTIVITY = "activity.json"
@@ -750,13 +750,15 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         return _warned({}, warn)     # signalling happens on the prompt, not here
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
         return _warned({}, warn)
+    plain = (None if discipline(_session_section(payload.get("session_id"), env))
+             else _plain_budget(zone, used_pct(payload.get("session_id"), env)))   # st1 C2
 
     if cfg.posture == "deny" and zone in (RESERVE, EXHAUSTED):
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": _wrap_up(zone),
+                "permissionDecisionReason": plain or _wrap_up(zone),
             },
             "systemMessage": (
                 f"agentik-session [{cfg.name}]: blocked a {tool} spawn: "
@@ -768,6 +770,8 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
             "permissionDecisionReason": (
+                f"{plain} Spawning {tool} now may not leave enough budget to finish "
+                "cleanly. Consider a smaller fan-out." if plain else
                 _budget_line(zone) + f" Spawning {tool} now may not leave "
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
@@ -900,7 +904,11 @@ def user_prompt_submit(payload: dict) -> dict:
             bits.append(_meter_words(m))
             _meter_stamp(sdir, now, True)
 
-    if zone in (RESERVE, EXHAUSTED):
+    plain = not discipline(_session_section(sid))          # st1 C2: plain words, no cadence
+    if plain:
+        if zone not in (CLEAR, UNKNOWN):
+            bits.append(_plain_budget(zone, used_pct(sid)))
+    elif zone in (RESERVE, EXHAUSTED):
         bits.append(_wrap_up(zone))
     elif zone not in (CLEAR, UNKNOWN):
         bits.append(_budget_line(zone))
@@ -916,7 +924,7 @@ def user_prompt_submit(payload: dict) -> dict:
     if cache:
         bits.append(cache)
 
-    if cadence and count >= cadence:
+    if cadence and count >= cadence and not plain:
         bits.append(
             f"{count} prompts since the last checkpoint (cadence is {cadence} in "
             f"the '{zone}' zone). Commit or durably record what is done, then "
@@ -1209,7 +1217,7 @@ def _start(payload: dict, env=None) -> dict:
     # prompt, which only the owner sees, keeps every figure.
     line = (f"agentik-session: profile '{_token(s['profile'])}'"
             f"{'' if launched(env) else NOT_LAUNCHED}; "
-            f"{START_METER if asks_charter(s) else START_METER_PLAIN}; "
+            f"{START_METER if discipline(s) else START_METER_PLAIN}; "
             f"resolved config at {path}")
     line += rules.clause(s, _lifetime(cwd, env, sid)[0],     # at most 320 bytes (S21, S30)
                          fill=_fill_part(sid, s, env))     # its fill part (FW1b R6)
@@ -1264,18 +1272,39 @@ def _first_meter(sdir: Path, tp, env) -> None:
 
 START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
                "when it is time to bring the charter current and hand off")
-# Packet st1-starter R5: a session whose profile waives the charter (`charter.required` false,
-# as `starter`'s) is told the meter with no word of a charter.
+# Packet st1-starter R5: a session under the waiver (`discipline`) is told the meter with no
+# word of the sitting discipline.
 START_METER_PLAIN = ("the meter shows this session's percent on its schedule and prints "
                      "CHECKPOINT when it is time to commit and stop")
 
 
-def asks_charter(session) -> bool:
-    """False where the resolved `session` section waives the charter (`charter.required` is
-    false); True otherwise, as every line read before st1, a section that names no
-    `required` included."""
+def discipline(session) -> bool:
+    """The fix of st1's review 1, C1, the one waiver: False where the resolved `session`
+    section's `charter.discipline` is false (the shipped `starter` alone sets it): plain
+    start, budget, checkpoint and last lines, and an automatic compaction passes. True
+    otherwise, a section that names none or none read included; `charter.required` alone
+    changes no line."""
     c = session.get("charter") if isinstance(session, dict) else None
-    return not (isinstance(c, dict) and c.get("required") is False)
+    return not (isinstance(c, dict) and c.get("discipline") is False)
+
+
+def _session_section(session_id, env=None) -> dict:
+    """The session's resolved `session` section; {} when none is read."""
+    sdir = _session_dir(session_id, os.environ if env is None else env)
+    s = _load_json(sdir / "resolved.json").get("session") if sdir else None
+    return s if isinstance(s, dict) else {}
+
+
+# C2: under the waiver every line about the budget says the percent and what to do.
+PLAIN_TODO = {WINDDOWN: "finish the work in hand and commit it; start nothing large",
+              RESERVE: "finish or park what is in flight and commit it",
+              EXHAUSTED: "commit what is done, then stop"}
+
+
+def _plain_budget(zone: str, pct) -> str:
+    todo = PLAIN_TODO.get(zone, "carry on, and commit each piece of work as it is done")
+    used = "" if pct is None else f"{max(0, int(math.floor(pct)))}% used, "
+    return f"Session budget: {used}'{zone}' zone; {todo}."
 
 
 def _charter_reminder(session: dict, cwd) -> str:
@@ -1356,7 +1385,7 @@ CHARTER_REC = "charter.json"
 NO_CHARTER = "<this sitting's charter>"
 # Packet b1 R5: the owner tells an intentional wind-down from an early stop by this.
 WIND_DOWN = "; tell the owner you are winding down at the meter's line, at {pct}%"
-# Packet st1-starter R5: the checkpoint's tail where the profile asks no charter, on either road.
+# Packet st1-starter R5: the checkpoint's tail under the waiver (`discipline`), on either road.
 PLAIN_TAIL = "commit what is done, then stop"
 RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
                 "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
@@ -1389,7 +1418,8 @@ def _checkpoint_out(m: meter.Meter, charter: str | None,
                     files: list[str] | None = None) -> dict:
     """The pin's line off a launcher (`files` None); under one (S33), a line per spelling
     of the charter file in `files`, the first that fits MAX_OUT. `charter` None (a profile
-    that asks none, packet st1 R5): PLAIN_TAIL alone, on either road."""
+    under the waiver, packet st1 R5 and C2): PLAIN_TAIL alone, on either road, with no
+    wind-down tail."""
     c = m.ceilings
     head = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
             f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); ")
@@ -1398,7 +1428,7 @@ def _checkpoint_out(m: meter.Meter, charter: str | None,
              else [f"charter {path}; bring the charter current, commit, then exit"
                    for path in (charter, "?")])
     for tail in tails:
-        line = head + tail + WIND_DOWN.format(pct=m.used_pct)
+        line = head + tail + ("" if charter is None else WIND_DOWN.format(pct=m.used_pct))
         if m.used_pct >= 100.0:
             line += "\n" + (PLAIN_EXIT if charter is None else EXIT_RULE)     # st1 D3
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
@@ -1487,7 +1517,7 @@ def _post_tool_use(payload: dict, env) -> dict:
         _meter_stamp(sdir, now, True)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                        "additionalContext": _meter_words(m.as_dict())}}
-    if not asks_charter(resolved.get("session")):              # st1 R5
+    if not discipline(resolved.get("session")):                # st1 R5, C1
         return _checkpoint_out(m, None)
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
@@ -1603,19 +1633,11 @@ COMPACT_BLOCKED = ("This setup restarts a sitting rather than compacting it: bri
                    "sitting's charter>`; a /compact you type yourself still runs.")
 
 
-def blocks_compaction(session) -> bool:
-    """Packet st1-starter D3: False where the resolved `session` section's
-    `charter.blocks_compaction` is false (as `starter`'s); True otherwise, a section that
-    names none, or none read, included."""
-    c = session.get("charter") if isinstance(session, dict) else None
-    return not (isinstance(c, dict) and c.get("blocks_compaction") is False)
-
-
 def pre_compact(payload: dict, env=None) -> dict:
     """Block an automatic compaction; an owner-typed `/compact` (trigger `manual`) and any
     trigger not known pass with an empty reply, which dispatch prints as nothing (QUIET_PASS).
     An automatic one passes too where the session's resolved file waives the block
-    (`blocks_compaction`, st1 D3); a file not read blocks, as before. It writes no state."""
+    (`discipline`, st1 D3 and C1); a file not read blocks, as before. It writes no state."""
     if payload.get("trigger") != "auto":
         return {}
     try:
@@ -1624,7 +1646,7 @@ def pre_compact(payload: dict, env=None) -> dict:
         session = _load_json(sdir / "resolved.json").get("session") if sdir else None
     except Exception:                                   # noqa: BLE001
         session = None
-    if not blocks_compaction(session):
+    if not discipline(session):
         return {}
     return {"decision": "block", "reason": COMPACT_BLOCKED}
 

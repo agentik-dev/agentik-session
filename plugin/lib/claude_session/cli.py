@@ -1446,8 +1446,9 @@ def run_args(cwd, env, claude_args) -> list:
     only: `run` starts claude itself, never the local lane's dispatcher)."""
     from . import chain
     try:
-        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
-                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,     # st1 C4: as its chain
+                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={},
+                             chain=True)
     except resolver.ResolveError as e:
         _die(f"{RUN}: {e}", 2)
     s = r.sections["session"]
@@ -1474,8 +1475,9 @@ def run_defaults(cwd, env, claude_args) -> tuple:
     valued option with none), which `run` refuses as mt1 R7 did)."""
     from . import chain
     try:
-        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,
-                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
+        r = resolver.resolve(cwd, chain._GUARD_SESSION, env,     # st1 C4: as its chain
+                             profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={},
+                             chain=True)
     except resolver.ResolveError as e:
         _die(f"{RUN}: {e}", 2)
     rn = r.sections["session"].get("run") or {}

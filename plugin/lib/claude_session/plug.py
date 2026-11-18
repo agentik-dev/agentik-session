@@ -58,8 +58,8 @@ SUMMARIES = {
     "tiers.*.effort": "The effort a subagent in this role runs at.",
     "charter.dir": "The folder, under the repo, that holds a sitting's charters.",
     "charter.required": "Whether a session is told when no charter is open today.",
-    "charter.blocks_compaction": "Whether an automatic compaction is blocked, so the sitting "
-                                 "restarts instead.",
+    "charter.discipline": "Whether the session keeps the sitting discipline; false gives "
+                          "plain lines.",
     "pacing.meter_line_minutes": "The minutes between the meter's lines while the zone is clear; "
                                  "0 prints one at every prompt.",
     "gate.wall": "The seconds a gate job may run before it is cut.",

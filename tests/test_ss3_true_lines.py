@@ -80,8 +80,7 @@ def test_a_chain_session_counts_as_launched(box):
     """`agentik session run` with no CLAUDE_SESSION_PROFILE passes the default profile's model
     and effort to claude itself and marks the child with the chain's name alone."""
     rc, ctx, _ = _start(box, CLAUDE_SESSION_CHAIN="cwd-none")
-    # st1: the default profile is starter
-    assert rc == 0 and ctx.startswith("agentik-session: profile 'starter'; the meter "), ctx
+    assert rc == 0 and ctx.startswith("agentik-session: profile 'frontier'; the meter "), ctx
 
 
 def test_a_helper_counts_as_launched(box):
