@@ -1557,7 +1557,9 @@ def cmd_line(args) -> int:
         if here is None:
             raise lines.Refused(f"line {verb}: {start} is in no checkout")
         if verb == "close":
-            print(lines.close(root, here, args.id, args.how, args.note))
+            back, why = lines.close(root, here, args.id, args.how, args.note)
+            print(back if back else f"line close: {args.id} closed as {args.how}; no line "
+                                    f"back: {why}")
             return 0
         got = lines.listing(root, here)
         if args.json:
