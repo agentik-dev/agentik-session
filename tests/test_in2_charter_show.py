@@ -246,6 +246,9 @@ def test_in2_6_check_and_close_warn(box, monkeypatch):
 def test_in2_7_open_writes_the_part(box, monkeypatch):
     pear = box / "repos" / "pear"
     monkeypatch.chdir(pear)
+    user = box / "home" / ".claude" / "agentik"        # st1: frontier, the fallback before st1
+    user.mkdir(parents=True, exist_ok=True)
+    (user / "profiles.yaml").write_text("defaults:\n  profile: frontier\n")
     rc, out, err = run("charter", "open", "a made-up goal", "--dir", "fresh")
     assert rc == 0, err
     p = Path(out.strip())

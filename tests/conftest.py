@@ -110,3 +110,17 @@ def temp_state_roots(tmp_path_factory, monkeypatch):
     from claude_session import harness
     monkeypatch.setattr(harness, "_ps", lambda pid: None, raising=False)
     return home
+
+
+FRONTIER_USER = "defaults:\n  profile: frontier\n"
+
+
+@pytest.fixture
+def frontier_home(temp_state_roots):
+    """Packet st1-starter: the temp HOME's user file names `frontier` under
+    `defaults.profile`, for a module whose cases assert what frontier, the fallback before
+    st1, says and resolves (its charter, priority and pacing) with nothing else naming one."""
+    d = temp_state_roots / ".claude" / "agentik"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "profiles.yaml").write_text(FRONTIER_USER)
+    return temp_state_roots

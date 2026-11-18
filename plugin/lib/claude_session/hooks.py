@@ -1262,21 +1262,24 @@ def _first_meter(sdir: Path, tp, env) -> None:
 
 START_METER = ("the meter shows this session's percent on its schedule and prints CHECKPOINT "
                "when it is time to bring the charter current and hand off")
-# Packet st1-starter R5: a session whose profile asks no charter (`charter.required` not true,
+# Packet st1-starter R5: a session whose profile waives the charter (`charter.required` false,
 # as `starter`'s) is told the meter with no word of a charter.
 START_METER_PLAIN = ("the meter shows this session's percent on its schedule and prints "
                      "CHECKPOINT when it is time to commit and stop")
 
 
 def asks_charter(session) -> bool:
-    """Does the resolved `session` section ask for a charter (`charter.required` is true)?"""
+    """False where the resolved `session` section waives the charter (`charter.required` is
+    false); True otherwise, as every line read before st1, a section that names no
+    `required` included."""
     c = session.get("charter") if isinstance(session, dict) else None
-    return isinstance(c, dict) and c.get("required") is True
+    return not (isinstance(c, dict) and c.get("required") is False)
 
 
 def _charter_reminder(session: dict, cwd) -> str:
     """When `charter.required` and no `<dir>/<today>-*.md` exists under cwd."""
-    if not asks_charter(session):
+    c = session.get("charter")
+    if not isinstance(c, dict) or c.get("required") is not True:
         return ""
     d = _charter({"session": session})
     if not d.startswith("?") and any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):

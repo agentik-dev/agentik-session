@@ -8,6 +8,9 @@ import pytest
 
 from claude_session import budget, cli, config, sessionconfig
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 SID = "cli-sess-0000-1111-2222"
 
 

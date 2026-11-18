@@ -12,6 +12,9 @@ import pytest
 
 from claude_session import charter, cli, config
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests" / "fixtures" / "charters"
 SECTION = {"ceilings": {"context": 180000, "turns": 400}, "window": 200000,

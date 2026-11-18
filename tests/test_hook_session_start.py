@@ -22,6 +22,12 @@ def payload():
 
 
 def env_for(tmp_path, **extra):
+    """st1-starter: the home's user file names frontier, the fallback before st1, whose
+    charter, priority and pacing these cases assert."""
+    user = tmp_path / "home" / ".claude" / "agentik"
+    user.mkdir(parents=True, exist_ok=True)
+    if not (user / "profiles.yaml").exists():
+        (user / "profiles.yaml").write_text("defaults:\n  profile: frontier\n")
     return {"HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(tmp_path / "state"), **extra}
 
 

@@ -21,6 +21,9 @@ import pytest
 
 from claude_session import cli, doctor, hooks, meter, resolver
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 ROOT = Path(__file__).resolve().parents[1]
 SID = "ss1-zero-sess-0000-1111"
 

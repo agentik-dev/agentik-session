@@ -11,6 +11,9 @@ import pytest
 
 from claude_session import charter, cli, resolver, rules
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 ROOT = Path(__file__).resolve().parents[1]
 SECTION = {"ceilings": {"context": 180000, "turns": 400}, "window": 200000,
            "checkpoint_at": 0.8, "charter": {"dir": "history/sittings"}}
@@ -169,7 +172,8 @@ def test_fw1a_s4_and_fill(tmp_path):
     assert rules.PRIORITY["levels"]["S4"] == S4 and len(S4) <= rules.TEXT_MAX
     assert rules.BUGS[2] == BUG_3 and rules.FILL == FILL
     env = {"HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(tmp_path / "state")}
-    assert resolver.resolve(tmp_path, "t", env).sections["session"]["priority"] == rules.PRIORITY
+    assert resolver.resolve(tmp_path, "t", env, profile="frontier").sections["session"]["priority"] \
+        == rules.PRIORITY                       # st1: frontier, the fallback before st1
     out = rules.render({})
     assert f"  S4 {S4}\n" in out and f"  - {BUG_3}\n  - {FILL}\n" in out
     assert "nothing ready" not in out and "none ready" not in out

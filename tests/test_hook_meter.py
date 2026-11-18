@@ -10,6 +10,9 @@ import pytest
 
 from claude_session import charter, config, hooks, ledger, meter, resolver
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests" / "fixtures" / "meter"
 SID = "meter-sess-1"
