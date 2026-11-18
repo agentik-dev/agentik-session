@@ -15,12 +15,12 @@
 - [x] P4: `make readme`, gate job 20261117-202532-2619 exit 0 (round 1, prose-only verifier PASS); `shasum -c` on the sidecar OK; `scripts/readme-top` 8 lines, in the form; the needs line says the Workflow tool is refused; the source 16,370 B
 - [x] P5 stamp: `make stamp`, gate job 20261117-203114-2620 exit 0: plugin 2.0.0-alpha.140, 5113 tests, n272, n280, n281 to the overflow
 - [x] P6: `make check` job 20261117-203135-2621 exit 2 at `test_in3_line.py::test_5_no_line_waiting_is_the_pins_output` alone (both venvs, 5112 passed): main's fixture holds frontier's SessionStart, its empty home's profile at in3's pin; the case's homes now name frontier in their user file (conftest's FRONTIER_USER), the fixture unchanged; 56 passed on both venvs
-- [ ] P5 check: `make check` through the gate on the fixed head
+- [x] P5 check: `make check`, gate job 20261117-203657-2622 exit 0 on `ca7b1a3` (5113 passed; floor 4949 passed, 143 skipped; readme fresh); hygiene over `main..HEAD` exit 0; this charter's line is the one commit after it
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-`make check` through the gate.
+The coordinator's review of phase 2; then the landing.
 
-Exit: open.
+Exit: every ruling P1 to P6 built; the gate's check green (job 20261117-203657-2622).
