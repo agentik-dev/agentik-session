@@ -35,7 +35,7 @@ def run(world, **kw):
 def test_defaults_alone(world):
     r = run(world)
     s = r.sections["session"]
-    assert s["profile"] == "frontier" and s["model"] == "opus"
+    assert s["profile"] == "starter" and s["model"] == "opus"   # st1: the fallback
     assert s["ceilings"] == {"context": 180000, "turns": 400}
     assert s["push"] == "never" and s["device"] == "never"
     assert r.sections["relay"]["enabled"] == "auto"
@@ -67,9 +67,11 @@ def test_every_named_profile_resolves(world):
 
 
 # (layers present, the effort that wins): each adjacent pair, lowest first.
+# st1: the user file names frontier, whose body it holds (starter is the fallback since st1).
+FRONTIER_LOW = "defaults:\n  profile: frontier\nprofiles:\n  frontier:\n    effort: low\n"
 PRECEDENCE = [
-    ({"user": "profiles:\n  frontier:\n    effort: low\n"}, "low"),
-    ({"user": "profiles:\n  frontier:\n    effort: low\n", "repo": "session: {effort: medium}\n"}, "medium"),
+    ({"user": FRONTIER_LOW}, "low"),
+    ({"user": FRONTIER_LOW, "repo": "session: {effort: medium}\n"}, "medium"),
     ({"repo": "session: {effort: medium}\n", "local": "session: {effort: max}\n"}, "max"),
 ]
 
@@ -135,7 +137,8 @@ def test_c6_the_old_relay_key_is_read_and_relay_wins(world):
                          "remove agent-relay"]
     # the user's profiles.yaml: its old key still overrides the shipped `relay`
     put("repo", "")
-    put("user", 'profiles:\n  frontier:\n    agent-relay: {enabled: "off"}\n')
+    put("user", 'defaults:\n  profile: frontier\n'                  # st1: names frontier
+        'profiles:\n  frontier:\n    agent-relay: {enabled: "off"}\n')
     r = run(world)
     assert r.sections["relay"]["enabled"] == "off"
     assert r.renamed == ["profiles.yaml: frontier: agent-relay is read as relay; rename the key"]
@@ -271,6 +274,7 @@ S21_DEFAULT_S3 = "the build order: the goal's next slice, then the repo's pendin
 
 def test_s21_one_text_replaces_one_level(world):
     from claude_session import rules
+    world[2]("user", "defaults:\n  profile: frontier\n")     # st1: frontier's priority, on
     world[2]("repo", 'session:\n  priority:\n    levels: {S4: "the rest: polish, only when idle"}\n')
     r = run(world)
     lv = r.sections["session"]["priority"]["levels"]
@@ -280,7 +284,7 @@ def test_s21_one_text_replaces_one_level(world):
 
 
 def test_s21_local_wins(world):
-    world[2]("user", "defaults:\n  pacing: {fallback: 2000}\n")
+    world[2]("user", "defaults:\n  profile: frontier\n  pacing: {fallback: 2000}\n")   # st1
     world[2]("repo", "session:\n  pacing: {fallback: 2400, waiting: 2}\n")
     world[2]("local", "session:\n  pacing: {fallback: 3000}\n")
     assert run(world).sections["session"]["pacing"] == {"enabled": True, "fallback": 3000,
@@ -310,6 +314,7 @@ def test_s26_admission_is_a_session_key_merged_by_field(world):
 
 @pytest.mark.parametrize("key,kept", [("priority", "levels"), ("pacing", "fallback")])
 def test_s21_off(world, key, kept):
+    world[2]("user", "defaults:\n  profile: frontier\n")     # st1: frontier's, both on
     world[2]("repo", "session:\n  %s: {enabled: false}\n" % key)
     s = run(world).sections["session"]
     assert s[key]["enabled"] is False and s[key][kept]
