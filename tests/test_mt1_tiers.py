@@ -361,7 +361,9 @@ def test_r1_f2_the_layer_order(world):
     user_file("defaults:\n  subagents: opus\n")
     assert resolved(world, "balanced")["tiers"]["build"]["model"] == "sonnet"
     assert resolved(world)["tiers"]["build"]["model"] == "opus"
-    user_file("defaults:\n  subagents: sonnet\nprofiles:\n  frontier:\n    subagents: haiku\n")
+    # st1: the home names frontier, so the unnamed resolve reads its body (starter is the fallback)
+    user_file("defaults:\n  profile: frontier\n  subagents: sonnet\n"
+              "profiles:\n  frontier:\n    subagents: haiku\n")
     assert resolved(world, "frontier")["tiers"]["build"]["model"] == "haiku"
     assert resolved(world)["tiers"]["build"]["model"] == "haiku"
     user_file("defaults:\n  tiers:\n    design: {model: sonnet}\n    lookup: {model: sonnet}\n"
@@ -435,7 +437,7 @@ def test_r1_f7_a_model_word_outside_the_grammar_is_refused_before_any_write(worl
         assert rc == 2 and "names no model" in err, (argv, err)
     assert uf.read_text() == "# mine\n" and rf.read_text() == "# theirs\n"
     assert sessionconfig.load_overlay(SID) == {}
-    assert resolved(world)["profile"] == "frontier"
+    assert resolved(world)["profile"] == "starter"           # st1: the fallback
 
 
 def test_r1_f7_a_bracketed_model_saves_quoted(world):
@@ -502,7 +504,7 @@ def test_r2_f1_a_model_with_no_family_never_fails_resolution(world, where):
     assert s["tiers"]["words"]["model"] == "sonnet" and s["posture"] == "deny"
     out = hooks.session_start({"session_id": SID, "cwd": str(world), "source": "startup",
                                "model": "claude-opus-4-5"}, os.environ)
-    assert "profile 'frontier'" in out["hookSpecificOutput"]["additionalContext"]
+    assert "profile 'starter'" in out["hookSpecificOutput"]["additionalContext"]   # st1
     sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
     assert (sdir / "resolved.json").exists()
     assert denied(spawn("tier: mend\nfix it", "opus"))
@@ -572,8 +574,9 @@ def _r3_write(world, where, inner):
         user_file("defaults:\n  tiers:\n    lookup:\n" + ind(6))
         return f"{uf}: defaults.tiers.lookup"
     if where == "user profile":
-        user_file("profiles:\n  frontier:\n    tiers:\n      lookup:\n" + ind(8))
-        return f"{uf}: profiles.frontier.tiers.lookup"
+        # st1: the body of the fallback profile, `starter` since st1 (`frontier` before)
+        user_file("profiles:\n  starter:\n    tiers:\n      lookup:\n" + ind(8))
+        return f"{uf}: profiles.starter.tiers.lookup"
     rdir = world / ".claude" / "agentik"
     if where == "local":
         (rdir / "config.local.yaml").write_text("tiers:\n  lookup:\n" + ind(4))
@@ -587,7 +590,7 @@ def _r3_holds(world, field, lower, key):
     doctor's config row names `key` (None: names no lookup key)."""
     out = hooks.session_start({"session_id": SID, "cwd": str(world), "source": "startup",
                                "model": "claude-opus-4-5"}, os.environ)
-    assert "profile 'frontier'" in out["hookSpecificOutput"]["additionalContext"]
+    assert "profile 'starter'" in out["hookSpecificOutput"]["additionalContext"]   # st1
     sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
     doc = json.loads((sdir / "resolved.json").read_text())
     assert doc["session"]["tiers"]["lookup"].get(field) == lower
