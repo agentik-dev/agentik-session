@@ -74,7 +74,7 @@ CLI verbs (`agentik session --help`):
 | `unattended` | `agentik session unattended run . --until 06:30` |
 | `akt` | `akt --dry-run`; `akt` is `run --`, alone with `run.prompt` (needs `history/sittings/`) |
 
-Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, refuses writes to files the checkout's, a folder's or the user's gate list names, `*` in one segment), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead), never a typed `/compact`.
+Hooks (`plugin/hooks/hooks.json`): SessionStart, PreToolUse on every tool (gates `Agent|Task`, denies `Workflow`, refuses writes to files the checkout's, a folder's or the user's gate list names, `*` in one segment), PostToolUse, PostToolUseFailure, PostToolBatch, UserPromptSubmit, Stop, SessionEnd, and PreCompact, which blocks an automatic compaction (a sitting restarts instead; `starter` allows it), never a typed `/compact`.
 
 ## Profiles
 
@@ -82,8 +82,9 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 
 | profile | for |
 |---|---|
+| `starter` | the default when nothing names one: the meter on; no charter, priority, pacing or respawn |
 | `frontier` | everything on the seat, full effort |
-| `balanced` | Opus main thread, Sonnet subagents; the everyday default |
+| `balanced` | Opus main thread, Sonnet subagents |
 | `local` | seat main thread, local subagents via `agentik-agents local` |
 | `local-only` | main thread and subagents on the local model; posture `off` |
 | `scratch` | a test project; posture `off`, no charter required |
@@ -91,11 +92,11 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 | `packets` | writes packets and designs, never builds |
 | `builder` | what the relay spawns; posture `deny` |
 | `orchestrator` | large, complex work: Fable 5.1 on its 1M window |
-| `orchestrator-opus` | small and medium orchestrated projects: Opus 5.5 on its 1M window (`opus[1m]`) |
+| `orchestrator-opus` | small and medium orchestrated projects: Opus 5.5 on its 1M window |
 
 - `agentik session start <profile>` launches Claude Code with that profile, by flags only, never `settings.json`. `--max-turns N` sets `CLAUDE_SESSION_MAX_TURNS`, which caps the turn ceiling; `start` sets `CLAUDE_SESSION_DEPTH` to the parent's depth plus one; a nested `start` exits 2 without `--nested`.
 - `agentik session set <knob> <value>` changes this session only. Launch-time knobs print their in-session equivalent; `set tier.<role> <model>`, `set cap <model>` (each `--until`) hold the session's tiers; `--save` writes a tier to a layer file; `posture` applies at once. `set fill <reset|opus> [--until <zoned time>]`, the owner's word alone: an orchestrator's 1M main thread, this session, never past the week's reset; `run` hands it on; `set fill off` ends it from any seat.
-- A session's profile is its role. The SessionStart hook takes the name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets), else `session.profile` in `config.local.yaml`, then in `config.yaml`, then the user's `defaults.profile`, else `frontier`. A helper (marked `CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`: 180000 context tokens.
+- A session's profile is its role. The SessionStart hook takes the name from `CLAUDE_SESSION_PROFILE` (or `CLAUDE_SESSION_CONFIG`, which `agentik session start` sets), else `session.profile` in `config.local.yaml`, then in `config.yaml`, then the user's `defaults.profile`, else `starter`; naming `frontier` there takes up the sitting discipline. A helper (`CLAUDE_SESSION_HELPER=1`) inherits that variable but resolves as `builder`.
 - Claude Code's measured window (`context.window`) decides: a model change moves window, ceilings and ctx % at its next measure. Before the first, `profiles.yaml`'s `models:` table does: fable and mythos 1M; a bare `opus` 200k, or 1M as `opus[1m]`; sonnet and haiku 200k; Opus by the SessionStart payload's `model`, the profile's, `ANTHROPIC_MODEL`, the settings'.
 - The role decides the ceilings: `ceilings` on a 200k window, `ceilings_1m` on 1M. Every role gets 180000 context tokens and 400 turns on both windows, except the two orchestrators, which get 400000 and 400 on 1M.
 - Precedence: a user or project layer that sets `ceilings` (both windows) or `ceilings_1m` (1M) wins, field by field; then the role's ceilings for the resolved window; then the shipped defaults; the turn cap (`CLAUDE_SESSION_MAX_TURNS`) applies last.
@@ -103,11 +104,11 @@ Profiles ship in `plugin/lib/claude_session/profiles.yaml`. The `defaults` entry
 Start an orchestrator session (quote `opus[1m]`: zsh reads brackets as a glob):
 
 ```sh
-CLAUDE_SESSION_PROFILE=orchestrator claude --model fable  # Fable 5.1, 1M
-CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'  # Opus 5.5, 1M
+CLAUDE_SESSION_PROFILE=orchestrator claude --model fable
+CLAUDE_SESSION_PROFILE=orchestrator-opus claude --model 'opus[1m]'
 ```
 
-For a repo that always orchestrates, put `session: {profile: orchestrator-opus}` in its `.claude/agentik/config.local.yaml` and run `claude --model 'opus[1m]'`.
+A repo that always orchestrates names it in `.claude/agentik/config.local.yaml`: `session: {profile: orchestrator-opus}`.
 
 ## Budget
 
@@ -123,7 +124,7 @@ For a repo that always orchestrates, put `session: {profile: orchestrator-opus}`
 
 ## Priority and pacing
 
-- Two session keys, on in every shipped profile: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; a wait says `WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>`, STALLED at `waiting`; fill off).
+- Two session keys: `session.priority` (S1 harm, S2 blocks the goal, S3 the build order, S4 the rest) and `session.pacing` (the wakeup rides the act's last tool call; a pending helper is the wake; a wait says `WAITING <n>: <what>; <how to tell>; by <who>; est <zoned time|none>`, STALLED at `waiting`; fill off).
 - SessionStart's line carries them in one block of at most 320 bytes. `agentik session rules` prints both whole, as resolved.
 - Any layer overrides them, field by field; `set` does not. A level's text is quoted, since it holds ": ". No hook enforces either.
 
@@ -180,7 +181,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 ## Tests
 
 - `make test`: the whole suite, with a fake `claude` on PATH and no quota spent.
-- Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`, a file per area; `tests/test_readme.py` checks this README.
+- Targeted lines: `.venv/bin/python -m pytest -q tests/<file>.py`; `tests/test_readme.py` checks this README.
 - `make check` is the gate: test, lint, doclint, hygiene, validate (`claude plugin validate`), then README freshness against `design/readme/rendered.sha256` (`readme: stale` is exit 2). Bounded: one run per tree (`.check.lock`), a 1800 s wall, held off above load 4 x cores.
 - `make readme` renders this README from `design/readme/source.md` through respeak's technical mode and writes both sidecar lines. Edit the source, never the README.
 

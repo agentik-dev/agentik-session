@@ -11,7 +11,10 @@ allowed-tools:
 ## Profiles
 
 The user starts sessions from named profiles (`frontier`, `balanced`, `local`,
-`local-only`, `scratch`, `review`, `packets`, `builder`). At SessionStart the
+`local-only`, `scratch`, `review`, `packets`, `builder`, `orchestrator`,
+`orchestrator-opus`, `starter`). `starter` runs when nothing names one: the
+meter alone, with no charter, priority or pacing; a user takes up the sitting
+discipline by naming `frontier` under `defaults.profile`. At SessionStart the
 plugin resolves every layer (the shipped profiles, the user's, the repo's
 `.claude/agentik/config.yaml` and `config.local.yaml`, the launch
 profile, this session's overlay) into one file. Read it before assuming the
