@@ -14,10 +14,13 @@ worktree's own: the tree's scan is `make hygiene` where its Makefile holds a lin
 `hygiene:`, else `scripts/hygiene` when present; a range's scan (the branch's, the merge
 message's) is `make hygiene-range RANGE=<span>` where a line opens `hygiene-range:`, else
 `scripts/hygiene --require-private --commits <span>` when its --help names `--commits`. The
-Makefile is read, no recipe run, to tell; make runs without the caller's MAKEFLAGS, MFLAGS,
-GNUMAKEFLAGS, MAKEFILES or MAKELEVEL, and its code is the red line's, so a line that is no rule
-after all, or a Makefile that does not parse, is red, never a skipped scan. The note names what
-ran. Stdout is one line, the verdict, and it comes last:
+makefile make reads (the first of GNUmakefile, makefile, Makefile there) is read, no recipe run,
+to tell; make runs without the caller's MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, MAKEFILES or MAKELEVEL.
+Before each make road the same call with `-q` asks whether a recipe would run (it still runs a
+recipe line led by `+` or holding `$(MAKE)`): exit 1 goes on; exit 0, "Nothing to be done" or
+"is up to date", is red at the scan's step, exit 1, a note saying the target would run no recipe;
+any other exit, and the scan's own, is the red line's code, so a line that is no rule after all,
+or a makefile that does not parse, is red, never a skipped scan. The note names what ran. Stdout is one line, the verdict, and it comes last:
 
   land <repo>: ok <sha>, main readied            exit 0
   land <repo>: red <step> exit <code>            exit <code>
@@ -551,7 +554,7 @@ def scan_message(repo, tree, full, ours, merged, message):
     span = "%s..%s" % (full, commit)
     shown, argv, env = scan(span)
     note("merge-file: %s in %s" % (shown, tree))
-    code = run(tree, *argv, env=env)
+    code = run_scan(tree, "merge-file", argv, env)
     if code != 0:
         raise Red("merge-file", code, "%s exit %d on the merge message; see its stderr above "
                   "(%s)" % (argv[0] == "make" and "make hygiene-range" or "scripts/hygiene",
@@ -677,10 +680,20 @@ def takes_commits(tree, script):
 MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES", "MAKELEVEL")
 
 
-def has_target(tree, name):
-    """R1: the tree's Makefile holds a line that opens `<name>:`; read, no recipe run."""
+MAKEFILES_READ = ("GNUmakefile", "makefile", "Makefile")   # make's own order (lh1 fix C2)
+
+
+def has_target(tree, name, files=MAKEFILES_READ):
+    """R1: the makefile make reads in the tree, the first of `files` there, holds a line that
+    opens `<name>:`; read, no recipe run."""
+    for base in files:
+        path = os.path.join(tree, base)
+        if os.path.exists(path):
+            break
+    else:
+        return False
     try:
-        with open(os.path.join(tree, "Makefile"), encoding="utf-8", errors="replace") as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             return any(line.startswith(name + ":") for line in fh)
     except OSError:
         return False
@@ -719,6 +732,24 @@ def range_scan(tree):
     return None
 
 
+def run_scan(tree, step, argv, env):
+    """A scan's run, its exit. A make road is run only when `make -q` with the same call says a
+    recipe would run (lh1 fix C1): its exit 1; its exit 0 ("Nothing to be done", "is up to
+    date": no rule after all, or a target that is no `.PHONY` beside a file of its name) is red
+    <step>, never a skipped scan; any other exit is red with make's code."""
+    if argv[0] == "make":
+        call = " ".join(argv[1:])
+        code = run(tree, "make", "-q", *argv[1:], env=env)
+        if code == 0:
+            raise Red(step, 1, "make -q %s exit 0 in %s: the target would run no recipe (no rule "
+                      "after all, or up to date), so no scan would run; a scan target is named "
+                      "in .PHONY and has a recipe" % (call, tree))
+        if code != 1:
+            raise Red(step, code, "make -q %s exit %d in %s: make cannot run the target"
+                      % (call, code, tree))
+    return run(tree, *argv, env=env)
+
+
 def unscanned(tree, span):
     """The note for a tree scanned with no road for its range."""
     if os.path.lexists(os.path.join(tree, "scripts", "hygiene")):
@@ -730,8 +761,8 @@ def unscanned(tree, span):
 # line a landing derives, then the stamp, each as one commit closing with the trailer.
 
 def stamps(tree):
-    """R1: the worktree's Makefile holds a line that opens `stamp:`."""
-    return has_target(tree, "stamp")
+    """R1: the worktree's Makefile holds a line that opens `stamp:` (the pin's read, kept)."""
+    return has_target(tree, "stamp", ("Makefile",))
 
 
 def git_bytes(cwd, *args):
@@ -1387,14 +1418,14 @@ def land(repo, branch, sha, message, log=None, dry=False):
     if scan is not None:
         shown, argv, env = scan
         note("hygiene: %s in %s" % (shown, tree))
-        code = run(tree, *argv, env=env)
+        code = run_scan(tree, "hygiene", argv, env)
         if code != 0:
             raise Red("hygiene", code)
     road = range_scan(tree)
     if road is not None:
         shown, argv, env = road(span)
         note("hygiene: %s in %s" % (shown, tree))
-        code = run(tree, *argv, env=env)
+        code = run_scan(tree, "hygiene", argv, env)
         if code != 0:
             raise Red("hygiene", code)
     elif scan is not None:

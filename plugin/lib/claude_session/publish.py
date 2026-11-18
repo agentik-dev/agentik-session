@@ -57,13 +57,13 @@ check` on a clean main, none of those four names set; this verb never queues it.
 `main` again: a tracked file of the working tree that differs from S, read before the scans and
 after them, since the tree's scan would read another tree. `hygiene`, by land's roads (packet
 lh1-land-hygiene): a repo with no `scripts/hygiene` and no `hygiene:` or `hygiene-range:` line in
-its Makefile is not scanned; a `scripts/hygiene` that is there and is no executable file is `red
+the makefile make reads is not scanned; a `scripts/hygiene` that is there and is no executable file is `red
 hygiene exit 126` (a shell's code for a file it may not run), before any push (review 2, lead 1).
 Else the tree's scan runs in the checkout (`make hygiene` where the target is, else the bare
 script), then the range's of `<R's sha>..<S>` (`make hygiene-range RANGE=<span>` where the target
 is, else `scripts/hygiene --require-private --commits <span>` when its --help names `--commits`,
 as land's own step reads it), each one's output on stderr; a non-zero exit is the line's code,
-make's own on a make road. With no R, or no range road, the range is not scanned and the ok line
+make's own on a make road, which first passes land's `make -q` read (`land.run_scan`). With no R, or no range road, the range is not scanned and the ok line
 ends `, range not scanned`. `push`: `git
 push --no-follow-tags <remote> <S>:refs/heads/main` (so no tag rides it where `push.followTags`
 is set, review 1 lead 1), the sha and never main's name, never forced, never `--no-verify`, no
@@ -254,7 +254,7 @@ def scans(repo, r, s):
     if scan is not None:
         shown, argv, env = scan
         note("hygiene: %s in %s" % (shown, repo))
-        code = land.run(repo, *argv, env=env)
+        code = land.run_scan(repo, "hygiene", argv, env)
         if code != 0:
             raise land.Red("hygiene", code)
     if r is None:
@@ -267,7 +267,7 @@ def scans(repo, r, s):
         return "range not scanned"
     shown, argv, env = road(span)
     note("hygiene: %s in %s" % (shown, repo))
-    code = land.run(repo, *argv, env=env)
+    code = land.run_scan(repo, "hygiene", argv, env)
     if code != 0:
         raise land.Red("hygiene", code)
     return ""
