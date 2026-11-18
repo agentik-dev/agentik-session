@@ -85,8 +85,8 @@ check-unlocked: tree-note test lint doclint hygiene plugin-version-check validat
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
-readme:  ## render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2000 s: its budget)
-	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2000 --load 4 -- scripts/readme-render
+readme:  ## render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2900 s: its budget)
+	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2900 --load 4 -- scripts/readme-render
 doclint:  ## the doc gate (conventions §5), then HANDOFF.md and NICE_TO_HAVE.md against their tables (hq design/05 §4)
 	scripts/doclint
 	scripts/recordlint

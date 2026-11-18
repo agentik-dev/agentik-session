@@ -12,12 +12,12 @@ claude plugin marketplace add agentik-dev/agentik-commons; claude plugin install
 /session:status
 ```
 
-It needs Claude Code and the system's Python at 3.9 or newer. No clone and no package: it works alone.
+It needs Claude Code and the system's Python 3.9+, and it refuses Claude Code's Workflow tool. No clone, no package: it works alone.
 Part of [agentik](https://github.com/agentik-dev): the other tools, and how to leave.
 
 ## Why it exists
 
-The plugin gives each session one named profile, a budget with a stop and a written charter. It is part of a small family of plugins that answers "how much may this session spend, and what happens when it runs out".
+The plugin gives each session one named profile, a budget with a stop and a written charter. Its family answers "how much may this session spend, and what happens when it runs out".
 
 ## Install
 
@@ -195,7 +195,7 @@ Gates queue: one per repo under a load ceiling (RUNBOOK §5), cut at `gate.wall`
 
 ## Status
 
-Status: version `v2.0.0-alpha.139`, rendered `2026-11-10`, `5065` tests in the suite.
+Status: version `v2.0.0-alpha.139`, rendered `2026-11-17`, `5078` tests in the suite.
 
 ## Credit
 
