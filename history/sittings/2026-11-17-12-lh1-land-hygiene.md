@@ -22,6 +22,7 @@
 - Choice: a target is a Makefile line that opens `hygiene:` (or `hygiene-range:`), the rule `stamps` reads `stamp:` by; a target defined only in an included file is not seen, and the bare script runs.
 - Choice: a make road's red carries make's own code (2 for a failed recipe), as the check step's does.
 - Choice: make runs without the caller's MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, MAKEFILES, MAKELEVEL (land's job drops them already; publish runs in a sitting's shell).
+- Choice (fix 1): the version named by `make stamp STAMP_VERSION=2.0.0-alpha.139`, since the stamp keeps a version above main's and the check reds a change under plugin/ after it.
 - Choice (fix 1): `make -q` exit 0 reds with code 1, this module's own refusal code; `stamps` keeps reading `Makefile` alone (R5: the ready step unchanged).
 - Choice: each scan picks its road alone; `range not scanned` is said when a tree scan ran and no range road was there, so a repo with neither scan prints as at the pin.
 - Choice: publish's 126 refusal stands wherever `scripts/hygiene` is there and not executable, a target beside it or not, as at the pin.
@@ -31,10 +32,10 @@
 - [x] C4: the packet's section 4a, NICE n315
 - [x] `make stamp` (job `20261117-191437-2596`, exit 0): alpha.138 kept, the count 4996 to 5009, n262 moved to the overflow
 - [x] `make check` job `20261117-191455-2597`, exit 2: red `plugin-version-check` alone (5009 and 4845 passed), the stamp kept alpha.138 set at `d5ebb69`; `make stamp STAMP_VERSION=2.0.0-alpha.139` (job `20261117-192016-2599`, exit 0)
-- [ ] `make check` again through the gate queue
+- [x] `make check` again (job `20261117-192034-2600`, exit 0 on `9f706f0`): 5009 passed; 4845 passed, 143 skipped; hygiene 0 outside the allowlist; readme fresh
 
 ## Next act
-`make check`.
+None: the fix is done; the branch waits on the coordinator's review.
 
 ## Exit
-Build 1: every ruling built, the check green on `d5ebb69`. Fix 1: in flight.
+Build 1: every ruling built, the check green on `d5ebb69`. Fix 1: C1 to C4 built, the check green on `9f706f0`; this commit adds the charter alone.
