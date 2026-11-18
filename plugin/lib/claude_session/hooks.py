@@ -844,24 +844,30 @@ def _cache_line(payload: dict) -> str | None:
         return None
 
 
-def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool) -> list[str]:
+def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool,
+                line: str | None = None) -> list[str]:
     """S38 ruling 3: the main thread's inbox of gate results, whatever the posture. At most
     three files are taken (an atomic rename into `inbox/read/`), each one line (the `wait`
     line), then `<n> more: ...` when any remain. The lines stop where the output would pass
     MAX_OUT: the whole output on PostToolUse (`alone` False, `out` the handler's), the
     inbox block alone on UserPromptSubmit. A helper's payload (agent_id) takes nothing.
-    Never raises: a failure is no lines, and the files wait for the next hook."""
+    With a sitting's `line` (packet in3 R4), one file at most, under MAX_OUT less the
+    line's share, and the line after them. Never raises: a failure is no gate lines, and
+    the files wait for the next hook."""
+    tail = [line] if line else []
     try:
         sid = payload.get("session_id")
         if payload.get("agent_id") or not isinstance(sid, str) or not _SID.match(sid):
-            return []
+            return tail
         base = {} if alone else out
+        room = MAX_OUT - (LINE_SHARE if line else 0)
 
         def fits(text: str) -> bool:
-            return len(json.dumps(_with_gate(base, event, [text]))) <= MAX_OUT
-        return gate.inbox_take(resolver.state_dir(env), sid, fits=fits)
+            return len(json.dumps(_with_gate(base, event, [text]))) <= room
+        return gate.inbox_take(resolver.state_dir(env), sid, limit=1 if line else gate.TAKE,
+                               fits=fits) + tail
     except Exception:                                   # noqa: BLE001
-        return []
+        return tail
 
 
 def _with_gate(out: dict, event: str, lines: list[str]) -> dict:
@@ -874,6 +880,22 @@ def _with_gate(out: dict, event: str, lines: list[str]) -> dict:
     hso["hookEventName"] = event
     hso["additionalContext"] = "\n".join(lines) + (f"\n\n{ctx}" if ctx else "")
     return new
+
+
+# Packet in3-line: a line another sitting sent this checkout, taken in three hooks (lines.py).
+LINE_SHARE = 256                        # lines.SHARE: a hook's bytes kept for its line (R4)
+
+
+def _line_take(payload: dict, env, start: bool = False, out: dict | None = None) -> str | None:
+    """One line for this session, or None: on PostToolUse only while the handler's own
+    output leaves the line its share (`out`). Never raises."""
+    try:
+        if out is not None and len(json.dumps(out)) > MAX_OUT - LINE_SHARE:
+            return None
+        from . import lines
+        return lines.take(resolver.state_dir(env), payload, env, start=start)
+    except Exception:                                   # noqa: BLE001 - never a failed hook
+        return None
 
 
 def user_prompt_submit(payload: dict) -> dict:
@@ -940,7 +962,8 @@ def user_prompt_submit(payload: dict) -> dict:
 def _gate_ups(payload: dict, out: dict) -> dict:
     """UserPromptSubmit's output with the inbox lines first, the block alone under MAX_OUT."""
     return _with_gate(out, "UserPromptSubmit",
-                      _gate_lines(payload, os.environ, "UserPromptSubmit", out, alone=True))
+                      _gate_lines(payload, os.environ, "UserPromptSubmit", out, alone=True,
+                                  line=_line_take(payload, os.environ)))
 
 
 HELPER_PROFILE = "builder"
@@ -1167,13 +1190,16 @@ def session_start(payload: dict, env=None) -> dict:
     pin's, an exception included; with one, a start that raises reads as `{}`."""
     env = os.environ if env is None else env
     share = watcher_share(payload, env)
-    if share is None:
+    line = _line_take(payload, env, start=True)         # packet in3 R4: after the watcher's
+    if share is None and line is None:
         return _start(payload, env)
     try:
         out = _start(payload, env)
     except Exception:                                   # noqa: BLE001 - R4: still said
         out = {}
-    return _with_watcher(out, share)
+    if line is not None:
+        out = _with_gate(out, "SessionStart", [line])
+    return out if share is None else _with_watcher(out, share)
 
 
 def _start(payload: dict, env=None) -> dict:
@@ -1481,7 +1507,8 @@ def post_tool_use(payload: dict, env=None) -> dict:
     """The handler below, then the gate's inbox lines, the whole under MAX_OUT (S38)."""
     env = os.environ if env is None else env
     out = _post_tool_use(payload, env)
-    return _with_gate(out, "PostToolUse", _gate_lines(payload, env, "PostToolUse", out, False))
+    return _with_gate(out, "PostToolUse", _gate_lines(payload, env, "PostToolUse", out, False,
+                                                      line=_line_take(payload, env, out=out)))
 
 
 def _post_tool_use(payload: dict, env) -> dict:

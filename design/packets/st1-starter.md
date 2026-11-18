@@ -67,7 +67,7 @@ Tests changed, none deleted or skipped. Named `frontier` in the temp home (`conf
 
 ## 4. Findings that name this row
 
-Review 1's F4, F6 and F7: `NICE_TO_HAVE.md` n315 to n317.
+Review 1's F4, F6 and F7: `NICE_TO_HAVE.md` n324 to n326.
 
 ## 5. Forbidden reads
 

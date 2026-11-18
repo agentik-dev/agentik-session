@@ -1,4 +1,4 @@
-.PHONY: help test test-floor venv-floor venv doctor install skill lint clean check check-unlocked tree-note doclint hygiene plugin-version-check validate readme stamp
+.PHONY: help test test-floor venv-floor venv doctor install skill lint clean check check-unlocked tree-note doclint hygiene hygiene-range plugin-version-check validate readme stamp
 # The virtualenv first: `python3` and the scripts' shebangs resolve to it, never Apple's.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 # The newest installed respeak renderer, under either marketplace name.
@@ -85,14 +85,17 @@ check-unlocked: tree-note test lint doclint hygiene plugin-version-check validat
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
-readme:  ## render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2000 s: its budget)
-	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2000 --load 4 -- scripts/readme-render
+readme:  ## render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2900 s: its budget)
+	RESPEAK_RENDER="$(RESPEAK_RENDER)" scripts/bounded --wall 2900 --load 4 -- scripts/readme-render
 doclint:  ## the doc gate (conventions §5), then HANDOFF.md and NICE_TO_HAVE.md against their tables (hq design/05 §4)
 	scripts/doclint
 	scripts/recordlint
 hygiene:  ## the vendored copies' pins, then the public-hygiene scan (conventions §5, §6)
 	shasum -a 256 -c --status scripts/vendored.sha256 || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	scripts/hygiene
+hygiene-range:  ## the public-hygiene scan of a commit range, RANGE=<a>..<b>: what gate land and gate publish run on a branch's span and a merge message (packet lh1-land-hygiene)
+	@[ -n "$(RANGE)" ] || { echo "hygiene-range: RANGE=<a>..<b> names the span"; exit 2; }
+	scripts/hygiene --require-private --commits "$(RANGE)"
 plugin-version-check:  ## a change under plugin/ fails until plugin.json's version moves (GUIDE §7)
 	$(PYTHON) scripts/plugin-version-check
 # The landing's derived lines, after a branch merges main (hq design/19's land3); check never calls it.

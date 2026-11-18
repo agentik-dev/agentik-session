@@ -1,0 +1,41 @@
+# Sitting 2026-11-17-12: agentik-session, lh1-land-hygiene
+
+| item | value |
+|---|---|
+| goal | `gate land` and `gate publish` scan by the repo's own `hygiene` and `hygiene-range` targets where the Makefile has them, else the bare `scripts/hygiene` as before |
+| budget | about 90 tool calls, `claude-opus-5-5`; checkpoint at 80% |
+| pin | `69d0824` on main (plugin 2.0.0-alpha.137) |
+| branch | `lh1-land-hygiene`, worktree `.claude/worktrees/lh1-land-hygiene`, the two venvs linked |
+| level | S3, packet `design/packets/lh1-land-hygiene.md` |
+| window | 200k |
+| agents | 0 |
+
+## Done-ness
+- [x] the packet, the baseline at the pin (land and publish `red hygiene exit 1`; 14 of the 19 new cases red, the pin's own roads green)
+- [x] R1 to R3, R5: `land.py` and `publish.py` take the target where it is; `tests/test_lh1_land_hygiene.py` 19 green; the pin's 381 land and publish tests unchanged and green; the new file and two publish files green under `.venv-floor` too
+- [x] R4: this repo's `hygiene-range` target (`scripts/hygiene --require-private --commits "$(RANGE)"`, no RANGE exit 2); two tests: the land roads read it, and its rule run in a temp folder
+- [x] `make stamp` (job `20261117-185426-2590`, exit 0): alpha.138, the count 4975 to 4996
+- [x] `make check` (job `20261117-185452-2591`, exit 0 on `d5ebb69`): 4996 passed; 4836 passed, 139 skipped; hygiene 0 outside the allowlist; readme fresh
+
+## Handover
+- If this sitting is cut: the first unticked line above.
+- Choice: a target is a Makefile line that opens `hygiene:` (or `hygiene-range:`), the rule `stamps` reads `stamp:` by; a target defined only in an included file is not seen, and the bare script runs.
+- Choice: a make road's red carries make's own code (2 for a failed recipe), as the check step's does.
+- Choice: make runs without the caller's MAKEFLAGS, MFLAGS, GNUMAKEFLAGS, MAKEFILES, MAKELEVEL (land's job drops them already; publish runs in a sitting's shell).
+- Choice (fix 1): the version named by `make stamp STAMP_VERSION=2.0.0-alpha.139`, since the stamp keeps a version above main's and the check reds a change under plugin/ after it.
+- Choice (fix 1): `make -q` exit 0 reds with code 1, this module's own refusal code; `stamps` keeps reading `Makefile` alone (R5: the ready step unchanged).
+- Choice: each scan picks its road alone; `range not scanned` is said when a tree scan ran and no range road was there, so a repo with neither scan prints as at the pin.
+- Choice: publish's 126 refusal stands wherever `scripts/hygiene` is there and not executable, a target beside it or not, as at the pin.
+
+## The fix of review 1 (brief-2, from `f3405d7`)
+- [x] C1: `land.run_scan`, `make -q` before each make road, exit 0 red at the scan's step; C2: the makefile make reads; 7 land and 7 publish cases, each landed or pushed at `f3405d7`
+- [x] C4: the packet's section 4a, NICE n321
+- [x] `make stamp` (job `20261117-191437-2596`, exit 0): alpha.138 kept, the count 4996 to 5009, n262 moved to the overflow
+- [x] `make check` job `20261117-191455-2597`, exit 2: red `plugin-version-check` alone (5009 and 4845 passed), the stamp kept alpha.138 set at `d5ebb69`; `make stamp STAMP_VERSION=2.0.0-alpha.139` (job `20261117-192016-2599`, exit 0)
+- [x] `make check` again (job `20261117-192034-2600`, exit 0 on `9f706f0`): 5009 passed; 4845 passed, 143 skipped; hygiene 0 outside the allowlist; readme fresh
+
+## Next act
+None: the fix is done; the branch waits on the coordinator's review.
+
+## Exit
+Build 1: every ruling built, the check green on `d5ebb69`. Fix 1: C1 to C4 built, the check green on `9f706f0`; this commit adds the charter alone.
