@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] the packet, the baseline at the pin (land and publish `red hygiene exit 1`; 14 of the 19 new cases red, the pin's own roads green)
 - [x] R1 to R3, R5: `land.py` and `publish.py` take the target where it is; `tests/test_lh1_land_hygiene.py` 19 green; the pin's 381 land and publish tests unchanged and green; the new file and two publish files green under `.venv-floor` too
-- [ ] R4: this repo's `hygiene-range` target
+- [x] R4: this repo's `hygiene-range` target (`scripts/hygiene --require-private --commits "$(RANGE)"`, no RANGE exit 2); two tests: the land roads read it, and its rule run in a temp folder
 - [ ] `make stamp`, then `make check`, once each through the gate queue
 
 ## Handover
@@ -25,4 +25,4 @@
 - Choice: publish's 126 refusal stands wherever `scripts/hygiene` is there and not executable, a target beside it or not, as at the pin.
 
 ## Next act
-R4: this repo's `hygiene-range` target.
+`make stamp`, then `make check`, through the gate queue.

@@ -9,6 +9,7 @@ remote is a bare repo beside it. The fakes write one line a call to $LAND_ORDER.
 
 import os
 import re
+import subprocess
 import unittest
 
 import pytest
@@ -251,6 +252,44 @@ def test_lh1_r3_publish_a_target_make_cannot_run_is_red_hygiene(tmp_path, makefi
     rc, out, err, s = published(c)
     assert (rc, out) == (2, line(c, "red hygiene exit 2")), err
     assert c.bare_main() != s
+
+
+# R4: this repo's own Makefile has both targets, so its own landing takes the target's road.
+
+THIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_lh1_r4_this_repo_lands_by_its_own_targets():
+    from claude_session import land
+    assert land.has_target(THIS, "hygiene") and land.has_target(THIS, "hygiene-range")
+    assert land.tree_scan(THIS)[:2] == ("make hygiene", ("make", "hygiene"))
+    assert land.range_scan(THIS)("a..b")[:2] == (
+        "make hygiene-range RANGE=a..b", ("make", "hygiene-range", "RANGE=a..b"))
+
+
+def test_lh1_r4_the_range_target_runs_what_the_land_step_ran_for_a_range(tmp_path):
+    """The rule as this Makefile writes it, run in a temp folder beside a fake scripts/hygiene
+    that records its argv: the bare script's range call, its exit the target's; no RANGE is 2."""
+    with open(os.path.join(THIS, "Makefile")) as fh:
+        text = fh.read()
+    rule = text[text.index("\nhygiene-range:") + 1:]
+    rule = rule[:rule.index("\n", rule.index("\n\tscripts/hygiene") + 1) + 1]
+    (tmp_path / "Makefile").write_text(rule)
+    fake = tmp_path / "scripts" / "hygiene"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\necho \"$*\" >> \"%s\"\nexit 3\n" % (tmp_path / "argv"))
+    fake.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k not in ("MAKEFLAGS", "MFLAGS",
+                                                            "GNUMAKEFLAGS", "MAKEFILES",
+                                                            "MAKELEVEL")}
+    p = subprocess.run(["make", "-s", "hygiene-range", "RANGE=refs/heads/main..abc1234"],
+                       cwd=str(tmp_path), env=env, capture_output=True, text=True)
+    assert p.returncode == 2, p.stderr      # make's code: the recipe exited 3
+    assert (tmp_path / "argv").read_text() == "--require-private --commits refs/heads/main..abc1234\n"
+    p = subprocess.run(["make", "-s", "hygiene-range"], cwd=str(tmp_path), env=env,
+                       capture_output=True, text=True)
+    assert p.returncode == 2 and "RANGE=<a>..<b> names the span" in p.stdout
+    assert (tmp_path / "argv").read_text().count("\n") == 1
 
 
 if __name__ == "__main__":

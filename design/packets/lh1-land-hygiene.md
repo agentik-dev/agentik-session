@@ -41,6 +41,8 @@ At the pin the merge message's scan runs twice, before the check and again befor
 | 5 | `publish` in each of the four temp repos: the same roads, the same reds | 1 and 3 red, 2 and 4 held |
 | 6 | every test the repo held before: green, changed only where it asserted a step's printed line, each such change listed here; the repo's `make check`, once through the gate queue, green | green |
 
+R4's target: `hygiene-range` runs `scripts/hygiene --require-private --commits "$(RANGE)"`, and exits 2 with a line naming `RANGE=` when it is empty; the vendored pins stay the `hygiene` target's.
+
 No test runs a landing or a publish outside a temp repo with a temp remote, and none pushes anywhere real.
 
 The tests whose assertion of a printed line changed: none. The pin's 381 land and publish tests (`tests/test_land*.py`) pass unchanged, since every bare road's notes, probes and lines are the pin's.
