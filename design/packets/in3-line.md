@@ -4,7 +4,7 @@
 |---|---|
 | from | the hq coordinator, 2026-11-17, brief in3-line, rulings R1 to R9; hq design/17 §3 items 7 to 10, §5, §10's R1-F7, R1-F9, R1-F11, R1-F13; hq entries 6 and 37 |
 | pin | `69d0824` on main (plugin 2.0.0-alpha.137). Worktree `.claude/worktrees/in3-line`, branch `in3-line`; the two venvs linked |
-| wall | this worktree; no push, `--amend`, rebase, merge, install or plugin update; `make` only through the gate queue; no `claude` started by a test; no relay verb; no test reads or writes the live state root or sends to a real checkout; `DECISIONS.md` unchanged |
+| wall | this worktree; no push, `--amend`, rebase, merge, install or plugin update; `make` only through the gate queue; no `claude` started by a test; no relay verb; no test reads or writes the live state root or sends to a real checkout; the repo's ledger unchanged |
 | may touch | `plugin/lib/claude_session/lines.py` (new), `hooks.py` (`_gate_lines`, `_gate_ups`, `post_tool_use`, `session_start`, a block after `_with_gate`), `cli.py` (the `line` parser and `cmd_line`), `gate.py` (`_prune` calls the lines' prune), `tests/test_in3_line.py` and `tests/fixtures/in3-baseline.json` (new), this packet, `history/sittings/2026-11-17-12-in3-line.md`; the version, the README's count and the sidecar by `make stamp` alone |
 | verify | `make stamp`, then `make check`, by the gate queue, once each, last |
 | acceptance | §3; `PY -m pytest -q tests/test_in3_line.py` under `.venv` and `.venv-floor` |
