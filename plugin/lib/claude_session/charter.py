@@ -617,8 +617,19 @@ def show(repos, dir_of) -> dict:
     return doc
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")    # C0, DEL and C1
+
+
+def _shown(text) -> str:
+    """`text` for the owner's terminal: each C0, DEL or C1 character escaped as `--json`
+    writes it (ESC as backslash-u001b), so a charter's escape sequence reaches the tty as
+    text (n205)."""
+    return _CONTROL.sub(lambda m: "\\u%04x" % ord(m.group()), str(text))
+
+
 def show_text(doc: dict) -> str:
-    """R8: the plain view, one block a repo with a blank line between, the skipped last."""
+    """R8: the plain view, one block a repo with a blank line between, the skipped last; each
+    line with its control characters escaped (n205)."""
     blocks = []
     for r in doc["repos"]:
         w = r["waits"]
@@ -629,12 +640,12 @@ def show_text(doc: dict) -> str:
         out += [f"hand  {x['what']}; `{x['command']}`" if x["command"] is not None
                 else f"hand  {x['what']}  (no command)" for x in w or ()]
         out += [f"form  {x}" for x in r["refusals"]]
-        blocks.append("\n".join(out))
+        blocks.append("\n".join(map(_shown, out)))
     reasons: dict = {}
     for s in doc["skipped"]:
         reasons.setdefault(s["why"], []).append(os.path.basename(s["repo"]))
     if reasons:
-        blocks.append("\n".join(f"skipped ({why}): {', '.join(names)}"
+        blocks.append("\n".join(_shown(f"skipped ({why}): {', '.join(names)}")
                                 for why, names in reasons.items()))
     return "\n\n".join(blocks) + "\n" if blocks else ""
 
