@@ -407,8 +407,13 @@ call's prompt (any case, a trailing full stop allowed; the first line naming one
 of the five roles counts). When the call's model, else its agent file's `model:`, ranks
 above the role's (fable, opus, sonnet, haiku, local, highest first), the spawn
 gate warns under posture `signal` or `ask` and refuses under `deny`. A spawn
-naming no role meets the family rule alone: a Fable helper starts only under a
-Fable session, in every posture.
+naming no role meets the family rule alone, which runs first, in every posture,
+a helper's call too: a helper never starts above its session's family (a Sonnet
+session starts no Opus helper, a Haiku session no Opus or Sonnet one), and the
+refusal names the session's family as the `model` word. Where the session's
+model is not known (no record yet, its two records disagreeing after a switch,
+a model naming no family, or a helper's own spawn) a Fable helper alone is
+refused: it starts only under a Fable session.
 
 The type's model counts. A call that names no `model` is judged, by the family
 rule and the role check alike, on the `model:` in its agent type's frontmatter.
