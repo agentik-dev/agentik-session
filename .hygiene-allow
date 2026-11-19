@@ -154,6 +154,7 @@ design/packets/land4-ready.md: sibling
 design/packets/akt-run.md: sibling
 # su3: the packet names this repo's own ledger file in its wall row, one line since its first commit (742aaa1).
 design/packets/su3-start-check.md: sibling
+design/packets/st1-starter.md: sibling
 # sl1: this tool's own ledger says which public tool's verb reads an entry, one line since aa9cccb.
 DECISIONS.md: sibling
 # sl1: the packet names the ledger file and the public ledger tool's verbs that write it, since its first commit (49fb15c).

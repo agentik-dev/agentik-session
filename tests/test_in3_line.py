@@ -100,6 +100,10 @@ def measure(base: Path, monkeypatch) -> dict:
             home = t / "home"
             monkeypatch.setenv("HOME", str(home))
             monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
+            # packet st1-starter: the pin's empty home ran frontier, which its user file names now
+            (home / ".claude" / "agentik").mkdir(parents=True)
+            (home / ".claude" / "agentik" / "profiles.yaml").write_text(
+                "defaults:\n  profile: frontier\n")
             alpha, beta = checkout(t, "alpha"), checkout(t, "beta")
             monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(alpha))
             send(alpha, beta)                               # a line for another checkout

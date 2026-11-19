@@ -21,6 +21,10 @@ SHIPPED = str(ROOT / "plugin" / "lib" / "claude_session" / "profiles.yaml")
 SID = "ak5-sess-0000-1111"
 SETTING_KEYS = {"key", "value", "default", "type", "choices", "summary", "source", "change",
                 "live", "values"}
+# st1: what an empty home's starter session holds off, where `default` is frontier's (ak5 R5):
+# the three fields starter turns off, and frontier's own plugins and notes, which starter,
+# the shipped defaults, does not state
+STARTER_OFF = {"charter.required", "priority.enabled", "pacing.enabled", "plugins", "notes"}
 DESCRIBE_KEYS = {"schema", "ok", "tool", "version", "summary", "repo", "plugin", "needs",
                  "verbs", "reads"}
 
@@ -153,14 +157,20 @@ def test_config_empty_home(box):
     for s in d["settings"]:
         assert set(s) == SETTING_KEYS, s["key"]
         assert set(s["change"]) == {"kind", "command", "path", "block", "note"}
-        assert s["value"] == s["default"], s["key"]
+        if s["key"] in STARTER_OFF:     # st1: the empty home runs starter, where these are off
+            assert not s["value"] and s["default"], s["key"]
+        elif s["key"] == "charter.discipline":   # st1 fix C1: starter's alone, absent is true
+            assert s["value"] is False and s["default"] is None
+        else:
+            assert s["value"] == s["default"], s["key"]
         assert not str(s["source"]["path"] or "").startswith(str(home)), s["key"]
         assert s["source"]["layer"] in layers and all(v["layer"] in layers for v in s["values"])
         assert len(s["summary"]) < 100 and not s["summary"].startswith("This setting")
     eff = next(s for s in d["settings"] if s["key"] == "effort")
     assert eff["value"] == "high"
-    assert eff["source"] == {"layer": "profile", "path": SHIPPED, "line": 90}
-    assert [v["layer"] for v in eff["values"]] == ["default", "profile"]
+    # st1: starter states no effort, so the shipped defaults' line holds it
+    assert eff["source"] == {"layer": "default", "path": SHIPPED, "line": 47}
+    assert [v["layer"] for v in eff["values"]] == ["default"]
     assert {"tiers.build.model", "gate.wall", "ceilings.context", "posture"} <= set(keys)
     assert not {"description", "subagents", "window", "models"} & set(keys)
 
@@ -178,7 +188,7 @@ def test_config_repo_effort(box):
     assert s["live"] is False
     f.unlink()
     s = one(box, "effort")
-    assert s["source"] == {"layer": "profile", "path": SHIPPED, "line": 90}
+    assert s["source"] == {"layer": "default", "path": SHIPPED, "line": 47}   # st1: starter's
     assert s["change"]["path"] == str(home / ".claude" / "agentik" / "profiles.yaml")
 
 
@@ -186,10 +196,12 @@ def test_config_repo_effort(box):
 
 def test_config_user_effort(box):
     home, _ = box
-    f = user_file(home, "defaults:\n  effort: max\nprofiles:\n  frontier:\n    effort: low\n")
+    # st1: the home names frontier, whose body it holds
+    f = user_file(home, "defaults:\n  profile: frontier\n  effort: max\n"
+                  "profiles:\n  frontier:\n    effort: low\n")
     s = one(box, "effort")
     assert s["value"] == "low"
-    assert s["source"] == {"layer": "user", "path": str(f), "line": 5}
+    assert s["source"] == {"layer": "user", "path": str(f), "line": 6}
     assert [v["layer"] for v in s["values"]] == ["default", "user-defaults", "profile", "user"]
 
 

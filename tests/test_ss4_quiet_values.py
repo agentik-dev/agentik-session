@@ -261,6 +261,10 @@ LAYERS = {"repo": Path(".claude") / "agentik" / "config.yaml",
 
 def _charter_dir(box, where, kind):
     text, doc = CDIR[kind]
+    # st1 fix C1: the user file names frontier, which these cases meant by naming none;
+    # under starter's waiver `required: true` alone gives no line of the charter's
+    (box[0] / ".claude" / "agentik").mkdir(parents=True, exist_ok=True)
+    (box[0] / ".claude" / "agentik" / "profiles.yaml").write_text("defaults:\n  profile: frontier\n")
     if where == "overlay":
         _overlay(box, {"charter": {"required": True, "dir": doc}})
         return

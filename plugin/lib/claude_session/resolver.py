@@ -13,7 +13,7 @@ Layers, lowest first (D7):
 The invocation flag sits above all of them and belongs to whoever reads the
 file. The profile *name* is taken from the highest layer that names one
 (launch, then local, then repo, then the user file's `defaults.profile`: packet mt1 R3),
-else `frontier`; its values form the base, and a named launch profile re-applies its own
+else `starter` (DEFAULT_PROFILE, entry 10); its values form the base, and a named launch profile re-applies its own
 fields above the repo files.
 
 `tiers` (packet mt1) is layered apart, role by role, lowest first (mt1 round 1, F1 F2):
@@ -93,7 +93,16 @@ SHIPPED = Path(__file__).with_name("profiles.yaml")
 REPO_DIR = Path(".claude") / "agentik"
 # agentik-r1 §6.3 c4, c5: the repo's and the user's folders before the rename.
 OLD_REPO_DIR = Path(".claude") / "claude-code-session"
-DEFAULT_PROFILE = "frontier"
+# Packet st1-starter R3: the name used when nothing names one (entry 10), and the profile
+# that states every field (profiles.yaml's header), which `describe config` reads a
+# setting's default from (packet ak5 R5).
+DEFAULT_PROFILE = "starter"
+FULL_PROFILE = "frontier"
+# The fix of st1's review 1, C4: a session the launcher starts (`agentik session run`, its
+# respawns) carries the chain's name here; with nothing naming a profile it runs
+# FULL_PROFILE, as before st1, since a launched chain is the sitting discipline.
+CHAIN_VAR = "CLAUDE_SESSION_CHAIN"
+CHAIN_RE = re.compile(r"^(?!\.+\Z)[A-Za-z0-9._-]{1,64}\Z")    # a file name: never . or ..
 
 # The overlay keeps its pre-profile knob names; these are the ones that differ.
 OVERLAY_RENAMES = {"subagent_model": "subagents"}
@@ -615,14 +624,25 @@ def _iso(ts: float | None) -> str | None:
     return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
 
 
+def fallback_profile(env, chain: bool | None = None) -> str:
+    """The name a session runs when no layer names one: FULL_PROFILE under a launched chain
+    (`chain` True, or None and `env` carrying the chain's mark), else DEFAULT_PROFILE."""
+    if chain is None:
+        chain = bool(CHAIN_RE.match(str(env.get(CHAIN_VAR) or "")))
+    return FULL_PROFILE if chain else DEFAULT_PROFILE
+
+
 def resolve(cwd, session_id: str, env, profile: str | None = None,
             overlay: dict | None = None, transcript_path=None,
             session_model: str | None = None,
-            session_model_source: str | None = None) -> Resolved:
+            session_model_source: str | None = None,
+            chain: bool | None = None) -> Resolved:
     """Resolve every layer for one session. Raises ResolveError; writes nothing.
     `session_model` is the SessionStart payload's `model`, or under `claude -p` the
     launcher's `CLAUDE_SESSION_MODEL`, when the hook has one; `session_model_source`
-    names which (`payload` when a caller passes a model without it), null with no model."""
+    names which (`payload` when a caller passes a model without it), null with no model.
+    `chain` True: the launcher's own resolve for the chain it starts; None reads the chain's
+    mark in `env` (C4: with nothing naming a profile, a chain runs FULL_PROFILE)."""
     if not session_id or not _SID.match(str(session_id)):
         raise ResolveError(f"session_id is not an id: {str(session_id)[:40]!r}")
     cwd = Path(cwd)
@@ -663,7 +683,7 @@ def resolve(cwd, session_id: str, env, profile: str | None = None,
     name = (profile or (local_s.get("session") or {}).get("profile")
             or (repo_s.get("session") or {}).get("profile")
             or (ud.get("profile") if isinstance(ud.get("profile"), str) else None)
-            or DEFAULT_PROFILE)
+            or fallback_profile(env, chain))
     if name not in profiles:
         # row ss2: a name read from a layer file (session.profile) is its text, so it is
         # withheld; a name the caller gave (the launch's CLAUDE_SESSION_PROFILE, an
