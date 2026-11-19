@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet, with the baseline measured at the pin: the table's three cells pass; 211 standing tests green under both venvs
-- [ ] The failing tests, `tests/test_h6_every_family.py`
+- [x] The failing tests, `tests/test_h6_every_family.py`: 7 of 16 red at the pin (the 9 that pass: D5's helper row, R2's no family, line 3, the Fable bytes, line 6)
 - [ ] R1 to R4: the rule and its two lines in `_spawn_rule`
 - [ ] R6: `RUNBOOK.md`'s family rule paragraph; NICE n324 (D5's lead)
 - [ ] `make stamp` through the gate
@@ -22,6 +22,6 @@
 - Choices: none yet.
 
 ## Next act
-The failing tests.
+R1 to R4 in `_spawn_rule`.
 
 ## Exit
