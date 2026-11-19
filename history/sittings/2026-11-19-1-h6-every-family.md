@@ -16,12 +16,13 @@
 - [x] R1 to R4: the rule and its two lines in `_spawn_rule`; 247 green under both venvs (the new file and the standing five, `test_wfd.py` too); the probe's three cells deny, every other as at the pin
 - [x] R6: `RUNBOOK.md`'s family rule paragraph says the rule as built; NICE n324 (D5's lead); no shipped profile runs a Sonnet or Haiku main model, so none is newly refused
 - [x] `make stamp` through the gate: job `20261119-101204-2697`, exit 0; alpha.140 to alpha.141, the count 5079 to 5095
-- [ ] `make check` through the gate: job `20261119-101220-2698` exit 2, the tests green (5095 passed; 4931 passed, 143 skipped) and recordlint's 400-character bound on n324; the row shortened, the check again
+- [x] `make check` through the gate: job `20261119-101220-2698` exit 2 on recordlint's 400-character bound alone (n324, shortened); job `20261119-101754-2701` on `61fec96`, exit 0 in 6 min; 5095 passed (`.venv`), 4931 passed and 143 skipped (`.venv-floor`); hygiene 0 outside the allowlist
 
 ## Handover
 - Choices: one line for both new forms' head (`a helper starts only at or below its session's family`), the helper's family said as `family <f>` after its model; `tiers` imported inside `_spawn_rule`, as `_rank` does; the session is read for an Opus, Sonnet or Haiku helper too, so a failure there now denies those as well (R4).
 
 ## Next act
-`make check` through the gate.
+None: the row is built and the check green; the landing is the coordinator's.
 
 ## Exit
+R1 to R6 built and committed; the tests green under both venvs; `make check` green on `61fec96`.
