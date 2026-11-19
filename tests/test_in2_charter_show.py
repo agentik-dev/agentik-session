@@ -132,6 +132,21 @@ def test_in2_2_show_text(box):
         f"hand  {PROSE}  (no command)"]
 
 
+def test_n205_show_text_escapes_control_characters(box):
+    """n205: a charter's CSI and OSC sequences reach the text view escaped, as `--json` has them."""
+    pear = box / "repos" / "pear"
+    hand = "- hand: \x1b[31mred\x1b[0m press; `make \x1b]0;t\x07 -C pear`"
+    (pear / "history" / "sittings" / "2026-11-14-1.md").write_text(
+        form(date="2026-11-14", waits=(hand,), next_act=("Prune\x9b2J.",)))
+    rc, out, err = run("charter", "show", str(pear))
+    assert (rc, err) == (0, "")
+    assert out.splitlines() == [
+        "== pear  2026-11-14-1  1 for the owner's hand",
+        "next  Prune\\u009b2J.",
+        "hand  \\u001b[31mred\\u001b[0m press; `make \\u001b]0;t\\u0007 -C pear`"]
+    assert not any(0 <= ord(c) < 32 and c != "\n" or 127 <= ord(c) < 160 for c in out)
+
+
 # 3. the newest, and --dir
 def test_in2_3_newest_and_dir(box):
     pear = box / "repos" / "pear"
