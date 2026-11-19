@@ -45,7 +45,7 @@ Tests in `tests/test_h6_every_family.py`.
 
 ## 4. Findings that name this row
 
-- D5: a helper's own spawn stays Fable only, since its payload carries no model and its records are the session's; NICE n324.
+- D5: a helper's own spawn stays Fable only, since its payload carries no model and its records are the session's; NICE n327.
 - No shipped profile has a Sonnet or Haiku main model, so none is newly refused here.
 
 ## 5. Forbidden reads

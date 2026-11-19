@@ -53,7 +53,7 @@ def test_s21_default_texts_are_the_shipped_ones(tmp_path):
     assert r.PRIORITY == {"enabled": True, "levels": {"S1": S1, "S2": S2, "S3": S3, "S4": S4}}
     assert r.PACING == {"enabled": True, "fallback": 1800, "waiting": 3,
                         "meter_line_minutes": 30}           # packet b1 R1
-    s = resolved(tmp_path)
+    s = resolved(tmp_path, profile="frontier")      # st1: the fallback, starter, has both off
     assert s["priority"] == r.PRIORITY and s["pacing"] == r.PACING
 
 
@@ -62,6 +62,9 @@ def test_s21_default_every_shipped_profile_keeps_both_on(tmp_path):
     assert len(profiles) >= 10
     for name in profiles:
         s = resolved(tmp_path, profile=name)
+        if name == "starter":           # st1 R1: starter, by design, has both off
+            assert s["priority"]["enabled"] is False and s["pacing"]["enabled"] is False
+            continue
         assert s["priority"]["enabled"] is True and s["pacing"]["enabled"] is True, name
 
 

@@ -4,6 +4,9 @@ import pytest
 
 from claude_session import budget, config, hooks, sessionconfig
 
+# packet st1-starter: these cases assert the fallback before st1, frontier
+pytestmark = pytest.mark.usefixtures("frontier_home")
+
 SID = "test-sess-0000-1111-2222"
 _ENV = {}   # the running test's monkeypatch, for use() (ADV6-6: no bare os.environ writes)
 

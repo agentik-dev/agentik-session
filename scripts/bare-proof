@@ -263,6 +263,8 @@ class Proof:
                 fh.write(DECOY)
         with open(os.path.join(self.repo, ".git", "info", "exclude"), "a") as fh:
             fh.write("claude_session\njson.py\n")
+        # Packet st1-starter, C3 of its fix: the repo names no profile, as on a bare machine,
+        # so each hook runs `starter`'s road; `discipline` proves frontier's block apart.
 
     # ---- the children --------------------------------------------------------
 
@@ -320,11 +322,8 @@ class Proof:
             return None if load("meter.json").get("session_id") == sid else "no meter.json"
         if event in HELPER_EVENTS:
             return None if load("helper-activity.json").get("event") == event else "no helper-activity.json stamp"
-        if event == "PreCompact":
-            try:
-                return None if json.loads(r.stdout)["decision"] == "block" else "no block"
-            except (ValueError, KeyError, TypeError):
-                return "no block on an automatic compaction"
+        if event == "PreCompact":       # st1: a bare machine runs starter, which lets it pass
+            return None if not r.stdout else "printed on an automatic compaction under starter"
         if event == "Stop":
             return None if "at" in load("turn-ended.json") else "no turn-ended.json"
         if event == "StopFailure":
@@ -718,6 +717,20 @@ class Proof:
         except Exception as e:      # noqa: BLE001
             self.row(name, False, "%s: %s" % (type(e).__name__, str(e)[:160]))
 
+    def discipline(self):
+        """Packet st1-starter, C3: a session that names `frontier` (the launch's profile)
+        still has its automatic compaction blocked; what is wrong, as `events`."""
+        extra = {"CLAUDE_SESSION_PROFILE": "frontier"}
+        r = self.hook("SessionStart", "framed", extra)
+        if r.returncode != 0 or "profile 'frontier'" not in r.stdout:
+            return ["frontier SessionStart exit %d" % r.returncode]
+        r = self.hook("PreCompact", "framed", extra, {"trigger": "auto"})
+        try:
+            ok = r.returncode == 0 and json.loads(r.stdout)["decision"] == "block"
+        except (ValueError, KeyError, TypeError):
+            ok = False
+        return [] if ok else ["frontier PreCompact: no block on an automatic compaction"]
+
     def swallowed(self):
         """What `dispatch` has swallowed so far, by the mock's runner's record."""
         try:
@@ -728,6 +741,7 @@ class Proof:
 
     def ten_events(self):
         wrong = self.events("first")
+        wrong += self.discipline()
         self.first_pyc = self.pyc_count()
         wrong += self.failing_tool()
         wrong += self.swallowed()
