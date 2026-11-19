@@ -452,7 +452,10 @@ def _spawn_rule(payload: dict, env) -> str | None:
     """The one line that denies this spawn, else None. Packet wfd: every Workflow call is
     denied, first and unconditionally, its call unread (no script, no path, no name), so the
     rule cannot raise and cannot fail open. Packet wfg R5: a Fable helper on Agent or Task
-    starts only under a Fable session, and an unknown session model denies it."""
+    starts only under a Fable session, and an unknown session model denies it. Packet h6
+    R1: under a session of a family `tiers.ORDER` ranks, a helper of a family above it is
+    denied too; a session not known, or of no ranked family, denies a Fable helper alone."""
+    from . import tiers
     tool = payload.get("tool_name")
     if tool == "Workflow":
         return WORKFLOW_DENY
@@ -464,9 +467,18 @@ def _spawn_rule(payload: dict, env) -> str | None:
     named = isinstance(model, str) and bool(model)      # h5 R1: the call outranks the file
     if not named:
         model = _agent_model(ti, payload, env)
-    if workflowguard.family(model) != "fable":
+    helper = workflowguard.family(model)
+    if helper not in tiers.ORDER:                       # h6 R2: no family passes
         return None
     parent = _session_family(payload, env)
+    if helper != "fable":                               # h6 R1, R3: another family's line
+        if parent not in tiers.ORDER or tiers.ORDER.index(helper) >= tiers.ORDER.index(parent):
+            return None
+        names = (f"the call names {_token(model)}" if named else
+                 f"agent type {_token(ti.get('subagent_type'))} names {_token(model)}")
+        return ("agentik-session: a helper starts only at or below its session's family: "
+                f"this one runs {parent}, and {names}, family {helper}. "
+                f"Name model: '{parent}' on the call.")
     if parent == "fable":
         return None
     runs = MODEL_UNKNOWN if parent is None else f"this one runs {parent}"
