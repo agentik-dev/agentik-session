@@ -15,13 +15,14 @@
 - [x] The failing tests, `tests/test_pl2_line_dynamic.py`: 49 of 62 red at the pin (the 10,000-tag scan 5.5 s)
 - [x] R1 to R6: `band_line`, `_line_none`, `_mix_resets`, `week_left`, `ceiling_word`; `admissionLine`, `mixPart`, `lineNone`, `weekLeft`; `status`; band.json's `week_resets` written in `band()`; PL2_CASES in the module's tests; pinned lines changed in test_band, test_bands, test_s53, test_window_mode, test_pl1_prompt_line and the module's fixtures; the runbook, the skill. Full suite under `.venv`: 5261 green, red only R7's six and the README's count (the stamp's)
 - [x] R7: the refusal's words, the linear notice scan (`_blocks`, 10,000 open tags in 200 KB well under 0.5 s), the respawn line at PostToolUse (`_ran_unconfirmed`, `_with_respawn`, `_post_meter`); the runbook and the skill; NICE n344, n345. rc1, rc2, hooks, hook_meter, chain green, unedited
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: job `20261120-063511-2785`, exit 0; alpha.144 to alpha.145, the count 5207 to 5269; n289 moved to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: the packet's §4.
 - NICE is past its 24,576 B bound with n344, n345: `make stamp` moves the oldest S4 rows, as at rc2.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+`make check` through the gate.
 
 ## Exit

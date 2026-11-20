@@ -147,6 +147,7 @@ Open S4 rows moved out of `NICE_TO_HAVE.md` when it passed recordlint's 24,576 B
 | n285 | S4 | `claude_session/measure.py` | `measure` does not measure what the installed skills' descriptions cost a turn, nor how often each skill is invoked | by reading: no skill in `measure` | 2026-11-17, g10's brief, R8 |
 | n287 | S4 | `claude_session/lineguard.py` | A command word the shell expands is not read: `G=git; $G push`, `T=agentik; $T session gate publish` and zsh's `=git push` pass the push rule | review 1 of g10, F4 | 2026-11-17, g10 build 2 |
 | n288 | S4 | `claude_session/lineguard.py` | A git alias is not followed: `git -c alias.p=push p` and `git config alias.p push && git p` pass the push rule; lead: a helper's `alias.<x>` whose value holds a push word refuses | review 1 of g10, F6 | 2026-11-17, g10 build 2 |
+| n289 | S4 | `claude_session/shellreader.py` | Text a shell runs that is neither a `Cmd` nor unread passes the push rule: `trap 'git push' EXIT`, `bash <(echo git push)`, `sh /dev/stdin <<< 'git push'`, `fish -c 'git push'`; so does unread text with quotes in the words: `eval '\git push'`, `eval 'agentik session gate "publish"'` | review 1 of g10, F8 | 2026-11-17, g10 build 2 |
 
 ## Borrowed from [tokendoctor](https://github.com/rsaryev/tokendoctor) by rsaryev (MIT), read at 07955d5
 
