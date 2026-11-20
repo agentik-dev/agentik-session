@@ -370,8 +370,11 @@ def _waiting(b):
     return out
 
 
-def _hold(b, paths, tid="toolu_gc1_held"):
-    instructionguard.hold({"session_id": SID, "tool_use_id": tid}, b.env, paths)
+def _hold(b, paths):
+    instructionguard._hold(_said_dir(b), paths)
+
+
+OWN = "1700000000000000000-1-0.said"            # brief 4 J2: a name the check gives a waiting file
 
 
 @pytest.fixture
@@ -447,7 +450,7 @@ def test_f2_a_handler_that_leaves_no_room_waits_then_one_post_says_it(gb, monkey
 def test_f1_a_corrupt_waiting_record_loses_no_change(gb, record):
     folder = _said_dir(gb)
     folder.mkdir(parents=True)
-    (folder / "planted.said").write_bytes(record)
+    (folder / OWN).write_bytes(record)
     _, out = _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text("c\n"))
     assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
     rows = [(r["decision"], bool(r["why"])) for r in _log(gb)]
@@ -459,7 +462,7 @@ def test_f1_corrupt_records_one_after_another_each_say_their_change(gb):
     folder = _said_dir(gb)
     for i, record in enumerate([b'{"paths": 5}', b'"a string"', b'\x00\x01\x02']):
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "planted.said").write_bytes(record)
+        (folder / OWN).write_bytes(record)
         _, out = _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text(f"{i}\n"),
                       tid=f"toolu_f1_{i}")
         assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
@@ -653,7 +656,7 @@ def test_h2_eight_processes_of_25_posts_say_every_change(gb):
 def _plant(b, shape):
     d = _said_dir(b)
     d.mkdir(parents=True, exist_ok=True)
-    at = d / "planted.said"
+    at = d / OWN
     big = b.tmp / "big.bin"
     big.write_bytes(b"a" * (2 << 20))
     if shape == "a directory":
@@ -670,23 +673,27 @@ def _plant(b, shape):
     return at
 
 
-@pytest.mark.parametrize("shape", ["a directory", "a FIFO", "a dangling link", "a link to 2 MiB",
-                                   "2 MiB", "garbage", "paths 5", "a string"])
+NOT_REGULAR = ("a directory", "a FIFO", "a dangling link", "a link to 2 MiB")
+
+
+@pytest.mark.parametrize("shape", [*NOT_REGULAR, "2 MiB", "garbage", "paths 5", "a string"])
 def test_h3_a_bad_waiting_entry_never_blocks_the_next_change(gb, shape):
-    """Acceptance 3: the next change is said at its own Post within half a second, and the log
-    gains one guard error; the entry is gone, and a later Post logs no more."""
+    """Acceptance 3: the next change is said at its own Post within half a second. A regular
+    file of the check's own naming that is bad is one guard error and gone; an entry that is
+    no regular file is left as it is and logged never (brief 4 J2). A later Post logs no more."""
     at = _plant(gb, shape)
     try:
         p = _changed(gb, "toolu_h3")
         out, took = _bounded(lambda: hooks.post_tool_use(p, gb.env))
         assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md")) and took < 0.5
         rows = _log(gb)
-        assert sorted(r["decision"] for r in rows) == ["changed", "open"]
-        assert [r["why"] for r in rows if r["decision"] == "open"][0]
-        assert not os.path.lexists(at) and (gb.tmp / "big.bin").exists()
+        bad = shape not in NOT_REGULAR
+        assert sorted(r["decision"] for r in rows) == ["changed"] + ["open"] * bad
+        assert all(r["why"] for r in rows if r["decision"] == "open")
+        assert os.path.lexists(at) != bad and (gb.tmp / "big.bin").exists()
         _bounded(lambda: hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h3_n")),
                                              gb.env))
-        assert len(_log(gb)) == 2 and _said_files(gb) == []
+        assert len(_log(gb)) == 1 + bad and _said_files(gb) == ([] if bad else [OWN])
     finally:
         if os.path.lexists(at) and not os.path.isdir(at):
             os.remove(at)
@@ -695,12 +702,14 @@ def test_h3_a_bad_waiting_entry_never_blocks_the_next_change(gb, shape):
 def test_h3_a_temp_older_than_a_minute_is_removed(gb):
     d = _said_dir(gb)
     d.mkdir(parents=True)
-    for name in (".old.said.1.tmp", ".young.said.1.tmp"):
+    old, young, other = f".{OWN}.1.tmp", f".{OWN}.2.tmp", ".old.said.1.tmp"
+    for name in (old, young, other):
         (d / name).write_text("{")
     then = time.time() - 120
-    os.utime(d / ".old.said.1.tmp", (then, then))
+    for name in (old, other):
+        os.utime(d / name, (then, then))
     hooks.post_tool_use(_changed(gb, "toolu_h3_t"), gb.env)
-    assert _said_files(gb) == [".young.said.1.tmp"] and _log(gb)[-1]["decision"] == "changed"
+    assert _said_files(gb) == sorted([young, other]) and _log(gb)[-1]["decision"] == "changed"
 
 
 def test_h2_one_saying_reads_at_most_256_entries(gb):
@@ -789,3 +798,134 @@ def test_h6_a_control_character_in_a_drawn_path_is_a_question_mark(gb):
     model, owner = _said(out)
     assert owner == OWNER.format("/made-up/a?b?c/CLAUDE.md") and "?b?c" in model
     assert not any(c in model + owner for c in "\n\x1b") and len(json.dumps(out)) <= PAIR
+
+
+# ---- brief 4, the fix of review 3: a call's paths split; only its own files; no folder no use --
+
+def _posts(b, n, tag):
+    """`n` main-thread Posts of a line the gate reads, each's owner line."""
+    return [_said(hooks.post_tool_use(_post(_bash("ls", b.repo, tid=f"toolu_{tag}{i}")),
+                                      b.env))[1] for i in range(n)]
+
+
+def _kept(folder):
+    """Each entry's name, kind, bytes and mtime, unfollowed: what a test asserts untouched."""
+    out = {}
+    for name in sorted(os.listdir(folder)):
+        st = os.lstat(folder / name)
+        body = (folder / name).read_bytes() if os.path.isfile(folder / name) else None
+        out[name] = (st.st_mode, st.st_mtime_ns, body)
+    return out
+
+
+def test_j1_sixty_three_paths_past_64_kib_are_said_at_their_own_post(gb):
+    """Acceptance 1 (review 3's B1): one unread line changes 63 gated files whose paths make
+    more than 64 KiB of JSON; its own Post says the first and `(+62 more)`; nothing waits."""
+    deep = os.path.join(*(['"' * 100 + "d" * 150] * 3))
+    (gb.repo / deep).mkdir(parents=True)
+    names = [f"{deep}/f{i:02d}.md" for i in range(63)]
+    (gb.repo / ".claude" / "edit-gates").write_text("".join(n + "\n" for n in names))
+    (gb.home / ".claude" / "edit-gates").unlink()      # the list and its 63 make RECORD_CAP
+    for n in names:
+        (gb.repo / n).write_text("x\n")
+    real = [os.path.realpath(gb.repo / n) for n in names]
+    assert len(json.dumps({"paths": real}, ensure_ascii=False).encode()) > instructionguard.SAID_CAP
+    _, out = _run(gb, UNREAD, lambda: [(gb.repo / n).write_text("y\n") for n in names])
+    model, owner = _said(out)
+    assert _names(owner, sorted(real)[0], 62) and "(+62 more)" in model
+    assert {r["decision"] for r in _log(gb)} == {"changed"}    # as many as LOG_CAP holds
+    assert _said_files(gb) == [] and _posts(gb, 2, "j1_") == ["", ""]
+
+
+def test_j2_fifteen_hundred_folders_hide_no_change_and_are_never_touched(gb):
+    """Acceptance 2 (B3): 1500 non-empty folders and 20 held changes; one Post with room says
+    all 20; no folder is touched; five more Posts grow the log by 0 bytes."""
+    d = _said_dir(gb)
+    d.mkdir(parents=True)
+    for i in range(1500):                        # half of them named as a waiting file would be
+        f = d / (f"1-1-{i}.said" if i % 2 else f"dir{i:04d}")
+        f.mkdir()
+        (f / "inside").write_text("kept\n")
+    paths = [str(gb.tmp / f"c{i:02d}" / "CLAUDE.md") for i in range(20)]
+    for p in paths:
+        _hold(gb, [p])
+    before = _kept(d)
+    first = _said(hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_j2_0")), gb.env))[1]
+    assert _names(first, sorted(paths)[0], 19)
+    log = _sdir(gb) / instructionguard.LOG
+    size = log.stat().st_size if log.exists() else 0
+    assert _posts(gb, 5, "j2_") == [""] * 5
+    assert (log.stat().st_size if log.exists() else 0) == size == 0
+    kept = _kept(d)
+    assert len(kept) == 1500 and all(kept[k] == before[k] for k in kept)
+    assert all((d / k / "inside").read_text() == "kept\n" for k in kept)
+
+
+def _user_folder(b):
+    """A user's folder of three files: a note, one named as a waiting file would be (whose
+    path the check would say), and an old temp of the check's own naming."""
+    u = b.tmp / "user-folder"
+    u.mkdir()
+    (u / "notes.txt").write_text("mine\n")
+    (u / OWN).write_text(json.dumps({"paths": ["/made-up/elsewhere/CLAUDE.md"]}))
+    (u / f".{OWN}.1.tmp").write_text("{")
+    then = time.time() - 3 * 86400
+    for name in os.listdir(u):
+        os.utime(u / name, (then, then))
+    return u
+
+
+def test_j3_a_waiting_folder_that_is_a_link_is_never_used(gb):
+    """Acceptance 3 (L1): `guard-said` a link to a user's folder: after a Pre, a Post that
+    finds a change and five more Posts, the folder's three files keep their bytes and mtimes;
+    the change is said at its own Post; one guard error, not six."""
+    u = _user_folder(gb)
+    before = _kept(u)
+    _sdir(gb).mkdir(parents=True, exist_ok=True)
+    _said_dir(gb).symlink_to(u)
+    _, out = _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text("j3\n"))
+    assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
+    assert _posts(gb, 5, "j3_") == [""] * 5
+    assert _kept(u) == before and _said_dir(gb).is_symlink()
+    rows = [(r["decision"], r["why"]) for r in _log(gb)]
+    assert [d for d, _ in rows] == ["changed", "open"] and "guard-said" in rows[1][1]
+
+
+@pytest.mark.parametrize("shape", ["a link", "a file"])
+def test_j3_an_open_folder_that_is_no_folder_is_never_used(gb, shape):
+    """J3: `guard-open` a link to a user's folder, or a file: three unread lines write, read
+    and remove nothing there; one guard error for the session."""
+    _sdir(gb).mkdir(parents=True, exist_ok=True)
+    at = _sdir(gb) / instructionguard.OPEN_DIR
+    if shape == "a link":
+        u = _user_folder(gb)
+        (u / "toolu_gc1_0001.json").write_text("{}")
+        os.utime(u / "toolu_gc1_0001.json", (time.time() - 3 * 86400,) * 2)
+        at.symlink_to(u)
+        kept = lambda: _kept(u)                 # noqa: E731
+    else:
+        at.write_text("a file\n")
+        kept = lambda: _kept(_sdir(gb))[instructionguard.OPEN_DIR]     # noqa: E731
+    before = kept()
+    for i in range(3):
+        _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text(f"{i}\n"), tid=f"toolu_j3o{i}")
+    assert kept() == before and os.path.lexists(at)
+    assert [(r["decision"], "guard-open" in (r["why"] or "")) for r in _log(gb)] == [("open", True)]
+
+
+def test_j2_a_note_and_a_folder_stay_and_garbage_of_its_own_name_goes(gb):
+    """Acceptance 4: in a real waiting folder `notes.txt` and a folder named as a waiting file
+    stay, untouched and never logged, through ten sayings; a regular file of the check's own
+    naming that holds garbage is removed with one guard error."""
+    d = _said_dir(gb)
+    d.mkdir(parents=True)
+    (d / "notes.txt").write_text("mine\n")
+    (d / "1-1-1.said").mkdir()
+    keep = _kept(d)
+    (d / OWN).write_bytes(b"\xff garbage {")
+    for i in range(10):
+        out = hooks.post_tool_use(_changed(gb, f"toolu_j2n{i}"), gb.env)
+        assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
+    assert _kept(d) == keep
+    rows = [r["decision"] for r in _log(gb)]
+    assert rows.count("open") == 1 and rows.count("changed") == 10

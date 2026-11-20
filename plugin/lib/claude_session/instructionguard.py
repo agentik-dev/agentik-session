@@ -558,6 +558,9 @@ SAID_LOOK = 4 * SAID_READ                 # H2: the entries one saying looks at,
 SAID_CAP = 65536                          # H2: a waiting file's bytes, at most
 TEMP_AGE = 60                             # H3: a waiting folder's temp older than this goes
 _SEQ = itertools.count()                  # H1: a waiting file's name, unique to this process
+_OWN = re.compile(r"[0-9]+-[0-9]+-[0-9]+\.said\Z")              # J2: the names the check gives
+_OWN_TEMP = re.compile(r"\.[0-9]+-[0-9]+-[0-9]+\.said\.[0-9]+\.tmp\Z")
+UNFIT = ".unfit"                          # J3: beside a folder that is no folder, once logged
 SAID = ("agentik-session: {shown} is gated and changed during a Bash line the gate could not "
         "read. If that line ran the lane, nothing is wrong. Otherwise restore it and use the "
         "instruct skill.")
@@ -682,7 +685,7 @@ def before(payload: dict, env, cwd) -> None:
     if tid is None or folder is None:
         return
     names = _in_force(cwd, env)
-    if names:
+    if names and _fit(folder, payload, env):
         _write_record(folder, tid + ".json", {"at": time.time(), "cwd": cwd,
                                               "files": [[p, _reading(p)] for p in names]})
 
@@ -713,6 +716,36 @@ def _small(path, cap: int) -> tuple:
         return None, type(e).__name__
     finally:
         os.close(fd)
+
+
+def _fit(folder: Path, payload: dict, env) -> bool:
+    """J3: whether `folder` may be used: a real folder by `lstat`, or nothing yet (made when
+    written). Anything else, a link to a folder included, is never listed, read, written or
+    removed, and is one guard error a session: logged by the hook that makes the marker
+    `<folder>.unfit` beside it."""
+    try:
+        if stat.S_ISDIR(os.lstat(folder).st_mode):
+            return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        pass
+    try:
+        os.close(os.open(str(folder) + UNFIT,
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
+    except FileExistsError:
+        return False
+    except OSError:
+        pass
+    log(payload, env, "open", None, why=f"{folder.name} is no folder")
+    return False
+
+
+def _remove(path) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _drop(path) -> None:
@@ -760,41 +793,49 @@ class Waiting(list):
     files: tuple = ()
 
 
-def _said_dir(payload: dict, env) -> Path | None:
-    folder = _open_dir(payload, env)
-    return None if folder is None else folder.parent / SAID_DIR
-
-
 def _hold(folder: Path, paths: list) -> None:
-    """H1: `paths`, one change, as its own waiting file, written once by rename. Raises."""
-    name = f"{time.time_ns()}-{os.getpid()}-{next(_SEQ)}.said"
-    _write_record(folder, name, {"paths": list(paths)}, prune=False)
+    """H1: `paths`, one change, as its own waiting files, each written once by rename; J1: as
+    many files as it takes for each to stay within SAID_CAP, so no path is dropped for size.
+    Raises."""
+    chunks, size = [[]], len(b'{"paths": []}')
+    for p in paths:
+        n = len(json.dumps(p, ensure_ascii=False).encode()) + 2
+        if chunks[-1] and size + n > SAID_CAP:
+            chunks.append([])
+            size = len(b'{"paths": []}')
+        chunks[-1].append(p)
+        size += n
+    for chunk in chunks:
+        name = f"{time.time_ns()}-{os.getpid()}-{next(_SEQ)}.said"
+        _write_record(folder, name, {"paths": chunk}, prune=False)
 
 
 def post(payload: dict, env, take: bool = True) -> list:
     """R2 at a Post: the Bash call's changes logged, then each call's held as its own waiting
     file before anything else (H1). When `take` and the payload is the main thread's, the
     paths that wait (a `Waiting`), still held: `taken` lets their files go once they are in an
-    output (H2). A change that cannot be held is a guard error and is said here (H5). Never
-    raises: a failure is a guard error."""
+    output (H2). A change that cannot be held is a guard error and is said here (H5); a folder
+    that is no folder is not used (J3). Never raises: a failure is a guard error."""
     try:
         bash = payload.get("tool_name") == "Bash"
         take = take and not payload.get("agent_id")
         folder = _open_dir(payload, env)
         if folder is None or not (bash or take):
             return []
-        tid = _call_id(payload)
-        changed = _compare(payload, env, folder / (tid + ".json")) if bash and tid else []
-        stray: list = []
-        if changed:
+        tid, said_dir = _call_id(payload), folder.parent / SAID_DIR
+        changed = (_compare(payload, env, folder / (tid + ".json"))
+                   if bash and tid and _fit(folder, payload, env) else [])
+        fit = _fit(said_dir, payload, env)
+        stray: list = [] if fit else changed
+        if changed and fit:
             try:
-                _hold(folder.parent / SAID_DIR, changed)
+                _hold(said_dir, changed)
             except Exception as e:                      # noqa: BLE001 - H5
                 log(payload, env, "open", None, why=type(e).__name__)
                 stray = changed
         if not take:
             return []
-        out = _waiting(folder.parent / SAID_DIR, payload, env)
+        out = _waiting(said_dir, payload, env) if fit else Waiting()
         out.extend(p for p in stray if p not in out)
         return out
     except Exception as e:                              # noqa: BLE001 - never a failed hook
@@ -803,11 +844,11 @@ def post(payload: dict, env, take: bool = True) -> list:
 
 
 def _entry(path, payload: dict, env) -> list | None:
-    """H2, H3: one waiting file's paths, read strictly: only `{"paths": [str, ...]}` is one.
-    Anything else is one guard error and is removed where it can be; None. None, silently,
-    where it went (another hook took it)."""
+    """H2, J2: one waiting file's paths, read strictly: only `{"paths": [str, ...]}` is one.
+    A regular file that is anything else is one guard error and is removed; None. None,
+    silently, where it went (another hook took it) or is no longer a regular file."""
     raw, why = _small(path, SAID_CAP)
-    if raw is None and why is None:
+    if raw is None and why in (None, "a link", "no regular file"):
         return None
     if raw is not None:
         try:
@@ -819,29 +860,38 @@ def _entry(path, payload: dict, env) -> list | None:
         except ValueError as e:                         # no JSON; no UTF-8
             why = type(e).__name__
     log(payload, env, "open", None, why=f"a bad waiting entry: {why}")
-    _drop(path)
+    _remove(path)
     return None
 
 
 def _waiting(folder: Path, payload: dict, env) -> Waiting:
     """H2: the paths of at most SAID_READ waiting files, and those files; a temp older than
-    TEMP_AGE removed on the way (H3). Nothing in the folder can make it wait or raise."""
+    TEMP_AGE removed on the way. J2: only a regular file (by `lstat`) of the check's own
+    naming is looked at, read, counted or removed; every other entry is left as it is, not
+    logged. Nothing in the folder can make it wait or raise."""
     out, files = Waiting(), []
     try:
         listing = os.scandir(folder)
     except OSError:
         return out
-    now, read = time.time(), 0
+    now, looked, read = time.time(), 0, 0
     with listing:
-        for looked, e in enumerate(listing):
+        for e in listing:
             if looked >= SAID_LOOK or read >= SAID_READ:
                 break
-            if e.name.startswith(".") and e.name.endswith(".tmp"):
-                try:
-                    if e.stat(follow_symlinks=False).st_mtime < now - TEMP_AGE:
-                        _drop(e.path)
-                except OSError:
-                    pass
+            temp = _OWN_TEMP.match(e.name)
+            if not (temp or _OWN.match(e.name)):
+                continue
+            looked += 1
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if temp:
+                if st.st_mtime < now - TEMP_AGE:
+                    _remove(e.path)
                 continue
             read += 1
             paths = _entry(e.path, payload, env)
@@ -855,16 +905,6 @@ def _waiting(folder: Path, payload: dict, env) -> Waiting:
 def waiting(payload: dict, env) -> list:
     """The paths that wait to be said, for the main thread's UserPromptSubmit; still held."""
     return post({**payload, "tool_name": None}, env)
-
-
-def hold(payload: dict, env, paths: list) -> None:
-    """H1: paths held as one waiting file. Never raises: a failure is a guard error."""
-    try:
-        folder = _said_dir(payload, env)
-        if folder is not None and paths:
-            _hold(folder, paths)
-    except Exception as e:                              # noqa: BLE001
-        log(payload, env, "open", None, why=type(e).__name__)
 
 
 def taken(payload: dict, env, paths) -> None:

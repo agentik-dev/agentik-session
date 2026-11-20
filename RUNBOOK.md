@@ -155,8 +155,9 @@ changed, appeared or went is one `changed` line in `guard.jsonl`, and one line t
 and the owner names it: if the line ran the lane nothing is wrong, else restore the file and use
 the skill. A change seen at a failure, or in a helper, is said at the main thread's next
 PostToolUse or prompt; till then it waits as its own small file in
-`sessions/<sid>/guard-said/`, and a file there that is no such record is one guard error and
-is removed. It never blocks and never restores. A `cd` or `pushd` inside `( ... )` ends at the `)` (a quoted or backslashed paren,
+`sessions/<sid>/guard-said/`. A file there of its own naming that is no such record is one guard
+error and is removed; anything else there is left as it is, and either folder, where it is a
+link or no folder, is not used (one guard error a session). It never blocks and never restores. A `cd` or `pushd` inside `( ... )` ends at the `)` (a quoted or backslashed paren,
 and a `case` pattern's, is no subshell's edge), and `popd` returns to its `pushd`'s folder; a `cd` or `popd` it cannot read leaves the folder unknown, and a relative target after it
 passes the same way. A path matches by its absolute
 and its real spelling, in any case where the volume folds case.
