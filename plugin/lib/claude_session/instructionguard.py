@@ -51,6 +51,7 @@ process is spawned and no launch line is read.
 """
 from __future__ import annotations
 
+import fcntl
 import fnmatch
 import hashlib
 import json
@@ -550,9 +551,13 @@ RECORD_CAP = 64                           # files read before one line, at most
 BIG = 1 << 20                             # past this a file is read by its size and mtime
 LEFTOVER = 86400                          # R4: a call's file older than this is removed
 RETIRED = ("the line cannot be split", "a target cannot be resolved")   # R5: old logs' reasons
-SAID = ("agentik-session: {paths} {verb} gated and changed during a Bash line the gate could "
-        "not read. If that line ran the lane, nothing is wrong. Otherwise restore {it} and use "
-        "the instruct skill.")
+WAITING = "waiting.said"                  # brief 2 F1: a session's changes not yet said
+SAID = ("agentik-session: {shown} is gated and changed during a Bash line the gate could not "
+        "read. If that line ran the lane, nothing is wrong. Otherwise restore it and use the "
+        "instruct skill.")
+SAID_OWNER = "agentik-session: a gated file changed during a Bash line the gate could not read: {shown}"
+PAIR_CAP = 480                            # F2: the pair beside an empty output, in JSON bytes
+DRAWN = 48                                # F2: a longer path is `…` and its last DRAWN - 1
 
 
 def _in_force(cwd, env) -> list:
@@ -665,17 +670,6 @@ def before(payload: dict, env, cwd) -> None:
                                               "files": [[p, _reading(p)] for p in names]})
 
 
-def _shown(path: str, cwd, env) -> str:
-    """A path as the said line names it: relative under the call's folder, `~/` under the home
-    folder, else whole."""
-    if isinstance(cwd, str) and cwd and path.startswith(cwd.rstrip("/") + "/"):
-        return path[len(cwd.rstrip("/")) + 1:]
-    home = _home(env).rstrip("/")
-    if home and path.startswith(home + "/"):
-        return "~/" + path[len(home) + 1:]
-    return path
-
-
 def _rmdir(folder: Path) -> None:
     try:
         os.rmdir(folder)                  # empty: the next Post's read is one failed call
@@ -685,7 +679,7 @@ def _rmdir(folder: Path) -> None:
 
 def _compare(payload: dict, env, path: Path) -> list:
     """R2: the call's file claimed (removed), its files read again; each change one `changed`
-    line. The changed paths as said."""
+    line. The changed files' real paths (F3), one a file however it was spelled."""
     try:
         with open(path, "rb") as f:
             raw = f.read(1 << 20)
@@ -696,84 +690,149 @@ def _compare(payload: dict, env, path: Path) -> list:
         doc = json.loads(raw)
     except ValueError:
         return []
-    cwd = doc.get("cwd") if isinstance(doc, dict) else None
-    out = []
+    out: list = []
     for row in (doc.get("files") if isinstance(doc, dict) else None) or []:
         if not (isinstance(row, list) and len(row) == 2 and isinstance(row[0], str)):
             continue
-        if _reading(row[0]) != row[1]:
-            log(payload, env, "changed", row[0], call=_call_id(payload))
-            out.append(_shown(row[0], cwd, env))
+        real = os.path.realpath(row[0])
+        if real not in out and _reading(row[0]) != row[1]:
+            log(payload, env, "changed", real, call=_call_id(payload))
+            out.append(real)
     return out
 
 
-def post(payload: dict, env, take: bool = True) -> tuple:
-    """R2 and R3 at a Post: (the paths this Bash call changed, the paths that wait to be said,
-    taken when `take` and the payload is the main thread's), each as said. No folder, one
-    failed call. Never raises."""
+def post(payload: dict, env, take: bool = True) -> list:
+    """R2 at a Post: the Bash call's changes logged, then held in the waiting record before
+    anything else (F1). The paths that wait to be said when `take` and the payload is the main
+    thread's, still held: `taken` lets them go once they are in an output. No folder, one
+    failed call. Never raises: a failure is a guard error."""
     try:
         bash = payload.get("tool_name") == "Bash"
         take = take and not payload.get("agent_id")
         folder = _open_dir(payload, env)
         if folder is None or not (bash or take):
-            return [], []
+            return []
         try:
             names = os.listdir(folder)
         except OSError:
-            return [], []
+            return []
         tid = _call_id(payload)
         changed = (_compare(payload, env, folder / (tid + ".json"))
                    if bash and tid and tid + ".json" in names else [])
-        waiting = _take(folder, names) if take else []
-        _rmdir(folder)
-        return changed, waiting
-    except Exception:                                   # noqa: BLE001 - never a failed hook
-        return [], []
+        waiting = (_mutate(payload, env, folder, changed, ()) if changed or
+                   (take and WAITING in names) else [])
+        if not waiting:
+            _rmdir(folder)
+        return waiting if take else []
+    except Exception as e:                              # noqa: BLE001 - never a failed hook
+        log(payload, env, "open", None, why=type(e).__name__)
+        return []
 
 
-def _take(folder: Path, names: list) -> list:
-    out = []
-    for name in sorted(names):
-        if name.startswith(".") or not name.endswith(".said"):
+def _waiting(folder: Path, payload: dict, env) -> list:
+    """F1: the waiting record's paths, read strictly: only `{"paths": [str, ...]}` is a
+    record. A corrupt one is removed, one guard error, and read as empty."""
+    try:
+        with open(folder / WAITING, "rb") as f:
+            raw = f.read(1 << 20)
+        doc = json.loads(raw)
+        paths = doc.get("paths") if isinstance(doc, dict) else None
+        if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
+            return paths
+        why = "TypeError"
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as e:     # a folder in its place; no JSON; no UTF-8
+        why = type(e).__name__
+    log(payload, env, "open", None, why=f"a corrupt waiting record: {why}")
+    try:
+        os.remove(folder / WAITING)
+    except OSError:
+        pass
+    return []
+
+
+def _mutate(payload: dict, env, folder: Path, add, drop) -> list:
+    """F1: the waiting record with `add` joined and `drop` taken out, under a lock on the
+    folder, written by replace only when its set changes. The set after. Raises on a failed
+    write."""
+    for again in (False, True):
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            fd = os.open(str(folder), os.O_RDONLY)
+        except FileNotFoundError:         # another Post removed it, empty, between the two
+            if again:
+                raise
             continue
         try:
-            with open(folder / name, "rb") as f:
-                raw = f.read(1 << 20)
-            os.remove(folder / name)      # the one that removes it says it: never twice
-        except OSError:
-            continue
-        try:
-            paths = json.loads(raw).get("paths")
-        except (ValueError, AttributeError):
-            continue
-        out += [p for p in paths or [] if isinstance(p, str)]
-    return out
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            was = _waiting(folder, payload, env)
+            gone = set(drop)
+            now = [p for p in dict.fromkeys(was + list(add)) if p not in gone]
+            if now and now != was:
+                _write_record(folder, WAITING, {"paths": now})
+            elif not now and was:
+                os.remove(folder / WAITING)
+            return now
+        finally:
+            os.close(fd)
+    return []
 
 
-def take(payload: dict, env) -> list:
-    """The paths that wait to be said, taken, for the main thread's UserPromptSubmit."""
-    return post({**payload, "tool_name": None}, env)[1]
+def waiting(payload: dict, env) -> list:
+    """The paths that wait to be said, for the main thread's UserPromptSubmit; still held."""
+    return post({**payload, "tool_name": None}, env)
 
 
 def hold(payload: dict, env, paths: list) -> None:
-    """R3: paths to say at the main thread's next PostToolUse or UserPromptSubmit. Never
-    raises."""
+    """F1: paths joined to the waiting record. Never raises: a failure is a guard error."""
     try:
         folder = _open_dir(payload, env)
-        if folder is None or not paths:
-            return
-        name = f"{_call_id(payload) or 'call'}-{time.time_ns()}-{os.getpid()}.said"
-        _write_record(folder, name, {"paths": list(paths)})
-    except Exception:                                   # noqa: BLE001
-        pass
+        if folder is not None and paths:
+            _mutate(payload, env, folder, paths, ())
+    except Exception as e:                              # noqa: BLE001
+        log(payload, env, "open", None, why=type(e).__name__)
 
 
-def said(paths: list) -> str:
-    """R3's one line, the paths sorted and comma-joined."""
+def taken(payload: dict, env, paths: list) -> None:
+    """F1: paths said, out of the waiting record; the folder goes when empty. Never raises: a
+    failure leaves them to be said again, never lost."""
+    try:
+        folder = _open_dir(payload, env)
+        if folder is not None and paths and not _mutate(payload, env, folder, (), paths):
+            _rmdir(folder)
+    except Exception as e:                              # noqa: BLE001
+        log(payload, env, "open", None, why=type(e).__name__)
+
+
+def _drawn(path: str, env) -> str:
+    """F3: a real path, `~/` under the home; F2: past DRAWN characters, `…` and its tail."""
+    for home in sorted({os.path.realpath(_home(env)), os.path.abspath(_home(env))}, key=len,
+                       reverse=True):
+        home = home.rstrip("/")
+        if home and path.startswith(home + "/"):
+            path = "~/" + path[len(home) + 1:]
+            break
+    return path if len(path) <= DRAWN else "\u2026" + path[1 - DRAWN:]
+
+
+def _pair(model: str, owner: str, event: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": model},
+            "systemMessage": owner}
+
+
+def said(paths: list, env, event: str = "PostToolUse") -> tuple:
+    """F2: (the model's line, the owner's line) for the waiting paths: the first sorted, then
+    `(+N more)`; the drawn path's tail cut until the pair beside `{}` fits PAIR_CAP."""
     paths = sorted(dict.fromkeys(paths))
-    many = len(paths) > 1
-    return SAID.format(paths=", ".join(paths), verb="are" if many else "is",
-                       it="them" if many else "it")
+    more = f" (+{len(paths) - 1} more)" if len(paths) > 1 else ""
+    shown = _drawn(paths[0], env)
+    while True:
+        text = shown + more
+        model, owner = SAID.format(shown=text), SAID_OWNER.format(shown=text)
+        if len(json.dumps(_pair(model, owner, event))) <= PAIR_CAP or len(shown) <= 2:
+            return model, owner
+        shown = "\u2026" + shown[2:]     # one character fewer, the mark kept
 
 
 # ---- the hook ---------------------------------------------------------------------------

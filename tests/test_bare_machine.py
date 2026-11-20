@@ -573,8 +573,9 @@ READERS = {
         "t1.json", {"at": 1.0, "cwd": "/w", "files": [["/nonexistent/gc1/CLAUDE.md", ["absent"]]]},
         lambda m, d: m["instructionguard"]._compare({"session_id": S, "tool_use_id": "t1"},
                                                     _state_env(d), d / "t1.json")),
-    ("instructionguard", "_take"): ("t1.said", {"paths": ["CLAUDE.md"]},   # packet gc1, R3
-                                    lambda m, d: m["instructionguard"]._take(d, ["t1.said"])),
+    ("instructionguard", "_waiting"): ("waiting.said", {"paths": ["/w/CLAUDE.md"]},   # gc1 F1
+                                       lambda m, d: m["instructionguard"]._waiting(
+                                           d, {"session_id": S}, _state_env(d))),
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
     ("ledger", "lines"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},   # packet S54 R4
