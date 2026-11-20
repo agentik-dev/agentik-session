@@ -14,6 +14,6 @@ named paths and nothing else (another writer's staged file stays out), and
 `--commit` with no path is refused.
 
 A RESPAWN close is not marked here: this command makes no tool call, and only a
-main-thread Bash call confirms the mark. Run
-`agentik-session checkpoint --respawn --charter <file>` through Bash as the
-sitting's last act, then end the turn.
+main-thread Bash call run in the foreground confirms the mark (a background one is
+refused). Run `agentik-session checkpoint --respawn --charter <file>` in a
+foreground Bash call of its own as the sitting's last act, then end the turn.

@@ -121,7 +121,8 @@ def test_output_stays_under_max_out_with_a_long_charter(env, tmp_path):
 S33_HEAD = "CHECKPOINT: 80.0% context (144000/180000), 0.2% turns (1/400); charter "
 WIND80 = "; tell the owner you are winding down at the meter's line, at 80.0%"   # packet b1 R5
 S33_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
-            "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
+            "`agentik session checkpoint --respawn --charter {f}` in a foreground call of "
+            "its own and end the turn; "                        # rc1 R4
             "the launcher restarts this sitting" + WIND80)
 NONE_FOUND = "<this sitting's charter>"
 

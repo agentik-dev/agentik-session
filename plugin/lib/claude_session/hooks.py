@@ -1436,7 +1436,8 @@ WIND_DOWN = "; tell the owner you are winding down at the meter's line, at {pct}
 # Packet st1-starter R5: the checkpoint's tail under the waiver (`discipline`), on either road.
 PLAIN_TAIL = "commit what is done, then stop"
 RESPAWN_TAIL = ("bring the charter current with a Next act that opens RESPAWN:, commit, then run "
-                "`agentik session checkpoint --respawn --charter {f}` and end the turn; "
+                "`agentik session checkpoint --respawn --charter {f}` in a foreground call of "
+                "its own and end the turn; "                        # rc1 R4
                 "the launcher restarts this sitting")
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9_./-]+\Z")    # a path the line may put on a command line
 

@@ -104,8 +104,8 @@ Two lines arrive as hook context; act on them, do not argue with them:
   `agentik-session checkpoint`. Tell the owner you are winding down at the meter's
   line, with the percent. The session must be handed off at any moment
   from here. Under `agentik session run`, the sitting runs
-  `agentik session checkpoint --respawn --charter <file> --state <s>` and ends the turn,
-  and the launcher restarts it.
+  `agentik session checkpoint --respawn --charter <file> --state <s>` in a foreground
+  call of its own and ends the turn, and the launcher restarts it.
 - **`EXIT: ...`** at or past 100%: land the act in flight at a checkpoint, then
   exit; respawn, never compact. A RESPAWN close (the charter's Next act opens on
   `RESPAWN`) is marked as the sitting's last act: once the charter is current and
@@ -113,7 +113,10 @@ Two lines arrive as hook context; act on them, do not argue with them:
   write the state file (a title line, then `## Helpers`, `## Gates`, `## Last acts`
   and `## Read first`, each bulleted or `- none`, under 8,192 bytes; see RUNBOOK
   "Restarting a sitting"), run `agentik-session checkpoint --respawn --charter <file>
-  --state <s>` through Bash, then end the turn. The successor's SessionStart line
+  --state <s>` in a foreground Bash call of its own, then end the turn: a background
+  call is refused, since no hook can confirm its mark and the launcher would wait on
+  it. While a mark stands unconfirmed, each prompt says `RESPAWN unconfirmed:` and the
+  band `respawn unconfirmed`: run the close again in the foreground. The successor's SessionStart line
   names the copy: read it first, then the charter's Next act. Its last line says whether a launcher restarts the sitting; without one,
   print your start line and stop. When the restart does not come,
   `agentik session status` names the hold, `respawn held: <reason> since <HH:MM>`:
