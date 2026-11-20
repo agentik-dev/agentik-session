@@ -17,12 +17,15 @@
 - [x] R3: the band's word in `plugin/hooks/session.ts` (`respawnWord`), six cases in `session.test.ts` (run only by the gate's `claude plugin test`); a node probe of the nine marker and confirm cases gives the ruling's word; `test_mod.py`, `test_ss1_zero.py` green
 - [x] R4, R5: the tail (`test_hook_meter.py`'s `S33_TAIL` follows it, that assertion alone), the skill, the command, the runbook; respawn-r1 §3.2 step 5, §3.3, a change log line; the README left (its source is rendered by a model run this wall forbids, and is ten bytes under its cap); 541 green across the tail's pinning files
 - [x] R7: ten NICE rows, n328 to n337; recordlint's size bound waits on `make stamp`'s move
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: jobs `20261120-020219-2760` and `20261120-020333-2761` (after the READERS row), exit 0; alpha.142 to alpha.143, the count 5130 to 5172; n273 to n299's nine oldest S4 rows moved to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
-- (none yet)
+- Choices: the deny sits first in the Bash guards (before the stray-write lineguard), and `run_in_background` counts only when it `is True`; a confirm that does not parse names no bytes, so the line is said, while a confirm that cannot be read (an OSError other than absence) says nothing; the line goes first among the prompt's lines; the band's confirm `at` that is not a number reads unconfirmed, a marker `written` that is not a number reads marked.
+- Existing tests changed: `test_hook_meter.py`'s `S33_TAIL` (the tail's bytes, R4); `test_bare_machine.py`'s READERS gains `_unconfirmed_line` (its own message asks a new reader to join).
+- The README is left: its source is rendered by a model run, which this wall forbids, and stands ten bytes under its cap.
 
 ## Next act
-`make stamp` through the gate, then `make check` through it.
+`make check` through the gate, once, last.
 
 ## Exit
