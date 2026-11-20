@@ -16,7 +16,8 @@
 - [x] H1 to H6: one `guard-said/*.said` a change, by rename; the safe reader; no lock, no rmdir. 56 of 56; gc1, g2b, bare machine, doctor 751 (`.venv`), 748 and 3 skipped (`.venv-floor`)
 - [x] H7: four NICE rows, n359 to n362 (review 2's L1, L5, L6, L9)
 - [x] `make stamp STAMP_VERSION=2.0.0-alpha.148` through the gate: job `20261120-131528-2832`, exit 0; alpha.147 to .148, 5309 to 5327 tests; n312 to n315 to the overflow
-- [ ] `make check` through the gate
+- [x] The first check, job `20261120-131546-2833` on `007080d`: 5327 passed (`.venv`), 5163 and 143 skipped (`.venv-floor`), red only at recordlint (n359 past 400 characters), fixed
+- [ ] `make check` through the gate, again
 
 ## Handover
 - Choices: the packet's §4b.
