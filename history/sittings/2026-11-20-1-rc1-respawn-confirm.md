@@ -15,14 +15,14 @@
 - [x] The failing tests, `tests/test_rc1_respawn_confirm.py`: 29 of 41 red at the pin
 - [x] R1, R2: the deny and the prompt's line in `hooks.py`; 37 of 41 green (the tail's 4 wait on R4); `test_hooks.py`, `test_hook_meter.py`, `test_chain.py`, `test_wfg.py`, `test_h6_every_family.py` green, 244
 - [x] R3: the band's word in `plugin/hooks/session.ts` (`respawnWord`), six cases in `session.test.ts` (run only by the gate's `claude plugin test`); a node probe of the nine marker and confirm cases gives the ruling's word; `test_mod.py`, `test_ss1_zero.py` green
-- [ ] R4, R5: the tail, the skill, the command, the runbook; design respawn-r1
-- [ ] R7: ten NICE rows
+- [x] R4, R5: the tail (`test_hook_meter.py`'s `S33_TAIL` follows it, that assertion alone), the skill, the command, the runbook; respawn-r1 §3.2 step 5, §3.3, a change log line; the README left (its source is rendered by a model run this wall forbids, and is ten bytes under its cap); 541 green across the tail's pinning files
+- [x] R7: ten NICE rows, n328 to n337; recordlint's size bound waits on `make stamp`'s move
 - [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
 - (none yet)
 
 ## Next act
-R4 and R5: the tail, the skill, the command, the runbook; design respawn-r1.
+`make stamp` through the gate, then `make check` through it.
 
 ## Exit
