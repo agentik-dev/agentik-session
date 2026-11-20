@@ -18,13 +18,13 @@
 - [x] `make stamp` through the gate: job `20261120-123120-2824`, exit 0; the count 5295 to 5309, alpha.146 kept; n302, n304, n306, n307, n309, n310, n311 to the overflow
 - [x] The first check, job `20261120-123138-2825` on `37ac625`: 5309 passed (`.venv`), 5145 and 143 skipped (`.venv-floor`), red only at plugin-version-check (the plugin changed after build 1's alpha.146)
 - [x] `make stamp STAMP_VERSION=2.0.0-alpha.147` through the gate: job `20261120-123939-2826`, exit 0
-- [ ] `make check` through the gate, again
+- [x] `make check` through the gate: job `20261120-123956-2827` on `42e4479`, exit 0 in 6 min: 5309 passed (`.venv`), 5145 and 143 skipped (`.venv-floor`), hygiene 0, version check ok, readme fresh
 
 ## Handover
 - Choices: the packet's §4a. The fix round needs its own version: alpha.146 to alpha.147, by the stamp's `STAMP_VERSION`.
 
 ## Next act
-`make check` through the gate.
+None: the fix is built and the check green; review 2 and the landing are the coordinator's.
 
 ## Exit
-Open.
+F1 to F5 built and committed; `make check` green on `42e4479`; this record is the tip's only change after it.
