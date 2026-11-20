@@ -18,7 +18,7 @@
 - [x] R4, R5: the tail (`test_hook_meter.py`'s `S33_TAIL` follows it, that assertion alone), the skill, the command, the runbook; respawn-r1 §3.2 step 5, §3.3, a change log line; the README left (its source is rendered by a model run this wall forbids, and is ten bytes under its cap); 541 green across the tail's pinning files
 - [x] R7: ten NICE rows, n328 to n337; recordlint's size bound waits on `make stamp`'s move
 - [x] `make stamp` through the gate: jobs `20261120-020219-2760` and `20261120-020333-2761` (after the READERS row), exit 0; alpha.142 to alpha.143, the count 5130 to 5172; n273 to n299's nine oldest S4 rows moved to the overflow
-- [ ] `make check` through the gate
+- [x] `make check` through the gate: job `20261120-020352-2762` on `402cf46`, exit 0 in 8 min; 5172 passed (`.venv`), 5008 passed and 143 skipped (`.venv-floor`); the band's six new cases pass under `claude plugin test`; readme fresh; hygiene 0 outside the allowlist
 
 ## Handover
 - Choices: the deny sits first in the Bash guards (before the stray-write lineguard), and `run_in_background` counts only when it `is True`; a confirm that does not parse names no bytes, so the line is said, while a confirm that cannot be read (an OSError other than absence) says nothing; the line goes first among the prompt's lines; the band's confirm `at` that is not a number reads unconfirmed, a marker `written` that is not a number reads marked.
@@ -26,6 +26,7 @@
 - The README is left: its source is rendered by a model run, which this wall forbids, and stands ten bytes under its cap.
 
 ## Next act
-`make check` through the gate, once, last.
+None: the row is built and the check green; the landing is the coordinator's.
 
 ## Exit
+R1 to R7 built and committed; `make check` green on `402cf46`; this record is the tip's only change after it.
