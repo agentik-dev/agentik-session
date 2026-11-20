@@ -1747,7 +1747,7 @@ def post_tool_use(payload: dict, env=None) -> dict:
     the outcome said after it (R3), then the gate's inbox lines, the whole under MAX_OUT
     (S38)."""
     env = os.environ if env is None else env
-    waiting = instructionguard.post(payload, env)     # held on disk first (brief 2 F1)
+    waiting = instructionguard.post(payload, env)     # held on disk first (brief 3 H1)
     out = _with_changed(payload, env, _post_tool_use(payload, env), waiting)
     return _with_gate(out, "PostToolUse", _gate_lines(payload, env, "PostToolUse", out, False,
                                                       line=_line_take(payload, env, out=out)))
@@ -1757,7 +1757,7 @@ def _with_changed(payload: dict, env, out: dict, waiting: list,
                   event: str = "PostToolUse") -> dict:
     """gc1 R3, brief 2 F2: the gated files' changes that wait, said once after the handler's
     own words (the checkpoint and respawn lines keep their place), to the model and in
-    `systemMessage`, where the whole fits MAX_OUT; then taken out of the waiting record (F1).
+    `systemMessage`, where the whole fits MAX_OUT; then their waiting files removed (H2).
     Where it does not fit they wait for the main thread's next PostToolUse or
     UserPromptSubmit."""
     if not waiting or payload.get("agent_id"):

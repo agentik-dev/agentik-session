@@ -51,9 +51,10 @@ process is spawned and no launch line is read.
 """
 from __future__ import annotations
 
-import fcntl
+import errno
 import fnmatch
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -551,7 +552,12 @@ RECORD_CAP = 64                           # files read before one line, at most
 BIG = 1 << 20                             # past this a file is read by its size and mtime
 LEFTOVER = 86400                          # R4: a call's file older than this is removed
 RETIRED = ("the line cannot be split", "a target cannot be resolved")   # R5: old logs' reasons
-WAITING = "waiting.said"                  # brief 2 F1: a session's changes not yet said
+SAID_DIR = "guard-said"                   # brief 3 H1: sessions/<sid>/guard-said/<name>.said
+SAID_READ = 256                           # H2: the entries one saying reads, at most
+SAID_LOOK = 4 * SAID_READ                 # H2: the entries one saying looks at, temps included
+SAID_CAP = 65536                          # H2: a waiting file's bytes, at most
+TEMP_AGE = 60                             # H3: a waiting folder's temp older than this goes
+_SEQ = itertools.count()                  # H1: a waiting file's name, unique to this process
 SAID = ("agentik-session: {shown} is gated and changed during a Bash line the gate could not "
         "read. If that line ran the lane, nothing is wrong. Otherwise restore it and use the "
         "instruct skill.")
@@ -627,7 +633,11 @@ def _open_dir(payload: dict, env) -> Path | None:
 
 def _prune(folder: Path, now: float) -> None:
     """R4: a call's file (or a temp) older than LEFTOVER is removed, unread."""
-    for name in os.listdir(folder):
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
         if name.endswith(".json") or name.endswith(".tmp"):
             try:
                 if os.lstat(folder / name).st_mtime < now - LEFTOVER:
@@ -636,26 +646,33 @@ def _prune(folder: Path, now: float) -> None:
                 pass
 
 
-def _write_record(folder: Path, name: str, doc: dict) -> None:
-    """`folder/name` written whole (0600, the folder 0700), after the leftovers' prune; once
-    more where the folder went between the two (a Post removes it when empty)."""
+def _write_record(folder: Path, name: str, doc: dict, prune: bool = True) -> None:
+    """`folder/name` written whole by rename from a temp in the folder (0600, the folder 0700,
+    made with its parents), after the leftovers' prune; tried once more, its folder made again,
+    where the first try fails (brief 3 H4). Raises on the second failure."""
     data = json.dumps(doc, ensure_ascii=False).encode()
     for again in (False, True):
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        _prune(folder, time.time())
         tmp = folder / f".{name}.{os.getpid()}.tmp"
         try:
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if prune:
+                _prune(folder, time.time())
             fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        except FileNotFoundError:
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+            finally:
+                os.close(fd)
+            os.replace(tmp, folder / name)
+            return
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
             if again:
                 raise
-            continue
-        try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
-        os.replace(tmp, folder / name)
-        return
 
 
 def before(payload: dict, env, cwd) -> None:
@@ -670,9 +687,42 @@ def before(payload: dict, env, cwd) -> None:
                                               "files": [[p, _reading(p)] for p in names]})
 
 
-def _rmdir(folder: Path) -> None:
+def _small(path, cap: int) -> tuple:
+    """(bytes, None) for a regular file of at most `cap` bytes; (None, why) for anything else;
+    (None, None) where nothing is there. Opened so it cannot block and follows no link (H2)."""
     try:
-        os.rmdir(folder)                  # empty: the next Post's read is one failed call
+        fd = os.open(str(path), os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except (FileNotFoundError, NotADirectoryError):
+        return None, None
+    except OSError as e:
+        return None, "a link" if e.errno == errno.ELOOP else type(e).__name__
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None, "no regular file"
+        if st.st_size > cap:
+            return None, "too large"
+        raw = b""
+        while len(raw) <= cap:
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                return raw, None
+            raw += chunk
+        return None, "too large"
+    except OSError as e:
+        return None, type(e).__name__
+    finally:
+        os.close(fd)
+
+
+def _drop(path) -> None:
+    """A bad entry removed where it can be: an empty folder by `rmdir`, else by `remove`; a
+    folder that holds anything stays (no hook removes a tree)."""
+    try:
+        if stat.S_ISDIR(os.lstat(path).st_mode):
+            os.rmdir(path)
+        else:
+            os.remove(path)
     except OSError:
         pass
 
@@ -680,9 +730,12 @@ def _rmdir(folder: Path) -> None:
 def _compare(payload: dict, env, path: Path) -> list:
     """R2: the call's file claimed (removed), its files read again; each change one `changed`
     line. The changed files' real paths (F3), one a file however it was spelled."""
+    raw, why = _small(path, BIG)
+    if raw is None:
+        if why is not None:
+            _drop(path)
+        return []
     try:
-        with open(path, "rb") as f:
-            raw = f.read(1 << 20)
         os.remove(path)
     except OSError:
         return []
@@ -701,82 +754,102 @@ def _compare(payload: dict, env, path: Path) -> list:
     return out
 
 
+class Waiting(list):
+    """The paths that wait to be said, and `files`, the waiting files they were read from: the
+    files `taken` removes once the paths are in an output (H2)."""
+    files: tuple = ()
+
+
+def _said_dir(payload: dict, env) -> Path | None:
+    folder = _open_dir(payload, env)
+    return None if folder is None else folder.parent / SAID_DIR
+
+
+def _hold(folder: Path, paths: list) -> None:
+    """H1: `paths`, one change, as its own waiting file, written once by rename. Raises."""
+    name = f"{time.time_ns()}-{os.getpid()}-{next(_SEQ)}.said"
+    _write_record(folder, name, {"paths": list(paths)}, prune=False)
+
+
 def post(payload: dict, env, take: bool = True) -> list:
-    """R2 at a Post: the Bash call's changes logged, then held in the waiting record before
-    anything else (F1). The paths that wait to be said when `take` and the payload is the main
-    thread's, still held: `taken` lets them go once they are in an output. No folder, one
-    failed call. Never raises: a failure is a guard error."""
+    """R2 at a Post: the Bash call's changes logged, then each call's held as its own waiting
+    file before anything else (H1). When `take` and the payload is the main thread's, the
+    paths that wait (a `Waiting`), still held: `taken` lets their files go once they are in an
+    output (H2). A change that cannot be held is a guard error and is said here (H5). Never
+    raises: a failure is a guard error."""
     try:
         bash = payload.get("tool_name") == "Bash"
         take = take and not payload.get("agent_id")
         folder = _open_dir(payload, env)
         if folder is None or not (bash or take):
             return []
-        try:
-            names = os.listdir(folder)
-        except OSError:
-            return []
         tid = _call_id(payload)
-        changed = (_compare(payload, env, folder / (tid + ".json"))
-                   if bash and tid and tid + ".json" in names else [])
-        waiting = (_mutate(payload, env, folder, changed, ()) if changed or
-                   (take and WAITING in names) else [])
-        if not waiting:
-            _rmdir(folder)
-        return waiting if take else []
+        changed = _compare(payload, env, folder / (tid + ".json")) if bash and tid else []
+        stray: list = []
+        if changed:
+            try:
+                _hold(folder.parent / SAID_DIR, changed)
+            except Exception as e:                      # noqa: BLE001 - H5
+                log(payload, env, "open", None, why=type(e).__name__)
+                stray = changed
+        if not take:
+            return []
+        out = _waiting(folder.parent / SAID_DIR, payload, env)
+        out.extend(p for p in stray if p not in out)
+        return out
     except Exception as e:                              # noqa: BLE001 - never a failed hook
         log(payload, env, "open", None, why=type(e).__name__)
         return []
 
 
-def _waiting(folder: Path, payload: dict, env) -> list:
-    """F1: the waiting record's paths, read strictly: only `{"paths": [str, ...]}` is a
-    record. A corrupt one is removed, one guard error, and read as empty."""
+def _entry(path, payload: dict, env) -> list | None:
+    """H2, H3: one waiting file's paths, read strictly: only `{"paths": [str, ...]}` is one.
+    Anything else is one guard error and is removed where it can be; None. None, silently,
+    where it went (another hook took it)."""
+    raw, why = _small(path, SAID_CAP)
+    if raw is None and why is None:
+        return None
+    if raw is not None:
+        try:
+            doc = json.loads(raw)
+            paths = doc.get("paths") if isinstance(doc, dict) else None
+            if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
+                return paths
+            why = "no list of paths"
+        except ValueError as e:                         # no JSON; no UTF-8
+            why = type(e).__name__
+    log(payload, env, "open", None, why=f"a bad waiting entry: {why}")
+    _drop(path)
+    return None
+
+
+def _waiting(folder: Path, payload: dict, env) -> Waiting:
+    """H2: the paths of at most SAID_READ waiting files, and those files; a temp older than
+    TEMP_AGE removed on the way (H3). Nothing in the folder can make it wait or raise."""
+    out, files = Waiting(), []
     try:
-        with open(folder / WAITING, "rb") as f:
-            raw = f.read(1 << 20)
-        doc = json.loads(raw)
-        paths = doc.get("paths") if isinstance(doc, dict) else None
-        if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
-            return paths
-        why = "TypeError"
-    except FileNotFoundError:
-        return []
-    except (OSError, ValueError) as e:     # a folder in its place; no JSON; no UTF-8
-        why = type(e).__name__
-    log(payload, env, "open", None, why=f"a corrupt waiting record: {why}")
-    try:
-        os.remove(folder / WAITING)
+        listing = os.scandir(folder)
     except OSError:
-        pass
-    return []
-
-
-def _mutate(payload: dict, env, folder: Path, add, drop) -> list:
-    """F1: the waiting record with `add` joined and `drop` taken out, under a lock on the
-    folder, written by replace only when its set changes. The set after. Raises on a failed
-    write."""
-    for again in (False, True):
-        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            fd = os.open(str(folder), os.O_RDONLY)
-        except FileNotFoundError:         # another Post removed it, empty, between the two
-            if again:
-                raise
-            continue
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            was = _waiting(folder, payload, env)
-            gone = set(drop)
-            now = [p for p in dict.fromkeys(was + list(add)) if p not in gone]
-            if now and now != was:
-                _write_record(folder, WAITING, {"paths": now})
-            elif not now and was:
-                os.remove(folder / WAITING)
-            return now
-        finally:
-            os.close(fd)
-    return []
+        return out
+    now, read = time.time(), 0
+    with listing:
+        for looked, e in enumerate(listing):
+            if looked >= SAID_LOOK or read >= SAID_READ:
+                break
+            if e.name.startswith(".") and e.name.endswith(".tmp"):
+                try:
+                    if e.stat(follow_symlinks=False).st_mtime < now - TEMP_AGE:
+                        _drop(e.path)
+                except OSError:
+                    pass
+                continue
+            read += 1
+            paths = _entry(e.path, payload, env)
+            if paths is not None:
+                out.extend(paths)
+                files.append(e.path)
+    out.files = tuple(files)
+    return out
 
 
 def waiting(payload: dict, env) -> list:
@@ -785,34 +858,35 @@ def waiting(payload: dict, env) -> list:
 
 
 def hold(payload: dict, env, paths: list) -> None:
-    """F1: paths joined to the waiting record. Never raises: a failure is a guard error."""
+    """H1: paths held as one waiting file. Never raises: a failure is a guard error."""
     try:
-        folder = _open_dir(payload, env)
+        folder = _said_dir(payload, env)
         if folder is not None and paths:
-            _mutate(payload, env, folder, paths, ())
+            _hold(folder, paths)
     except Exception as e:                              # noqa: BLE001
         log(payload, env, "open", None, why=type(e).__name__)
 
 
-def taken(payload: dict, env, paths: list) -> None:
-    """F1: paths said, out of the waiting record; the folder goes when empty. Never raises: a
-    failure leaves them to be said again, never lost."""
-    try:
-        folder = _open_dir(payload, env)
-        if folder is not None and paths and not _mutate(payload, env, folder, (), paths):
-            _rmdir(folder)
-    except Exception as e:                              # noqa: BLE001
-        log(payload, env, "open", None, why=type(e).__name__)
+def taken(payload: dict, env, paths) -> None:
+    """H2: the waiting files `paths` was read from removed, those and no others, once the paths
+    are in an output. Never raises: a file another hook took is already gone."""
+    for f in getattr(paths, "files", ()):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
 
 
 def _drawn(path: str, env) -> str:
-    """F3: a real path, `~/` under the home; F2: past DRAWN characters, `…` and its tail."""
+    """F3: a real path, `~/` under the home; H6: a control character `?`; F2: past DRAWN
+    characters, `…` and its tail."""
     for home in sorted({os.path.realpath(_home(env)), os.path.abspath(_home(env))}, key=len,
                        reverse=True):
         home = home.rstrip("/")
         if home and path.startswith(home + "/"):
             path = "~/" + path[len(home) + 1:]
             break
+    path = "".join("?" if ord(c) < 32 or 127 <= ord(c) < 160 else c for c in path)   # H6
     return path if len(path) <= DRAWN else "\u2026" + path[1 - DRAWN:]
 
 

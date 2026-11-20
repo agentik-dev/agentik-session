@@ -12,8 +12,8 @@
 
 ## Done-ness
 - [x] The packet's §4b, the rulings and choices
-- [ ] The failing tests (acceptance 1 to 6)
-- [ ] H1 to H6: the waiting files, the safe reader, no lock, no rmdir
+- [x] The failing tests: 30 of 56 red at `bf9aa49` (acceptance 1 to 6, H3's temp, H2's 256, H5)
+- [x] H1 to H6: one `guard-said/*.said` a change, by rename; the safe reader; no lock, no rmdir. 56 of 56; gc1, g2b, bare machine, doctor 751 (`.venv`), 748 and 3 skipped (`.venv-floor`)
 - [ ] H7: the NICE rows
 - [ ] `make stamp STAMP_VERSION=2.0.0-alpha.148`, then `make check`, through the gate
 
@@ -21,7 +21,7 @@
 - Choices: the packet's §4b.
 
 ## Next act
-The failing tests in `tests/test_gc1_outcome.py`.
+H7, the NICE rows.
 
 ## Exit
 (open)
