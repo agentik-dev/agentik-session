@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet, with the pin's line for the owner's entry
-- [ ] The failing tests, `tests/test_pl2_line_dynamic.py`
+- [x] The failing tests, `tests/test_pl2_line_dynamic.py`: 49 of 62 red at the pin (the 10,000-tag scan 5.5 s)
 - [ ] R1 to R6: `band_line`, `_line_none`, `_mix_resets`, `admissionLine`, `mixPart`, `status`, the key `week_resets`; the tests that pinned a changed line; the runbook, the skill
 - [ ] R7: the refusal's words, the linear notice scan, the respawn line at PostToolUse; two NICE rows
 - [ ] `make stamp`, then `make check`, through the gate
@@ -21,6 +21,6 @@
 - Choices: listed in the packet's §4 as they are made.
 
 ## Next act
-The failing tests.
+R1 to R6, the line and its twin.
 
 ## Exit
