@@ -15,13 +15,13 @@
 - [x] The failing tests, `tests/test_rc2_close_guards.py`: 32 of 35 red at the pin (the three that pass: markers that give no hold, as at the pin)
 - [x] R1: the hold in `chain.py`'s `_watch` (`_unconfirmed`, said only while the watch holds nothing else); NICE n336 leaves; `test_chain.py`, `test_rc1_respawn_confirm.py`, `test_r2.py`, `test_cli.py`, `test_u1.py`, h3, h4 green, 518
 - [x] R2 to R4: `_job_open` at PostToolUse, `_jobs_notice` at the prompt, `_jobs_out_line` in `pre_tool_use` after the other Bash guards; NICE n337 leaves, n338 (a mid-turn notice) in; 35 of 35 green, 389 with rc1, hooks, hook_meter, chain, bare_machine
-- [ ] R5, R6: the runbook, the skill, respawn-r1; the NICE rows
+- [x] R5, R6: the runbook, the skill, respawn-r1 §3.3 step 2, §3.9, a change log line; the README left (packet §4); NICE n339 to n343 (rc1's review 1, L1 to L4, L7) and n301's sighting; 1208 green across the tests that read these files
 - [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
 - Nothing yet.
 
 ## Next act
-R5 and R6: the runbook, the skill, respawn-r1, the NICE rows.
+`make stamp`, then `make check`, through the gate.
 
 ## Exit

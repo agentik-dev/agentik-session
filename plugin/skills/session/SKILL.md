@@ -116,11 +116,17 @@ Two lines arrive as hook context; act on them, do not argue with them:
   --state <s>` in a foreground Bash call of its own, then end the turn: a background
   call is refused, since no hook can confirm its mark and the launcher would wait on
   it. While a mark stands unconfirmed, each prompt says `RESPAWN unconfirmed:` and the
-  band `respawn unconfirmed`: run the close again in the foreground. The successor's SessionStart line
+  band `respawn unconfirmed`: run the close again in the foreground. While a background
+  job of the main thread is not known to have ended (no notice of it reached a prompt),
+  the first foreground close is refused once with when each started, since the restart
+  ends any still running: wait for its notice, or run the close again and it passes.
+  The successor's SessionStart line
   names the copy: read it first, then the charter's Next act. Its last line says whether a launcher restarts the sitting; without one,
   print your start line and stop. When the restart does not come,
   `agentik session status` names the hold, `respawn held: <reason> since <HH:MM>`:
-  a `floor` or a `cap` lifts with time, a `not-respawn` when the charter opens on
+  a `floor` or a `cap` lifts with time, a `not-main` (a mark no foreground close
+  confirmed, said once it stood `settle`) when the close runs again in the foreground,
+  a `not-respawn` when the charter opens on
   `RESPAWN` again and the verb runs again; otherwise exit, and the chain stops.
 
 The **posture** decides how loud the budget is. `off` says nothing (`scratch`,
