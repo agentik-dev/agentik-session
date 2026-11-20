@@ -16,12 +16,13 @@
 - [x] R1: the hold in `chain.py`'s `_watch` (`_unconfirmed`, said only while the watch holds nothing else); NICE n336 leaves; `test_chain.py`, `test_rc1_respawn_confirm.py`, `test_r2.py`, `test_cli.py`, `test_u1.py`, h3, h4 green, 518
 - [x] R2 to R4: `_job_open` at PostToolUse, `_jobs_notice` at the prompt, `_jobs_out_line` in `pre_tool_use` after the other Bash guards; NICE n337 leaves, n338 (a mid-turn notice) in; 35 of 35 green, 389 with rc1, hooks, hook_meter, chain, bare_machine
 - [x] R5, R6: the runbook, the skill, respawn-r1 §3.3 step 2, §3.9, a change log line; the README left (packet §4); NICE n339 to n343 (rc1's review 1, L1 to L4, L7) and n301's sighting; 1208 green across the tests that read these files
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: job `20261120-024921-2774`, exit 0; alpha.143 to alpha.144, the count 5172 to 5207; n301 (its sighting with it), n282 to n288's six oldest S4 rows moved to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Nothing yet.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+`make check` through the gate.
 
 ## Exit
