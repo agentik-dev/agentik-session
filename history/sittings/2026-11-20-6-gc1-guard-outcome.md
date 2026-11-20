@@ -15,13 +15,14 @@
 - [x] The failing tests: 30 of 56 red at `bf9aa49` (acceptance 1 to 6, H3's temp, H2's 256, H5)
 - [x] H1 to H6: one `guard-said/*.said` a change, by rename; the safe reader; no lock, no rmdir. 56 of 56; gc1, g2b, bare machine, doctor 751 (`.venv`), 748 and 3 skipped (`.venv-floor`)
 - [x] H7: four NICE rows, n359 to n362 (review 2's L1, L5, L6, L9)
-- [ ] `make stamp STAMP_VERSION=2.0.0-alpha.148`, then `make check`, through the gate
+- [x] `make stamp STAMP_VERSION=2.0.0-alpha.148` through the gate: job `20261120-131528-2832`, exit 0; alpha.147 to .148, 5309 to 5327 tests; n312 to n315 to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: the packet's §4b.
 
 ## Next act
-`make stamp STAMP_VERSION=2.0.0-alpha.148` through the gate, then `make check`.
+`make check` through the gate.
 
 ## Exit
 (open)
