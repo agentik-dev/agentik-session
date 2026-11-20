@@ -764,7 +764,14 @@ hang-up the launcher writes nothing more to the terminal).
   it: PreToolUse refuses a RESPAWN close with `run_in_background` in every
   posture, and while a chained mark stands unconfirmed each main-thread
   prompt carries a `RESPAWN unconfirmed:` line and the band reads
-  `respawn unconfirmed`; run the close again in the foreground. The checkpoint refuses, exit 2 and nothing written, a charter that
+  `respawn unconfirmed`; run the close again in the foreground. A main-thread
+  Bash job run in the background is recorded under `sessions/<id>/jobs/` when
+  its call returns, and the prompt that carries its task notice removes the
+  record; while a record stands that no close was refused for, a foreground
+  close is refused once, every posture, with how many jobs are not known to
+  have ended and when each started, since the launcher's restart ends any
+  still running. Wait for each notice, or, where every job has ended or may
+  be cut, run the close again and it passes. The checkpoint refuses, exit 2 and nothing written, a charter that
   `git status --porcelain` reads as modified, staged or untracked: `<file> is
   not committed; commit it first: <the same line>`. With `--commit` a tracked charter passes,
   an untracked one never; a git call that fails or times out goes on with a
@@ -814,7 +821,9 @@ hang-up the launcher writes nothing more to the terminal).
   new mark, the STOP file goes, or the 24 h count falls under the cap. While
   it stands, `respawn/<chain>/held.json` under the state root names the
   reason, since when and the session, and `agentik session status` prints
-  `respawn held: <reason> since <HH:MM>`; the terminal stays silent. A hold
+  `respawn held: <reason> since <HH:MM>`; the terminal stays silent. A mark
+  of the sitting that no confirm names is held `not-main` once it has stood
+  `settle` seconds, and a foreground close that confirms it clears it. A hold
   that never lifts ends with the sitting: exit it, and the chain stops with
   that reason.
 - Give a `/loop` an interval under 60m, or none. A `/loop` of 60 minutes or

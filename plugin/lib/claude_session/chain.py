@@ -615,6 +615,9 @@ class Chain:
                     continue
                 conf = _json(sdir / hooks.CONFIRMED)
                 if conf is None:
+                    if held is None:             # rc2 R1: said, never signalled
+                        self._say_held("not-main" if self._unconfirmed(sdir, sid, now)
+                                       else None, sid, now)
                     continue
                 held, seen, end = self._step(sdir, sid, start, now, conf, seen, held)
                 self._say_held(held, sid, now)
@@ -623,6 +626,16 @@ class Chain:
                     term_at, ended_by = now, "launcher"
         finally:
             self._say_held(None, sid, None)          # the child ended: the file goes
+
+    def _unconfirmed(self, sdir: Path, sid: str, now: float) -> bool:
+        """rc2 R1: no confirm, and the marker parses, names this sitting and was `written`
+        at least `settle` ago: the hold `not-main` is said in held.json. The watch's own
+        `held` stays None, so `_step` and `_decide` read the confirm as at the pin. A
+        marker that does not parse, names another session or is younger says nothing."""
+        marker = _json(sdir / hooks.MARKER) or {}
+        written = marker.get("written")
+        return (marker.get("session") == sid and _num(written)
+                and written <= now - self.g["settle"])
 
     def _step(self, sdir, sid, start, now, conf, seen, held):
         """One poll past a confirmed marker: (held, seen, end the child). A new marker or
