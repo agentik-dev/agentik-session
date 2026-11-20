@@ -14,13 +14,14 @@
 - [x] The packet's §4b gains J1 to J4 (`cfa743b`)
 - [x] The failing tests: 11 of 62 red at `a1bfd88`; J1 to J3 and `hold()` gone: 62 of 62 (`.venv`); gc1, g2b, doctor 664 (`.venv-floor`); the runbook's guard lines
 - [x] J4: NICE n363 to n365 (review 3's B2, L3, L5); the bound's overflow is the stamp's
-- [ ] `make stamp`, then `make check` through the gate
+- [x] `make stamp STAMP_VERSION=2.0.0-alpha.149` through the gate: job `20261120-135014-2835`, exit 0; 5327 to 5333 tests; n316 to n319 to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: the packet's §4b.
 
 ## Next act
-The stamp, then the check.
+The check, once, through the gate queue.
 
 ## Exit
 Open.
