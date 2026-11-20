@@ -21,10 +21,10 @@
 
 ## Handover
 - Choices: the packet's §4b.
-- decide, owner: the coordinator (the landing's history scan): commit `51d06b9` added a made-up `~/code/` example to `NICE_TO_HAVE.md` (home group, one line, n360); `840d806` removes it from the tree. It needs an allow row or a ruling.
+- decide, owner: the coordinator (the landing's history scan): commit `51d06b9` added a made-up example under the home group's folder pattern to `NICE_TO_HAVE.md` (one line, n360); `840d806` removes it from the tree. It needs an allow row or a ruling.
 
 ## Next act
 None: the fix is built and the check green; review 3 and the landing are the coordinator's.
 
 ## Exit
-H1 to H7 built and committed; `make check` green on `740dbb2`; this record is the tip's only change after it.
+H1 to H7 built and committed; `make check` green on `740dbb2`; this record is the only change after it, in two commits (the second drops a home-pattern hit the first wrote here).
