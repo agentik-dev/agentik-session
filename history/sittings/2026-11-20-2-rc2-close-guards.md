@@ -17,12 +17,13 @@
 - [x] R2 to R4: `_job_open` at PostToolUse, `_jobs_notice` at the prompt, `_jobs_out_line` in `pre_tool_use` after the other Bash guards; NICE n337 leaves, n338 (a mid-turn notice) in; 35 of 35 green, 389 with rc1, hooks, hook_meter, chain, bare_machine
 - [x] R5, R6: the runbook, the skill, respawn-r1 §3.3 step 2, §3.9, a change log line; the README left (packet §4); NICE n339 to n343 (rc1's review 1, L1 to L4, L7) and n301's sighting; 1208 green across the tests that read these files
 - [x] `make stamp` through the gate: job `20261120-024921-2774`, exit 0; alpha.143 to alpha.144, the count 5172 to 5207; n301 (its sighting with it), n282 to n288's six oldest S4 rows moved to the overflow
-- [ ] `make check` through the gate: job `20261120-024940-2775` on `b3b48b9` exit 2, both test passes green (5207; 5043 and 143 skipped), recordlint alone red on three NICE rows past 400 characters (n338, n340, n343), shortened
+- [x] `make check` through the gate: job `20261120-024940-2775` on `b3b48b9` exit 2, both test passes green (5207; 5043 and 143 skipped), recordlint alone red on three NICE rows past 400 characters (n338, n340, n343), shortened; job `20261120-025637-2777` on `dd43915`, exit 0 in 10 min: 5207 passed (`.venv`), 5043 and 143 skipped (`.venv-floor`), hygiene 0 outside the allowlist, readme fresh
 
 ## Handover
-- Nothing yet.
+- Choices: the hold is said only while the watch holds no other reason, and its own `held` stays None, so `_decide` reads the exit as at the pin; the refusal counts every open record, asked or not, and sits after the other Bash guards, so `asked` is spent only on a close that would run; a record that does not parse counts as open, its time `?`.
 
 ## Next act
-`make check` through the gate.
+None: the row is built and the check green; the landing is the coordinator's.
 
 ## Exit
+R1 to R6 built and committed; `make check` green on `dd43915`; this record is the tip's only change after it.
