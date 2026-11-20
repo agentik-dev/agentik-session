@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import signal
+import subprocess
+import sys
 import time
 
 import pytest
@@ -349,9 +353,21 @@ def test_r3_several_paths_name_the_first_and_how_many_more(gb):
 PAIR = 480                                      # F2: the pair beside `{}`, at most
 
 
+def _said_dir(b):
+    return _sdir(b) / instructionguard.SAID_DIR
+
+
+def _said_files(b):
+    d = _said_dir(b)
+    return sorted(os.listdir(d)) if d.is_dir() else []
+
+
 def _waiting(b):
-    p = _sdir(b) / instructionguard.OPEN_DIR / instructionguard.WAITING
-    return json.loads(p.read_text())["paths"] if p.exists() else []
+    """Brief 3 H1: every path that waits, one small file a change, in the files' order."""
+    out = []
+    for name in _said_files(b):
+        out += json.loads((_said_dir(b) / name).read_text())["paths"]
+    return out
 
 
 def _hold(b, paths, tid="toolu_gc1_held"):
@@ -429,21 +445,21 @@ def test_f2_a_handler_that_leaves_no_room_waits_then_one_post_says_it(gb, monkey
 @pytest.mark.parametrize("record", [b'{"paths": 5}', b'{"paths": "abc"}', b'"abc"',
                                     b'\xff\x00garbage{', b'{"paths": ["a", 5]}'])
 def test_f1_a_corrupt_waiting_record_loses_no_change(gb, record):
-    folder = _sdir(gb) / instructionguard.OPEN_DIR
+    folder = _said_dir(gb)
     folder.mkdir(parents=True)
-    (folder / instructionguard.WAITING).write_bytes(record)
+    (folder / "planted.said").write_bytes(record)
     _, out = _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text("c\n"))
     assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
     rows = [(r["decision"], bool(r["why"])) for r in _log(gb)]
     assert sorted(rows) == [("changed", False), ("open", True)]
-    assert _open_files(gb) == []
+    assert _open_files(gb) == [] and _said_files(gb) == []
 
 
 def test_f1_corrupt_records_one_after_another_each_say_their_change(gb):
-    folder = _sdir(gb) / instructionguard.OPEN_DIR
+    folder = _said_dir(gb)
     for i, record in enumerate([b'{"paths": 5}', b'"a string"', b'\x00\x01\x02']):
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / instructionguard.WAITING).write_bytes(record)
+        (folder / "planted.said").write_bytes(record)
         _, out = _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text(f"{i}\n"),
                       tid=f"toolu_f1_{i}")
         assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
@@ -498,16 +514,278 @@ def test_f2_a_prompt_with_seventy_waiting_paths_stays_within_max_out(gb):
     assert _waiting(gb) == []
 
 
-def test_f1_one_waiting_record_a_session_rewritten_only_when_its_set_changes(gb, monkeypatch):
+def test_h1_each_waiting_change_is_its_own_file_never_rewritten(gb, monkeypatch):
     full = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                    "additionalContext": "CHECKPOINT: " + "w" * 500}}
     monkeypatch.setattr(hooks, "_post_tool_use", lambda payload, env: full)
     _run(gb, UNREAD, lambda: (gb.repo / "CLAUDE.md").write_text("1\n"), tid="toolu_f1_a")
-    rec = _sdir(gb) / instructionguard.OPEN_DIR / instructionguard.WAITING
-    stamp = rec.stat().st_mtime_ns
+    [first] = _said_files(gb)
+    stamp = (_said_dir(gb) / first).stat().st_mtime_ns
     for i in range(5):
         hooks.post_tool_use(_post(_bash("ls", gb.repo, tid=f"toolu_f1_l{i}")), gb.env)
-    assert rec.stat().st_mtime_ns == stamp
     _run(gb, UNREAD, lambda: (gb.repo / "AGENTS.md").write_text("2\n"), tid="toolu_f1_b")
-    assert _open_files(gb) == [instructionguard.WAITING]
+    assert (_said_dir(gb) / first).stat().st_mtime_ns == stamp
+    assert len(_said_files(gb)) == 2 and _open_files(gb) == []
     assert _waiting(gb) == [str(gb.repo / "CLAUDE.md"), str(gb.repo / "AGENTS.md")]
+
+
+# ---- brief 3, the fix of review 2: one small file a change, no lock, no folder removed ---------
+
+LIB = os.path.dirname(os.path.dirname(instructionguard.__file__))
+MORE = re.compile(r" \(\+(\d+) more\)\Z")
+
+
+class _Hung(BaseException):
+    """Raised by the alarm into a hook that waits, so a regression fails and never hangs."""
+
+
+def _bounded(fn, wall=3.0):
+    """`fn()` and its seconds; a call still running after `wall` is a failed test."""
+    def ring(*_):
+        raise _Hung()
+    old = signal.signal(signal.SIGALRM, ring)
+    signal.setitimer(signal.ITIMER_REAL, wall)
+    try:
+        t = time.monotonic()
+        out = fn()
+        return out, time.monotonic() - t
+    except _Hung:
+        pytest.fail(f"a hook still ran after {wall} s")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+
+
+def _changed(b, tid, name="CLAUDE.md", text=None):
+    """One unread line's Pre and its change, the test's own write; the Post's payload."""
+    p = _bash(UNREAD, b.repo, tid=tid)
+    hooks.pre_tool_use(p, b.env)
+    (b.repo / name).write_text(text or tid + "\n")
+    return _post(p)
+
+
+def _count(owner):
+    """How many paths one owner's line stands for: the one drawn and its `(+N more)`."""
+    if not owner:
+        return 0
+    m = MORE.search(owner)
+    return 1 + (int(m.group(1)) if m else 0)
+
+
+@pytest.mark.parametrize("when", ["before its write", "after its write"])
+def test_h1_review_2_b1_another_post_with_nothing_waiting_loses_no_change(gb, monkeypatch, when):
+    """Acceptance 1: another main-thread Post of the session ends with nothing waiting while
+    this Post holds its change; the change is said once, at its own Post or the next."""
+    real = instructionguard._write_record
+    others = []
+
+    def other():
+        return hooks.post_tool_use(_post(_bash("ls", gb.repo, tid=f"toolu_h1_o{len(others)}")),
+                                   gb.env)
+
+    def racing(folder, name, doc, *a, **k):
+        if when == "before its write":
+            others.append(other())
+        real(folder, name, doc, *a, **k)
+        if when == "after its write":
+            others.append(other())
+    p = _changed(gb, "toolu_h1_b1")
+    monkeypatch.setattr(instructionguard, "_write_record", racing)
+    out, _ = _bounded(lambda: hooks.post_tool_use(p, gb.env))     # a lock would wait here
+    monkeypatch.setattr(instructionguard, "_write_record", real)
+    later = [hooks.post_tool_use(_post(_bash("ls", gb.repo, tid=f"toolu_h1_l{i}")), gb.env)
+             for i in range(3)]
+    owners = [_said(o)[1] for o in [out] + others + later]
+    assert others and sum(o == OWNER.format(_drawn(gb.repo / "CLAUDE.md")) for o in owners) == 1
+    assert [r["decision"] for r in _log(gb)] == ["changed"]
+    assert _waiting(gb) == [] and _said_dir(gb).is_dir()
+
+
+STRESS = """
+import json, os, sys
+env = json.loads(sys.argv[1]); os.environ.update(env)
+from claude_session import hooks, instructionguard
+k, sid, root = int(sys.argv[2]), sys.argv[3], sys.argv[4]
+taken, real = [], instructionguard.taken
+def counted(payload, e, waiting):
+    real(payload, e, waiting)
+    taken.extend(waiting)
+instructionguard.taken = counted
+folder = instructionguard._open_dir({"session_id": sid}, env)
+owners = []
+for i in range(25):
+    tid = "toolu_s%d_%d" % (k, i)
+    path = os.path.join(root, "p%d-%d" % (k, i), "CLAUDE.md")
+    instructionguard._write_record(folder, tid + ".json", {"at": 0, "files": [[path, ["absent"]]]})
+    out = hooks.post_tool_use({"session_id": sid, "cwd": root, "hook_event_name": "PostToolUse",
+                               "tool_name": "Bash", "tool_use_id": tid,
+                               "tool_input": {"command": "x"}, "tool_response": {}}, env)
+    owners.append(out.get("systemMessage") or "")
+print(json.dumps({"owners": owners, "taken": taken}))
+"""
+
+
+def test_h2_eight_processes_of_25_posts_say_every_change(gb):
+    """Acceptance 2: 200 changes in 8 processes at once; each path in some output's line or
+    count, no call raises, and after one last Post nothing waits."""
+    root = gb.tmp / "stress"
+    every = set()
+    for k in range(8):
+        for i in range(25):
+            d = root / f"p{k}-{i}"
+            d.mkdir(parents=True)
+            (d / "CLAUDE.md").write_text("x\n")
+            every.add(os.path.realpath(d / "CLAUDE.md"))
+    env = {**gb.env, "CLAUDE_CODE_SESSION_ID": SID, "PYTHONPATH": LIB}
+    procs = [subprocess.Popen([sys.executable, "-c", STRESS, json.dumps(env), str(k), SID,
+                               str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=env, text=True) for k in range(8)]
+    runs = [p.communicate(timeout=120) for p in procs]
+    assert [(p.returncode, err) for p, (_, err) in zip(procs, runs)] == [(0, "")] * 8
+    docs = [json.loads(out) for out, _ in runs]
+    assert sum(_count(o) for d in docs for o in d["owners"]) >= 200
+    assert set().union(*(d["taken"] for d in docs)) == every
+    assert [r["decision"] for r in _log(gb)] == ["changed"] * 200
+    hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_s_last")), gb.env)
+    assert _waiting(gb) == [] and _said_files(gb) == [] and _open_files(gb) == []
+
+
+def _plant(b, shape):
+    d = _said_dir(b)
+    d.mkdir(parents=True, exist_ok=True)
+    at = d / "planted.said"
+    big = b.tmp / "big.bin"
+    big.write_bytes(b"a" * (2 << 20))
+    if shape == "a directory":
+        at.mkdir()
+    elif shape == "a FIFO":
+        os.mkfifo(at)                   # never opened by the test
+    elif shape == "a dangling link":
+        at.symlink_to(b.tmp / "nowhere")
+    elif shape == "a link to 2 MiB":
+        at.symlink_to(big)
+    else:
+        at.write_bytes({"2 MiB": b"[" * (2 << 20), "garbage": b"\xff\x00\x13garbage{",
+                        "paths 5": b'{"paths": 5}', "a string": b'"a string"'}[shape])
+    return at
+
+
+@pytest.mark.parametrize("shape", ["a directory", "a FIFO", "a dangling link", "a link to 2 MiB",
+                                   "2 MiB", "garbage", "paths 5", "a string"])
+def test_h3_a_bad_waiting_entry_never_blocks_the_next_change(gb, shape):
+    """Acceptance 3: the next change is said at its own Post within half a second, and the log
+    gains one guard error; the entry is gone, and a later Post logs no more."""
+    at = _plant(gb, shape)
+    try:
+        p = _changed(gb, "toolu_h3")
+        out, took = _bounded(lambda: hooks.post_tool_use(p, gb.env))
+        assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md")) and took < 0.5
+        rows = _log(gb)
+        assert sorted(r["decision"] for r in rows) == ["changed", "open"]
+        assert [r["why"] for r in rows if r["decision"] == "open"][0]
+        assert not os.path.lexists(at) and (gb.tmp / "big.bin").exists()
+        _bounded(lambda: hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h3_n")),
+                                             gb.env))
+        assert len(_log(gb)) == 2 and _said_files(gb) == []
+    finally:
+        if os.path.lexists(at) and not os.path.isdir(at):
+            os.remove(at)
+
+
+def test_h3_a_temp_older_than_a_minute_is_removed(gb):
+    d = _said_dir(gb)
+    d.mkdir(parents=True)
+    for name in (".old.said.1.tmp", ".young.said.1.tmp"):
+        (d / name).write_text("{")
+    then = time.time() - 120
+    os.utime(d / ".old.said.1.tmp", (then, then))
+    hooks.post_tool_use(_changed(gb, "toolu_h3_t"), gb.env)
+    assert _said_files(gb) == [".young.said.1.tmp"] and _log(gb)[-1]["decision"] == "changed"
+
+
+def test_h2_one_saying_reads_at_most_256_entries(gb):
+    for i in range(300):
+        _hold(gb, [str(gb.tmp / f"w{i:03d}" / "CLAUDE.md")])
+    assert len(_said_files(gb)) == 300
+    first = _said(hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h2_1")), gb.env))[1]
+    assert first.endswith(" (+255 more)") and len(_said_files(gb)) == 44
+    second = _said(hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h2_2")), gb.env))[1]
+    assert second.endswith(" (+43 more)") and _said_files(gb) == []
+
+
+def test_h2_a_line_that_does_not_fit_removes_no_file(gb, monkeypatch):
+    _hold(gb, [str(gb.repo / "CLAUDE.md")])
+    full = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                   "additionalContext": "CHECKPOINT: " + "w" * 500}}
+    monkeypatch.setattr(hooks, "_post_tool_use", lambda payload, env: full)
+    assert hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h2_f")), gb.env) == full
+    assert _waiting(gb) == [str(gb.repo / "CLAUDE.md")]
+
+
+_HOLDER = """
+import fcntl, os, sys, time
+fds = [os.open(p, os.O_RDONLY) for p in sys.argv[1:]]
+for fd in fds:
+    fcntl.flock(fd, fcntl.LOCK_EX)
+print("held", flush=True)
+time.sleep(3)
+"""
+
+
+def test_h1_a_held_flock_delays_no_hook(gb):
+    """Acceptance 4: an exclusive `flock` on the session's folder and both of the gate's, held
+    for three seconds, delays neither the Pre nor the Post of an unread line past 0.25 s."""
+    folders = [_sdir(gb), _sdir(gb) / instructionguard.OPEN_DIR, _said_dir(gb)]
+    for f in folders:
+        f.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen([sys.executable, "-c", _HOLDER, *map(str, folders)],
+                              stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        p = _bash(UNREAD, gb.repo, tid="toolu_h1_lock")
+        pre, pre_took = _bounded(lambda: hooks.pre_tool_use(p, gb.env))
+        (gb.repo / "CLAUDE.md").write_text("held\n")
+        out, post_took = _bounded(lambda: hooks.post_tool_use(_post(p), gb.env))
+        assert holder.poll() is None
+        assert pre == {} and pre_took < 0.25 and post_took < 0.25
+        assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_h4_no_hook_removes_a_folder(gb):
+    """Acceptance 5: 400 unread lines that change nothing and 20 that change and are said leave
+    both folders, empty."""
+    for i in range(400):
+        _run(gb, UNREAD, tid=f"toolu_h4_{i:04d}")
+    for i in range(20):
+        out = hooks.post_tool_use(_changed(gb, f"toolu_h4_c{i:02d}"), gb.env)
+        assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
+    for f in (_sdir(gb) / instructionguard.OPEN_DIR, _said_dir(gb)):
+        assert f.is_dir() and os.listdir(f) == []
+
+
+def test_h5_a_change_that_cannot_wait_is_a_guard_error_said_at_its_own_post(gb, monkeypatch):
+    real = instructionguard._write_record
+
+    def refuse(folder, name, doc, *a, **k):
+        if name.endswith(".said"):
+            raise PermissionError("read-only")
+        return real(folder, name, doc, *a, **k)
+    p = _changed(gb, "toolu_h5")
+    monkeypatch.setattr(instructionguard, "_write_record", refuse)
+    out = hooks.post_tool_use(p, gb.env)
+    assert _said(out)[1] == OWNER.format(_drawn(gb.repo / "CLAUDE.md"))
+    assert [(r["decision"], r["why"]) for r in _log(gb)] == \
+        [("changed", None), ("open", "PermissionError")]
+
+
+def test_h6_a_control_character_in_a_drawn_path_is_a_question_mark(gb):
+    """Acceptance 6: a newline and an escape in a path are each `?`; the pair within 480 B."""
+    path = "/made-up/a\nb\x1bc/CLAUDE.md"
+    _hold(gb, [path])
+    out = hooks.post_tool_use(_post(_bash("ls", gb.repo, tid="toolu_h6")), gb.env)
+    model, owner = _said(out)
+    assert owner == OWNER.format("/made-up/a?b?c/CLAUDE.md") and "?b?c" in model
+    assert not any(c in model + owner for c in "\n\x1b") and len(json.dumps(out)) <= PAIR
