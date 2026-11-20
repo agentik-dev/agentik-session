@@ -81,7 +81,8 @@ def at(h, m=0):
 
 # ---- (a) mix off: the band line and band.json as before ----
 
-GOLDEN_LINE = "5h 40% → 52% · ceiling 97 · resets 14:00 (2h00) · 0 helpers, room for 18 · 0 deferred · 7d 40%"
+GOLDEN_LINE = ("5h 40% → 52% · resets 14:00 (2h00) · helpers 0/18 · 7d 40% · "
+               "week resets Mon 23:00 (4d11h)")      # pl2: no ceiling, n/m, no 0 deferred, the week
 
 
 def test_s53_a_mix_off_band_json_and_line_unchanged():
@@ -91,12 +92,13 @@ def test_s53_a_mix_off_band_json_and_line_unchanged():
     assert "mix" not in off and "mix" not in settings()
     assert off == {"P": 40, "peak": 52.0, "ceiling": 97, "resetsAt": "2026-11-12T14:00:00+00:00",
                    "until": "2026-11-12T14:00:00+00:00", "bound": "five_hour", "running": 0,
-                   "room": 18, "deferred": 0, "P7": 40, "mode": "observe", "at": iso(NOW),
+                   "room": 18, "deferred": 0, "P7": 40, "week_resets": "2026-11-16T23:00:00+00:00",
+                   "mode": "observe", "at": iso(NOW),
                    "window": "five_hour", "slot": "Mon-2300Z"}
     assert admission.band_line(off, NOW) == GOLDEN_LINE
     on = admission.band(rows, NOW, settings(shares={"fable": 1, "opus": 1}), tz=UTC)
     assert {k: v for k, v in on.items() if k != "mix"} == off       # the mix only adds
-    assert admission.band_line(on, NOW) == GOLDEN_LINE + " · resets 0"     # pl1 R1: the shares are status's
+    assert admission.band_line(on, NOW) == GOLDEN_LINE     # pl1 R1: the shares are status's; pl2 R2: no resets 0
     assert admission.mix_status(on["mix"], NOW) == "mix: fable 30/50 · opus 10/50 · next opus · resets 0"
     assert "spend mix" not in rules.render({})
     assert "spend mix" in rules.render({"admission": {"mix": {"shares": {"opus": 1}}}})

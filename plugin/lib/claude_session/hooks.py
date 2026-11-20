@@ -1600,9 +1600,38 @@ def _confirm(payload: dict, sdir: Path) -> None:
 # RESPAWN close is refused once while a record stands that no close was yet refused for: the
 # launcher's restart ends a job still running, and only the sitting knows whether it ended.
 NOTICE_OPEN = "<task-notification>"
-_NOTICE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
-_NOTICE_CALL = re.compile(r"<tool-use-id>\s*([^<]*?)\s*</tool-use-id>")
-_NOTICE_TASK = re.compile(r"<task-id>\s*([^<]*?)\s*</task-id>")
+NOTICE_CLOSE = "</task-notification>"
+
+
+def _blocks(text: str, open_: str, close: str, bare: bool = False) -> list:
+    """Each span from an `open_` to the first `close` after it, as a lazy regex finds them,
+    in time linear in `text` (packet pl2 R7: a prompt of unclosed openings cost seconds).
+    With no `close` after an opening none follows either, so the scan stops. `bare`: a span
+    holding a `<` is none, the search going on from that `<` (`[^<]*` in a regex)."""
+    out, i = [], 0
+    while (i := text.find(open_, i)) >= 0:
+        start = i + len(open_)
+        if bare:
+            j = text.find("<", start)
+            if j < 0:
+                break
+            if text.startswith(close, j):
+                out.append(text[start:j])
+                i = j + len(close)
+            else:
+                i = j
+            continue
+        j = text.find(close, start)
+        if j < 0:
+            break
+        out.append(text[start:j])
+        i = j + len(close)
+    return out
+
+
+def _tag_values(block: str, tag: str) -> list:
+    """`<tag> value </tag>` values in a block, stripped, with no `<` inside (rc2's regex)."""
+    return [v.strip() for v in _blocks(block, f"<{tag}>", f"</{tag}>", bare=True)]
 JOBS_NAMED = 5                      # the start times the refusal names, then `and N more`
 
 
@@ -1638,7 +1667,8 @@ def _jobs_open(sdir: Path) -> list:
 def _jobs_notice(payload: dict, env) -> None:
     """rc2 R3: each `<task-notification>` block of a main-thread prompt removes the record its
     `<tool-use-id>` names, or whose `task` its `<task-id>` names, whatever its status. A
-    prompt with no block costs one substring test; a fault leaves the records."""
+    prompt with no block costs one substring test, one with blocks a scan linear in its
+    length (pl2 R7); a fault leaves the records."""
     try:
         prompt = payload.get("prompt")
         if not (isinstance(prompt, str) and NOTICE_OPEN in prompt) or payload.get("agent_id"):
@@ -1647,9 +1677,9 @@ def _jobs_notice(payload: dict, env) -> None:
         if sdir is None:
             return
         calls, tasks = set(), set()
-        for block in _NOTICE.findall(prompt):
-            calls.update(_NOTICE_CALL.findall(block))
-            tasks.update(_NOTICE_TASK.findall(block))
+        for block in _blocks(prompt, NOTICE_OPEN, NOTICE_CLOSE):
+            calls.update(_tag_values(block, "tool-use-id"))
+            tasks.update(_tag_values(block, "task-id"))
         calls.discard("")
         tasks.discard("")
         if not (calls or tasks):
@@ -1693,7 +1723,10 @@ def _jobs_out_line(payload: dict, env) -> str | None:
             times += f" and {n - JOBS_NAMED} more"
         line = (f"agentik-session: {n} background {'job' if n == 1 else 'jobs'} of this "
                 f"sitting {'is' if n == 1 else 'are'} not known to have ended (started "
-                f"{times}), and the launcher's restart ends any still running. Wait for each "
+                f"{times}), and the launcher's restart ends any still running. A job whose "
+                "notice has already come has ended: where each one's has, run the close again "
+                "now rather than wait, since a notice already delivered never comes again and "
+                "an unattended sitting that waits for one is never woken. Else wait for each "
                 "one's notice; or, where every one has ended or may be cut, run the close "
                 "again and it passes.")
         now = time.time()
@@ -1725,6 +1758,42 @@ def _post_tool_use(payload: dict, env) -> dict:
     if sdir is not None:
         _confirm(payload, sdir)
         _job_open(payload, sdir)                         # rc2 R2: never raises
+    return _with_respawn(_post_meter(payload, env, sdir), _ran_unconfirmed(payload, env, sdir))
+
+
+def _ran_unconfirmed(payload: dict, env, sdir: Path | None) -> str | None:
+    """pl2 R7: rc1's `RESPAWN unconfirmed:` line for the main thread's Bash call that left this
+    session's chained marker behind, written at or after the call's own PreToolUse stamp,
+    with no confirm of its bytes once `_confirm` has run: a close run from a script, whose
+    command names no `checkpoint --respawn`, in a foreground call no prompt follows. None
+    otherwise and on any fault. Never raises."""
+    try:
+        if sdir is None or payload.get("agent_id") or payload.get("tool_name") != "Bash":
+            return None
+        line = _unconfirmed_line(payload, env)
+        if line is None:
+            return None
+        at = _load_json(sdir / ACTIVITY).get("at")
+        written = _load_json(sdir / MARKER).get("written")    # the stamp, as _confirm reads it
+        return line if _num(at) and _num(written) and written >= at else None
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _with_respawn(out: dict, line: str | None) -> dict:
+    """The handler's context, then the respawn line (pl2 R7), the pair within MAX_OUT; the
+    line dropped where it does not fit."""
+    if not line:
+        return out
+    ctx = ((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
+    new = {"hookSpecificOutput": {**((out or {}).get("hookSpecificOutput") or {}),
+                                  "hookEventName": "PostToolUse",
+                                  "additionalContext": f"{ctx}\n\n{line}" if ctx else line}}
+    return new if len(json.dumps(new)) <= MAX_OUT else out
+
+
+def _post_meter(payload: dict, env, sdir: Path | None) -> dict:
+    """The main thread's meter at PostToolUse (§2.2), and the CHECKPOINT line by D13."""
     tp = payload.get("transcript_path")
     if sdir is None or not tp:
         return {}

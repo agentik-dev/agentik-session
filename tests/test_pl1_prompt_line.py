@@ -20,6 +20,13 @@ TS = Path(__file__).resolve().parent.parent / "plugin" / "hooks" / ("session.tes
 OWNER_LINE = "no 5h window · 7d 61% · resets 1 · week resets Fri 13:00 · 14 helpers"
 
 
+def _left(line: str) -> str:
+    """pl2 R3: the week's reset gains its time left, which the wall clock moves; the line
+    with it taken out, checked to be there."""
+    assert re.search(r"week resets \w{3} \d\d:\d\d \((\d+d\d+h|\d+h\d\d)\)", line), line
+    return re.sub(r" \((\d+d\d+h|\d+h\d\d)\)", "", line)
+
+
 def _friday_after(now: datetime) -> str:
     d = (now + timedelta(days=1)).date()
     while d.weekday() != 4:
@@ -63,7 +70,7 @@ def test_pl1_1_the_owner_s_state_draws_the_owner_s_tidied_line(monkeypatch):
     monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 10.0)
     write_band(owner_state())
     line = _band_bit(prompt_bits())
-    assert line == OWNER_LINE
+    assert _left(line) == OWNER_LINE
     for word in ("mix", "fable", "opus", "next", "band", "best", "observe"):
         assert word not in line.split(), word
 
@@ -77,8 +84,8 @@ def test_pl1_1_the_module_s_fixture_is_the_same_line():
     def get(name):
         return re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1)
     now = datetime.fromisoformat(re.search(r"^const NOW = Date\.parse\('(.*)'\)$", text, re.M).group(1))
-    assert get("PL1_OWNER_LINE") == OWNER_LINE
-    assert admission.band_line(json.loads(get("PL1_OWNER")), now) == OWNER_LINE
+    assert get("PL1_OWNER_LINE") == OWNER_LINE.replace("Fri 13:00", "Fri 13:00 (4d1h)")   # pl2 R3
+    assert admission.band_line(json.loads(get("PL1_OWNER")), now) == get("PL1_OWNER_LINE")
 
 
 # ---- acceptance 2: no zone word for `clear`; every other zone as at the pin ----
@@ -122,9 +129,9 @@ def test_pl1_5_the_mix_off_reads_as_on(monkeypatch):
     on = owner_state(now)
     write_band(owner_state(now, mix=False))
     off_line = _band_bit(prompt_bits())
-    assert off_line == OWNER_LINE.replace(" · resets 1", "")
+    assert _left(off_line) == OWNER_LINE.replace(" · resets 1", "")
     write_band(on)
-    assert _band_bit(prompt_bits()) == OWNER_LINE
+    assert _left(_band_bit(prompt_bits())) == OWNER_LINE
     on["mix"]["resets_left"] = None               # a mix with no resets count: the same line
     write_band(on)
     assert _band_bit(prompt_bits()) == off_line

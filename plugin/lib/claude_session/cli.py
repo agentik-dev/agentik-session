@@ -289,8 +289,10 @@ def cmd_status(args) -> int:
             mix = admission.mix_status(facts.get("mix"), datetime.now(timezone.utc))   # F2
             if mix:                             # pl1 R3: each family's share, the next family
                 print(mix)
-            if "mode" in facts:
-                print(f"admission mode: {facts['mode']}")
+            if "mode" in facts:                 # pl2 R1: the ceiling left the line for here
+                c = facts.get("ceiling")
+                print(f"admission mode: {facts['mode']}"
+                      + (f" · ceiling {admission.ceiling_word(c)}" if c is not None else ""))
             return 0
     print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else _role_line(d))
     return 0
@@ -319,10 +321,13 @@ def _role_line(d: dict) -> str:
 
 def _admission_facts(band) -> dict:
     """pl1 R3: the facts that left the prompt line, from this session's band.json entry: the
-    admission's `mode` and the spend `mix` object, each only when the entry has it."""
+    admission's `mode`, its `ceiling` (pl2 R1, a finite number) and the spend `mix` object,
+    each only when the entry has it."""
     if not isinstance(band, dict):
         return {}
     out = {"mode": band["mode"]} if isinstance(band.get("mode"), str) else {}
+    if admission._real(band.get("ceiling")) is not None:
+        out["ceiling"] = band["ceiling"]
     return {**out, "mix": band["mix"]} if isinstance(band.get("mix"), dict) else out
 
 

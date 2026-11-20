@@ -183,7 +183,8 @@ const lineEnd = (b: any, nowMs: number): string[] => {
 
 // The mix's parts after the 7d part (packet S53 ruling 6, NICE n15, as pl1 R1 left it), the
 // twin of Python's _mix_part: `reset now` while the mix says so, then `resets 2` with ` by Ddd
-// HH:MM` while `until` is ahead; nothing with no mix, no points or no budgets. The shares,
+// HH:MM` while `until` is ahead, a count drawn under 1 left out with its `by` (packet pl2
+// R2); nothing with no mix, no points or no budgets. The shares,
 // `next <family>` and `mix no reading` are `status`'s since pl1. Rounded as _pct is,
 // floor(x + 0.5), all digits past 1e21; it never throws, so a malformed mix leaves the line
 // as it was.
@@ -199,6 +200,7 @@ export const mixPart = (mx: any, nowMs: number): string[] => {
     if (!isMap(pts) || !isMap(bud)) return []
     const out: string[] = own(mx, 'reset') === true ? ['reset now'] : []
     const left = fig(own(mx, 'resets_left')), until = own(mx, 'until')
+    if (left !== null && Math.floor(left + 0.5) < 1) return out
     const u = wall(until), day = u ? weekday(String(until)) : null
     let tail = left !== null ? `resets ${pctOf(left)}` : ''
     if (u && day && u[2] > nowMs) tail = `${tail} by ${day} ${u[0]}:${u[1]}`.trim()
@@ -209,9 +211,21 @@ export const mixPart = (mx: any, nowMs: number): string[] => {
   }
 }
 
+// The time left to the week's reset (packet pl2 R3), the twin of Python's week_left: `(5d4h)`
+// from a day up, `(4h30)` under one, never below `(0h00)`; and the week's part it closes.
+const weekLeft = (t: number, nowMs: number): string => {
+  const n = Math.max(0, Math.floor((t - nowMs) / 60000))
+  return n >= 1440 ? `(${Math.floor(n / 1440)}d${Math.floor((n % 1440) / 60)}h)`
+    : `(${Math.floor(n / 60)}h${String(n % 60).padStart(2, '0')})`
+}
+const weekPart = (v: unknown, nowMs: number): string | null => {
+  const w = wall(v), day = w ? weekday(String(v)) : null
+  return w && day ? `week resets ${day} ${w[0]}:${w[1]} ${weekLeft(w[2], nowMs)}` : null
+}
+
 // A `none` entry's parts (packet S43), the twin of Python's _line_none: `until` first, else
-// `resetsAt`, both the week's; the band's word is `status`'s since pl1. No countdown, ceiling,
-// room or deferred.
+// `resetsAt`, both the week's, with the time left (pl2 R3); the band's word is `status`'s
+// since pl1. No countdown, ceiling, room or deferred.
 // `head` is `5h no reading` on a five-hour login's week (packet S51).
 const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
   const parts = [head]
@@ -219,9 +233,9 @@ const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
   parts.push(...mixPart(b.mix, nowMs))
   for (const v of [b.until, b.resetsAt]) {
-    const w = wall(v), day = w ? weekday(String(v)) : null
-    if (w && day) {
-      parts.push(`week resets ${day} ${w[0]}:${w[1]}`)
+    const part = weekPart(v, nowMs)
+    if (part) {
+      parts.push(part)
       break
     }
   }
@@ -238,24 +252,24 @@ export const admissionLine = (band: string | null, nowMs: number, id = ''): stri
   const P = fig(b.P), peak = fig(b.peak), c = fig(b.ceiling)
   if (b.window === 'five_hour' && P === null && c === null) return lineNone(b, nowMs, '5h no reading').join(' · ')
   const parts = [P === null ? '5h no reading' : `5h ${whole(P)}%` + (peak !== null ? ` → ${whole(peak)}%` : '')]
-  if (c !== null) parts.push(`ceiling ${String(c)}`)
   const w = wall(b.resetsAt), u = wall(b.until)
   const left = (x: [string, string, number]): string => {
     const n = Math.max(0, Math.floor((x[2] - nowMs) / 60000))
     return `(${Math.floor(n / 60)}h${String(n % 60).padStart(2, '0')})`
   }
-  if (b.bound === 'seven_day' && u) parts.push(`week resets ${u[0]}:${u[1]} ${left(u)}` + (w ? `, 5h ${w[0]}:${w[1]}` : ''))
+  const slotted = b.bound === 'seven_day' && !!u
+  if (slotted && u) parts.push(`week resets ${u[0]}:${u[1]} ${left(u)}` + (w ? `, 5h ${w[0]}:${w[1]}` : ''))
   else if (w) parts.push(`resets ${w[0]}:${w[1]} ${left(w)}`)
+  // packet pl2 R3b: `helpers n/m`, n running of n plus the room; `n helpers` with no room
   const running = fig(b.running), room = fig(b.room)
-  const helpers: string[] = []
-  if (running !== null) helpers.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
-  if (room !== null) helpers.push(`room for ${whole(room)}`)
-  if (helpers.length) parts.push(helpers.join(', '))
+  if (running !== null && room !== null) parts.push(`helpers ${whole(running)}/${String(Math.round(running) + Math.round(room))}`)
+  else if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
   const d = fig(b.deferred), p7 = fig(b.P7)
-  if (d !== null) parts.push(`${whole(d)} deferred`)
+  if (d !== null && Math.round(d) >= 1) parts.push(`${whole(d)} deferred`)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
   parts.push(...mixPart(b.mix, nowMs))
-  return [...parts, ...lineEnd(b, nowMs)].join(' · ')
+  const week = slotted ? null : weekPart(b.week_resets, nowMs)    // pl2 R3: the week closes it
+  return [...parts, ...(week ? [week] : []), ...lineEnd(b, nowMs)].join(' · ')
 }
 
 // ---- Admission (design/admission-r1.md §3.1, packet S25): it observes. ----

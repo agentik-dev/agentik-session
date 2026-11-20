@@ -87,7 +87,8 @@ def test_band_on_a_synthetic_ledger_matches_a_hand_count():
         room += 1
     assert (round(peak, 2), room) == (81.75, 5)
     assert b == {"P": 72, "peak": 81.75, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
-                 "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41, "mode": "observe",
+                 "until": "2026-10-12T14:05:00+00:00", "bound": "five_hour", "running": 2, "room": room, "deferred": 2, "P7": 41,
+                 "week_resets": "2026-10-15T23:00:00+00:00", "mode": "observe",   # pl2 R3
                  "at": iso(NOW), "window": "five_hour", "slot": "Thu-2300Z"}
 
 
@@ -172,23 +173,23 @@ def test_a_held_lock_writes_no_band_json():
 FULL = {"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T14:05:00+00:00",
         "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe",
         "at": "2026-10-12T12:52:30+00:00"}
-LINE = ("5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · "
-        "1 deferred · 7d 41%")             # no mode's word (pl1 R1)
+LINE = ("5h 72% → 91% · resets 14:05 (1h12) · helpers 3/5 · "
+        "1 deferred · 7d 41%")             # no mode's word (pl1 R1), no ceiling, n/m (pl2)
 
 
-def test_band_line_is_pinned_at_80_columns():
-    line = admission.band_line(FULL, NOW, 80)
-    assert line == "5h 72% → 91% · ceiling 97 · resets 14:05 (1h12) · 3 helpers, room for 2 · 1 def…"
-    assert len(line) == 80
+def test_band_line_is_pinned_at_40_columns():     # pl2: the line is 70 wide, so 40
+    line = admission.band_line(FULL, NOW, 40)
+    assert line == "5h 72% → 91% · resets 14:05 (1h12) · he…"
+    assert len(line) == 40
     assert admission.band_line(FULL, NOW) == LINE
 
 
 @pytest.mark.parametrize("key,line", [
     ("peak", LINE.replace(" → 91%", "")),
-    ("ceiling", LINE.replace(" · ceiling 97", "")),
+    ("ceiling", LINE),                  # pl2 R1: the ceiling is status's, never the line's
     ("resetsAt", LINE.replace(" · resets 14:05 (1h12)", "")),
-    ("running", LINE.replace("3 helpers, ", "")),
-    ("room", LINE.replace(", room for 2", "")),
+    ("running", LINE.replace(" · helpers 3/5", "")),      # pl2 R3b: no running count, no part
+    ("room", LINE.replace("helpers 3/5", "3 helpers")),
     ("deferred", LINE.replace(" · 1 deferred", "")),
     ("P7", LINE.replace(" · 7d 41%", "")),
     ("mode", LINE),                     # pl1 R1: the mode is status's, never the line's
@@ -199,7 +200,7 @@ def test_each_part_is_left_out_when_absent(key, line):
 
 def test_one_helper_and_enforce_and_a_bad_reset():
     b = {**FULL, "running": 1, "mode": "enforce", "resetsAt": "14:05"}
-    assert admission.band_line(b, NOW) == ("5h 72% → 91% · ceiling 97 · 1 helper, room for 2 · "
+    assert admission.band_line(b, NOW) == ("5h 72% → 91% · helpers 1/3 · "
                                            "1 deferred · 7d 41%")
 
 
