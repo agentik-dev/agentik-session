@@ -15,13 +15,14 @@
 - [x] The failing tests, `tests/test_gc1_outcome.py`: 24 of 24 red at the pin
 - [x] R1 to R6: `before`, `post`, `hold`, `take`, `said` and `guard_row` in the guard; `post_tool_use`, `_with_changed`, `post_tool_use_failure`, `_gate_ups`; doctor's row warns. 24 of 24 green; the retired `open` lines' tests in test_g2b, the reader table. Pre 0.79 ms, Post 0.37 ms now (0.35, 0.11 at the pin); 400 unread lines +0 B
 - [x] R7: the runbook's guard lines say the outcome check; NICE n141 leaves, n175 and n118 re-worded, n179, n180, n189 marked read; n346 to n352 in (pl2 review 1's L1, L2, L4, L6, L7, L9, L11). Full suite under `.venv` before it: 5293 green, red only the README's count (the stamp's)
-- [ ] `make stamp`, then `make check` through the gate
+- [x] `make stamp` through the gate: job `20261120-115956-2821`, exit 0; alpha.145 to alpha.146, the count 5269 to 5295; n290, n291, n292, n293, n295, n296, n303 moved to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: the packet's §4.
 - NICE is past its 24,576 B bound with n346 to n352: `make stamp` moves the oldest S4 rows, as at pl2.
 
 ## Next act
-`make stamp`, then `make check`, through the gate queue.
+`make check` through the gate queue.
 
 ## Exit
