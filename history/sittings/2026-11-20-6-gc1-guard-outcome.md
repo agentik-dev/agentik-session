@@ -1,0 +1,27 @@
+# Sitting 2026-11-20-6: agentik-session, gc1-guard-outcome, the fix of review 2
+
+| item | value |
+|---|---|
+| goal | review 2's B1 to B3: one small file a waiting change, written by rename, no lock and no folder removed (H1 to H5); the drawn path's controls (H6); four NICE rows (H7); the stamp and one check |
+| budget | about 90 tool calls, `claude-opus-5-5`; checkpoint at 80% |
+| pin | `bf9aa49`, the branch's tip after build 2 |
+| branch | `gc1-guard-outcome`, worktree `.claude/worktrees/gc1-guard-outcome`, the two venvs linked |
+| level | S3, packet `design/packets/gc1-guard-outcome.md` §4b |
+| window | 200k |
+| agents | 0 |
+
+## Done-ness
+- [x] The packet's §4b, the rulings and choices
+- [ ] The failing tests (acceptance 1 to 6)
+- [ ] H1 to H6: the waiting files, the safe reader, no lock, no rmdir
+- [ ] H7: the NICE rows
+- [ ] `make stamp STAMP_VERSION=2.0.0-alpha.148`, then `make check`, through the gate
+
+## Handover
+- Choices: the packet's §4b.
+
+## Next act
+The failing tests in `tests/test_gc1_outcome.py`.
+
+## Exit
+(open)

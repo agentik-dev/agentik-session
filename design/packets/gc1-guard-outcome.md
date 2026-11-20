@@ -79,6 +79,34 @@ waited and swallowed each later change; B2, a corrupt `.said` file lost the chan
   until the pair fits 480 with `UserPromptSubmit`'s name.
 - Choice: UserPromptSubmit caps the pair as PostToolUse does; its inbox block stays alone.
 
+## 4b. Fix of review 2 (brief 3)
+
+Review 2: B1, the one waiting record was written under an `flock` on `guard-open/`, which
+another main-thread Post removed when empty, so the write failed and a change was logged and
+never said; B2, a directory at the record lost every change; B3, a FIFO there hung a Post.
+This section replaces F1's one record under a lock; F2's bound and texts, F3 and F4 stand.
+
+- H1: a change that waits is its own file, `sessions/<sid>/guard-said/<ns>-<pid>-<k>.said`
+  (`{"paths": [...]}`, 0600), its bytes written to `.<name>.tmp` in that folder and renamed in;
+  never rewritten. No lock is taken anywhere in the outcome check.
+- H2: a main-thread PostToolUse or UserPromptSubmit lists the folder, reads at most 256
+  entries, each only a regular file of at most 65,536 bytes, opened `O_NONBLOCK|O_NOFOLLOW`. F2's
+  line is made from every path read; only once it is in the output are the files read removed,
+  those alone. At least once is the rule: two hooks at once may each say one change.
+- H3: an entry that is no regular file, too large, or no list of strings is one `open` line
+  (`a bad waiting entry: <why>`), removed when it can be (`rmdir` for an empty folder) and else
+  skipped; nothing raises or waits. A temp older than a minute is removed.
+- H4: no hook removes `guard-open/` or `guard-said/`; each is made on demand with its parents.
+  A write into either that fails is made again once, its folder first.
+- H5: a change that cannot be written is one guard error; a main-thread PostToolUse says it in
+  its own output where it fits.
+- H6: a control character in a drawn path, a newline included, is drawn `?`.
+- H7: NICE for review 2's L1, L5, L6 and L9.
+- Choice: the call's file is opened directly (one failed `open` when absent), not found by a
+  listing, and read by the same safe reader; a bad one is removed.
+- Choice: a non-empty folder planted in `guard-said/` is skipped and logs at each saying Post;
+  no tree is removed by a hook.
+
 ## 5. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, no relay ledger.
