@@ -37,18 +37,29 @@ command neither knows writes (`dd`, `ln`, `truncate`, a script, a name in a vari
 `cd` the strict reading wrongly follows on a plain line (`false && cd /tmp; ...`).
 
 R4: an exception lets the call through with one `open` line in the session's `guard.jsonl`;
-each refusal is a line there too, naming a helper by the payload's `agent_id`. No knob: the
+each refusal is a line there too, naming a helper by the payload's `agent_id`.
+
+gc1, the outcome: a line neither reading can read whole (it cannot be split, or a target cannot
+be resolved) and that neither denies logs nothing; before it runs, the files the lists in force
+at the call's folder name by a plain path, and those lists, are read into
+`sessions/<sid>/guard-open/<tool_use_id>.json` (sha256, or size and mtime past 1 MiB, or absent;
+at most 64). Its PostToolUse or PostToolUseFailure reads them again and removes the file; each
+path that differs is one `changed` line, said once to the model and the owner. It never blocks
+and never restores. No knob: the
 environment is read for `HOME` and `CLAUDE_CONFIG_DIR` and the state root, nothing else. No
 process is spawned and no launch line is read.
 """
 from __future__ import annotations
 
+import errno
 import fnmatch
 import hashlib
+import itertools
 import json
 import os
 import re
 import shlex
+import stat
 import sys
 import time
 from pathlib import Path
@@ -492,10 +503,11 @@ def _bash_gated(payload: dict, env):
     loose = _loose_gated(command, cwd, env, cache, found, stood)
     if loose is not None:
         return loose, LOOSE
-    if raised or split:                   # g5 r1 F3, r1 F6: the line was not all read
-        log(payload, env, "open", None, why="the line cannot be split")
-    elif unresolved:                      # r1 F6: an unresolved target passes, with one line
-        log(payload, env, "open", None, why="a target cannot be resolved")
+    if raised or split or unresolved:     # gc1 R1: not all read; held by the outcome instead
+        try:
+            before(payload, env, cwd)
+        except Exception as e:                          # noqa: BLE001 - R5: a guard error
+            log(payload, env, "open", None, why=type(e).__name__)
     return None
 
 
@@ -505,10 +517,10 @@ def _text(v) -> str | None:
     return v[:TEXT_CAP] if isinstance(v, str) else None
 
 
-def log(payload: dict, env, decision: str, path, why=None, rule=None) -> None:
+def log(payload: dict, env, decision: str, path, why=None, rule=None, call=None) -> None:
     """One line in `sessions/<sid>/guard.jsonl` (0600); a line that would carry the log past
-    LOG_CAP is not written. Never raises. `rule` (g8: the rules' names) is written only when
-    given."""
+    LOG_CAP is not written. Never raises. `rule` (g8: the rules' names) and `call` (gc1: the
+    tool call's id, on a `changed` line) are written only when given."""
     try:
         sid = payload.get("session_id")
         if not (isinstance(sid, str) and _SID.match(sid)):
@@ -517,6 +529,8 @@ def log(payload: dict, env, decision: str, path, why=None, rule=None) -> None:
                "path": _text(path), "agent_id": _text(payload.get("agent_id")), "why": _text(why)}
         if rule is not None:
             row["rule"] = [_text(r) for r in rule]
+        if call is not None:
+            row["call"] = _text(call)
         line = (json.dumps(row, ensure_ascii=False) + "\n").encode()
         sdir = resolver.session_dir(resolver.state_dir(env), sid)
         sdir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -529,6 +543,410 @@ def log(payload: dict, env, decision: str, path, why=None, rule=None) -> None:
             os.close(fd)
     except Exception:                                   # noqa: BLE001 - a log never fails a hook
         pass
+
+
+# ---- gc1: the outcome of a line the gate cannot read ----------------------------------------
+
+OPEN_DIR = "guard-open"                   # sessions/<sid>/guard-open/<tool_use_id>.json
+RECORD_CAP = 64                           # files read before one line, at most
+BIG = 1 << 20                             # past this a file is read by its size and mtime
+LEFTOVER = 86400                          # R4: a call's file older than this is removed
+RETIRED = ("the line cannot be split", "a target cannot be resolved")   # R5: old logs' reasons
+SAID_DIR = "guard-said"                   # brief 3 H1: sessions/<sid>/guard-said/<name>.said
+SAID_READ = 256                           # H2: the entries one saying reads, at most
+SAID_LOOK = 4 * SAID_READ                 # H2: the entries one saying looks at, temps included
+SAID_CAP = 65536                          # H2: a waiting file's bytes, at most
+TEMP_AGE = 60                             # H3: a waiting folder's temp older than this goes
+_SEQ = itertools.count()                  # H1: a waiting file's name, unique to this process
+_OWN = re.compile(r"[0-9]+-[0-9]+-[0-9]+\.said\Z")              # J2: the names the check gives
+_OWN_TEMP = re.compile(r"\.[0-9]+-[0-9]+-[0-9]+\.said\.[0-9]+\.tmp\Z")
+UNFIT = ".unfit"                          # J3: beside a folder that is no folder, once logged
+SAID = ("agentik-session: {shown} is gated and changed during a Bash line the gate could not "
+        "read. If that line ran the lane, nothing is wrong. Otherwise restore it and use the "
+        "instruct skill.")
+SAID_OWNER = "agentik-session: a gated file changed during a Bash line the gate could not read: {shown}"
+PAIR_CAP = 480                            # F2: the pair beside an empty output, in JSON bytes
+DRAWN = 48                                # F2: a longer path is `…` and its last DRAWN - 1
+
+
+def _in_force(cwd, env) -> list:
+    """The files read before an unread line: the lists in force at `cwd` that exist (the
+    checkout's, each folder's, the user's), then each file they name by a plain path, in that
+    order, at most RECORD_CAP. In a worktree a folder's line is read in the member and in the
+    worktree both."""
+    cache: dict = {}
+    lists, named = [], []
+    here = os.path.abspath(cwd) if cwd else None
+    top = _top(here, itself=True) if here else None
+    if top is not None:
+        lists.append(os.path.join(top, ".claude", LIST))
+        named += [os.path.join(top, r) for r in repo_lines(top, cache)]
+    for d, lines, vp in (folder_lists(here, env, cache, itself=True) if here else []):
+        lists.append(os.path.join(d, ".claude", LIST))
+        member = (vp[:len(vp) - (len(here) - len(top))]
+                  if top is not None and vp != here else None)
+        for r in lines:
+            p = os.path.join(d, r)
+            named.append(p)
+            if member is not None and p.startswith(member.rstrip("/") + "/"):
+                named.append(top + p[len(member):])
+    lists.append(os.path.join(user_dir(env), LIST))
+    named += user_lines(env, cache)
+    out = [os.path.normpath(p) for p in lists if os.path.lexists(p)]
+    out += [os.path.normpath(p) for p in named if not _GLOB & set(p)]
+    return list(dict.fromkeys(out))[:RECORD_CAP]
+
+
+def _reading(path: str) -> list:
+    """One file's reading: `["sha256", hex]`, `["size", bytes, mtime_ns]` past BIG,
+    `["absent"]`, or `["other"]` for what is no regular file or cannot be opened."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (FileNotFoundError, NotADirectoryError):
+        return ["absent"]
+    except OSError:
+        return ["other"]
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return ["other"]
+        if st.st_size > BIG:
+            return ["size", st.st_size, st.st_mtime_ns]
+        h = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                return ["sha256", h.hexdigest()]
+            h.update(chunk)
+    finally:
+        os.close(fd)
+
+
+def _call_id(payload: dict) -> str | None:
+    tid = payload.get("tool_use_id")
+    return tid if isinstance(tid, str) and _SID.match(tid) else None
+
+
+def _open_dir(payload: dict, env) -> Path | None:
+    sid = payload.get("session_id")
+    if not (isinstance(sid, str) and _SID.match(sid)):
+        return None
+    return resolver.session_dir(resolver.state_dir(env), sid) / OPEN_DIR
+
+
+def _prune(folder: Path, now: float) -> None:
+    """R4: a call's file (or a temp) older than LEFTOVER is removed, unread."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".json") or name.endswith(".tmp"):
+            try:
+                if os.lstat(folder / name).st_mtime < now - LEFTOVER:
+                    os.remove(folder / name)
+            except OSError:
+                pass
+
+
+def _write_record(folder: Path, name: str, doc: dict, prune: bool = True) -> None:
+    """`folder/name` written whole by rename from a temp in the folder (0600, the folder 0700,
+    made with its parents), after the leftovers' prune; tried once more, its folder made again,
+    where the first try fails (brief 3 H4). Raises on the second failure."""
+    data = json.dumps(doc, ensure_ascii=False).encode()
+    for again in (False, True):
+        tmp = folder / f".{name}.{os.getpid()}.tmp"
+        try:
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if prune:
+                _prune(folder, time.time())
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+            finally:
+                os.close(fd)
+            os.replace(tmp, folder / name)
+            return
+        except OSError:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if again:
+                raise
+
+
+def before(payload: dict, env, cwd) -> None:
+    """R1: the call's file, read before a line the gate cannot read; nothing with no call id
+    or nothing to read. Raises on a failed write (the caller's guard error)."""
+    tid, folder = _call_id(payload), _open_dir(payload, env)
+    if tid is None or folder is None:
+        return
+    names = _in_force(cwd, env)
+    if names and _fit(folder, payload, env):
+        _write_record(folder, tid + ".json", {"at": time.time(), "cwd": cwd,
+                                              "files": [[p, _reading(p)] for p in names]})
+
+
+def _small(path, cap: int) -> tuple:
+    """(bytes, None) for a regular file of at most `cap` bytes; (None, why) for anything else;
+    (None, None) where nothing is there. Opened so it cannot block and follows no link (H2)."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except (FileNotFoundError, NotADirectoryError):
+        return None, None
+    except OSError as e:
+        return None, "a link" if e.errno == errno.ELOOP else type(e).__name__
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None, "no regular file"
+        if st.st_size > cap:
+            return None, "too large"
+        raw = b""
+        while len(raw) <= cap:
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                return raw, None
+            raw += chunk
+        return None, "too large"
+    except OSError as e:
+        return None, type(e).__name__
+    finally:
+        os.close(fd)
+
+
+def _fit(folder: Path, payload: dict, env) -> bool:
+    """J3: whether `folder` may be used: a real folder by `lstat`, or nothing yet (made when
+    written). Anything else, a link to a folder included, is never listed, read, written or
+    removed, and is one guard error a session: logged by the hook that makes the marker
+    `<folder>.unfit` beside it."""
+    try:
+        if stat.S_ISDIR(os.lstat(folder).st_mode):
+            return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        pass
+    try:
+        os.close(os.open(str(folder) + UNFIT,
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
+    except FileExistsError:
+        return False
+    except OSError:
+        pass
+    log(payload, env, "open", None, why=f"{folder.name} is no folder")
+    return False
+
+
+def _remove(path) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _drop(path) -> None:
+    """A bad entry removed where it can be: an empty folder by `rmdir`, else by `remove`; a
+    folder that holds anything stays (no hook removes a tree)."""
+    try:
+        if stat.S_ISDIR(os.lstat(path).st_mode):
+            os.rmdir(path)
+        else:
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _compare(payload: dict, env, path: Path) -> list:
+    """R2: the call's file claimed (removed), its files read again; each change one `changed`
+    line. The changed files' real paths (F3), one a file however it was spelled."""
+    raw, why = _small(path, BIG)
+    if raw is None:
+        if why is not None:
+            _drop(path)
+        return []
+    try:
+        os.remove(path)
+    except OSError:
+        return []
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return []
+    out: list = []
+    for row in (doc.get("files") if isinstance(doc, dict) else None) or []:
+        if not (isinstance(row, list) and len(row) == 2 and isinstance(row[0], str)):
+            continue
+        real = os.path.realpath(row[0])
+        if real not in out and _reading(row[0]) != row[1]:
+            log(payload, env, "changed", real, call=_call_id(payload))
+            out.append(real)
+    return out
+
+
+class Waiting(list):
+    """The paths that wait to be said, and `files`, the waiting files they were read from: the
+    files `taken` removes once the paths are in an output (H2)."""
+    files: tuple = ()
+
+
+def _hold(folder: Path, paths: list) -> None:
+    """H1: `paths`, one change, as its own waiting files, each written once by rename; J1: as
+    many files as it takes for each to stay within SAID_CAP, so no path is dropped for size.
+    Raises."""
+    chunks, size = [[]], len(b'{"paths": []}')
+    for p in paths:
+        n = len(json.dumps(p, ensure_ascii=False).encode()) + 2
+        if chunks[-1] and size + n > SAID_CAP:
+            chunks.append([])
+            size = len(b'{"paths": []}')
+        chunks[-1].append(p)
+        size += n
+    for chunk in chunks:
+        name = f"{time.time_ns()}-{os.getpid()}-{next(_SEQ)}.said"
+        _write_record(folder, name, {"paths": chunk}, prune=False)
+
+
+def post(payload: dict, env, take: bool = True) -> list:
+    """R2 at a Post: the Bash call's changes logged, then each call's held as its own waiting
+    file before anything else (H1). When `take` and the payload is the main thread's, the
+    paths that wait (a `Waiting`), still held: `taken` lets their files go once they are in an
+    output (H2). A change that cannot be held is a guard error and is said here (H5); a folder
+    that is no folder is not used (J3). Never raises: a failure is a guard error."""
+    try:
+        bash = payload.get("tool_name") == "Bash"
+        take = take and not payload.get("agent_id")
+        folder = _open_dir(payload, env)
+        if folder is None or not (bash or take):
+            return []
+        tid, said_dir = _call_id(payload), folder.parent / SAID_DIR
+        changed = (_compare(payload, env, folder / (tid + ".json"))
+                   if bash and tid and _fit(folder, payload, env) else [])
+        fit = _fit(said_dir, payload, env)
+        stray: list = [] if fit else changed
+        if changed and fit:
+            try:
+                _hold(said_dir, changed)
+            except Exception as e:                      # noqa: BLE001 - H5
+                log(payload, env, "open", None, why=type(e).__name__)
+                stray = changed
+        if not take:
+            return []
+        out = _waiting(said_dir, payload, env) if fit else Waiting()
+        out.extend(p for p in stray if p not in out)
+        return out
+    except Exception as e:                              # noqa: BLE001 - never a failed hook
+        log(payload, env, "open", None, why=type(e).__name__)
+        return []
+
+
+def _entry(path, payload: dict, env) -> list | None:
+    """H2, J2: one waiting file's paths, read strictly: only `{"paths": [str, ...]}` is one.
+    A regular file that is anything else is one guard error and is removed; None. None,
+    silently, where it went (another hook took it) or is no longer a regular file."""
+    raw, why = _small(path, SAID_CAP)
+    if raw is None and why in (None, "a link", "no regular file"):
+        return None
+    if raw is not None:
+        try:
+            doc = json.loads(raw)
+            paths = doc.get("paths") if isinstance(doc, dict) else None
+            if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
+                return paths
+            why = "no list of paths"
+        except ValueError as e:                         # no JSON; no UTF-8
+            why = type(e).__name__
+    log(payload, env, "open", None, why=f"a bad waiting entry: {why}")
+    _remove(path)
+    return None
+
+
+def _waiting(folder: Path, payload: dict, env) -> Waiting:
+    """H2: the paths of at most SAID_READ waiting files, and those files; a temp older than
+    TEMP_AGE removed on the way. J2: only a regular file (by `lstat`) of the check's own
+    naming is looked at, read, counted or removed; every other entry is left as it is, not
+    logged. Nothing in the folder can make it wait or raise."""
+    out, files = Waiting(), []
+    try:
+        listing = os.scandir(folder)
+    except OSError:
+        return out
+    now, looked, read = time.time(), 0, 0
+    with listing:
+        for e in listing:
+            if looked >= SAID_LOOK or read >= SAID_READ:
+                break
+            temp = _OWN_TEMP.match(e.name)
+            if not (temp or _OWN.match(e.name)):
+                continue
+            looked += 1
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if temp:
+                if st.st_mtime < now - TEMP_AGE:
+                    _remove(e.path)
+                continue
+            read += 1
+            paths = _entry(e.path, payload, env)
+            if paths is not None:
+                out.extend(paths)
+                files.append(e.path)
+    out.files = tuple(files)
+    return out
+
+
+def waiting(payload: dict, env) -> list:
+    """The paths that wait to be said, for the main thread's UserPromptSubmit; still held."""
+    return post({**payload, "tool_name": None}, env)
+
+
+def taken(payload: dict, env, paths) -> None:
+    """H2: the waiting files `paths` was read from removed, those and no others, once the paths
+    are in an output. Never raises: a file another hook took is already gone."""
+    for f in getattr(paths, "files", ()):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+
+def _drawn(path: str, env) -> str:
+    """F3: a real path, `~/` under the home; H6: a control character `?`; F2: past DRAWN
+    characters, `…` and its tail."""
+    for home in sorted({os.path.realpath(_home(env)), os.path.abspath(_home(env))}, key=len,
+                       reverse=True):
+        home = home.rstrip("/")
+        if home and path.startswith(home + "/"):
+            path = "~/" + path[len(home) + 1:]
+            break
+    path = "".join("?" if ord(c) < 32 or 127 <= ord(c) < 160 else c for c in path)   # H6
+    return path if len(path) <= DRAWN else "\u2026" + path[1 - DRAWN:]
+
+
+def _pair(model: str, owner: str, event: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": model},
+            "systemMessage": owner}
+
+
+def said(paths: list, env, event: str = "PostToolUse") -> tuple:
+    """F2: (the model's line, the owner's line) for the waiting paths: the first sorted, then
+    `(+N more)`; the drawn path's tail cut until the pair beside `{}` fits PAIR_CAP."""
+    paths = sorted(dict.fromkeys(paths))
+    more = f" (+{len(paths) - 1} more)" if len(paths) > 1 else ""
+    shown = _drawn(paths[0], env)
+    while True:
+        text = shown + more
+        model, owner = SAID.format(shown=text), SAID_OWNER.format(shown=text)
+        if len(json.dumps(_pair(model, owner, event))) <= PAIR_CAP or len(shown) <= 2:
+            return model, owner
+        shown = "\u2026" + shown[2:]     # one character fewer, the mark kept
 
 
 # ---- the hook ---------------------------------------------------------------------------
@@ -731,27 +1149,36 @@ def count_here(env, cwd) -> int:
 # ---- R4: the doctor's line --------------------------------------------------------------
 
 def counts(sdir) -> tuple:
-    """(0, refusals, calls let through on an error) in one session's guard log; the first
-    place is g2's prompts, which the gate never makes."""
-    n = {"deny": 0, "open": 0}
+    """(0, refusals, guard errors, gated files changed by an unread line) in one session's
+    guard log; the first place is g2's prompts, which the gate never makes. An `open` line
+    with a reason gc1 retired counts as neither (R5)."""
+    n = {"deny": 0, "open": 0, "changed": 0}
     try:
         with open(Path(sdir) / LOG, "rb") as f:
             raw = f.read(LOG_CAP + 4096)
     except OSError:
-        return 0, 0, 0
+        return 0, 0, 0, 0
     for text in raw.decode("utf-8", "replace").splitlines():
         try:
             d = json.loads(text)
         except ValueError:
             continue
         if isinstance(d, dict) and d.get("decision") in n:
+            if d["decision"] == "open" and d.get("why") in RETIRED:
+                continue
             n[d["decision"]] += 1
-    return 0, n["deny"], n["open"]
+    return 0, n["deny"], n["open"], n["changed"]
 
 
 def doctor_row(env, cwd) -> str:
     """One line: the gates are on, how many lines are gated here, and what this repo's newest
     session (g1's `newest`) logged."""
+    return guard_row(env, cwd)[0]
+
+
+def guard_row(env, cwd) -> tuple:
+    """(the doctor's line, warn): warn when the newest session logged a guard error or a gated
+    file changed by an unread line (gc1 R5)."""
     from . import instructions
     try:
         n = count_here(env, cwd)
@@ -761,10 +1188,10 @@ def doctor_row(env, cwd) -> str:
         main = instructions.main_checkout(cwd)
         found = instructions.newest(resolver.state_dir(env), main)
     except Exception:                                   # noqa: BLE001
-        return f"on; {n} gated here (the repo's sessions cannot be read)"
+        return f"on; {n} gated here (the repo's sessions cannot be read)", False
     if found is None:
-        return f"on; {n} gated here; no session of {main} has a log to count its refusals"
+        return f"on; {n} gated here; no session of {main} has a log to count its refusals", False
     sid = found[0]
-    _, denies, opened = counts(resolver.session_dir(resolver.state_dir(env), sid))
-    return (f"on; {n} gated here; session {sid}: {denies} refusals, {opened} let through on "
-            "an error")
+    _, denies, errors, changed = counts(resolver.session_dir(resolver.state_dir(env), sid))
+    return (f"on; {n} gated here; session {sid}: {denies} refusals, {errors} guard errors, "
+            f"{changed} gated files changed by an unread line"), bool(errors or changed)

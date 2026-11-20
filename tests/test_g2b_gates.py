@@ -95,6 +95,11 @@ def _log(b, sid=SID):
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
+def _call_file(b):
+    """gc1 R1: the file an unread Bash line's call writes before it runs."""
+    return (resolver.session_dir(b.state, SID) / instructionguard.OPEN_DIR / "toolu_g2b_0002.json")
+
+
 def _listed(b) -> list:
     return [b.repo / "CLAUDE.md", b.repo / "AGENTS.md", b.repo / ".claude" / "settings.json",
             b.repo / ".claude" / "settings.local.json", b.repo / "docs" / "a" / "b.md",
@@ -482,7 +487,8 @@ def test_r4_doctor_row_counts_the_newest_session(box):
         instructionguard.check(_payload("Edit", box.repo / "AGENTS.md", **more), box.env)
     instructionguard.log({"session_id": SID}, box.env, "open", None, why="x")
     assert instructionguard.doctor_row(box.env, box.repo) == (
-        f"on; 6 gated here; session {SID}: 2 refusals, 1 let through on an error")
+        f"on; 6 gated here; session {SID}: 2 refusals, 1 guard errors, 0 gated files changed by "
+        "an unread line")
 
 
 def test_r4_doctor_row_without_a_session(box):
@@ -499,8 +505,8 @@ def test_r4_doctor_row_in_the_report(machine):  # noqa: F811
     rep = doctor.run(env, repo)
     rows = [c for c in rep.checks if c.name == "guard"]
     assert rep.ok and len(rows) == 1 and rows[0].ok and not rows[0].warn
-    assert re.fullmatch(rf"on; \d+ gated here; session {SID}: 0 refusals, 0 let through on an "
-                        r"error", rows[0].detail), rows[0].detail
+    assert re.fullmatch(rf"on; \d+ gated here; session {SID}: 0 refusals, 0 guard errors, 0 "
+                        r"gated files changed by an unread line", rows[0].detail), rows[0].detail
 
 
 # ---- review round 1: F1 (a subshell's or a popd's folder), F6 (an unresolved target logs) --
@@ -519,10 +525,10 @@ def test_f1_a_subshells_or_a_popds_folder_does_not_outlive_it(box, command):
 @pytest.mark.parametrize("command", [
     "echo x >> $X", "echo x >> CLAUDE.m*", "cd $X; printf x >> $Y",
 ])
-def test_f6_an_unresolved_bash_target_passes_with_one_open_line(box, command):
+def test_f6_an_unresolved_bash_target_passes_held_by_the_outcome(box, command):
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
-    rows = _log(box)
-    assert [(r["decision"], r["tool"]) for r in rows] == [("open", "Bash")], rows
+    assert _log(box) == []               # gc1 R1: no `open` line; the call's file instead
+    assert _call_file(box).is_file()
 
 
 def test_f6_a_resolved_ungated_target_logs_nothing(box):
@@ -557,7 +563,8 @@ def test_r2_an_unmatched_paren_leaves_the_folder_unknown(box):
     command = "cd sub; ) ; printf x >> ../notes.md"
     assert shellreader.bash_targets(command, str(box.repo), box.env) == [("write", None)]
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}
-    assert [r["decision"] for r in _log(box)] == ["open"]
+    assert _log(box) == []               # gc1 R1: held by the outcome, no `open` line
+    assert _call_file(box).is_file()     # brief 2 F4: the unresolved case is recorded
 
 
 # ---- g5: a `#` inside a word is no comment's start (u3's review, round 1, R1-F2) ----------
@@ -621,10 +628,10 @@ def test_g5_r1_the_commands_before_a_split_failure_are_judged(box, command):
 
 @pytest.mark.parametrize("command", ["cp a notes.md \\", "echo 'a; cp a notes.md",
                                      "cp a notes.md; echo x\\"])
-def test_g5_r1_a_line_that_cannot_be_judged_still_passes_with_one_open_line(box, command):
+def test_g5_r1_a_line_that_cannot_be_judged_still_passes_held_by_the_outcome(box, command):
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
-    assert [(r["decision"], r.get("why")) for r in _log(box)] == \
-        [("open", "the line cannot be split")]
+    assert _log(box) == []               # gc1 R1: no `open` line; the call's file instead
+    assert _call_file(box).is_file(), command      # brief 2 F4: the split case is recorded
 
 
 # The round's "probed and clean" lines: each keeps its result at d2f89d9 (checked against
@@ -875,8 +882,8 @@ def test_g6_with_the_loose_reading_off_the_strict_reading_passes_as_at_a0055da(
         box, strict_only, command):
     (box.repo / "sub").mkdir()
     assert instructionguard.check(_bash(command, box.repo), box.env) == {}, command
-    assert [r["decision"] for r in _log(box)] == ([] if command.startswith("echo '>>") else
-                                                  ["open"])
+    assert _log(box) == []               # gc1 R1: an unread line logs no `open` line
+    assert _call_file(box).is_file() is not command.startswith("echo '>>"), command
 
 
 @pytest.mark.parametrize("command", G6_A1[1:6] + G6_A1[10:13] + G6_A1[-1:])

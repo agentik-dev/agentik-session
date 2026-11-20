@@ -957,12 +957,13 @@ def _check_instructions(env, cwd, plugins, sections) -> list:
 
 def _check_guard(env, cwd) -> Check:
     """Packets g2 R5 and g2b R4: the edit gates are on (they have no knob), how many lines are
-    gated here, and the refusals the repo's newest session logged. Never a failure."""
+    gated here, and the refusals the repo's newest session logged; gc1 R5: `warn` when it
+    logged a guard error or a gated file changed by an unread line. Never a failure."""
     try:
-        detail = instructionguard.doctor_row(env, cwd)
+        detail, warn = instructionguard.guard_row(env, cwd)
     except Exception:                                   # noqa: BLE001
-        detail = "on"
-    return Check("guard", True, detail)
+        detail, warn = "on", False
+    return Check("guard", True, detail, warn=warn)
 
 
 class NoCwd(Exception):

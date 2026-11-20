@@ -167,3 +167,6 @@ design/packets/in3-line.md: sibling
 tests/test_in3_line.py: home
 # is3-readme-needs: the packet named the suite's public respeak renderer plugin, five lines of prose about the renderer and the verifier, in its first commit (8c4d1fe); the tree's packet no longer has it (the coordinator's ruling).
 design/packets/is3-readme-needs.md: sibling
+# gc1: the branch's history holds a made-up two-folder example in a NICE row (51d06b9) and its quotation in the sitting's record (353cc65), both removed from the tree by later commits; these two rows leave with the next row in this repo.
+NICE_TO_HAVE.md: home
+history/sittings/2026-11-20-6-gc1-guard-outcome.md: home

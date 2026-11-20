@@ -146,8 +146,18 @@ redirection (a heredoc's own included), `tee`, `sed -i`, `perl -i`, `cp`, `mv` o
 a gated file, one level of `bash -c`, a literal `cd`, a `python -c` literal or a
 `python3 - <<EOF` body beside `open(` or `write_`, are refused, as is removing a list file
 (`rm`, `unlink`, `git rm`, `git checkout --`, `git restore`, `mv` from it). A target with `$`,
-a backquote or a glob, and a line `shlex` cannot split, pass, each with one `open` line in
-`guard.jsonl`. A `cd` or `pushd` inside `( ... )` ends at the `)` (a quoted or backslashed paren,
+a backquote or a glob, and a line `shlex` cannot split, pass, and the gate holds its rule by
+the outcome (gc1): before such a line it reads each file a list in force in the call's folder
+names by a plain path, and those lists, into `sessions/<sid>/guard-open/<tool_use_id>.json`
+(a sha256 each, size and mtime past 1 MiB, at most 64 files); at the call's PostToolUse or
+PostToolUseFailure, a helper's too, it reads them again and removes the file. A file that
+changed, appeared or went is one `changed` line in `guard.jsonl`, and one line to the session
+and the owner names it: if the line ran the lane nothing is wrong, else restore the file and use
+the skill. A change seen at a failure, or in a helper, is said at the main thread's next
+PostToolUse or prompt; till then it waits as its own small file in
+`sessions/<sid>/guard-said/`. A file there of its own naming that is no such record is one guard
+error and is removed; anything else there is left as it is, and either folder, where it is a
+link or no folder, is not used (one guard error a session). It never blocks and never restores. A `cd` or `pushd` inside `( ... )` ends at the `)` (a quoted or backslashed paren,
 and a `case` pattern's, is no subshell's edge), and `popd` returns to its `pushd`'s folder; a `cd` or `popd` it cannot read leaves the folder unknown, and a relative target after it
 passes the same way. A path matches by its absolute
 and its real spelling, in any case where the volume folds case.
@@ -171,10 +181,12 @@ with `/` or `~`, or holding `..`); a checkout's list keeps the lane as it was.
 
 It has no knob: no profile key, session setting or variable opens a path. It fails open: an
 error lets the call through and writes an `open` line to the session's `guard.jsonl` (0600,
-64 KiB at most), where each refusal is logged too, a helper's by its `agent_id`. It spawns no
-process and reads no launch line. The doctor's `guard` row, after the `instructions` rows,
-says it is on, how many lines are gated here (the three layers' sum), and counts the refusals of the repo's newest
-logged session. Under `auto`, whether the lane may write inside a `.claude` folder is the
+64 KiB at most), the only `open` line it writes; each refusal and each `changed` line is logged
+there too, a helper's by its `agent_id`. It spawns no process and reads no launch line. The
+doctor's `guard` row, after the `instructions` rows, says it is on, how many lines are gated
+here (the three layers' sum), and for the repo's newest logged session `N refusals, M guard
+errors, K gated files changed by an unread line`; it is `warn` when M or K is above 0. An old
+log's `open` lines for an unread line count as neither. Under `auto`, whether the lane may write inside a `.claude` folder is the
 owner's test (hq design/09 §7.2, step 7).
 
 ## 2. Choosing a profile
