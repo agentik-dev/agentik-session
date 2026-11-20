@@ -1774,7 +1774,7 @@ def _ran_unconfirmed(payload: dict, env, sdir: Path | None) -> str | None:
         if line is None:
             return None
         at = _load_json(sdir / ACTIVITY).get("at")
-        written = json.loads((sdir / MARKER).read_bytes()).get("written")
+        written = _load_json(sdir / MARKER).get("written")    # the stamp, as _confirm reads it
         return line if _num(at) and _num(written) and written >= at else None
     except Exception:                                   # noqa: BLE001
         return None
