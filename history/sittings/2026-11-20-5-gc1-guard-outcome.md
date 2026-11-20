@@ -15,13 +15,14 @@
 - [x] The failing tests: 23 of 38 red at `3fbbe31` (the said bytes, the record's name, the new cases); g2b's split and unresolved cases pinned to the call's file
 - [x] F1 to F4: one `waiting.said` a session, held before it is said, read strictly; the line bounded, 480 B beside `{}`; the real path. 38 of 38 green; test_gc1, test_g2b, test_bare_machine 624 (`.venv`), 621 and 3 skipped (`.venv-floor`); the split-dropped and unresolved-dropped mutants each fail test_g2b (a scratch copy)
 - [x] F5: six NICE rows, n353 to n358 (review 1's L4, L6, L7, L9, L10, L11)
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: job `20261120-123120-2824`, exit 0; the count 5295 to 5309, alpha.146 kept; n302, n304, n306, n307, n309, n310, n311 to the overflow
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: the packet's §4a.
 
 ## Next act
-`make stamp`, then `make check`, through the gate.
+`make check` through the gate.
 
 ## Exit
 Open.
