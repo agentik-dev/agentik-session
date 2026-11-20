@@ -50,7 +50,13 @@ The new files under `sessions/<sid>/guard-open/` (0700; each 0600): `<tool_use_i
 
 ## 4. Findings that name this row: the choices inside the rulings
 
-Filled at the build; see the sitting's record.
+- The lists in force that exist (the checkout's, each folder's, the user's) are read first, then the files they name by a plain path; the 64 counts both. In a worktree a folder's line is read in the member and in the worktree.
+- A reading is `sha256`, `size` past 1 MiB, `absent`, or `other` (no regular file, or one that cannot be opened; opened non-blocking, so a FIFO never hangs).
+- The said line names a path relative to the call's folder, `~/` under the home, else whole; several are sorted, comma-joined, with `are` and `them`. The log keeps the whole path.
+- It follows the handler's words (the CHECKPOINT line, then pl2's respawn line), and the gate's lines and a sitting's line follow it. Where it does not fit `MAX_OUT` it waits in a `.said` file like a failure's; UserPromptSubmit says it with no cap.
+- The call's file is removed before the second reading, so two Posts never log one change twice; the folder goes when empty, so a Post with nothing waiting costs one failed `listdir`. Pre now 0.79 ms, Post 0.37 ms (medians of 400, five gated files).
+- The Edit tools' `the target cannot be resolved` line is not named by R1 and stays; doctor counts it a guard error. A `.said` file is not pruned by R4. A call another hook denies after the gate leaves its file, which R4 removes after a day.
+- NICE: n141 leaves (no `open` line now); n175 and n118 re-worded to what remains; n179, n180 and n189 say their lines are read, so not held (the packet's probe). n346 to n352 from pl2's review 1.
 
 ## 5. Forbidden reads
 
