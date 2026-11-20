@@ -12,16 +12,16 @@
 
 ## Done-ness
 - [x] The packet's §4a, the fix's rulings and choices
-- [ ] The failing tests, acceptance 1 to 8
-- [ ] F1 to F4: the waiting record, the bounded line, the real path, the g2b pins
-- [ ] F5: six NICE rows
+- [x] The failing tests: 23 of 38 red at `3fbbe31` (the said bytes, the record's name, the new cases); g2b's split and unresolved cases pinned to the call's file
+- [x] F1 to F4: one `waiting.said` a session, held before it is said, read strictly; the line bounded, 480 B beside `{}`; the real path. 38 of 38 green; test_gc1, test_g2b, test_bare_machine 624 (`.venv`), 621 and 3 skipped (`.venv-floor`); the split-dropped and unresolved-dropped mutants each fail test_g2b (a scratch copy)
+- [x] F5: six NICE rows, n353 to n358 (review 1's L4, L6, L7, L9, L10, L11)
 - [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
 - Choices: the packet's §4a.
 
 ## Next act
-The failing tests in `tests/test_gc1_outcome.py`.
+`make stamp`, then `make check`, through the gate.
 
 ## Exit
 Open.
