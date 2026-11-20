@@ -58,6 +58,27 @@ The new files under `sessions/<sid>/guard-open/` (0700; each 0600): `<tool_use_i
 - The Edit tools' `the target cannot be resolved` line is not named by R1 and stays; doctor counts it a guard error. A `.said` file is not pruned by R4. A call another hook denies after the gate leaves its file, which R4 removes after a day.
 - NICE: n141 leaves (no `open` line now); n175 and n118 re-worded to what remains; n179, n180 and n189 say their lines are read, so not held (the packet's probe). n346 to n352 from pl2's review 1.
 
+## 4a. Fix of review 1 (brief 2)
+
+Review 1: B1, the said line named every path twice, so two worktree paths never fit `MAX_OUT`,
+waited and swallowed each later change; B2, a corrupt `.said` file lost the change.
+
+- F1: after the `changed` lines the paths join the session's one waiting record,
+  `guard-open/waiting.said` (`{"paths": [...]}`, replaced under a lock on the folder), before
+  anything else; a hook takes them out only once its line is in its output. Read strictly: not
+  a list of strings is corrupt, removed, one `open` line with its `why`, read as empty.
+- F2: the model's line `agentik-session: <shown> is gated and changed during a Bash line the
+  gate could not read. If that line ran the lane, nothing is wrong. Otherwise restore it and use
+  the instruct skill.`; the owner's `agentik-session: a gated file changed during a Bash line
+  the gate could not read: <shown>`. `<shown>`: the first path sorted, ` (+N more)`; past 48
+  characters `…` and the last 47. The pair beside `{}` at most 480 bytes; said where it fits
+  after the handler's words, taking every waiting path.
+- F3: a waiting path (and a log line's) is the real path, `~/` under the home; F4: g2b's split
+  and unresolved cases assert the call's file; F5: NICE for L4, L6, L7, L9 to L11.
+- Choice: the literal drawing with ` (+69 more)` is 488 bytes, so the tail is cut further
+  until the pair fits 480 with `UserPromptSubmit`'s name.
+- Choice: UserPromptSubmit caps the pair as PostToolUse does; its inbox block stays alone.
+
 ## 5. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, no relay ledger.
