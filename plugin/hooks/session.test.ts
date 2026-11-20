@@ -94,6 +94,44 @@ test('respawn.json present: respawn marked', async (t: any, on: any) => {
     .toBe('session: ctx 62% · turns 31% · notice · respawn marked')
 })
 
+// ---- Packet rc1 R3: a chained marker no confirm follows reads `respawn unconfirmed` ----
+const WRITTEN = 1791806370.25
+const MARK_CHAIN = JSON.stringify({ session: 'sess-1', charter: '/w/c.md', charter_sha256: '0'.repeat(64), written: WRITTEN, chain: 'net' })
+const MARK_NO_CHAIN = JSON.stringify({ session: 'sess-1', charter: '/w/c.md', charter_sha256: '0'.repeat(64), written: WRITTEN, chain: null })
+const CONFIRM = (at: number) => JSON.stringify({ at, marker_sha256: '0'.repeat(64) })
+const MARKED = 'session: ctx 62% · turns 31% · notice · respawn marked'
+const UNCONFIRMED = 'session: ctx 62% · turns 31% · notice · respawn unconfirmed'
+
+test('a chained marker and no confirm: respawn unconfirmed', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_CHAIN }))
+    .toBe(UNCONFIRMED)
+})
+
+test('a chained marker and a confirm at its written: respawn marked', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_CHAIN, [`${DIR}/respawn-main.json`]: CONFIRM(WRITTEN) }))
+    .toBe(MARKED)
+})
+
+test('a chained marker and a confirm after its written: respawn marked', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_CHAIN, [`${DIR}/respawn-main.json`]: CONFIRM(WRITTEN + 3) }))
+    .toBe(MARKED)
+})
+
+test('a chained marker and a confirm before its written: respawn unconfirmed', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_CHAIN, [`${DIR}/respawn-main.json`]: CONFIRM(WRITTEN - 60) }))
+    .toBe(UNCONFIRMED)
+})
+
+test('a chained marker and a confirm that does not parse: respawn unconfirmed', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_CHAIN, [`${DIR}/respawn-main.json`]: '{' }))
+    .toBe(UNCONFIRMED)
+})
+
+test('a marker with no chain: respawn marked', async (t: any, on: any) => {
+  expect(await band(t, on, { [`${DIR}/meter.json`]: METER, [`${DIR}/respawn.json`]: MARK_NO_CHAIN }))
+    .toBe(MARKED)
+})
+
 // ---- Packet S34 ruling 6: a rate limit ended the last turn, so the band names /model ----
 // The one fixture both twins read: tests/test_s34.py reads these lines and asserts mod.py's
 // limit_note gives LIMIT_NOTE for LIMITED alone and over ENDED_BEFORE, and none over

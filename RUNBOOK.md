@@ -740,7 +740,8 @@ that waits for a person, so `run` refuses to start (exit 2). A list flag
 `--mcp-config`) reads every argument after it, the prompt too, so write it
 as `--flag=value`. A sitting restarts only when its charter's
 `## Next act` opens on `RESPAWN`, the main thread ran `agentik session
-checkpoint --respawn --charter <file>`, and the turn has ended and stood
+checkpoint --respawn --charter <file>` in a foreground Bash call of its own,
+and the turn has ended and stood
 `settle` seconds with no helper call open. A helper call left open 20
 minutes with no helper activity since reads as stale (a rejected call
 never closes its file): the launcher goes on past it, says so in one line
@@ -757,7 +758,13 @@ hang-up the launcher writes nothing more to the terminal).
   commit -m "charter: the exit taken" -- <name>`, `<dir>` the charter's
   absolute directory), then write the state file, then `agentik session
   checkpoint --respawn --charter <file> --state <s>` (close prints it as its
-  `then:` line, without the optional `--state`). The checkpoint refuses, exit 2 and nothing written, a charter that
+  `then:` line, without the optional `--state`), run in a foreground Bash
+  call of its own as the last act. A background call returns before the
+  verb writes the marker, so no hook confirms it and the launcher waits on
+  it: PreToolUse refuses a RESPAWN close with `run_in_background` in every
+  posture, and while a chained mark stands unconfirmed each main-thread
+  prompt carries a `RESPAWN unconfirmed:` line and the band reads
+  `respawn unconfirmed`; run the close again in the foreground. The checkpoint refuses, exit 2 and nothing written, a charter that
   `git status --porcelain` reads as modified, staged or untracked: `<file> is
   not committed; commit it first: <the same line>`. With `--commit` a tracked charter passes,
   an untracked one never; a git call that fails or times out goes on with a

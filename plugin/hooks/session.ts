@@ -87,7 +87,23 @@ export const lineFacts = (m: any, measure: any): string | null => {
   return parts.length ? parts.join(' · ') : null
 }
 
-export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
+// Packet rc1 R3: the marker's word. A chained marker (`chain` a non-empty string) whose
+// respawn-main.json is absent, does not parse, or holds an `at` before the marker's `written`
+// reads `respawn unconfirmed`, since the launcher will not restart the sitting on it; any
+// other marker, one with no chain or one that does not parse, reads `respawn marked`. The
+// hash is the launcher's and the prompt line's test, never the band's.
+export const respawnWord = (marker: string, confirm: string | null): string => {
+  let mk: any = null
+  try { mk = obj(JSON.parse(marker)) } catch { mk = null }
+  if (!mk || typeof mk.chain !== 'string' || mk.chain === '') return 'respawn marked'
+  let c: any = null
+  try { c = confirm === null ? null : obj(JSON.parse(confirm)) } catch { c = null }
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  if (!c || !num(c.at)) return 'respawn unconfirmed'
+  return num(mk.written) && c.at < mk.written ? 'respawn unconfirmed' : 'respawn marked'
+}
+
+export const bandLine = (meter: string | null, respawn: boolean | string, nowMs: number,
                          limited: string | null = null, turnEnded: string | null = null,
                          measure: string | null = null): string => {
   let m: any = null
@@ -100,7 +116,7 @@ export const bandLine = (meter: string | null, respawn: boolean, nowMs: number,
   // Packet pl1 R2: the zone's word is said unless it is `clear`; `status` keeps `zone clear`.
   const zone = note ?? (m.zone === 'clear' ? null : m.zone)
   let line = `session: ${facts ? `${facts} · ` : ''}ctx ${pct(m.pct_context)} · turns ${pct(m.pct_turns)}${zone === null ? '' : ` · ${zone}`}`
-  if (respawn) line += ' · respawn marked'
+  if (respawn) line += ` · ${typeof respawn === 'string' ? respawn : 'respawn marked'}`
   const age = Math.floor((nowMs - Date.parse(String(m.ts))) / 1000)
   if (Number.isFinite(age) && age > STALE_S) line += ` · ${age}s old`
   return line
@@ -458,10 +474,16 @@ export const register: Register = on => {
     if (!dir) rows.push(NO_METER)
     else {
       let meter: string | null = null
-      let respawn = false
+      let respawn: boolean | string = false
       let band: string | null = null
       try { meter = String(await $.fs.read(`${dir}/meter.json`)) } catch { meter = null }
-      try { await $.fs.read(`${dir}/respawn.json`); respawn = true } catch { respawn = false }
+      let marker: string | null = null
+      try { marker = String(await $.fs.read(`${dir}/respawn.json`)) } catch { marker = null }
+      if (marker !== null) {            // rc1 R3: a chained marker no confirm follows says so
+        let confirm: string | null = null
+        try { confirm = String(await $.fs.read(`${dir}/respawn-main.json`)) } catch { confirm = null }
+        respawn = respawnWord(marker, confirm)
+      }
       let limited: string | null = null
       let ended: string | null = null
       try { limited = String(await $.fs.read(`${dir}/limited.json`)) } catch { limited = null }
