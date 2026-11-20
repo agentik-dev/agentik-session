@@ -16,10 +16,12 @@
 - [x] F1 to F4: one `waiting.said` a session, held before it is said, read strictly; the line bounded, 480 B beside `{}`; the real path. 38 of 38 green; test_gc1, test_g2b, test_bare_machine 624 (`.venv`), 621 and 3 skipped (`.venv-floor`); the split-dropped and unresolved-dropped mutants each fail test_g2b (a scratch copy)
 - [x] F5: six NICE rows, n353 to n358 (review 1's L4, L6, L7, L9, L10, L11)
 - [x] `make stamp` through the gate: job `20261120-123120-2824`, exit 0; the count 5295 to 5309, alpha.146 kept; n302, n304, n306, n307, n309, n310, n311 to the overflow
-- [ ] `make check` through the gate
+- [x] The first check, job `20261120-123138-2825` on `37ac625`: 5309 passed (`.venv`), 5145 and 143 skipped (`.venv-floor`), red only at plugin-version-check (the plugin changed after build 1's alpha.146)
+- [x] `make stamp STAMP_VERSION=2.0.0-alpha.147` through the gate: job `20261120-123939-2826`, exit 0
+- [ ] `make check` through the gate, again
 
 ## Handover
-- Choices: the packet's §4a.
+- Choices: the packet's §4a. The fix round needs its own version: alpha.146 to alpha.147, by the stamp's `STAMP_VERSION`.
 
 ## Next act
 `make check` through the gate.
