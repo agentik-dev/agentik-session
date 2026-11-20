@@ -453,7 +453,7 @@ def test_the_line_on_the_entry_a_write_draws():
     s = {**rules.admission({}), "demand": admission._demand_once({"HOME": "/nonexistent"})}
     b = admission.band(rows, NOW, s, tz=UTC)
     assert b["demand"]["until"] == "2026-10-30T23:00:00+00:00"
-    assert admission.band_line(b, NOW) == "no 5h window · 7d 62% · week resets Fri 21:00 · 3 helpers"
+    assert admission.band_line(b, NOW) == "no 5h window · 7d 62% · week resets Fri 21:00 (7d1h) · 3 helpers"
     assert admission.band_status(b, NOW).startswith("band: middle to 23:00")    # pl1 R1, R3
 
 
@@ -561,7 +561,7 @@ def _cases():
 def test_the_fixture_holds_the_record_s_line_and_the_corners():
     cases, now = _cases()
     lines = [line for _, line in cases]
-    assert "no 5h window · 7d 62% · week resets Fri 13:00 · 3 helpers" in lines   # pl1 R1
+    assert "no 5h window · 7d 62% · week resets Fri 13:00 (4d1h) · 3 helpers" in lines   # pl1 R1, pl2 R3
     assert not any(l.startswith("band ") or " · band " in l for l in lines)       # the band: status's
     assert sum("demand" in e for e, _ in cases) >= 20
     assert any("demand" in e and "window" not in e and l.startswith("5h ") for e, l in cases)     # a stray

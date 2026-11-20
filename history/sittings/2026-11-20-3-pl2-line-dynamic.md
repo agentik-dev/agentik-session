@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] The packet, with the pin's line for the owner's entry
 - [x] The failing tests, `tests/test_pl2_line_dynamic.py`: 49 of 62 red at the pin (the 10,000-tag scan 5.5 s)
-- [ ] R1 to R6: `band_line`, `_line_none`, `_mix_resets`, `admissionLine`, `mixPart`, `status`, the key `week_resets`; the tests that pinned a changed line; the runbook, the skill
+- [x] R1 to R6: `band_line`, `_line_none`, `_mix_resets`, `week_left`, `ceiling_word`; `admissionLine`, `mixPart`, `lineNone`, `weekLeft`; `status`; band.json's `week_resets` written in `band()`; PL2_CASES in the module's tests; pinned lines changed in test_band, test_bands, test_s53, test_window_mode, test_pl1_prompt_line and the module's fixtures; the runbook, the skill. Full suite under `.venv`: 5261 green, red only R7's six and the README's count (the stamp's)
 - [ ] R7: the refusal's words, the linear notice scan, the respawn line at PostToolUse; two NICE rows
 - [ ] `make stamp`, then `make check`, through the gate
 
@@ -21,6 +21,6 @@
 - Choices: listed in the packet's §4 as they are made.
 
 ## Next act
-R1 to R6, the line and its twin.
+R7: the refusal's words, the linear scan, the respawn line at PostToolUse; two NICE rows.
 
 ## Exit

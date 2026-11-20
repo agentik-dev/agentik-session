@@ -1502,13 +1502,14 @@ def _band_none(rows, now: datetime, settings: dict, tz, out: dict) -> dict:
 
 
 def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> dict:
-    """{P, peak, ceiling, resetsAt, until, bound, running, room, deferred, P7, mode, at, window,
-    slot}, for `key` (else the rows' current login) at `mode` (else `window`'s reading):
+    """{P, peak, ceiling, resetsAt, until, bound, running, room, deferred, P7, week_resets, mode,
+    at, window, slot}, for `key` (else the rows' current login) at `mode` (else `window`'s reading):
     the newest five-hour reading not past its reset (resetsAt, where a meter wait wakes) and
     its peak with no new spawn, the reset its background term runs to (`horizon`'s: until,
     named by bound; fix round F3), the helpers in flight, the room for spawns of the
     parent's family (each costed over the five-hour window), the held verdicts since the
-    window's start, the seven-day reading; with no such reading, `_band_none`'s week
+    window's start, the seven-day reading and its own reset (`week_resets`, packet pl2 R3:
+    the line closes with it; null with no seven-day reading ahead); with no such reading, `_band_none`'s week
     under this `window` (packet S51: P, peak and room None, P7 and the week's reset kept),
     as on a `none` login. The times are local (`tz` for tests), so every
     reader draws the same HH:MM."""
@@ -1542,7 +1543,8 @@ def band(rows, now: datetime, settings: dict, tz=None, key=None, mode=None) -> d
             "resetsAt": _local(resets, tz).isoformat(timespec="seconds"),
             "until": _local(until, tz).isoformat(timespec="seconds"), "bound": bound,
             "running": running, "room": _room(P + rise, each, T5, settings), "deferred": held,
-            "P7": _round(_newest(seven)[2], 2) if seven else None, **out},
+            "P7": _round(_newest(seven)[2], 2) if seven else None,
+            "week_resets": _stamp(_newest(seven)[3], tz) if seven else None, **out},
                      rows, now, settings, tz, key)
 
 
@@ -1669,6 +1671,13 @@ def _count(n: float, one: str, many: str) -> str:
     return f"{_pct(n)} {one if _pct(n) == '1' else many}"
 
 
+def ceiling_word(c) -> str:
+    """The ceiling as the line drew it until pl2 (R1: `status` says it now): a whole number
+    bare, else its repr."""
+    c = float(c)
+    return str(int(c)) if c == int(c) else repr(c)
+
+
 def clip(line: str, columns: int) -> str:
     return line if columns <= 0 or len(line) <= columns else line[:max(1, columns - 1)] + "…"
 
@@ -1766,9 +1775,13 @@ def mix_status(mx, now: datetime | None = None) -> str | None:
     return "mix: " + " · ".join(out + ([tail] if tail else []))
 
 
-def _mix_resets(mx: dict, now: datetime | None) -> str:
-    """`resets 2` with ` by Ddd HH:MM` while `until` is ahead; "" with neither."""
+def _mix_resets(mx: dict, now: datetime | None, line: bool = False) -> str:
+    """`resets 2` with ` by Ddd HH:MM` while `until` is ahead; "" with neither. On the line
+    (`line`, packet pl2 R2) a count drawn under 1 is nothing, its `by` included; `status`'s
+    `mix:` line keeps it at any value."""
     left, u = _real(mx.get("resets_left")), _wall(mx.get("until"))
+    if line and left is not None and int(_pct(left)) < 1:
+        return ""
     tail = f"resets {_pct(left)}" if left is not None else ""
     if u is not None and (now is None or u[2] > now):
         tail = f"{tail} by {_weekday(mx['until'])} {u[0]}:{u[1]}".strip()
@@ -1778,19 +1791,35 @@ def _mix_resets(mx: dict, now: datetime | None) -> str:
 def _mix_part(mx, now: datetime | None = None) -> list:
     """The mix's parts on the line, after the 7d part (packet S53 ruling 6, as pl1 R1 left
     it): `reset now` while the mix says so, then `resets 2` with ` by Ddd HH:MM` while
-    `until` is ahead; [] with no mix (mix off) or no points. The shares, `next <family>` and
+    `until` is ahead, a count under 1 drawn as nothing (packet pl2 R2); [] with no mix (mix
+    off) or no points. The shares, `next <family>` and
     `mix no reading` left the line for `status` (`mix_status`)."""
     if not isinstance(mx, dict):
         return []
     if not isinstance(mx.get("points"), dict) or not isinstance(mx.get("budgets"), dict):
         return []
-    tail = _mix_resets(mx, now)
+    tail = _mix_resets(mx, now, line=True)
     return (["reset now"] if mx.get("reset") is True else []) + ([tail] if tail else [])
+
+
+def week_left(t: datetime, now: datetime) -> str:
+    """The time left to the week's reset (packet pl2 R3): `(5d4h)` from a day up, whole days
+    and whole hours; under a day the five-hour reset's own form, `(4h30)`; never below
+    `(0h00)`. Whole minutes, floored, as the five-hour reset's countdown."""
+    n = max(0, math.floor((t - now).total_seconds() / 60))
+    return f"({n // 1440}d{n % 1440 // 60}h)" if n >= 1440 else f"({n // 60}h{n % 60:02d})"
+
+
+def _week_part(v, now: datetime):
+    """`week resets Ddd HH:MM (NdHh)` from a stamp `_wall` takes; None otherwise."""
+    w = _wall(v)
+    return None if w is None else f"week resets {_weekday(v)} {w[0]}:{w[1]} {week_left(w[2], now)}"
 
 
 def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
     """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · resets N · week resets
-    Ddd HH:MM · n helpers`, each left out with no figure; `until` first, else `resetsAt`,
+    Ddd HH:MM (NdHh) · n helpers`, each left out with no figure (the time left, packet pl2
+    R3); `until` first, else `resetsAt`,
     both the week's; the band (packet S44) is `status`'s since pl1. No countdown,
     ceiling, room or deferred. `head` is `5h no reading` on a five-hour login's week
     (packet S51)."""
@@ -1800,9 +1829,9 @@ def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
         parts.append(f"7d {_pct(p7)}%")
     parts += _mix_part(b.get("mix"), now)
     for v in (b.get("until"), b.get("resetsAt")):
-        w = _wall(v)
-        if w is not None:
-            parts.append(f"week resets {_weekday(v)} {w[0]}:{w[1]}")
+        part = _week_part(v, now)
+        if part is not None:
+            parts.append(part)
             break
     if running is not None:                     # the band's word left (pl1 R1): `status`
         parts.append(_count(running, "helper", "helpers"))
@@ -1810,11 +1839,13 @@ def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
 
 
 def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
-    """§3.5's line from band.json: `5h P% → peak% · ceiling c · resets HH:MM (h:mm) ·
-    n helpers, room for r · d deferred · 7d P7%`, then the age past 120 s (no mode's word
-    since pl1); a
-    part with no figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` when the
-    seven-day reset bounds the background term (`until`). An entry whose `window` is the
+    """§3.5's line from band.json: `5h P% → peak% · resets HH:MM (h:mm) · helpers n/m ·
+    d deferred · 7d P7%`, the mix's parts, `week resets Ddd HH:MM (NdHh)` from
+    `week_resets`, then the age past 120 s (no mode's word since pl1). A part with no
+    figure is left out; `week resets HH:MM (h:mm), 5h HH:MM` in the reset's slot when the
+    seven-day reset bounds the background term (`until`), and then no week part at the end.
+    Packet pl2: no ceiling (`status` says it); `helpers n/m`, n running of n plus the room,
+    `n helpers` with no room; a deferred or resets count drawn under 1 is left out. An entry whose `window` is the
     string `none` draws `_line_none` instead, as does a `five_hour` one with no five-hour
     figure and no ceiling, under `5h no reading` (packet S51). admissionLine is its twin."""
     now = now or datetime.now(timezone.utc)
@@ -1825,30 +1856,30 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
         return clip(" · ".join(_line_none(b, now, "5h no reading")), columns)
     parts = ["5h no reading" if P is None
              else f"5h {_pct(P)}%" + (f" → {_pct(peak)}%" if peak is not None else "")]
-    if c is not None:
-        parts.append(f"ceiling {int(c) if c == int(c) else repr(c)}")
     w, u = _wall(b.get("resetsAt")), _wall(b.get("until"))
 
     def left(x) -> str:
         n = max(0, math.floor((x[2] - now).total_seconds() / 60))
         return f"({n // 60}h{n % 60:02d})"
-    if b.get("bound") == SEVEN and u is not None:
+    slotted = b.get("bound") == SEVEN and u is not None
+    if slotted:
         parts.append(f"week resets {u[0]}:{u[1]} {left(u)}"
                      + (f", 5h {w[0]}:{w[1]}" if w is not None else ""))
     elif w is not None:
         parts.append(f"resets {w[0]}:{w[1]} {left(w)}")
     running, room = _real(b.get("running")), _real(b.get("room"))
-    helpers = [_count(running, "helper", "helpers")] if running is not None else []
-    helpers += [f"room for {_pct(room)}"] if room is not None else []
-    if helpers:
-        parts.append(", ".join(helpers))
+    if running is not None and room is not None:
+        parts.append(f"helpers {_pct(running)}/{int(_pct(running)) + int(_pct(room))}")
+    elif running is not None:
+        parts.append(_count(running, "helper", "helpers"))
     d, p7 = _real(b.get("deferred")), _real(b.get("P7"))
-    if d is not None:
+    if d is not None and int(_pct(d)) >= 1:
         parts.append(f"{_pct(d)} deferred")
     if p7 is not None:
         parts.append(f"7d {_pct(p7)}%")
     parts += _mix_part(b.get("mix"), now)
-    return clip(" · ".join(parts + _line_end(b, now)), columns)
+    week = None if slotted else _week_part(b.get("week_resets"), now)
+    return clip(" · ".join(parts + ([week] if week else []) + _line_end(b, now)), columns)
 
 
 # ---- `report`'s window use (design/admission-r1.md §3.6; packet S27b ruling 5) ----

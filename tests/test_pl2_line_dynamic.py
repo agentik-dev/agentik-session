@@ -22,7 +22,8 @@ UTC = timezone.utc
 ROOT = Path(__file__).resolve().parent.parent
 TS = ROOT / "plugin" / "hooks" / ("session.test." + "ts")
 
-# The owner's entry: the week's reset a Wednesday at 07:00, 5 d 4 h 12 min ahead of NOW.
+# The owner's entry: the week's reset a Wednesday at 07:00, 5 d 4 h 12 min ahead of NOW,
+# a Friday at 02:48.
 WEEK = datetime(2026, 11, 25, 7, 0, tzinfo=UTC)
 NOW = WEEK - timedelta(days=5, hours=4, minutes=12)
 
@@ -74,11 +75,11 @@ CASES = [
     ["3 resets 2", mixed(resets_left=2), NOW,
      f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · resets 2 · {WEEK_PART}"],
     ["3 resets 2 with until ahead", mixed(resets_left=2, until="2026-11-21T18:00:00+00:00"), NOW,
-     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · resets 2 by Fri 18:00 · {WEEK_PART}"],
+     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · resets 2 by Sat 18:00 · {WEEK_PART}"],
     ["3 reset now", mixed(reset=True), NOW,
      f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · reset now · {WEEK_PART}"],
     ["3 resets null with until ahead", mixed(resets_left=None, until="2026-11-21T18:00:00+00:00"),
-     NOW, f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · by Fri 18:00 · {WEEK_PART}"],
+     NOW, f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · by Sat 18:00 · {WEEK_PART}"],
     ["3 the none line, resets 0 with until ahead",
      {**NONE, "mix": {**MIX, "until": at(days=1)}}, NOW,
      "no 5h window · 7d 62% · week resets Wed 07:00 (5d4h) · 3 helpers"],
@@ -97,15 +98,15 @@ CASES = [
     ["4 the mix off still draws it", {k: v for k, v in OWNER.items() if k != "mix"}, NOW,
      OWNER_LINE],
     ["4 24 h exactly", week_at(hours=24), NOW,
-     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Fri 02:48 (1d0h)"],
+     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Sat 02:48 (1d0h)"],
     ["4 23 h 59 min", week_at(hours=23, minutes=59), NOW,
-     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Fri 02:47 (23h59)"],
+     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Sat 02:47 (23h59)"],
     ["4 a reset already past", week_at(minutes=-30), NOW,
-     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Thu 02:18 (0h00)"],
+     f"{HEAD} · helpers 5/5 · 5 deferred · 7d 41% · week resets Fri 02:18 (0h00)"],
     ["4 the none line, a reset already past", {**NONE, "until": at(minutes=-30)}, NOW,
-     "no 5h window · 7d 62% · week resets Thu 02:18 (0h00) · 3 helpers"],
+     "no 5h window · 7d 62% · week resets Fri 02:18 (0h00) · 3 helpers"],
     ["4 the none line, resetsAt alone", {**NONE, "until": None, "resetsAt": at(hours=4, minutes=30)},
-     NOW, "no 5h window · 7d 62% · week resets Thu 07:18 (4h30) · 3 helpers"],
+     NOW, "no 5h window · 7d 62% · week resets Fri 07:18 (4h30) · 3 helpers"],
     ["4b 0 running and room 6", {**OWNER, "running": 0, "room": 6}, NOW,
      f"{HEAD} · helpers 0/6 · 5 deferred · 7d 41% · {WEEK_PART}"],
     ["4b 3 running and no room", {**OWNER, "running": 3, "room": None}, NOW,
@@ -140,7 +141,7 @@ def test_the_line(name, entry, now, line):
 def test_1_the_owner_s_line_beside_the_pin_s():
     got = admission.band_line(OWNER, NOW)
     assert got == OWNER_LINE and got != PIN_LINE
-    assert "ceiling" not in got and "room for" not in got and "resets 0" not in got
+    assert "ceiling" not in got and "room for" not in got and "resets 0" not in got.split(" · ")
 
 
 # ---- acceptance 2: the ceiling is `status`'s ----
@@ -209,7 +210,7 @@ def test_2_an_entry_with_no_ceiling_prints_the_mode_alone(metered):
 def test_3_mix_status_keeps_its_count_at_any_value():
     assert admission.mix_status(MIX, NOW) == "mix: fable 30/50 · opus 10/50 · next opus · resets 0"
     assert admission.mix_status({**MIX, "until": at(days=1)}, NOW) == (
-        "mix: fable 30/50 · opus 10/50 · next opus · resets 0 by Fri 02:48")
+        "mix: fable 30/50 · opus 10/50 · next opus · resets 0 by Sat 02:48")
 
 
 # ---- acceptance 4: the time left, and the key band() writes ----
@@ -268,7 +269,7 @@ def _ts_const(name: str) -> str:
 
 
 def test_6_the_module_holds_the_same_cases():
-    """session.test.ts's PL2_CASES are these entries, nows and lines; its test asserts
+    """The module's PL2_CASES are these entries, nows and lines; its test asserts
     admissionLine draws each line, and test_the_line asserts band_line does."""
     if not TS.exists():
         pytest.skip("no plugin/hooks/*.ts: the classic path stands alone")
