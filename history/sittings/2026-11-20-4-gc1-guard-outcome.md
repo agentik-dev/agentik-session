@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet, with the pin's figures (Pre 0.37 ms, Post 0.12 ms; 400 unread lines +52,873 B)
-- [ ] The failing tests, `tests/test_gc1_outcome.py`
+- [x] The failing tests, `tests/test_gc1_outcome.py`: 24 of 24 red at the pin
 - [ ] R1 to R6: the call's file, the Post compare, said once, the leftovers, the log and doctor
 - [ ] R7: the runbook, six NICE rows tidied, seven in
 - [ ] `make stamp`, then `make check` through the gate
@@ -21,6 +21,6 @@
 - Choices: the packet's §4.
 
 ## Next act
-The failing tests.
+R1 to R6 in `instructionguard.py`, `hooks.py`, `doctor.py`.
 
 ## Exit
