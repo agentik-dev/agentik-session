@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet, with the baseline measured at the pin
-- [ ] The failing tests, `tests/test_rc2_close_guards.py`: 32 of 35 red at the pin
+- [x] The failing tests, `tests/test_rc2_close_guards.py`: 32 of 35 red at the pin (the three that pass: markers that give no hold, as at the pin)
 - [ ] R1: the hold in `chain.py`'s `_watch`; NICE n336 leaves
 - [ ] R2 to R4: the records, the notice, the refusal in `hooks.py`; NICE n337 leaves
 - [ ] R5, R6: the runbook, the skill, respawn-r1; the NICE rows
@@ -22,6 +22,6 @@
 - Nothing yet.
 
 ## Next act
-Write the failing tests, then R1.
+R1, the hold in `chain.py`'s `_watch`.
 
 ## Exit
