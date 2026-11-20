@@ -15,13 +15,13 @@
 - [x] The failing tests: 11 of 62 red at `a1bfd88`; J1 to J3 and `hold()` gone: 62 of 62 (`.venv`); gc1, g2b, doctor 664 (`.venv-floor`); the runbook's guard lines
 - [x] J4: NICE n363 to n365 (review 3's B2, L3, L5); the bound's overflow is the stamp's
 - [x] `make stamp STAMP_VERSION=2.0.0-alpha.149` through the gate: job `20261120-135014-2835`, exit 0; 5327 to 5333 tests; n316 to n319 to the overflow
-- [ ] `make check` through the gate
+- [x] `make check` through the gate: job `20261120-135039-2836` on `4976d02`, exit 0 in 6 min: 5333 passed (`.venv`), 5169 and 143 skipped (`.venv-floor`), hygiene 0, version check ok, readme fresh
 
 ## Handover
-- Choices: the packet's §4b.
+- Choices: the packet's §4b; `SAID_LOOK` counts only entries of the check's own naming; a split hold that fails part way says the whole call at its own Post (a path may be said twice); a planted `guard-open` logs its one guard error at a readable line's Post too.
 
 ## Next act
-The check, once, through the gate queue.
+None: the fix is built and the check green; the landing is the coordinator's.
 
 ## Exit
-Open.
+J1 to J4 built and committed; `make check` green on `4976d02`; this record is the only change after it.
