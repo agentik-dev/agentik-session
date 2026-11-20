@@ -139,12 +139,15 @@ def _jobs():
             if not p.name.startswith(".")}
 
 
-def _post(tid=TID, resp=None, background=None, **extra):
+_DEFAULT = object()
+
+
+def _post(tid=TID, resp=_DEFAULT, background=None, **extra):
     ti = {"command": "make check > /tmp/check.log 2>&1"}
     if background is not None:
         ti["run_in_background"] = background
     payload = {"session_id": SID, "tool_name": "Bash", "tool_use_id": tid, "tool_input": ti,
-               "tool_response": {"stdout": "", "backgroundTaskId": TASK} if resp is None
+               "tool_response": {"stdout": "", "backgroundTaskId": TASK} if resp is _DEFAULT
                else resp, **extra}
     return hooks.post_tool_use(payload, os.environ)
 

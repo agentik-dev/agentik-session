@@ -14,7 +14,7 @@
 - [x] The packet, with the baseline measured at the pin
 - [x] The failing tests, `tests/test_rc2_close_guards.py`: 32 of 35 red at the pin (the three that pass: markers that give no hold, as at the pin)
 - [x] R1: the hold in `chain.py`'s `_watch` (`_unconfirmed`, said only while the watch holds nothing else); NICE n336 leaves; `test_chain.py`, `test_rc1_respawn_confirm.py`, `test_r2.py`, `test_cli.py`, `test_u1.py`, h3, h4 green, 518
-- [ ] R2 to R4: the records, the notice, the refusal in `hooks.py`; NICE n337 leaves
+- [x] R2 to R4: `_job_open` at PostToolUse, `_jobs_notice` at the prompt, `_jobs_out_line` in `pre_tool_use` after the other Bash guards; NICE n337 leaves, n338 (a mid-turn notice) in; 35 of 35 green, 389 with rc1, hooks, hook_meter, chain, bare_machine
 - [ ] R5, R6: the runbook, the skill, respawn-r1; the NICE rows
 - [ ] `make stamp`, then `make check`, through the gate
 
@@ -22,6 +22,6 @@
 - Nothing yet.
 
 ## Next act
-R2 to R4 in `hooks.py`.
+R5 and R6: the runbook, the skill, respawn-r1, the NICE rows.
 
 ## Exit

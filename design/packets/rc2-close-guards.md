@@ -47,7 +47,7 @@ Tests in `tests/test_rc2_close_guards.py`; at the pin 32 of its 35 cases are red
 ## 4. Findings that name this row
 
 - The README's source is unchanged since rc1 measured it ten bytes under its cap (16,370 bytes at the pin), and it is rendered by a model run this wall forbids; its RESPAWN sentence is left as it is.
-- A notice that arrives mid-turn fires no prompt hook, so its record stays open and the close asks once about a job that has ended (D4: never a hold).
+- A notice that arrives mid-turn fires no prompt hook, so its record stays open and the close asks once about a job that has ended; a launcher hold on the records would stall the chain for good on such a job, where the refusal costs one call.
 
 ## 5. Forbidden reads
 

@@ -113,6 +113,7 @@ TURN_ENDED = "turn-ended.json"
 LIMITED = "limited.json"     # a turn an API error ended (S34 ruling 5); the band reads it
 HELPER_ACTIVITY = "helper-activity.json"
 CALLS = "calls"         # a helper's open tool calls, one file per `tool_use_id` (S20 ruling 2)
+JOBS = "jobs"           # the main thread's background Bash jobs, one file per `tool_use_id` (rc2)
 
 
 def _session_dir(session_id, env, fallback=True) -> Path | None:
@@ -760,6 +761,11 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             guard = {}
         if guard:
             return guard             # a refused call opens none
+    if tool == "Bash":               # rc2 R4: any posture, the main thread's alone, no call opened
+        line = _jobs_out_line(payload, os.environ if env is None else env)   # never raises
+        if line:
+            return _deny(line, "agentik-session: asked once before a RESPAWN close while a "
+                               "background job is not known to have ended.")
     _open_call(payload, os.environ if env is None else env)
     if tool not in SPAWNING_TOOLS:
         return {}
@@ -926,6 +932,7 @@ def user_prompt_submit(payload: dict) -> dict:
     if not payload.get("agent_id"):                     # before the posture (respawn-r1 §3.3)
         _stamp(payload, os.environ, ACTIVITY,
                {"event": "UserPromptSubmit", "tool": None, "at": time.time()})
+    _jobs_notice(payload, os.environ)                   # rc2 R3: every posture, never raises
     unconfirmed = _unconfirmed_line(payload, os.environ)  # rc1 R2: every posture, never raises
     cfg, zone = state(sid)
     if cfg.posture == "off":
@@ -1588,6 +1595,116 @@ def _confirm(payload: dict, sdir: Path) -> None:
         pass
 
 
+# Packet rc2 R2 to R4: the main thread's background Bash jobs. A record is written at the
+# call's PostToolUse, removed by the prompt that carries the job's notice, and a foreground
+# RESPAWN close is refused once while a record stands that no close was yet refused for: the
+# launcher's restart ends a job still running, and only the sitting knows whether it ended.
+NOTICE_OPEN = "<task-notification>"
+_NOTICE = re.compile(r"<task-notification>(.*?)</task-notification>", re.S)
+_NOTICE_CALL = re.compile(r"<tool-use-id>\s*([^<]*?)\s*</tool-use-id>")
+_NOTICE_TASK = re.compile(r"<task-id>\s*([^<]*?)\s*</task-id>")
+JOBS_NAMED = 5                      # the start times the refusal names, then `and N more`
+
+
+def _job_open(payload: dict, sdir: Path) -> None:
+    """rc2 R2: a main-thread Bash call whose `tool_response` is an object with a non-empty
+    string `backgroundTaskId`, or whose `tool_input.run_in_background` is true, writes
+    `jobs/<tool_use_id>` {at, task}, for an id `calls/` accepts. Never raises."""
+    try:
+        tid = payload.get("tool_use_id")
+        if (payload.get("agent_id") or payload.get("tool_name") != "Bash"
+                or not isinstance(tid, str) or not _SID.match(tid)):
+            return
+        resp, ti = payload.get("tool_response"), payload.get("tool_input")
+        task = resp.get("backgroundTaskId") if isinstance(resp, dict) else None
+        task = task if isinstance(task, str) and task else None
+        if task is None and not (isinstance(ti, dict) and ti.get("run_in_background") is True):
+            return
+        store._write_private(sdir / JOBS / tid, json.dumps({"at": time.time(), "task": task}))
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _jobs_open(sdir: Path) -> list:
+    """The records under `jobs/`, [(path, the object or {} when it does not parse)], by name;
+    a temp file (a leading dot) is none. [] when the folder is absent."""
+    try:
+        paths = sorted(p for p in (sdir / JOBS).iterdir() if not p.name.startswith("."))
+    except FileNotFoundError:
+        return []
+    return [(p, _load_json(p)) for p in paths]
+
+
+def _jobs_notice(payload: dict, env) -> None:
+    """rc2 R3: each `<task-notification>` block of a main-thread prompt removes the record its
+    `<tool-use-id>` names, or whose `task` its `<task-id>` names, whatever its status. A
+    prompt with no block costs one substring test; a fault leaves the records."""
+    try:
+        prompt = payload.get("prompt")
+        if not (isinstance(prompt, str) and NOTICE_OPEN in prompt) or payload.get("agent_id"):
+            return
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None:
+            return
+        calls, tasks = set(), set()
+        for block in _NOTICE.findall(prompt):
+            calls.update(_NOTICE_CALL.findall(block))
+            tasks.update(_NOTICE_TASK.findall(block))
+        calls.discard("")
+        tasks.discard("")
+        if not (calls or tasks):
+            return
+        for p, rec in _jobs_open(sdir):
+            if p.name in calls or (isinstance(rec.get("task"), str) and rec["task"] in tasks):
+                p.unlink(missing_ok=True)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _hhmm(at) -> str:
+    try:
+        return time.strftime("%H:%M", time.localtime(at)) if _num(at) else "?"
+    except (OverflowError, OSError, ValueError):
+        return "?"
+
+
+def _jobs_out_line(payload: dict, env) -> str | None:
+    """rc2 R4: for the main thread's foreground respawn close (rc1's predicate; a background
+    one met rc1's refusal first), while a record under `jobs/` has no `asked`: the line, and
+    each such record gains `asked`. None for every other call, when every record was asked,
+    and on any fault, so this guard's failure passes the call."""
+    try:
+        ti = payload.get("tool_input")
+        if (payload.get("agent_id") or payload.get("tool_name") != "Bash"
+                or not isinstance(ti, dict) or ti.get("run_in_background") is True
+                or not _respawn_close(ti.get("command"))):
+            return None
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None:
+            return None
+        recs = _jobs_open(sdir)
+        if not any("asked" not in rec for _, rec in recs):
+            return None
+        ats = sorted((rec.get("at") for _, rec in recs),
+                     key=lambda a: (0, a) if _num(a) and a == a else (1, 0))
+        n = len(ats)
+        times = ", ".join(_hhmm(a) for a in ats[:JOBS_NAMED])
+        if n > JOBS_NAMED:
+            times += f" and {n - JOBS_NAMED} more"
+        line = (f"agentik-session: {n} background {'job' if n == 1 else 'jobs'} of this "
+                f"sitting {'is' if n == 1 else 'are'} not known to have ended (started "
+                f"{times}), and the launcher's restart ends any still running. Wait for each "
+                "one's notice; or, where every one has ended or may be cut, run the close "
+                "again and it passes.")
+        now = time.time()
+        for p, rec in recs:
+            if "asked" not in rec:
+                store._write_private(p, json.dumps({**rec, "asked": now}))
+        return line
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
 def post_tool_use(payload: dict, env=None) -> dict:
     """The handler below, then the gate's inbox lines, the whole under MAX_OUT (S38)."""
     env = os.environ if env is None else env
@@ -1607,6 +1724,7 @@ def _post_tool_use(payload: dict, env) -> dict:
     sdir = _session_dir(payload.get("session_id"), env, fallback=False)
     if sdir is not None:
         _confirm(payload, sdir)
+        _job_open(payload, sdir)                         # rc2 R2: never raises
     tp = payload.get("transcript_path")
     if sdir is None or not tp:
         return {}
