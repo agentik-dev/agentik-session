@@ -46,27 +46,22 @@ Tests in `tests/test_gc1_outcome.py`.
 | 10 | one Pre and one Post for an unread line, five gated files, timed | Pre 0.36 ms, Post 0.11 ms (medians of 200) |
 | 11 | `make stamp`, then `make check` green through the gate | |
 
-The new files under `sessions/<sid>/guard-open/` (0700; each 0600): `<tool_use_id>.json` holds `{"at", "files": [[path, reading], ...]}`, a reading `["sha256", hex]`, `["size", bytes, mtime_ns]`, `["absent"]` or `["other"]`; `<tool_use_id>.said` holds `{"paths": [...]}`, a change waiting to be said. A `changed` log line carries `call`, the tool call's id.
+The new files under `sessions/<sid>/guard-open/` (0700; each 0600): `<tool_use_id>.json` holds `{"at", "files": [[path, reading], ...]}`, a reading `["sha256", hex]`, `["size", bytes, mtime_ns]`, `["absent"]` or `["other"]`; a waiting change is §4b's. A `changed` log line carries `call`, the tool call's id.
 
 ## 4. Findings that name this row: the choices inside the rulings
 
 - The lists in force that exist (the checkout's, each folder's, the user's) are read first, then the files they name by a plain path; the 64 counts both. In a worktree a folder's line is read in the member and in the worktree.
 - A reading is `sha256`, `size` past 1 MiB, `absent`, or `other` (no regular file, or one that cannot be opened; opened non-blocking, so a FIFO never hangs).
-- The said line names a path relative to the call's folder, `~/` under the home, else whole; several are sorted, comma-joined, with `are` and `them`. The log keeps the whole path.
-- It follows the handler's words (the CHECKPOINT line, then pl2's respawn line), and the gate's lines and a sitting's line follow it. Where it does not fit `MAX_OUT` it waits in a `.said` file like a failure's; UserPromptSubmit says it with no cap.
-- The call's file is removed before the second reading, so two Posts never log one change twice; the folder goes when empty, so a Post with nothing waiting costs one failed `listdir`. Pre now 0.79 ms, Post 0.37 ms (medians of 400, five gated files).
-- The Edit tools' `the target cannot be resolved` line is not named by R1 and stays; doctor counts it a guard error. A `.said` file is not pruned by R4. A call another hook denies after the gate leaves its file, which R4 removes after a day.
+- It follows the handler's words (the CHECKPOINT line, then pl2's respawn line), and the gate's lines and a sitting's line follow it. Where it does not fit it waits (§4b).
+- The call's file is removed before the second reading, so two Posts never log one change twice.
+- The Edit tools' `the target cannot be resolved` line is not named by R1 and stays; doctor counts it a guard error. A call another hook denies after the gate leaves its file, which R4 removes after a day.
 - NICE: n141 leaves (no `open` line now); n175 and n118 re-worded to what remains; n179, n180 and n189 say their lines are read, so not held (the packet's probe). n346 to n352 from pl2's review 1.
 
 ## 4a. Fix of review 1 (brief 2)
 
-Review 1: B1, the said line named every path twice, so two worktree paths never fit `MAX_OUT`,
-waited and swallowed each later change; B2, a corrupt `.said` file lost the change.
+Review 1: B1, two worktree paths never fit and swallowed later changes; B2, a corrupt record.
 
-- F1: after the `changed` lines the paths join the session's one waiting record,
-  `guard-open/waiting.said` (`{"paths": [...]}`, replaced under a lock on the folder), before
-  anything else; a hook takes them out only once its line is in its output. Read strictly: not
-  a list of strings is corrupt, removed, one `open` line with its `why`, read as empty.
+- F1 (replaced by §4b): one waiting record a session, under a lock, taken once said.
 - F2: the model's line `agentik-session: <shown> is gated and changed during a Bash line the
   gate could not read. If that line ran the lane, nothing is wrong. Otherwise restore it and use
   the instruct skill.`; the owner's `agentik-session: a gated file changed during a Bash line
@@ -79,33 +74,17 @@ waited and swallowed each later change; B2, a corrupt `.said` file lost the chan
   until the pair fits 480 with `UserPromptSubmit`'s name.
 - Choice: UserPromptSubmit caps the pair as PostToolUse does; its inbox block stays alone.
 
-## 4b. Fix of review 2 (brief 3)
+## 4b. Fix of review 2 (brief 3), replacing F1's one record under a lock
 
-Review 2: B1, the one waiting record was written under an `flock` on `guard-open/`, which
-another main-thread Post removed when empty, so the write failed and a change was logged and
-never said; B2, a directory at the record lost every change; B3, a FIFO there hung a Post.
-This section replaces F1's one record under a lock; F2's bound and texts, F3 and F4 stand.
+Review 2: B1, the lock sat on `guard-open/`, which a Post removed, so a change went unsaid.
 
-- H1: a change that waits is its own file, `sessions/<sid>/guard-said/<ns>-<pid>-<k>.said`
-  (`{"paths": [...]}`, 0600), its bytes written to `.<name>.tmp` in that folder and renamed in;
-  never rewritten. No lock is taken anywhere in the outcome check.
-- H2: a main-thread PostToolUse or UserPromptSubmit lists the folder, reads at most 256
-  entries, each only a regular file of at most 65,536 bytes, opened `O_NONBLOCK|O_NOFOLLOW`. F2's
-  line is made from every path read; only once it is in the output are the files read removed,
-  those alone. At least once is the rule: two hooks at once may each say one change.
-- H3: an entry that is no regular file, too large, or no list of strings is one `open` line
-  (`a bad waiting entry: <why>`), removed when it can be (`rmdir` for an empty folder) and else
-  skipped; nothing raises or waits. A temp older than a minute is removed.
-- H4: no hook removes `guard-open/` or `guard-said/`; each is made on demand with its parents.
-  A write into either that fails is made again once, its folder first.
-- H5: a change that cannot be written is one guard error; a main-thread PostToolUse says it in
-  its own output where it fits.
-- H6: a control character in a drawn path, a newline included, is drawn `?`.
-- H7: NICE for review 2's L1, L5, L6 and L9.
-- Choice: the call's file is opened directly (one failed `open` when absent), not found by a
-  listing, and read by the same safe reader; a bad one is removed.
-- Choice: a non-empty folder planted in `guard-said/` is skipped and logs at each saying Post;
-  no tree is removed by a hook.
+- H1: a waiting change is its own `guard-said/<ns>-<pid>-<k>.said` (`{"paths": [...]}`), by
+  rename from `.<name>.tmp`, never rewritten; no lock. H4: no hook removes a folder.
+- H2: a main-thread Post or prompt reads at most 256 entries, each a regular file of at most
+  64 KiB (`O_NONBLOCK|O_NOFOLLOW`); the files read go once F2's line is out. At least once.
+- H3: any other entry is one `open` line, removed if it can be, else skipped. A temp past a
+  minute goes. H5: a failed write is tried once more, then a guard error, said in its own Post.
+- H6: a control character in a drawn path is `?`. H7: NICE for review 2's L1, L5, L6, L9.
 
 ## 5. Forbidden reads
 
