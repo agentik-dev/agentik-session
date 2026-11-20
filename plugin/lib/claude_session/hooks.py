@@ -738,6 +738,14 @@ def pre_tool_use(payload: dict, env=None) -> dict:
             return _deny(warn, f"agentik-session: denied a {_token(tool)} spawn before launch.")
         if posture not in ("signal", "ask"):
             warn = None
+    if tool == "Bash":               # rc1 R1: any posture, a helper's too, no call opened
+        try:
+            background = _background_close(payload)
+        except Exception:                               # noqa: BLE001  (R1: fails open)
+            background = False
+        if background:
+            return _deny(BACKGROUND_CLOSE_DENY,
+                         "agentik-session: denied a RESPAWN close run in the background.")
     if tool == "Bash":               # g8: the stray-write refusals, a helper's too, no call opened
         try:
             line = lineguard.check(payload, os.environ if env is None else env)
@@ -918,16 +926,18 @@ def user_prompt_submit(payload: dict) -> dict:
     if not payload.get("agent_id"):                     # before the posture (respawn-r1 §3.3)
         _stamp(payload, os.environ, ACTIVITY,
                {"event": "UserPromptSubmit", "tool": None, "at": time.time()})
+    unconfirmed = _unconfirmed_line(payload, os.environ)  # rc1 R2: every posture, never raises
     cfg, zone = state(sid)
     if cfg.posture == "off":
-        return _gate_ups(payload, {})
+        return _gate_ups(payload, {} if not unconfirmed else {"hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit", "additionalContext": unconfirmed}})
 
     ov = sessionconfig.load_overlay()
     count = int(ov.get(COUNTER) or 0) + 1
     sessionconfig.save_overlay({COUNTER: count})
 
     cadence = (cfg.checkpoint or {}).get(zone, 0)
-    bits: list[str] = []
+    bits: list[str] = [unconfirmed] if unconfirmed else []
 
     m = _meter(sid)
     if m and m.get("turns") != 0:      # ss1 review 1 F1: SessionStart's zero meter says nothing
@@ -1493,6 +1503,69 @@ def _num(v) -> bool:
 RESPAWN_CMDS = ("agentik-session checkpoint", "agentik session checkpoint",
                 "claude-session checkpoint")
 
+# Packet rc1 R1: a background call's PostToolUse fires before its verb writes the marker, so
+# no hook confirms it and the launcher waits on it for good; such a call is refused.
+BACKGROUND_CLOSE_DENY = (
+    "agentik-session: a RESPAWN close is never run in the background: only the main thread's "
+    "foreground call confirms the mark, so a background one leaves the chain waiting on a mark "
+    "no hook confirms. Finish the check, commit and push first, then run `agentik session "
+    "checkpoint --respawn --charter <file>` in a foreground call of its own as the sitting's "
+    "last act.")
+# Packet rc1 R2: said at each main-thread prompt while this session's chained marker stands
+# unconfirmed; the charter's path only where _SAFE_PATH takes it.
+UNCONFIRMED = ("RESPAWN unconfirmed: no foreground Bash call of the main thread confirmed this "
+               "sitting's respawn mark, so the launcher will not restart the sitting. A closing "
+               "sitting runs `agentik session checkpoint --respawn --charter {f}` again in a "
+               "foreground call of its own, then ends the turn.")
+UNSAFE_CHARTER = "<the charter>"
+
+
+def _respawn_close(cmd) -> bool:
+    """A respawn close: a RESPAWN_CMDS spelling and `--respawn` in a Bash command (the one
+    test `_confirm` and the background refusal share)."""
+    return isinstance(cmd, str) and any(c in cmd for c in RESPAWN_CMDS) and "--respawn" in cmd
+
+
+def _background_close(payload: dict) -> bool:
+    """rc1 R1: a Bash call run with `run_in_background` true whose command is a respawn close."""
+    ti = payload.get("tool_input") or {}
+    return (payload.get("tool_name") == "Bash" and isinstance(ti, dict)
+            and ti.get("run_in_background") is True and _respawn_close(ti.get("command")))
+
+
+def _unconfirmed_line(payload: dict, env) -> str | None:
+    """rc1 R2: the main thread's line while `respawn.json` parses, names this session and a
+    non-empty chain, and `respawn-main.json` is absent, does not parse or names other bytes;
+    None otherwise, for a helper's payload, and on any fault reading either file. Never raises."""
+    try:
+        sid = payload.get("session_id")
+        if payload.get("agent_id") or not isinstance(sid, str):
+            return None
+        sdir = _session_dir(sid, env, fallback=False)
+        if sdir is None:
+            return None
+        raw = (sdir / MARKER).read_bytes()
+        mark = json.loads(raw)
+        if not isinstance(mark, dict) or mark.get("session") != sid:
+            return None
+        chain = mark.get("chain")
+        if not isinstance(chain, str) or not chain:
+            return None
+        try:
+            conf = json.loads((sdir / CONFIRMED).read_bytes())
+        except FileNotFoundError:
+            conf = None
+        except (ValueError, RecursionError):        # a confirm that does not parse names none
+            conf = None
+        if (isinstance(conf, dict)
+                and conf.get("marker_sha256") == hashlib.sha256(raw).hexdigest()):
+            return None
+        f = mark.get("charter")
+        return UNCONFIRMED.format(
+            f=f if isinstance(f, str) and _SAFE_PATH.match(f) else UNSAFE_CHARTER)
+    except Exception:                                   # noqa: BLE001
+        return None
+
 
 def _confirm(payload: dict, sdir: Path) -> None:
     """respawn-r1 §3.2 step 5: a main-thread Bash call that ran `agentik-session checkpoint
@@ -1501,8 +1574,7 @@ def _confirm(payload: dict, sdir: Path) -> None:
     or after this call's own PreToolUse stamp; none without `activity.json`. Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
-        if (payload.get("tool_name") != "Bash" or not isinstance(cmd, str)
-                or not any(c in cmd for c in RESPAWN_CMDS) or "--respawn" not in cmd):
+        if payload.get("tool_name") != "Bash" or not _respawn_close(cmd):
             return
         at = _load_json(sdir / ACTIVITY).get("at")
         raw = (sdir / MARKER).read_bytes()

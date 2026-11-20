@@ -12,8 +12,8 @@
 
 ## Done-ness
 - [x] The packet, with the baseline measured at the pin: the stall leaves no confirm and its background PreToolUse passes (`{}`); no prompt line; the pin's tail
-- [ ] The failing tests, `tests/test_rc1_respawn_confirm.py`: 29 of 41 red at the pin
-- [ ] R1, R2: the deny and the prompt's line in `hooks.py`
+- [x] The failing tests, `tests/test_rc1_respawn_confirm.py`: 29 of 41 red at the pin
+- [x] R1, R2: the deny and the prompt's line in `hooks.py`; 37 of 41 green (the tail's 4 wait on R4); `test_hooks.py`, `test_hook_meter.py`, `test_chain.py`, `test_wfg.py`, `test_h6_every_family.py` green, 244
 - [ ] R3: the band's word in `plugin/hooks/session.ts`
 - [ ] R4, R5: the tail, the skill, the command, the runbook; design respawn-r1
 - [ ] R7: ten NICE rows
@@ -23,6 +23,6 @@
 - (none yet)
 
 ## Next act
-Commit the failing tests, then R1 and R2 in hooks.py.
+R3, the band's word in `plugin/hooks/session.ts` and its four tests.
 
 ## Exit
