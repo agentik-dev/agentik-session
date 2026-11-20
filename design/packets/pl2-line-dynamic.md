@@ -49,6 +49,14 @@ The new band.json key: a five-hour entry built by `band()` gains `week_resets`, 
 
 ## 4. Findings that name this row: the choices inside the rulings
 
+- The key is `week_resets`, written in `band()` beside `P7` from the same reading (the newest seven-day reading ahead of now), since `band()` has no session for `week_reset` itself; a `none` entry and S51's week entry carry the week in `until` and `resetsAt` as before and gain no key.
+- "At least 1" is read on the drawn figure, for the resets and the deferred counts alike: 0.6 draws `1`, -0.4 nothing. `m` is the drawn running count plus the drawn room, so 2 running at the room's cap reads `helpers 2/101`.
+- A room with no running figure draws no part (acceptance 4b); a week's reset already past draws `(0h00)` on both lines, since band.json can age; the slot's `week resets HH:MM (h:mm), 5h HH:MM` leaves the end part out whatever `week_resets` holds.
+- `status` says the ceiling on the mode's line only, so an entry with a ceiling and no mode prints neither (band.json always writes the mode); `--json` holds the number as band.json does.
+- The module's clip test moved from 80 to 40 columns: the line is now 70 wide. The skill shows the line, so it follows too; the README's source does not show it and is unchanged.
+- R7: the respawn line follows whatever the handler said (the CHECKPOINT line, or the meter's words), after a blank line, dropped where the pair passes `MAX_OUT`; the gate's lines and a sitting's line come before as `post_tool_use` places them. The scan finds the same spans the regexes found, the tag values inside a block too, by `str.find`.
+- NICE n344 (L3) and n345 (L9) in.
+
 ## 5. Forbidden reads
 
 No transcript, no live state root, no file under `~/.claude`, no relay ledger.

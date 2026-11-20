@@ -115,11 +115,13 @@ Two lines arrive as hook context; act on them, do not argue with them:
   "Restarting a sitting"), run `agentik-session checkpoint --respawn --charter <file>
   --state <s>` in a foreground Bash call of its own, then end the turn: a background
   call is refused, since no hook can confirm its mark and the launcher would wait on
-  it. While a mark stands unconfirmed, each prompt says `RESPAWN unconfirmed:` and the
-  band `respawn unconfirmed`: run the close again in the foreground. While a background
+  it. While a mark stands unconfirmed, each prompt says `RESPAWN unconfirmed:`, as does
+  the call that left it (a close inside a script), and the band `respawn unconfirmed`:
+  run the close again in the foreground. While a background
   job of the main thread is not known to have ended (no notice of it reached a prompt),
   the first foreground close is refused once with when each started, since the restart
-  ends any still running: wait for its notice, or run the close again and it passes.
+  ends any still running: where each one's notice has already come, run the close again
+  now; else wait for its notice, or run the close again and it passes.
   The successor's SessionStart line
   names the copy: read it first, then the charter's Next act. Its last line says whether a launcher restarts the sitting; without one,
   print your start line and stop. When the restart does not come,
