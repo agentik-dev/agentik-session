@@ -569,6 +569,12 @@ READERS = {
                                    lambda m, d: m["instructions"].read_log(d)),     # packet g1
     ("instructionguard", "counts"): ("guard.jsonl", {"at": 1.0, "decision": "deny", "path": "/x/CLAUDE.md"},
                                      lambda m, d: m["instructionguard"].counts(d)),  # packet g2
+    ("instructionguard", "_compare"): (                               # packet gc1, R2
+        "t1.json", {"at": 1.0, "cwd": "/w", "files": [["/nonexistent/gc1/CLAUDE.md", ["absent"]]]},
+        lambda m, d: m["instructionguard"]._compare({"session_id": S, "tool_use_id": "t1"},
+                                                    _state_env(d), d / "t1.json")),
+    ("instructionguard", "_take"): ("t1.said", {"paths": ["CLAUDE.md"]},   # packet gc1, R3
+                                    lambda m, d: m["instructionguard"]._take(d, ["t1.said"])),
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
     ("ledger", "lines"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},   # packet S54 R4
@@ -614,7 +620,8 @@ NOT_STATE = {("__init__", "_pin"), ("admission", "decode"), ("chain", "_checks")
              ("resolver", "resolve"), ("yamlsubset", "_scalar"),
              ("instructionguard", "gates_write"),   # g2b: a `.json` draft checked, no state
              ("doctor", "_missed_call"),            # ss5 R1: a transcript's tail, no state
-             ("doctor", "_suite_sources")}          # fk3 R1: the suite's answer, no state
+             ("doctor", "_suite_sources"),          # fk3 R1: the suite's answer, no state
+             ("hooks", "_with_changed")}            # gc1 R3: a copy of the output, no state
 
 
 def test_the_table_names_every_reader():

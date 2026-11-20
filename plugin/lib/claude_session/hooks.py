@@ -989,7 +989,11 @@ def user_prompt_submit(payload: dict) -> dict:
 
 
 def _gate_ups(payload: dict, out: dict) -> dict:
-    """UserPromptSubmit's output with the inbox lines first, the block alone under MAX_OUT."""
+    """UserPromptSubmit's output with the inbox lines first, the block alone under MAX_OUT;
+    a gated file's change that waits (gc1 R3) said after the body."""
+    if not payload.get("agent_id"):
+        out = _with_changed(payload, os.environ, out, [], instructionguard.take(
+            payload, os.environ), event="UserPromptSubmit", cap=False)
     return _with_gate(out, "UserPromptSubmit",
                       _gate_lines(payload, os.environ, "UserPromptSubmit", out, alone=True,
                                   line=_line_take(payload, os.environ)))
@@ -1739,11 +1743,43 @@ def _jobs_out_line(payload: dict, env) -> str | None:
 
 
 def post_tool_use(payload: dict, env=None) -> dict:
-    """The handler below, then the gate's inbox lines, the whole under MAX_OUT (S38)."""
+    """The edit gate's outcome (gc1 R2, before a helper's early return), the handler below and
+    the outcome said after it (R3), then the gate's inbox lines, the whole under MAX_OUT
+    (S38)."""
     env = os.environ if env is None else env
-    out = _post_tool_use(payload, env)
+    changed, waiting = instructionguard.post(payload, env)     # never raises
+    out = _with_changed(payload, env, _post_tool_use(payload, env), changed, waiting)
     return _with_gate(out, "PostToolUse", _gate_lines(payload, env, "PostToolUse", out, False,
                                                       line=_line_take(payload, env, out=out)))
+
+
+def _with_changed(payload: dict, env, out: dict, changed: list, waiting: list,
+                  event: str = "PostToolUse", cap: bool = True) -> dict:
+    """gc1 R3: the gated files an unread line changed, said once after the handler's own words
+    (the checkpoint line first), to the model and in `systemMessage`, the whole within MAX_OUT
+    (`cap`). A helper's change, and one that does not fit, waits for the main thread's next
+    PostToolUse or UserPromptSubmit."""
+    paths = list(dict.fromkeys(list(waiting) + list(changed)))
+    if not paths:
+        return out
+    if payload.get("agent_id"):
+        instructionguard.hold(payload, env, paths)
+        return out
+    try:
+        text = instructionguard.said(paths)
+        new = json.loads(json.dumps(out)) if out else {}
+        hso = new.setdefault("hookSpecificOutput", {})
+        ctx = hso.get("additionalContext") or ""
+        hso["hookEventName"] = event
+        hso["additionalContext"] = f"{ctx}\n\n{text}" if ctx else text
+        new["systemMessage"] = (new["systemMessage"] + "\n" if new.get("systemMessage")
+                                else "") + text
+        if not cap or len(json.dumps(new)) <= MAX_OUT:
+            return new
+    except Exception:                                   # noqa: BLE001
+        pass
+    instructionguard.hold(payload, env, paths)
+    return out
 
 
 def _post_tool_use(payload: dict, env) -> dict:
@@ -1827,6 +1863,8 @@ def post_tool_use_failure(payload: dict, env=None) -> dict:
     """A failed tool call (S20 ruling 2): a helper's closes its open call and stamps
     `helper-activity.json`; the main thread's writes nothing. It says nothing."""
     env = os.environ if env is None else env
+    changed, _ = instructionguard.post(payload, env, take=False)   # gc1 R2; the shim drops output
+    instructionguard.hold(payload, env, changed)
     if payload.get("agent_id"):
         _tool_stamp(payload, env, "PostToolUseFailure")   # the stamp, then the close
         _close_call(payload, env)

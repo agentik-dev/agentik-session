@@ -20,6 +20,7 @@ UNREAD = 'f=CLAUDE.md; echo x >> "$f"'
 SAID = ("agentik-session: {} is gated and changed during a Bash line the gate could not read. "
         "If that line ran the lane, nothing is wrong. Otherwise restore it and use the "
         "instruct skill.")
+SAID_MANY = SAID.replace(" is gated", " are gated").replace("restore it", "restore them")
 
 
 def _bash(command, cwd, tid="toolu_gc1_0001", **more):
@@ -131,15 +132,21 @@ def test_4_a_gated_file_created_and_one_removed_are_each_a_change(gb):
     paths = sorted(r["path"] for r in _log(gb) if r["decision"] == "changed")
     assert paths == [str(gb.repo / "AGENTS.md"), str(gb.repo / "CLAUDE.md")]
     model, owner = _said(out)
-    assert SAID.replace(" is ", " are ").format("AGENTS.md, CLAUDE.md") in model
-    assert owner == SAID.replace(" is ", " are ").format("AGENTS.md, CLAUDE.md")
+    assert SAID_MANY.format("AGENTS.md, CLAUDE.md") in model
+    assert owner == SAID_MANY.format("AGENTS.md, CLAUDE.md")
     assert len(json.dumps(out)) <= hooks.MAX_OUT
 
 
 def test_4_a_path_outside_the_calls_folder_is_said_whole(gb):
     _, out = _run(gb, UNREAD, lambda: (gb.tree / "CLAUDE.md").write_text("new\n"))
     assert [r["path"] for r in _log(gb)] == [str(gb.tree / "CLAUDE.md")]
-    assert _said(out)[1] == SAID.format(gb.tree / "CLAUDE.md")
+    said = SAID.format(gb.tree / "CLAUDE.md")
+    if len(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                              "additionalContext": said},
+                       "systemMessage": said})) > hooks.MAX_OUT:     # a long temp path: it waits
+        assert out == {}
+        out = hooks.user_prompt_submit({"session_id": SID, "prompt": "go"})
+    assert _said(out)[1] == said
 
 
 # ---- 5: PostToolUseFailure: logged then, said once later ------------------------------------
