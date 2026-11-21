@@ -202,6 +202,27 @@ def test_hk1_a6_the_launcher_is_a_command_word(cmd, refused):
     assert hooks._helper_charter(_helper(cmd)) is refused, cmd
 
 
+# Review 1's F1: every working entry point the pin refused is refused again (the module by `-m`
+# with its `.cli` or `.__main__`, the runner by its path, `./<name>`, the module imported in
+# `-c`), while a path that only holds the launcher's name as a folder still passes.
+ENTRY = [f"python3 -m claude_session.cli {WORD} close",
+         f"python3 -m claude_session.__main__ {WORD} open x",
+         f"/usr/bin/python3 -I /x/plugin/lib/agentik-session {WORD} close",
+         f"python3 -I plugin/lib/agentik-session {WORD} open x",
+         f"cd /x/bin && ./agentik-session {WORD} close",
+         f"python3 -c 'from claude_session.cli import main; main([\"{WORD}\",\"close\"])'",
+         f"python3 -c 'from claude_session import cli; cli.main([\"{WORD}\",\"open\",\"x\"])'"]
+FOLDERS = [f"grep -n {WORD} agentik-session/x",
+           f"git -C /x/agentik-session commit -m '{WORD} close keeps the sum'",
+           f"cat /x/plugin/lib/claude_session/cli.py | grep {WORD}",
+           f"ls /x/lib/agentik-session/ && echo {WORD} open"]
+
+
+@pytest.mark.parametrize("cmd,refused", [(c, True) for c in ENTRY] + [(c, False) for c in FOLDERS])
+def test_hk1_f1_the_pins_entry_points_are_refused_again(cmd, refused):
+    assert hooks._helper_charter(_helper(cmd)) is refused, cmd
+
+
 # ---- R4: one relay section
 
 def test_hk1_a7_as_dict_holds_no_old_section(tmp_path):
