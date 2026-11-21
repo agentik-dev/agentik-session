@@ -171,7 +171,7 @@ def test_rr5b_a3_a_refusal_before_either_commit_leaves_both(make, tmp_path, case
     else:
         (w.hold / ".gitignore").write_text("*.tmp\n")
         git(w.hold, "add", ".gitignore")
-        git(w.hold, "commit", "-qm", "ignore")
+        git(w.hold, "commit", "-qm", "ignore", "--", ".gitignore")
         (w.rec / "note.tmp").write_text("x\n")
         named = str(w.rec / "note.tmp")
     heads = (w.head(w.clone), w.head(w.hold))
@@ -179,7 +179,8 @@ def test_rr5b_a3_a_refusal_before_either_commit_leaves_both(make, tmp_path, case
     assert rc == 2, (out, err)
     assert (w.head(w.clone), w.head(w.hold)) == heads and counter() == 5
     assert w.staged(w.clone) == ["s.txt"] and w.staged(w.hold) == ["repos/demo/x.txt"]
-    assert len(err.strip().splitlines()) == 1
+    # one line (git's own reason, as the pin quotes it, may run on: the ignored case)
+    assert [l for l in err.splitlines() if l.startswith("error:")] == [err.splitlines()[0]]
     if case == "neither":                                     # the pin's words, the clone named
         assert err.strip() == f"error: checkpoint --commit: {named} is outside the repo at {w.clone}"
     elif case == "merge":
@@ -226,7 +227,7 @@ def test_rr5b_a4_a_red_holder_hook_leaves_the_clones_commit_standing(make):
     hook.chmod(0o755)
     hold_head = w.head(w.hold)
     rc, out, err = run("checkpoint", "--commit", "a.py", str(w.charter), "-m", "cp")
-    assert rc == 5, (out, err)
+    assert rc == 1 and "commit hold: red commit exit 1" in out, (out, err)   # git's own code
     sha = w.head(w.clone)
     assert w.took(w.clone) == ["a.py"] and w.head(w.hold) == hold_head
     assert w.staged(w.hold) == ["repos/demo/x.txt"] and counter() == 5

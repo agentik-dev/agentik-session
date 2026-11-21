@@ -12,8 +12,8 @@
 
 ## Done-ness
 - [x] The packet
-- [ ] The failing tests, `tests/test_rr5b_*.py`
-- [ ] R1 to R5: the split, the pre-check, the half, no holder
+- [x] The failing tests, `tests/test_rr5b_*.py`: 17 red at the pin (`4d356cc`)
+- [x] R1 to R5: the split, `commit.precheck` for both before either, the half's line, no holder; fw5 and cli tests unchanged and green
 - [ ] R6, R7: `check FILE` in `broken`; the close line; `since_landing`
 - [ ] R8: RUNBOOK and help; doclint, hygiene
 - [ ] `make stamp`, then `make check` through the gate
@@ -22,6 +22,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-Write the failing tests for acceptance 1 to 8.
+R6 and R7: `check FILE` in `broken`, the close with no holder, `since_landing` in the holder.
 
 ## Exit

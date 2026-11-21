@@ -477,14 +477,31 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
     return _core(cwd, paths, argv, ("-F", msg), env, gated, caller, gate._config(env)["wall"])
 
 
-def commit_paths(cwd: str, paths: list, message: str, env) -> int:
+def commit_paths(cwd: str, paths: list, message: str, env, got=None) -> int:
     """`checkpoint --commit <paths...>` (fw5 R3): the named paths through the core with no
-    check, `message` the commit's. Refused (Nothing for nothing to commit) as `commit`'s."""
+    check, `message` the commit's. Refused (Nothing for nothing to commit) as `commit`'s.
+    Packet rr5b R4: on `ok`, the commit's sha, read under the lock, is appended to `got`."""
     from . import gate
-    return _core(cwd, paths, (), ("-m", message), env, False, None, gate._config(env)["wall"])
+    return _core(cwd, paths, (), ("-m", message), env, False, None, gate._config(env)["wall"],
+                 got)
 
 
-def _core(cwd, paths, argv, msg, env, gated, caller, wall) -> int:
+def precheck(cwd: str, paths: list) -> str:
+    """Packet rr5b R3: the refusals known before any commit (a snapshot not put back, the
+    repository's state, each path's test), for the work tree holding `cwd`, with no lock and
+    nothing written; its top. Refused as the core refuses."""
+    top = _top(cwd)
+    snap = _git_path(top, SNAP)
+    if os.path.lexists(snap):
+        index = _git_path(top, "index")
+        raise Refused(f"{snap} is the index as an earlier call found it, not put back: "
+                      f"`mv {snap} {index}` puts it back, or remove it; then call again")
+    _require_state(top)
+    _require_paths(top, cwd, paths)
+    return top
+
+
+def _core(cwd, paths, argv, msg, env, gated, caller, wall, got=None) -> int:
     top = _top(cwd)
     name = os.path.basename(top)
     with _signals():
@@ -493,12 +510,12 @@ def _core(cwd, paths, argv, msg, env, gated, caller, wall) -> int:
             print(f"commit {name}: red lock exit {LOCK_RED}", flush=True)
             return LOCK_RED
         try:
-            return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall)
+            return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got)
         finally:
             os.close(fd)                # the lock goes after the line, its sha read under it
 
 
-def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
+def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got=None) -> int:
     index, snap = _git_path(top, "index"), _git_path(top, SNAP)
     witness = _git_path(top, WITNESS)
     if os.path.lexists(snap):
@@ -508,13 +525,13 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall) -> int:
     _require_paths(top, cwd, paths)
     try:
         return _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall,
-                          index, snap, witness)
+                          index, snap, witness, got)
     finally:
         _drop(witness)                  # on every way out (fw5 R2)
 
 
 def _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall, index, snap,
-               witness) -> int:
+               witness, got=None) -> int:
     """fw5 R1: the add, "nothing to commit" and `moved` on the witness, so no path of this call
     is in the shared index while its check runs; then `add -N` for what the shared index lacks
     and `commit --only`. FW4d's snapshot guards that span alone (R2)."""
@@ -559,6 +576,8 @@ def _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall, index
         sha = _head(top)                # this call's commit: no other call holds the lock
         _drop(snap)
         print(f"commit {name}: ok {sha}", flush=True)
+        if got is not None:
+            got.append(sha)
         done = True
         return 0
     except BaseException as exc:

@@ -1495,6 +1495,103 @@ def _named(path: str, paths) -> bool:
     return False
 
 
+def _commit_one(workdir: str, paths: list, msg: str) -> None:
+    """fw5 R3: the named paths alone, through `commit`'s core with no check (its witness, its
+    lock, `commit --only`), so another writer's staged or edited file stays out."""
+    from . import commit as core
+    try:
+        code = core.commit_paths(workdir, paths, msg, os.environ)
+    except core.Nothing:
+        print("nothing to commit")
+    except core.Refused as err:
+        _die(f"checkpoint --commit: {err}", 2)
+    else:
+        if code != 0:
+            _die(f"commit failed: exit {code}; nothing recorded")
+
+
+def _under(full: str, top: str) -> bool:
+    return full == top or full.startswith(top.rstrip(os.sep) + os.sep)
+
+
+def _commit_named(workdir: str, paths: list, msg: str) -> None:
+    """Packet rr5b R1 to R5. `own`, `unset` and `broken` (and `out` with no record path named):
+    the pin, `_commit_one`. In `out` each path is sorted by its real path: under the work tree
+    the call stands in, the clone's; under the records folder, a record; under neither, the
+    pin's refusal. Every refusal known beforehand is made for both repositories before the
+    first commit; then the clone's commit, then the holder's, one lock at a time. Returns only
+    when the checkpoint is to be recorded; else exits with the line."""
+    from . import commit as core
+    a = records.answer(workdir)
+    if records.state(a) != "out" or not a.get("records"):
+        return _commit_one(workdir, paths, msg)
+    try:
+        top = core._top(workdir)
+    except core.Refused as err:
+        _die(f"checkpoint --commit: {err}", 2)
+    recs, here = os.path.realpath(a["records"]), os.path.realpath(workdir)
+    mine, theirs = [], []
+    for p in paths:
+        full = core._where(here, p)
+        if _under(full, top):
+            mine.append(p)
+        elif _under(full, recs):
+            theirs.append((p, full))
+        else:
+            _die(f"checkpoint --commit: {p} is outside the repo at {top}", 2)
+    if not theirs:
+        return _commit_one(workdir, paths, msg)
+    names = [p for p, _ in theirs]
+    if mine:
+        try:
+            core.precheck(workdir, mine)
+        except core.Refused as err:
+            _die(f"checkpoint --commit: the clone at {top}: {err}", 2)
+    hold, rel = a.get("holder"), []
+    if hold:
+        try:
+            hold = core._top(hold)
+            rel = [os.path.relpath(full, hold) for _, full in theirs]
+            core.precheck(hold, rel)
+        except core.Refused as err:
+            _die(f"checkpoint --commit: the records' repository at {hold}: {err}", 2)
+    sha = None
+    if mine:
+        got = []
+        try:
+            code = core.commit_paths(workdir, mine, msg, os.environ, got)
+        except core.Nothing:
+            print("nothing to commit in the clone")
+        except core.Refused as err:
+            _die(f"checkpoint --commit: the clone at {top}: {err}; nothing committed", 2)
+        else:
+            if code != 0:
+                _die(f"commit failed: exit {code}; nothing recorded; the record paths are not "
+                     f"committed either: {', '.join(names)}")
+            sha = got[0] if got else None
+    if not hold:
+        print("checkpoint --commit: the records folder is in no repository, so nothing of the "
+              f"record paths is committed: {', '.join(names)}")
+        return None
+    try:
+        code = core.commit_paths(hold, rel, msg, os.environ)
+    except core.Nothing:
+        print("nothing to commit in the records' repository")
+        return None
+    except core.Refused as err:
+        why, code = f"the records' repository at {hold}: {err}", 2
+    else:
+        if code == 0:
+            return None
+        why = f"the records' repository at {hold}: exit {code}"
+    if sha is None:
+        _die(f"commit failed: {why}; nothing recorded", code)
+    again = " ".join(shlex.quote(n) for n in names)
+    _die(f"checkpoint --commit: the clone's commit stands: {sha}; the record paths are not "
+         f"committed ({why}): {', '.join(names)}; nothing recorded; commit them with "
+         f"checkpoint --commit {again}", code)
+
+
 def cmd_checkpoint(args) -> int:
     paths = list(getattr(args, "paths", None) or [])
     if args.commit and not paths:
@@ -1513,18 +1610,7 @@ def cmd_checkpoint(args) -> int:
             _die("not a git repository, so there is nothing to commit")
         msg = args.message or ("checkpoint" if not sessionconfig.get_active()
                                else f"checkpoint ({cfg.name})")
-        # fw5 R3: the named paths alone, through `commit`'s core with no check (its witness,
-        # its lock, `commit --only`), so another writer's staged or edited file stays out.
-        from . import commit as core
-        try:
-            code = core.commit_paths(workdir, paths, msg, os.environ)
-        except core.Nothing:
-            print("nothing to commit")
-        except core.Refused as err:
-            _die(f"checkpoint --commit: {err}", 2)
-        else:
-            if code != 0:
-                _die(f"commit failed: exit {code}; nothing recorded")
+        _commit_named(workdir, paths, msg)
     if not sessionconfig.save_overlay({hooks.COUNTER: 0,
                                        hooks.LAST_CHECKPOINT: time.time()}):
         _die("could not record the checkpoint (no session overlay path)")
