@@ -16,7 +16,7 @@
 - [x] R2 to R7: `records.py`, the verbs, the hooks, doctor; `tests/test_rr5a_charter_folder.py` and `tests/test_rr5a_hooks.py`, 51 passed in both venvs
 - [x] Commits `0c77b5d` (resolver, verbs, doctor) and `3eada6b` (hooks); the whole suite under `.venv` red only on the stamp's two lines before the stamp; hygiene `--commits main..HEAD` and the tree scan exit 0; doclint silent
 - [x] `make stamp` through the gate (`20261120-230023-2934` exit 0): alpha.153, 5479 tests
-- [ ] `make check` through the gate queue, once, on the head of this commit
+- [x] `make check` through the gate queue on `1b92b2d`: `20261120-230745-2937` exit 0, 5479 passed
 
 ## Handover
 - Choices: the packet's §4.
@@ -27,3 +27,4 @@
 The landing: the gate's `make check` on this head is in the coordinator's record; no landing, install or push from this sitting.
 
 ## Exit
+Build 1: R1 to R7 built and committed, each acceptance line a named test; `make check` green on `1b92b2d` (`20261120-230745-2937` exit 0); this commit fills the record alone.
