@@ -549,14 +549,17 @@ def _records_dir(cwd, given, default: str, verb: str) -> str:
     """Packet rr5a R4, R5: the charter folder of `open` and a bare `close`. An absolute `given`
     (--dir) stands; in `out` the folder is `<records>/<given or default>`; in `unset` and
     `broken` with no `given` the verb refuses with the records line, exit 2; else the pin's,
-    relative to cwd."""
-    if given and os.path.isabs(given):
-        return given
+    relative to cwd. Review 1's F3: in `unset` and `broken` a `given` whose real path lies in the
+    clone refuses as no `given` does; one outside the clone stands."""
     a = records.answer(cwd)
     s = records.state(a)
+    if given and os.path.isabs(given):
+        if s in ("unset", "broken") and records.inside(a, given, cwd):
+            _die(f"{verb}: {records.line(a)}", 2)
+        return given
     if s == "out":
         return records.folder(a, given or default)
-    if s in ("unset", "broken") and not given:
+    if s in ("unset", "broken") and (not given or records.inside(a, given, cwd)):
         _die(f"{verb}: {records.line(a)}", 2)
     return given or default
 
@@ -627,6 +630,10 @@ def cmd_charter(args) -> int:
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
+        if args.dir:                         # rr5a F3: `broken` reads nothing in the clone
+            a = records.answer(os.getcwd())
+            if records.state(a) == "broken" and records.inside(a, args.dir, os.getcwd()):
+                _die(f"charter check: {records.line(a)}", 2)
         bad = red = 0
         section = _rules_section(os.getcwd())
         for f in args.args:
@@ -727,10 +734,13 @@ def _charter_show(args) -> int:
 
     def held(repo: str):
         """Packet rr5a R5: `unset` and `broken` read no charter; the state stands beside the
-        repo. An explicit --dir reads as at the pin."""
+        repo. An explicit --dir reads as at the pin, but in `broken` one that lies in the clone
+        (review 1's F3)."""
         a = answers.setdefault(repo, records.answer(repo))
         s = records.state(a)
-        if args.dir or s not in ("unset", "broken"):
+        if s not in ("unset", "broken"):
+            return None
+        if args.dir and not (s == "broken" and records.inside(a, args.dir, repo)):
             return None
         return {"why": f"records {s}",
                 "records": {"state": s, "why": a.get("why"), "line": records.line(a)}}

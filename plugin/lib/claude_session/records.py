@@ -173,6 +173,34 @@ def folder(a: dict | None, d: str) -> str | None:
     return os.path.join(a["records"], d)
 
 
+def _work_top(cwd) -> str | None:
+    """The work tree `cwd` stands in, by the `.git` entry its top holds; no process."""
+    d = os.path.realpath(cwd)
+    while True:
+        if os.path.lexists(os.path.join(d, ".git")):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return None
+        d = up
+
+
+def inside(a: dict | None, path, cwd) -> bool:
+    """Review 1's F3: whether `path`, by its real path, lies in the clone: under the main
+    checkout the answer names or under the work tree `cwd` stands in. A fault reads as inside.
+    Never raises."""
+    try:
+        p = os.path.realpath(os.path.join(cwd, path))
+        tops = [t for t in ((a or {}).get("repo"), _work_top(cwd)) if isinstance(t, str) and t]
+        for t in tops:
+            t = os.path.realpath(t)
+            if p == t or p.startswith(t.rstrip(os.sep) + os.sep):
+                return True
+        return False
+    except Exception:                                   # noqa: BLE001 - never raises
+        return True
+
+
 def _shown(v) -> str:
     return _CONTROL.sub(lambda m: "\\u%04x" % ord(m.group()), str(v))
 

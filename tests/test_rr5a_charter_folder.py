@@ -282,3 +282,57 @@ def test_doctor_row_in_each_state(tmp_path, state):
             assert "value repos/demo; reason relative" in text
     assert row.detail in json.dumps(got)
     assert doctor._check_records(tmp_path / "nowhere-made-up") is None
+
+
+# --- review 1's F3: a --dir inside the clone in `unset` and `broken` (GUIDE §12) ----------
+
+@pytest.mark.parametrize("state", ["unset", "missing", "inside"])
+def test_a_dir_inside_the_clone_is_refused_for_a_write(tmp_path, monkeypatch, capsys, state):
+    c, _ = layout(tmp_path, state)
+    monkeypatch.chdir(c)
+    (c / "sub").mkdir(exist_ok=True)
+    link = Path(os.path.realpath(tmp_path)) / "link"
+    link.symlink_to(c / "sub")                         # outside by its spelling, inside by its real path
+    before = tree(c)
+    for d in ("notes", str(c / "notes"), str(link)):
+        records.reset()
+        code, out, err = run(capsys, "charter", "open", "--dir", d, "g")
+        assert (code, out, err.count("\n")) == (2, "", 1) and KEY in err, (d, err)
+        code, out, err = run(capsys, "charter", "close", "--dir", d)
+        assert (code, out) == (2, "") and KEY in err, (d, err)
+    assert tree(c) == before
+    mine = Path(os.path.realpath(tmp_path)) / "elsewhere"      # outside the clone: it stands
+    code, out, _ = run(capsys, "charter", "open", "--dir", str(mine), "g")
+    assert code == 0 and Path(out.strip()).parent == mine
+    code, out, _ = run(capsys, "charter", "close", "--dir", str(mine))
+    assert code == 0 and out.splitlines()[0] == out.splitlines()[0].strip()
+    assert tree(c) == before
+
+
+def test_a_dir_inside_the_clone_is_refused_for_a_read_in_broken_alone(tmp_path, monkeypatch,
+                                                                       capsys):
+    for state in ("missing", "unset"):
+        records.reset()
+        c, _ = layout(tmp_path / state, state)
+        (c / "notes").mkdir()
+        f = c / "notes" / "2026-11-20-1.md"
+        f.write_text("# Sitting 2026-11-20-1: x\n")
+        monkeypatch.chdir(c)
+        code, out, _ = run(capsys, "charter", "show", "--json", "--dir", "notes")
+        doc = json.loads(out)
+        code_c, _, err_c = run(capsys, "charter", "check", "--dir", "notes", str(f))
+        if state == "missing":
+            assert code == 0 and doc["repos"] == []
+            assert doc["skipped"][0]["why"] == "records broken"
+            assert code_c == 2 and KEY in err_c and "reason missing" in err_c
+        else:                                          # `unset` reads as built
+            assert [r["file"] for r in doc["repos"]] == [str(f)]
+            assert code_c != 2 or KEY not in err_c
+    mine = Path(os.path.realpath(tmp_path)) / "elsewhere"
+    mine.mkdir()
+    (mine / "2026-11-20-1.md").write_text("# Sitting 2026-11-20-1: x\n")
+    records.reset()
+    monkeypatch.chdir(tmp_path / "missing" / "demo")
+    code, out, _ = run(capsys, "charter", "show", "--json", "--dir", str(mine))
+    assert [r["file"] for r in json.loads(out)["repos"]] == [str(mine / "2026-11-20-1.md")]
+

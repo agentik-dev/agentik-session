@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] F1: the bound under the hook's deadline (2 s at most in PostToolUse), the group killed by the bound, the cut and TERM, the band spent after its line; four tests, red at `1b92b2d`
 - [x] F2: the hot-path test counts asks (a recorder that raises nothing) and processes over nine paths in four states, against the pin's 0; the review's mutant (an ask atop `pre_tool_use`) reds it, `{'pre': (1, 1)}`
-- [ ] F3: a `--dir` inside the clone refused in `unset` and `broken`
+- [x] F3: a `--dir` whose real path is in the clone refused for `open` and `close` in `unset` and `broken`, for `show` and `check` in `broken`; outside it stands
 - [ ] F4: the line where git did not answer
 - [ ] F5: `records` only an absolute path
 - [ ] Doctor: `broken` is `fail`
@@ -23,6 +23,6 @@
 - Choices: the packet's §4 and its review 1 section.
 
 ## Next act
-F3, its test first.
+F4, its test first.
 
 ## Exit
