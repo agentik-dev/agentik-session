@@ -20,6 +20,7 @@
 - [x] NICE rows n370 to n375 (`0932695`); the packet true to the build; doclint silent; hygiene `--commits main..HEAD` 0 hits
 - [x] `make stamp` through the gate (`20261120-235343-2945` exit 0): 5497 tests, n325 to n328 to the overflow
 - [x] `make check` on `3ff71f7` (`20261120-235701-2947`): every test green in both venvs, red at recordlint alone (three NICE rows over 400 characters), mended here
+- [x] `make check` on `d62fbc7` (`20261121-000939-2948`): tests green, red at plugin-version-check alone; `make stamp STAMP_VERSION=2.0.0-alpha.154` through the gate (`20261121-001723-2949` exit 0)
 - [ ] `make check` through the gate on this commit: its job is in the coordinator's record
 
 ## Handover
