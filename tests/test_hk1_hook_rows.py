@@ -212,8 +212,9 @@ def test_hk1_a7_as_dict_holds_no_old_section(tmp_path):
     r = resolver.resolve(repo, "hk1-sess", env)
     assert resolver.OLD_RELAY not in r.as_dict() and "relay" in r.as_dict()
     (repo / ".claude/agentik").mkdir(parents=True)
-    (repo / ".claude/agentik/config.yaml").write_text('agent-relay: {enabled: "off", queue: q.yaml}\n')
+    old = resolver.OLD_RELAY  # the old key, named by the code's constant
+    (repo / ".claude/agentik/config.yaml").write_text(old + ': {enabled: "off", queue: q.yaml}\n')
     r = resolver.resolve(repo, "hk1-sess", env)
     assert r.sections["relay"]["enabled"] == "off" and r.sections["relay"]["queue"] == "q.yaml"
-    assert r.renamed == ["config.yaml: agent-relay is read as relay; rename the key"]
+    assert r.renamed == [f"config.yaml: {old} is read as relay; rename the key"]
     assert resolver.OLD_RELAY not in r.as_dict()
