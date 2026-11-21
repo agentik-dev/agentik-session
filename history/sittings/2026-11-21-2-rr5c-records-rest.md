@@ -24,7 +24,7 @@
 - [x] Build 2, item 1 (R6, review 1's F1, L1, L2): `_charter_reds` lints the charters `commit.taken` says the holder's commit takes; tests/test_rr5c_review1.py
 - [x] Build 2, item 2 (R7b, F2, F3): `_refuse_records_here` judges each named path through `core._where` and a named folder by the files `commit.taken` lists; tests/test_rr5c_review1.py
 - [x] Build 2, item 3: the packet's R2 (over R1, L4 ruled), R6 and R7b as built; `commit.py` in its may-touch row
-- [ ] Build 2, item 4: three NICE rows (L3, L5, rr5b's link lead)
+- [x] Build 2, item 4: NICE n380 (L3), n381 (L5), n382 (rr5b review 2's link lead); the file past its bound until `make stamp` moves the oldest S4 rows
 - [ ] Build 2: hygiene, stamp and `make check` through the gate
 
 ## Handover
@@ -32,7 +32,7 @@
 - decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-Build 2's item 4: three NICE rows.
+Build 2: hygiene, `make stamp`, then `make check` through the gate.
 
 ## Exit
-Build 2 in flight: items 1 to 3 landed.
+Build 2 in flight: items 1 to 4 landed.
