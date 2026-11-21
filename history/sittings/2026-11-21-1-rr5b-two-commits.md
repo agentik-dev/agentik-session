@@ -19,12 +19,14 @@ Build 1 (to `10b994f`): R1 to R8 built, stamped, its check green.
 - [x] The half's line: absolute record paths and the call's `-m`
 - [x] NICE rows n376 to n379 (F5 and three observations; the stamp moves the oldest S4 rows past the bound)
 - [x] The packet true to what is built (R2 with F1, R4 the half, R6 with F2 and F4, R7 with F3; §3 row 11)
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate (`20261121-015045-2972` exit 0): 5538 tests, n329 to n331 to the overflow
+- [ ] `make check` through the gate on the stamp's commit: its job is in the coordinator's record
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-`make stamp` through the gate, commit its output, then `make check`.
+`make check` through the gate on this commit; then the coordinator's read.
 
 ## Exit
+Build 2: review 1's round built (F2, F3, F1, the half's line, n376 to n379), each new test red at `10b994f` where it pins a change; stamped; this commit is the one `make check` runs on.
