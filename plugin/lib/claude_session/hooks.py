@@ -48,8 +48,12 @@ SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
 # a quoted or continued spelling reads as the plain one. Each regex has one repetition at most
 # and none nests, so the pass is linear in the command's length. A quoted mention that names
 # the launcher is denied too, and the helper rewords it.
+# Packet hk1 R3: the launcher counts only as a command word: never inside a longer path segment
+# or as a folder of a path (a checkout of this tool, `plugin/lib/claude_session/`), and still as
+# the last name of a path ending `/bin/<name>`, or a relative `bin/<name>` standing as a word.
 CHARTER_READS = ("check", "show")   # `charter`'s verbs that write nothing: never open, never close
-_LAUNCHER = re.compile(r"(?<![\w-])(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w-])")
+_LAUNCHER = re.compile(r"(?:(?<![\w/.-])(?:bin/)?|(?<=/bin/))"
+                       r"(?:agentik(?:-|\s+)session|claude[-_]session)(?![\w/.-])")
 _CHARTER_WORD = re.compile(r"(?<![\w-])charter(?![\w.-])")
 _CHARTER_READ = re.compile(r"[ \t]+(?:" + "|".join(CHARTER_READS) + r")(?![\w.-])")
 
