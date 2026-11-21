@@ -209,6 +209,9 @@ def line(a: dict | None) -> str:
     """The one line of `unset` and `broken`: the key to set, and for `broken` its value and the
     reason; "" in `own` and `out`."""
     s = state(a)
+    if failed(a):                                       # F4: no key to set; git gave no answer
+        return (f"{KEY} was not read: git did not answer "
+                f"(reason {_shown(a.get('why'))}); the records folder is unknown this time")
     if s == "unset":
         return (f"this repo keeps its records outside its clone and {KEY} is not set; "
                 f"set it: {SET_LINE}")

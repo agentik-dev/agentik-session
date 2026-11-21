@@ -336,3 +336,20 @@ def test_a_dir_inside_the_clone_is_refused_for_a_read_in_broken_alone(tmp_path, 
     code, out, _ = run(capsys, "charter", "show", "--json", "--dir", str(mine))
     assert [r["file"] for r in json.loads(out)["repos"]] == [str(mine / "2026-11-20-1.md")]
 
+
+# --- review 1's F4: where git did not answer, the line says so, and no "set it" -----------
+
+def test_a_git_that_did_not_answer_says_so_and_not_set_it(tmp_path, monkeypatch, capsys):
+    c, _ = layout(tmp_path, "own")
+    a = records._failed(str(c), "timeout")
+    got = records.line(a)
+    assert "git did not answer" in got and "reason timeout" in got
+    assert "set it" not in got and records.SET_LINE not in got
+    broken = layout(tmp_path / "b", "missing")[0]
+    assert records.SET_LINE in records.line(records.answer(str(broken)))    # a key set: the advice
+    monkeypatch.setattr(records, "_read", lambda folder: records._failed(folder, "timeout"))
+    records.reset()
+    monkeypatch.chdir(c)
+    code, out, err = run(capsys, "charter", "open", "g")
+    assert code == 2 and "git did not answer" in err and "set it" not in err
+
