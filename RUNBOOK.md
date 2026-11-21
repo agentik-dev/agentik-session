@@ -542,6 +542,10 @@ session:
 `reconcile: false` is off, as no key is. The record folder's real path, its
 links followed, lies inside the repo and outside `.git`, and the folder can
 be written; else the verb exits 2 before the detectors run.
+Where the repo's records live outside its clone, `record` is read under the
+records folder, and the charters the detectors read are its own; where they
+are declared out and the key is unset or does not resolve, the verb exits 2
+with the key's line and writes nothing (packet rr5c).
 
 `agentik session reconcile [--json] [--force]` runs in the repo. When the
 newest `<record>/YYYY-MM-DD.md` says it ran less than `every` hours ago it

@@ -17,6 +17,9 @@ from claude_session import commit as core
 KEY = "agentik.records"
 CHARTER = "history/sittings/2026-11-21-1.md"
 SID = "rr5b-sess-0000-1111"
+# rr5c R6: a record charter is linted before the holder's commit, so the fixture's is green
+BODY = ("\n| item | value |\n|---|---|\n| goal | g |\n| budget | b |\n| pin | p |\n"
+        "| window | 200k |\n| agents | 0 |\n\n## Done-ness\n\n## Handover\n")
 
 
 def git(cwd, *args):
@@ -56,7 +59,7 @@ class World:
         if self.rec is not None:
             (self.rec / "history" / "sittings").mkdir(parents=True)
             self.charter = self.rec / CHARTER
-            self.charter.write_text("# Sitting 2026-11-21-1: demo\n")
+            self.charter.write_text("# Sitting 2026-11-21-1: demo\n" + BODY + "\n## Next act\nx\n")
             (self.rec / "x.txt").write_text("base\n")
             git(self.clone, "config", KEY, str(self.rec))
         if self.hold is not None:
@@ -70,7 +73,7 @@ class World:
         (self.clone / "s.txt").write_text("theirs\n")
         git(self.clone, "add", "s.txt")
         if self.rec is not None:
-            self.charter.write_text("# Sitting 2026-11-21-1: demo\n\nmore\n")
+            self.charter.write_text("# Sitting 2026-11-21-1: demo\n" + BODY + "\n## Next act\nmore\n")
             (self.rec / "x.txt").write_text("theirs\n")
         if self.hold is not None:
             git(self.hold, "add", "repos/demo/x.txt")
@@ -244,7 +247,7 @@ def test_rr5b_a4_nothing_in_the_clone_does_not_stop_the_holder(make):
     # s.txt is staged by another hand but named here: the call takes it, as at the pin
     assert rc == 0 and w.took(w.hold) == [f"repos/demo/{CHARTER}"], (out, err)
     git(w.clone, "checkout", "-q", "HEAD", "--", ".")
-    (w.charter).write_text("# again\n")
+    (w.charter).write_text("# Sitting 2026-11-21-1: demo\n" + BODY + "\n## Next act\nagain\n")
     rc, out, err = run("checkpoint", "--commit", "a.py", str(w.charter), "-m", "cp")
     assert rc == 0, (out, err)
     assert "nothing to commit in the clone" in out and w.took(w.hold) == [f"repos/demo/{CHARTER}"]

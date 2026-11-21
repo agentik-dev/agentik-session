@@ -28,10 +28,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import admission, gate, resolver, yamlsubset
+from . import admission, gate, records, resolver, yamlsubset
 from .shellreader import _NEST, _SUB_OUT, _Bound, _sinks, commands  # g8a R9: the one walk
 
 QUEUE = Path("relay") / "queue.yaml"
+# Packet rr5c R7, the coordinating repo's entry 65 taken for the loop: as the relay's own line
+RECORDS_REFUSAL = (f"this repo keeps its records outside its clone (git config {records.KEY}); "
+                   "the loop does not run in such a repo yet")
 CONTEXT_CEILING = 180000          # the builder profile's (hq NICE n3: never budget.context)
 STALL = 2700.0                    # the relay's watchdog
 POLL = 30.0
@@ -1684,6 +1687,8 @@ def run(repo, keep=None, fx: Fx | None = None, stall: float = STALL, poll: float
     repo = Path(os.path.realpath(repo))
     if max_rows is not None and (type(max_rows) is not int or max_rows <= 0):
         raise UnattendedError(f"max-rows: {max_rows!r} is not a positive count")
+    if records.state(records.answer(str(repo))) != "own":    # rr5c R7: before any write or ps
+        raise UnattendedError(RECORDS_REFUSAL)
     at, lp = refusals(repo, fx, until, land)
     try:
         text = (repo / QUEUE).read_text()

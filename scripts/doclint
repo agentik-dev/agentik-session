@@ -40,7 +40,9 @@ Rules, each a function returning `path: rule: detail` lines:
               next phase, tracked or not), whose every `.md` path exists (ADV11-6)
 
 Files are the repo's tracked and untracked-not-ignored ones.
-Usage: doclint [--repo DIR]. Exit 0 when clean, 2 on a refusal, 1 on usage or
+DIR may be a subfolder of a work tree (a holder's `repos/<tool>/`): its own files, each
+path relative to it, so a charter there is read as `history/sittings/...` (packet rr5c
+R5). Usage: doclint [--repo DIR]. Exit 0 when clean, 2 on a refusal, 1 on usage or
 when git fails.
 """
 import fnmatch

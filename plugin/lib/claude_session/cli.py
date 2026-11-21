@@ -1520,6 +1520,67 @@ def _under(full: str, top: str) -> bool:
     return full == top or full.startswith(top.rstrip(os.sep) + os.sep)
 
 
+def _refuse_records_here(workdir: str, paths: list, a) -> None:
+    """Packet rr5c R7b, review 1's round: in `unset` and `broken`, the clone's commit is refused
+    before it starts, with the state's line, exit 2, where a named path lies under a record name
+    (`records.record_name`), each judged as the core spells it (`core._where`), or where a file
+    the commit would take under a named folder does (`core.taken`, git's own reading)."""
+    from . import commit as core
+    try:
+        top = os.path.realpath(core._top(workdir))
+    except core.Refused:
+        return                                      # the pin's refusal comes from the core
+    here, inner = os.path.realpath(workdir), []
+    for p in paths:
+        full = core._where(here, p)
+        if not _under(full, top) or full == top:
+            continue                                # the core's own refusal stands
+        if records.record_name(os.path.relpath(full, top)):
+            _die(f"checkpoint --commit: {p} is a record path in the clone; {records.line(a)}; "
+                 "nothing committed", 2)
+        inner.append(p)
+    if not inner:
+        return
+    files = core.taken(workdir, inner)
+    if files is None:
+        _die("checkpoint --commit: git cannot say which files the clone's commit would take, "
+             f"so none is known not to be a record path in the clone; {records.line(a)}; "
+             "nothing committed", 2)
+    for f in files:
+        if records.record_name(f):
+            _die(f"checkpoint --commit: {f}, which a named path takes, is a record path in the "
+                 f"clone; {records.line(a)}; nothing committed", 2)
+
+
+def _charter_reds(workdir: str, a, theirs: list, hold: str, rel: list) -> list:
+    """Packet rr5c R6 (hq design/28 §11 lead 6), review 1's round: `charter check`'s refusal
+    lines for each charter the holder's commit would take, before it takes it: the holder's git
+    says which files `rel` takes (a named folder's included), and each that lies under the
+    charter folder, bears a charter's name (`charter.NAME`) and is a file is read. A file that
+    is no charter, a charter the holder holds unchanged and a removal are not read."""
+    from . import commit as core
+    d = records.folder(a, _charter_dir(_session_section(workdir)))
+    if not d:
+        return []
+    files = core.taken(hold, rel)
+    if files is None:
+        return [f"{hold}: refused: git cannot say which files the records' commit would take"]
+    d, out = os.path.realpath(d), []
+    said = {os.path.realpath(full): p for p, full in theirs}   # a file named keeps its spelling
+    for f in files:
+        full = os.path.join(hold, f)
+        if not (charter.NAME.match(os.path.basename(f)) and os.path.isfile(full)
+                and _under(os.path.realpath(full), d)):
+            continue
+        try:
+            refusals = charter.check(full)
+        except OSError as e:
+            refusals = [e.strerror or str(e)]
+        p = said.get(os.path.realpath(full), full)
+        out.extend(f"{p}: refused: {r}" for r in refusals)
+    return out
+
+
 def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
     """Packet rr5b R1 to R5. `own`, `unset` and `broken` (and `out` with no record path named):
     the pin, `_commit_one`. In `out` each path is sorted by its real path: under the work tree
@@ -1529,6 +1590,8 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
     when the checkpoint is to be recorded; else exits with the line."""
     from . import commit as core
     a = records.answer(workdir)
+    if records.state(a) in ("unset", "broken"):     # rr5c R7b: no record is written in the clone
+        _refuse_records_here(workdir, paths, a)
     if records.state(a) != "out" or not a.get("records"):
         return _commit_one(workdir, paths, msg)
     try:
@@ -1565,6 +1628,7 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
             core.precheck(hold, rel)
         except core.Refused as err:
             _die(f"checkpoint --commit: the records' repository at {hold}: {err}", 2)
+    reds = _charter_reds(workdir, a, theirs, hold, rel) if hold else []
     sha = None
     if mine:
         got = []
@@ -1583,17 +1647,22 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
         print("checkpoint --commit: the records folder is in no repository, so nothing of the "
               f"record paths is committed: {', '.join(names)}")
         return None
-    try:
-        code = core.commit_paths(hold, rel, msg, os.environ)
-    except core.Nothing:
-        print("nothing to commit in the records' repository")
-        return None
-    except core.Refused as err:
-        why, code = f"the records' repository at {hold}: {err}", 2
+    if reds:                                        # rr5c R6: a red charter stays out
+        for line in reds:
+            print(line, file=sys.stderr)
+        why, code = f"the records' repository at {hold}: charter check refused it", 2
     else:
-        if code == 0:
+        try:
+            code = core.commit_paths(hold, rel, msg, os.environ)
+        except core.Nothing:
+            print("nothing to commit in the records' repository")
             return None
-        why = f"the records' repository at {hold}: exit {code}"
+        except core.Refused as err:
+            why, code = f"the records' repository at {hold}: {err}", 2
+        else:
+            if code == 0:
+                return None
+            why = f"the records' repository at {hold}: exit {code}"
     if sha is None:
         _die(f"commit failed: {why}; nothing recorded", code)
     full = [f for _, f in theirs]                   # review 1: right from any cwd, its -m kept
@@ -2389,7 +2458,8 @@ def build_parser() -> argparse.ArgumentParser:
                                        "sitting; print the line's id")
     ls_.add_argument("checkout", help="the checkout's top level the line is addressed to")
     ls_.add_argument("--file", required=True, metavar="PATH",
-                     help="a file inside this checkout, the line's whole text")
+                     help="a file inside this checkout, or under its records folder where "
+                          "its records live outside it, the line's whole text")
     ll = lsub.add_parser("list", help="the lines addressed to this checkout, and those it sent")
     ll.add_argument("--json", action="store_true")
     lw = lsub.add_parser("show", help="one line's pointer whole")

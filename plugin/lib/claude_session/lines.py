@@ -12,8 +12,10 @@ and a step reads the pointer before its rename. The take moves a waiting pointer
 into `closing/`, then publishes the closed pointer, its record written before, by a rename
 into `closed/`. Two sessions cannot both win a rename. A pointer whose fields are not a
 pointer's goes to `aside/`, unprinted, at most ASIDE_MOST a hook. The gate's prune pass removes
-a closed pointer after `KEEP`, an open one never. Nothing here writes outside the state root,
-starts a process or reads the network.
+a closed pointer after `KEEP`, an open one never. Nothing here writes outside the state root
+or reads the network. Packet rr5c R2: a file that is not under its checkout is asked of the
+resolver (`records.answer`, its bounded child, once a checkout a process): in `out` a file under
+the checkout's records folder passes; no other process is started.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from . import gate
+from . import gate, records
 
 DIR = "lines"
 TAKEN, AGAIN, CLOSING, CLOSED, ASIDE = "taken", "again", "closing", "closed", "aside"
@@ -123,6 +125,27 @@ def same(a: str, b: str) -> bool:
 
 def _under(path: str, base: str) -> bool:
     return _fold(path, base).startswith(_fold(base).rstrip(os.sep) + os.sep)
+
+
+def _records_of(checkout: str) -> str | None:
+    """Packet rr5c R2: the real path of the checkout's records folder where the resolver
+    answers `out` for it, else None (every other state, a fault, a timeout). Never raises."""
+    try:
+        a = records.answer(checkout)
+        if records.state(a) != "out" or not a.get("records"):
+            return None
+        return os.path.realpath(a["records"])
+    except Exception:                                   # noqa: BLE001 - the pin's verdict
+        return None
+
+
+def _held(path: str, base: str) -> bool:
+    """R2: `path` under the checkout `base`, else under its records folder in `out`; the
+    resolver is asked only when the first test fails."""
+    if _under(path, base):
+        return True
+    recs = _records_of(base)
+    return recs is not None and _under(path, recs)
 
 
 def address(t: str) -> str:
@@ -237,7 +260,12 @@ def send(root, target: str, file: str, start: str, now=None) -> str:
                       "where its answer can be taken")
     real = os.path.realpath(file)
     if not os.path.isfile(real) or not _under(real, frm):
-        raise Refused(f"line send: {file} is no file inside this checkout, {frm}")
+        recs = _records_of(frm)                     # rr5c R2: in `out`, its records folder
+        if recs is None:
+            raise Refused(f"line send: {file} is no file inside this checkout, {frm}")
+        if not os.path.isfile(real) or not _under(real, recs):
+            raise Refused(f"line send: {file} is no file inside this checkout, {frm}, "
+                          f"nor under its records folder, {recs}")
     if _bad(real) or _bad(frm) or _bad(to):
         raise Refused("line send: a path holds a line break, a control or format character, "
                       "or a lone surrogate")
@@ -249,7 +277,8 @@ def valid(ptr, name: str, to: str | None, from_checkout: bool = True) -> dict | 
     type (an unknown one is ignored, as every reader here ignores one, and never printed),
     `id` the file's name, no path holding a character `_breaks` names, `from` a checkout's
     top and no worktree (unless `from_checkout` is False: a close), `to` the taker's checkout
-    by the box's key, `file` under `from` (under `to` for a close's line back)."""
+    by the box's key, `file` under `from` (under `to` for a close's line back), or, rr5c R2,
+    under that checkout's records folder where the resolver answers `out` for it."""
     if not isinstance(ptr, dict) or not set(REQUIRED) <= set(ptr):
         return None
     for k, t in REQUIRED.items():
@@ -266,7 +295,7 @@ def valid(ptr, name: str, to: str | None, from_checkout: bool = True) -> dict | 
         return None
     if "closes" in ptr and not (isinstance(ptr["closes"], str) and ID.match(ptr["closes"])):
         return None
-    if not _under(ptr["file"], ptr["to"] if "closes" in ptr else ptr["from"]):
+    if not _held(ptr["file"], ptr["to"] if "closes" in ptr else ptr["from"]):
         return None
     c = ptr.get("closed")
     if c is not None and not (isinstance(c, dict) and set(c) <= {"as", "note", "at"}
