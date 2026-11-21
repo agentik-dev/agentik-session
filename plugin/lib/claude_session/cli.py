@@ -1536,21 +1536,31 @@ def _refuse_records_here(workdir: str, paths: list, a) -> None:
                  "nothing committed", 2)
 
 
-def _charter_reds(workdir: str, a, theirs: list) -> list:
-    """Packet rr5c R6 (hq design/28 §11 lead 6): `charter check`'s refusal lines for each
-    record path under the charter folder, before the holder's commit takes it; a path that
-    is no file (a removal) is not read."""
+def _charter_reds(workdir: str, a, theirs: list, hold: str, rel: list) -> list:
+    """Packet rr5c R6 (hq design/28 §11 lead 6), review 1's round: `charter check`'s refusal
+    lines for each charter the holder's commit would take, before it takes it: the holder's git
+    says which files `rel` takes (a named folder's included), and each that lies under the
+    charter folder, bears a charter's name (`charter.NAME`) and is a file is read. A file that
+    is no charter, a charter the holder holds unchanged and a removal are not read."""
+    from . import commit as core
     d = records.folder(a, _charter_dir(_session_section(workdir)))
     if not d:
         return []
+    files = core.taken(hold, rel)
+    if files is None:
+        return [f"{hold}: refused: git cannot say which files the records' commit would take"]
     d, out = os.path.realpath(d), []
-    for p, full in theirs:
-        if not (_under(os.path.realpath(full), d) and os.path.isfile(full)):
+    said = {os.path.realpath(full): p for p, full in theirs}   # a file named keeps its spelling
+    for f in files:
+        full = os.path.join(hold, f)
+        if not (charter.NAME.match(os.path.basename(f)) and os.path.isfile(full)
+                and _under(os.path.realpath(full), d)):
             continue
         try:
             refusals = charter.check(full)
         except OSError as e:
             refusals = [e.strerror or str(e)]
+        p = said.get(os.path.realpath(full), full)
         out.extend(f"{p}: refused: {r}" for r in refusals)
     return out
 
@@ -1602,7 +1612,7 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
             core.precheck(hold, rel)
         except core.Refused as err:
             _die(f"checkpoint --commit: the records' repository at {hold}: {err}", 2)
-    reds = _charter_reds(workdir, a, theirs) if hold else []
+    reds = _charter_reds(workdir, a, theirs, hold, rel) if hold else []
     sha = None
     if mine:
         got = []

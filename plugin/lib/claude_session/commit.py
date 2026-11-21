@@ -278,6 +278,25 @@ def _require_paths(top: str, cwd: str, paths: list) -> None:
         raise Refused("git add refuses: " + err.decode(errors="replace").strip()[:400])
 
 
+def taken(cwd: str, paths: list):
+    """Packet rr5c, review 1: the files, each relative to the top of the work tree holding
+    `cwd`, that `commit_paths(cwd, paths)` would take, as git itself reads the named paths:
+    each tracked one whose work-tree state is not HEAD's (a removal included) and each one
+    `git add` would add; nothing written. None where git cannot say."""
+    if _git(cwd, "rev-parse", "-q", "--verify", "HEAD")[0] == 0:
+        code, changed, _ = _git(cwd, "diff", "--name-only", "--no-renames", "-z", "HEAD", "--",
+                                *paths, z=True)
+    else:                                               # no HEAD yet: every tracked one
+        code, changed, _ = _git(cwd, "ls-files", "--full-name", "-z", "--", *paths, z=True)
+    if code != 0:
+        return None
+    code, others, _ = _git(cwd, "ls-files", "--full-name", "-o", "--exclude-standard", "-z",
+                           "--", *paths, z=True)
+    if code != 0:
+        return None
+    return sorted(set(changed) | {o for o in others if not o.endswith("/")})
+
+
 def _message(path: str) -> str:
     try:
         with open(path, "rb") as fh:

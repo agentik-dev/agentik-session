@@ -1,4 +1,4 @@
-# Sitting 2026-11-21-2: agentik-session, rr5c-records-rest, build 1
+# Sitting 2026-11-21-2: agentik-session, rr5c-records-rest, builds 1 and 2
 
 | item | value |
 |---|---|
@@ -21,12 +21,18 @@
 - [x] commons' two pages (`scripts/sync` from commons): commons 6a2155c's sync placed CONTRIBUTING.md and SECURITY.md and listed them; `--check` prints no behind or unlisted line; no test pinned the old list
 - [x] `make stamp`, `make check` through the gate: stamp `20261121-080446-3015` exit 0 (2.0.0-alpha.157, 5580 tests); the check's job is in the build record
 
+- [x] Build 2, item 1 (R6, review 1's F1, L1, L2): `_charter_reds` lints the charters `commit.taken` says the holder's commit takes; tests/test_rr5c_review1.py
+- [ ] Build 2, item 2 (R7b, F2, F3): the clone's paths as the core spells and takes them
+- [ ] Build 2, item 3: the packet's R2, R6, R7b words
+- [ ] Build 2, item 4: three NICE rows (L3, L5, rr5b's link lead)
+- [ ] Build 2: hygiene, stamp and `make check` through the gate
+
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 - decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-`make check` through the gate on this commit; then the coordinator's read.
+Build 2's item 2: R7b in `_refuse_records_here` through `core._where` and `commit.taken`.
 
 ## Exit
-Build 1: R1 to R8 and commons' two pages built, each its tests; stamped at 2.0.0-alpha.157; this commit is the one `make check` runs on.
+Build 2 in flight: item 1 landed.
