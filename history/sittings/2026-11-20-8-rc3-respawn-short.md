@@ -17,12 +17,13 @@
 - [x] R4: respawn-r1 §3.3's sentence and change log line; NICE n346, n347, n352 leave (n351 stays)
 - [x] R5: `.hygiene-allow` loses the gc1 pair and the FW4d pair with their comments; `scripts/hygiene --require-private` and `--commits main..HEAD` both exit 0 without them
 - [x] `make stamp` through the gate: job `20261120-160252-2845`, exit 0; alpha.150, 5333 to 5389 tests
-- [ ] `make check` through the gate
+- [x] `make check` through the gate: job `20261120-160435-2847` on `e67ecf2`, exit 0 in 10 min: 5389 passed (`.venv`), 5225 and 143 skipped (`.venv-floor`), hygiene 0, version check ok, readme fresh
 
 ## Handover
-- Choices: listed in the packet's §4 as they are made.
+- Choices: the packet's §4; the FW4d pair went too, both scans exiting 0 without it; the short form is 59 characters, 6 B to spare past 100% chained at a 1,000,000 ceiling.
 
 ## Next act
-`make check` through the gate queue.
+None: R1 to R5 built and the check green; the review and the landing are the coordinator's.
 
 ## Exit
+R1 to R5 built and committed; `make check` green on `e67ecf2`; this record is the only change after it.
