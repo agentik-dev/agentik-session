@@ -209,8 +209,9 @@ def _counter():
     return sessionconfig.load_overlay().get("_prompts_since_checkpoint")
 
 
-def test_s19_respawn_needs_its_charter(tmp_path):
+def test_s19_respawn_needs_its_charter(tmp_path, monkeypatch):
     f = _charter_file(tmp_path / "c.md")
+    monkeypatch.chdir(tmp_path)        # rs1 R3: no records state of the clone, as its siblings
     rc, _, err = run("checkpoint", "--respawn")
     assert rc == 2 and "--charter" in err and len(err.splitlines()) == 1
     rc, _, err = run("checkpoint", "--charter", str(f))

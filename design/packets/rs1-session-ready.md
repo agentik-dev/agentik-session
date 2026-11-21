@@ -39,6 +39,7 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 - R2: `OVERFLOW` stays the temp repos' path, where the stamp writes; line 9 reads `OVERFLOW_SHAPE`.
 - R3, the rehearsal's reds (job `20261121-091800-3036`, exit 2): three tests ran in the clone's own tree and so read its records state, `unset` there; each now runs outside any checkout (`own`, as at the pin), its assertions unchanged:
   - `test_hook_session_start.py`: the charter reminder and the s39 cases read `payload_outside`, the fixture's cwd copied to the temp folder.
+  - `test_cli.py`: `test_s19_respawn_needs_its_charter` runs from its temp folder, as `test_s19_respawn_writes_the_marker` beside it.
 
 ## 5. Forbidden reads
 
