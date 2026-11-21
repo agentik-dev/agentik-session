@@ -161,3 +161,4 @@ design/packets/in3-line.md: sibling
 tests/test_in3_line.py: home
 # is3-readme-needs: the packet named the suite's public respeak renderer plugin, five lines of prose about the renderer and the verifier, in its first commit (8c4d1fe); the tree's packet no longer has it (the coordinator's ruling).
 design/packets/is3-readme-needs.md: sibling
+records: out
