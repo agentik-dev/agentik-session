@@ -1539,6 +1539,10 @@ def _commit_named(workdir: str, paths: list, msg: str) -> None:
     mine, theirs = [], []
     for p in paths:
         full = core._where(here, p)
+        if _under(full, top) and _under(os.path.realpath(full), recs):   # review 1 F1, ruled
+            _die(f"checkpoint --commit: {p} is a symbolic link in the clone whose real path is "
+                 f"under the records folder at {recs}; its blob would publish the records "
+                 f"folder's path; nothing committed", 2)
         if _under(full, top):
             mine.append(p)
         elif _under(full, recs):

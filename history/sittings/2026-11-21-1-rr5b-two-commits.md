@@ -15,7 +15,7 @@ Build 1 (to `10b994f`): R1 to R8 built, stamped, its check green.
 ## Done-ness
 - [x] F2: `records.inside` compares each folder above the real path with the tops by identity
 - [x] F3: `since_landing` quotes the holder's sittings folder (own stays the pin's bare word)
-- [ ] F1: a named link in the clone whose real path is under the records folder is refused
+- [x] F1: a named link in the clone whose real path is under the records folder is refused
 - [ ] The half's line: absolute record paths and the call's `-m`
 - [ ] NICE rows (F5 and three observations)
 - [ ] The packet true to what is built; `make stamp`, then `make check`, through the gate
@@ -24,6 +24,6 @@ Build 1 (to `10b994f`): R1 to R8 built, stamped, its check green.
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-F1: a named link in the clone to a record refused before either commit, test first.
+The half's line: absolute record paths and the call's `-m`, test first.
 
 ## Exit

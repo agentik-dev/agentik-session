@@ -12,7 +12,8 @@ import pytest
 from claude_session import records
 from claude_session.reconcile import live
 
-from test_rr5b_two_commits import CHARTER, KEY, World, git, make, run  # noqa: F401
+from test_rr5b_two_commits import (CHARTER, KEY, World, counter, git, make,  # noqa: F401
+                                   run)
 
 
 def broken(w, root):
@@ -112,3 +113,37 @@ def test_rr5b_f3_the_printed_command_quotes_a_sittings_folder_with_a_space(make,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert p.returncode == 0 and p.stdout.strip() == "1", (f["evidence"]["command"], p.stdout,
                                                             p.stderr)
+
+
+# ---- F1, ruled: a link in the clone whose real path is under the records folder ------------
+
+@pytest.mark.parametrize("with_code", [False, True])
+def test_rr5b_f1_a_link_in_the_clone_to_a_record_is_refused_before_either(make, with_code):
+    w = make("out")
+    (w.clone / "link.md").symlink_to(w.charter)
+    heads = (w.head(w.clone), w.head(w.hold))
+    named = ["a.py", "link.md", str(w.charter)] if with_code else ["link.md"]
+    rc, out, err = run("checkpoint", "--commit", *named, "-m", "cp")
+    assert rc == 2 and out == "", (out, err)
+    assert (w.head(w.clone), w.head(w.hold)) == heads and counter() == 5
+    assert w.staged(w.clone) == ["s.txt"] and w.staged(w.hold) == ["repos/demo/x.txt"]
+    lines = err.strip().splitlines()
+    assert len(lines) == 1 and "link.md" in lines[0] and "symbolic link" in lines[0], err
+    assert "would publish the records folder's path" in lines[0], err
+
+
+def test_rr5b_f1_a_link_under_the_records_folder_into_the_clone_commits_in_the_holder(make):
+    w = make("out")
+    (w.rec / "back.md").symlink_to(w.clone / "a.py")
+    rc, out, err = run("checkpoint", "--commit", str(w.rec / "back.md"), "-m", "cp")
+    assert rc == 0, (out, err)
+    assert w.took(w.hold) == ["repos/demo/back.md"] and w.staged(w.hold) == ["repos/demo/x.txt"]
+
+
+def test_rr5b_f1_own_commits_a_link_in_the_clone_as_at_the_pin(make, tmp_path):
+    w = make("own")
+    far = Path(os.path.realpath(tmp_path)) / "far.md"
+    far.write_text("x\n")
+    (w.clone / "link.md").symlink_to(far)
+    rc, out, err = run("checkpoint", "--commit", "link.md", "-m", "cp")
+    assert rc == 0 and w.took(w.clone) == ["link.md"], (out, err)
