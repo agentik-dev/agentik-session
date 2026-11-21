@@ -10,9 +10,13 @@
 | acceptance | §3 |
 | budget | about 90 tool calls, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
 
-## 1. The owner's words
+## 1. What the source says: the code at the pin
 
-2026-11-20: "continue with the charter", and, giving the sitting six workers, "to accelerate your work". The coordinating repo's entry 37, verbatim: "Never commit. The tool repos are public. Commit no hostname, address, email, person's name, account detail, or private repo's name or path; examples use made-up names."
+- `cli.cmd_hook` writes the row in a `finally` after `hooks.dispatch`; a default SIGTERM or a SIGKILL skips it, so a hook cut at its 5 s wall leaves no row and `report --hooks` cannot count it.
+- `hooks._LAUNCHER` matched the launcher's names anywhere, path segments included, so a helper's `grep` or `git -C` in a checkout of this tool, with the word that follows, was refused.
+- `resolver.Resolved.as_dict` added an `agent-relay` copy of `relay`; the relay warns on every file that holds both.
+
+The owner's words, 2026-11-20: "continue with the charter", and, giving the sitting six workers, "to accelerate your work". The coordinating repo's entry 37, verbatim: "Never commit. The tool repos are public. Commit no hostname, address, email, person's name, account detail, or private repo's name or path; examples use made-up names."
 
 ## 2. Rulings (brief hk1)
 
@@ -36,7 +40,7 @@
 | 8 | every test of the pin passes, but those that pinned the copy | |
 | 9 | `scripts/hygiene --require-private --commits main..HEAD` exits 0; `make stamp`, then `make check` green through the gate | |
 
-## 4. Interfaces and the choices inside the rulings
+## 4. Findings that name this row: the choices inside the rulings
 
 - `harness.HOOK_WALL` maps each event to its `hooks.json` timeout in seconds; `harness.HOOK_DEADLINE` is the same map less `HOOK_MARGIN` (0.5 s), read by `cmd_hook` at the call. An event not in the map takes the PreToolUse wall.
 - The deadline and the TERM handler are armed only for a call the shim measures (a start in `AGENTIK_SESSION_HOOK_T0`): a bare `hook` call, which writes no row, keeps the pin's behaviour.
@@ -44,6 +48,8 @@
 - `report --hooks` keeps its table; one `cut:` line follows it only when a row was cut, and `--json` gains `cut`, `{event: {"124": n, "143": n}}`, empty when none.
 - Doctor's `hooks` row appears only while `hooks.jsonl` holds a cut PreToolUse, as `warn`. The log has no session field (S49 Amendment 1), so the row reads the account's log, both generations.
 - R3's pattern is the leads' trial with one addition: a relative `bin/<name>` standing as a word counts too, as it did at the pin.
+- R4: the two tests of `tests/test_resolver.py` that pinned the copy (`test_defaults_alone`, `test_c6_the_old_relay_key_is_read_and_relay_wins`) now pin its absence. No `.hygiene-allow` row goes: `resolver.py` and `tests/test_resolver.py` still name the old key in the fallbacks that stand.
+- R5: no open NICE row names any of the three findings, so none closes here.
 
 ## 5. Forbidden reads
 
