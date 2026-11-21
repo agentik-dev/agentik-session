@@ -624,6 +624,10 @@ naming the form, nothing committed or recorded; `commit`'s refusals exit 2
 the same way. Nothing to commit in the named paths prints `nothing to
 commit` and records; a red commit exits 1 and records nothing. With
 `--respawn`, a modified tracked charter passes only when the line names it.
+Where the repo's records live outside its clone, the record paths named
+make a second commit, after the clone's, in the repository holding the
+records folder, and a red second names the clone's commit and the record
+paths to name again (packet rr5b).
 
 ### Priority and pacing
 

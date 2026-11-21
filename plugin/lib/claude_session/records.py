@@ -189,18 +189,48 @@ def _work_top(cwd) -> str | None:
         d = up
 
 
-def inside(a: dict | None, path, cwd) -> bool:
-    """Review 1's F3: whether `path`, by its real path, lies in the clone: under the main
-    checkout the answer names or under the work tree `cwd` stands in. A fault reads as inside.
-    Never raises."""
-    try:
-        p = os.path.realpath(os.path.join(cwd, path))
-        tops = [t for t in ((a or {}).get("repo"), _work_top(cwd)) if isinstance(t, str) and t]
-        for t in tops:
-            t = os.path.realpath(t)
-            if p == t or p.startswith(t.rstrip(os.sep) + os.sep):
+def _under_ids(path: str, ids: set):
+    """True where `path`, its nearest existing folder or a folder above it up to the root is
+    the same file as one of `ids` (device, inode); False where none is; None where no stat
+    succeeded all the way up."""
+    seen = False
+    while True:
+        try:
+            st = os.stat(path)
+            seen = True
+            if (st.st_dev, st.st_ino) in ids:
                 return True
-        return False
+        except OSError:
+            pass
+        up = os.path.dirname(path)
+        if up == path:
+            return False if seen else None
+        path = up
+
+
+def inside(a: dict | None, path, cwd) -> bool:
+    """Review 1's F3, rr5b review 1's F2: whether `path` lies in the clone (the main checkout
+    the answer names, or the work tree `cwd` stands in), judged by the file system as the
+    resolver judges it, never by spelling: its spelled and its real path, and each folder above
+    them, are compared with the tops by file identity, so another letter case, a link or the
+    data volume's other path reads as inside. A path whose stat fails all the way up, tops
+    none of which can be read, and a fault read as inside. Never raises."""
+    try:
+        tops = [t for t in ((a or {}).get("repo"), _work_top(cwd)) if isinstance(t, str) and t]
+        if not tops:
+            return False
+        ids = set()
+        for t in tops:
+            try:
+                st = os.stat(t)
+            except OSError:
+                continue
+            ids.add((st.st_dev, st.st_ino))
+        if not ids:
+            return True
+        spelled = os.path.abspath(os.path.join(cwd, path))
+        said = {_under_ids(p, ids) for p in (spelled, os.path.realpath(spelled))}
+        return True in said or said == {None}
     except Exception:                                   # noqa: BLE001 - never raises
         return True
 
