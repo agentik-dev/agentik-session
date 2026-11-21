@@ -16,7 +16,8 @@
 - [x] R1 to R5: the split, `commit.precheck` for both before either, the half's line, no holder; fw5 and cli tests unchanged and green
 - [x] R6, R7: `check FILE` in `broken` refused in the clone; the close's pin line stands (a test), with no holder it says nothing is committed; `since_landing` in the holder
 - [ ] R8: RUNBOOK and help; doclint, hygiene
-- [ ] `make stamp`, then `make check` through the gate
+- [x] `make stamp` through the gate (`20261121-011449-2961` exit 0): plugin 2.0.0-alpha.155, 5528 tests
+- [ ] `make check` through the gate on the stamp's commit: its job is in the coordinator's record
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
@@ -25,3 +26,4 @@
 R8: RUNBOOK's and the help's sentence; the packet's choices; doclint, hygiene; then the stamp and the check through the gate.
 
 ## Exit
+Build 1: R1 to R8 built, each acceptance test red at the pin where the pin differs; stamped; this commit is the one `make check` runs on.
