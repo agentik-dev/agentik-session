@@ -24,7 +24,9 @@ README = "README.md"
 SIDECAR = "design/readme/rendered.sha256"
 MANIFEST = "plugin/.claude-plugin/plugin.json"
 NICE = "NICE_TO_HAVE.md"
-OVERFLOW = "history/NICE-overflow.md"
+OVERFLOW = "history/NICE-overflow.md"          # the temp repo's, where the stamp writes
+# the real overflow's shape, made-up rows: the overflow is a record, which leaves the clone (rs1 R2)
+OVERFLOW_SHAPE = ROOT / "tests" / "fixtures" / "land3" / "NICE-overflow.md"
 TESTS = "tests/test_pear.py"
 DATE = "2026-01-02"
 NICE_HEAD = ("# NICE_TO_HAVE: pear\n\nFindings that block nothing, one row each.\n\n"
@@ -581,7 +583,7 @@ def test_line9_the_readers_find_this_repos_files():
     assert stamp.STATUS.pattern == README_STATUS.pattern
     for rel in (SOURCE, README):
         assert stamp.status_match((ROOT / rel).read_text(), rel)
-    overflow = (ROOT / OVERFLOW).read_bytes()
+    overflow = OVERFLOW_SHAPE.read_bytes()
     at = stamp.overflow_insert_at(overflow)
     before = overflow[:at].decode().splitlines()
     assert before[-1].startswith("| n") and "## From the open findings" in before

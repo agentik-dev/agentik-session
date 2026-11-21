@@ -1,0 +1,161 @@
+test -e .claude-plugin/marketplace.json; echo $?
+grep -c '^agentik-session = ' pyproject.toml
+test -f tests/fixtures/repo/.claude/agentik/config.yaml; echo $?
+.venv/bin/python -B -m pytest tests/test_mod.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_doctor.py tests/test_cli.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_measure.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_mod.py tests/test_admission.py tests/test_doctor.py tests/test_cli.py -q 2>&1 | tail -1
+make test 2>&1 | tail -1
+make check; echo $?
+scripts/hygiene --json | /usr/bin/python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["hits_outside_allowlist"])'
+scripts/doclint; echo $?
+wc -c design/conventions.md
+git status --short | wc -l
+d=$(mktemp -d); git -C $d init -q; printf 'sk-an%s-x\n' t > $d/k.md; ln -s /Us$(printf e)rs/x $d/l; : > $d/home-tec$(printf h).md; scripts/hygiene --repo $d --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["hits_outside_allowlist"])'; rm -r $d
+.venv/bin/python -m pytest -q tests/test_install.py tests/test_bounded.py 2>&1 | tail -1
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/design/packets $d/history/sessions; printf '|a|b|\n|-|-|\n|verify|make check|\n|acceptance|make check; go test ./...|\n' > $d/design/packets/x.md; : > $d/history/sessions/NEXT; : > $d/NEXT; scripts/doclint --repo $d | grep -c -E 'runs a whole suite|next:'; rm -r $d
+.venv/bin/python -m pytest -q tests -k 'nested or max_turns or unknown or stdin_paths or total or over_default or boundary or sidecar or timeout or pins' 2>&1 | tail -1
+grep -c -E 'CLAUDE_SESSION_DEPTH|CLAUDE_SESSION_MAX_TURNS|eight groups|verify. row' design/conventions.md
+grep -c -E 'd9e99149|4318bc91' design/conventions.md
+for f in hygiene doclint; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)" design/conventions.md || echo $f; done | wc -l
+grep -l '(filled at close)' history/sittings/*-s10-fixes-r6.md | wc -l
+git status --short | wc -l
+.venv/bin/python -m pytest -q tests/test_readme.py 2>&1 | tail -1
+shasum -c --status design/readme/rendered.sha256; echo $?
+sed -n 3p README.md | grep -c 'src="assets/icon.svg"'
+grep -c 'url(#' assets/icon.svg
+.venv/bin/python -c 'import xml.dom.minidom as m;print(m.parse("assets/icon.svg").getElementsByTagName("title")[0].firstChild.data)'
+.venv/bin/python -c 'import importlib.machinery as m,importlib.util as u;s=u.spec_from_loader("h",m.SourceFileLoader("h","scripts/hygiene"));h=u.module_from_spec(s);s.loader.exec_module(h);print(sum(len(p.findall(open(f).read())) for f in ("README.md","design/readme/source.md") for n,p in h.COMPILED if n not in ("person","sibling")))'
+grep -l -E '\.\./(claude-code|quince-relay)' README.md design/readme/source.md | wc -l
+grep -c -E '^Status: version .v2\.0\.0-alpha\.1., rendered .2026-[0-9]{2}-[0-9]{2}., .[0-9]+. tests' README.md
+git status --short | wc -l
+.venv/bin/python -m pytest -q tests/test_bounded.py -k 'stopped_guardian or nested_stop or nonfinite' 2>&1 | tail -1
+.venv/bin/python -m pytest -q tests/test_doclint.py -k 'fails_closed or targeted_allowed or missing_prompt' 2>&1 | tail -1
+.venv/bin/python -m pytest -q tests/test_hygiene.py -k oversize 2>&1 | tail -1
+.venv/bin/python -m pytest -q tests/test_install.py -k session_start 2>&1 | tail -1
+scripts/bounded --wall nan -- true; echo $?
+d=$(mktemp -d); git -C $d init -q; head -c 4194305 /dev/zero | tr '\0' x > $d/f; printf '\n/Use%s/me/x\n' rs >> $d/f; scripts/hygiene --repo $d --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["groups"]["home"]["lines"])'; rm -rf $d
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/history/sessions; echo design/packets/nope.md > $d/history/sessions/NEXT; scripts/doclint --repo $d | grep -c 'missing prompt'; rm -rf $d
+for f in hygiene doclint bounded; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)" design/conventions.md || echo $f; done | wc -l
+grep -l '(filled at close)' history/sittings/*-s14-fixes-adv11.md | wc -l
+git status --short | wc -l
+.venv/bin/python -m pytest -q tests/test_doclint.py -k spent 2>&1 | tail -1
+.venv/bin/python -m pytest -q tests/test_hygiene.py -k adv11_15 2>&1 | tail -1
+.venv/bin/python -m pytest -q tests/test_launch.py -k always_opens_a_sitting 2>&1 | tail -1
+grep -c 'ar21-fixes-adv12' scripts/doclint
+grep -c 'RELAY_ROW' design/overhaul-r1.md
+grep -c a45c3ec1301c design/conventions.md
+grep -c 'CLAUDE_SESSION_HELPER=1' scripts/readme-render
+grep -c 'refused past depth 2' scripts/readme-render
+grep -c 'env -u RELAY_ROW' scripts/readme-render
+grep -cE 'CLAUDE_SESSION_HELPER=1 claude -p.*refused past depth 2' design/overhaul-r1.md
+grep -c 'def test_renderer.*helper' tests/test_readme.py
+.venv/bin/python -m pytest -q tests/test_readme.py -k 'helper or status_line' 2>&1 | tail -1 | grep -cE 'failed|error|no tests'
+shasum -c --status design/readme/rendered.sha256
+make doclint
+make hygiene
+grep -c '^# Packet S16:' design/packets/s16-resync.md
+git diff --name-only --diff-filter=A main...HEAD -- history/sittings | xargs grep -cE '/Users/[a-z]|~/cod[e]/|filled at close'
+git status --short | grep -c .
+.venv/bin/python -m pytest tests/test_hook_meter.py -q -k s17 2>&1 | tail -1
+grep -ci 'compact at most once|compacts in place' claude_session/hooks.py claude_session/profiles.yaml plugin/skills/session/SKILL.md | grep -vc ':0$'
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/test_bounded.py -q -k s18 2>&1 | tail -1
+grep -c 'BOUNDED_IDLE_FLOOR' scripts/bounded
+grep -c '"-B"' scripts/bounded
+grep -c 'scripts/bounded' design/conventions.md
+.venv/bin/python -B -m pytest tests/test_rules.py tests/test_resolver.py tests/test_hook_session_start.py tests/test_charter.py tests/test_cli.py -q -k s21 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_hook_session_start.py tests/test_charter.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_charter.py tests/test_cli.py -q -k s22 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_charter.py tests/test_cli.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_admission.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_mod.py tests/test_doctor.py tests/test_cli.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_admit.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_admission.py tests/test_measure.py tests/test_resolver.py tests/test_doctor.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_band.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_admit.py tests/test_admission.py tests/test_hooks.py tests/test_mod.py tests/test_cli.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_launch_model.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_models.py tests/test_hook_meter.py tests/test_hooks.py tests/test_resolver.py tests/test_doctor.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_s49.py -q 2>&1 | tail -1
+.venv/bin/python -B -m pytest tests/test_ledger.py tests/test_precompact.py -q 2>&1 | tail -1
+grep -c 'hooks.jsonl' plugin/hooks/run
+grep -c 'exec "$tool"' plugin/hooks/run
+make hygiene
+make check; echo $?
+make check 2>&1 | grep '^readme:'
+make test 2>&1 | tail -1
+grep -c '^readme:' Makefile
+test -s design/readme/source.md && test $(wc -c < design/readme/source.md) -lt 6144; echo $?
+head -1 scripts/hygiene scripts/doclint | grep -c '/usr/bin/env python3'
+test "$(shasum -a 256 scripts/hygiene | cut -c1-64)" = "$(grep -o '[0-9a-f]\{64\}' design/conventions.md)"; echo $?
+python3 -c 'import json;print([d["marketplace"] for d in json.load(open("plugin/.claude-plugin/plugin.json"))["dependencies"]])'
+cat README.md design/conventions.md | grep -c 'CLAUDE_SESSION_ID'
+grep -c '"provider"' design/conventions.md
+for w in '/session:read' 'charter open' 'resolved.json' 'CLAUDE_CODE_SESSION_ID' 'make check' '/session:status' 'quince-session report' 'PreToolUse' '^0.6'; do grep -q -- "$w" README.md || echo "$w"; done | wc -l
+grep -c 'until S6' .hygiene-allow
+grep -c '/usr/bin/python3' install-wrapper.sh
+git status --short | wc -l
+make check; echo $?
+make test 2>&1 | tail -1
+grep -c 'Packet authoring' design/conventions.md
+grep -c 'CONVENTIONS_CEILING = 8192' scripts/doclint
+shasum -c --status design/readme/rendered.sha256; echo $?
+cat design/conventions.md Makefile | grep -c 'shasum -c'
+git grep -l 'CLAUDE_SESSION_ID' -- claude_session plugin README.md design/conventions.md design/readme | wc -l
+grep -c 'the only session variable' design/conventions.md
+for f in hygiene doclint; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)" design/conventions.md || echo $f; done | wc -l
+python3 -m claude_session checkpoint --help | grep -c 'add -A'
+python3 -m claude_session checkpoint --help | grep -c 'tracked'
+grep -c 'tracked' design/readme/source.md
+grep -o 'quince-session [a-z-]\+' RUNBOOK.md | sort -u | grep -c -E 'reset|statusline'
+grep -c -i -E 'schedul|usage window|six named|fork' RUNBOOK.md
+python3 -m claude_session doctor --json 2>/dev/null | python3 -c 'import json,sys;c=[c for c in json.load(sys.stdin)["checks"] if c["name"]=="python"][0];print(c["ok"],"newest" in c["detail"])'
+grep -c '/usr/bin/python3' claude_session/doctor.py
+git status --short | wc -l
+make check; echo $?
+make test 2>&1 | tail -1
+grep -c 'def check_plugin' scripts/doclint
+grep -c 'COMMAND_CEILING = 31' scripts/doclint
+grep -c 'COMMANDS = ' scripts/doclint
+grep -c 'plugin/commands/\*.md' scripts/doclint
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/plugin/commands; printf -- '---\ndescription: x\n---\nbody\n' > $d/plugin/commands/a.md; scripts/doclint --repo $d; echo $?; rm -r $d
+grep -c 'def test_plugin' tests/test_doclint.py
+grep -c 'pluginlint' design/conventions.md
+grep -c 'the invariant' design/conventions.md
+grep -c -E 'hooks/run.*optional|optional.*hooks/run' design/conventions.md
+grep -c 'tamper' design/conventions.md
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/history/sittings; printf 'by Kev%sin\n' '' > $d/history/sittings/x.md; printf 'by Kev%sin\n' '' > $d/x.md; git -C $d add -A; scripts/hygiene --repo $d --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["groups"]["person"]["files"], d["hits_outside_allowlist"])'; rm -r $d
+grep -c 'history/sittings' scripts/hygiene
+grep -c 'sittings' tests/test_hygiene.py
+grep -c -E 'b46db3dfed41b9d3|fb05f6203ac904a0' design/conventions.md
+for f in hygiene doclint; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)" design/conventions.md || echo $f; done | wc -l
+git status --short | wc -l
+make check; echo $?
+make test 2>&1 | tail -1
+d=$(mktemp -d); git -C $d init -q; printf 'Kev%sin\n' '' > $d/a.md; printf 'Kev%sin\n' '' > $d/b.md; printf 'b.md\n' > $d/.gitignore; scripts/hygiene --repo $d --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["groups"]["person"]["files"])'; rm -r $d
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/history/sittings; printf 'respea%s\n' k > $d/history/sittings/x.md; printf 'respea%s\n' k > $d/x.md; git -C $d add -A; scripts/hygiene --repo $d --json | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["groups"]["sibling"]["files"], d["hits_outside_allowlist"])'; rm -r $d
+grep -c '^history/sittings/\*.md: private$' .hygiene-allow
+grep -c 'the .person. and .sibling. groups are not evaluated' design/conventions.md
+grep -c 'exclude-standard' design/conventions.md
+grep -c 'goal, budget, pin, window, agents' design/conventions.md
+d=$(mktemp -d); git -C $d init -q; mkdir -p $d/plugin/skills/a; { printf -- '---\nname: a\ndescription: %s\nallowed-tools: x\n---\n' "$(python3 -c 'print("x"*201)')"; python3 -c 'print("b\n"*501, end="")'; } > $d/plugin/skills/a/SKILL.md; scripts/doclint --repo $d; echo $?; rm -r $d
+grep -c 'def test_plugin_skill' tests/test_doclint.py
+grep -c 'git-common-dir' design/conventions.md
+grep -c '^\.venv$' .gitignore
+grep -c -E '5c7408dd|ca28e426' design/conventions.md
+for f in hygiene doclint; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)" design/conventions.md || echo $f; done | wc -l
+git status --short | wc -l
+grep -c -F -e '4cd780d9c66d996e58b217b39ee0679e426172ab9ad7bd4e17971b188e7e7600  scripts/agentik' -e '8ef611607c0fdc44703fa48c374ebc00edc1488da56292985380200d219eb2e9  scripts/hygiene' -e '188adff23545f99159a189174baf3771f7e790e5f1256958b0e3e3ac4ed11306  scripts/bounded' scripts/vendored.sha256
+git diff --name-only main | grep -c '^scripts/'
+grep -c -F 'c97596e7b129ac53fb2c8b22adfcf3a9d7e5bd71b6c9473d719aa2cda8063c4b  scripts/plugin-version-check' scripts/vendored.sha256
+grep -c -F -e '4cd780d9c66d996e58b217b39ee0679e426172ab9ad7bd4e17971b188e7e7600  scripts/agentik' -e '8ef611607c0fdc44703fa48c374ebc00edc1488da56292985380200d219eb2e9  scripts/hygiene' -e '188adff23545f99159a189174baf3771f7e790e5f1256958b0e3e3ac4ed11306  scripts/bounded' scripts/vendored.sha256
+grep -c '' scripts/vendored.sha256
+grep -c -F 'scripts/plugin-version-check' Makefile
+sed -n '/^hygiene:/,/^validate:/p' Makefile | grep -c -F 'PYTHON) scripts/plugin-version-check'
+sed -n '/^check-unlocked:/p' Makefile | grep -c plugin-version-check
+grep -c '' Makefile
+grep -c -F '"version": "2.0.0-alpha.18"' plugin/.claude-plugin/plugin.json
+./.venv/bin/python -m pytest -q tests/test_u2.py
+./.venv-floor/bin/python -m pytest -q tests/test_u2.py
+./.venv/bin/python -m pytest -q tests/test_unattended.py
+./.venv-floor/bin/python -m pytest -q tests/test_unattended.py
+grep -c 2.0.0-alpha.71 plugin/.claude-plugin/plugin.json
