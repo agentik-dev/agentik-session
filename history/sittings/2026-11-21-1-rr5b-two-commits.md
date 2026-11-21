@@ -17,13 +17,13 @@ Build 1 (to `10b994f`): R1 to R8 built, stamped, its check green.
 - [x] F3: `since_landing` quotes the holder's sittings folder (own stays the pin's bare word)
 - [x] F1: a named link in the clone whose real path is under the records folder is refused
 - [x] The half's line: absolute record paths and the call's `-m`
-- [ ] NICE rows (F5 and three observations)
+- [x] NICE rows n376 to n379 (F5 and three observations; the stamp moves the oldest S4 rows past the bound)
 - [ ] The packet true to what is built; `make stamp`, then `make check`, through the gate
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-NICE rows (F5 and three observations), after the stamp's move if the bound needs it.
+The packet true to what is built; then `make stamp` and `make check` through the gate.
 
 ## Exit
