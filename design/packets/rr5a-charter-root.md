@@ -40,13 +40,21 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 | 5 | R6: `subprocess.Popen` counted in four hooks, `own` and `out` | no resolver child |
 | 6 | a stub `git` that sleeps 30 s: `broken`, `timeout`, within 6 s, the group gone | no read |
 | 7 | doctor's `records` row in each state, text and JSON | no row |
-| 8 | every test of the pin passes, but those the newer scanner moves | |
-| 9 | the median of 30: a silent PostToolUse process, `charter show` in `own` | 66.6 ms, 74.9 ms |
+| 8 | every test of the pin passes, but those the newer scanner moves | the scanner moves none; `tests/test_bare_machine.py`'s `NOT_STATE` gains `("records", "_read")`, the one table its meta-test asks a new JSON reader to join |
+| 9 | the median of 30: a silent PostToolUse process, `charter show` in `own` | 66.6 ms, 74.9 ms; now 68.1 ms, 139.6 ms (the pin again in the same minute: 66.1, 74.8): `show` pays one resolver child |
 | 10 | `scripts/hygiene --require-private --commits main..HEAD` exits 0; `make stamp`, then `make check` green through the gate | |
 
 ## 4. Findings that name this row: the choices inside the rulings
 
-- (filled as the build goes)
+- `records.answer` is None where the folder stands in no git checkout or no git answers (the resolver's `NoRepo`): every caller reads that as `own`, the pin. Its own state `failed` (`timeout`, or the fault's last line) reads as `broken` through `records.state`. The child has the ledger tool's shape: `python -I -S -c`, its own session, killed with its group at `records.BOUND`, gitinfo's 5 s.
+- An explicit `--dir` wins in every state: absolute as given; relative, joined to `records` in `out` and to the working directory (or the REPO for `show`) elsewhere, so in `unset` and `broken` a verb given `--dir` runs as at the pin, the record of the open included.
+- `show` in `unset` and `broken` skips the REPO with `why` `records unset` or `records broken` and a `records` object beside it (`state`, `why`, `line`); `own` and `out` add no field.
+- `checkpoint --respawn` with no `--charter` refuses at the pin in every state; in `unset` and `broken` the line it says is the records line, with the same exit 2.
+- SessionStart asks the resolver only where `charter.required` is on, the one place its reminder speaks; in `broken` it says `; records: <the line>` there instead of the reminder.
+- The CHECKPOINT line in `out` names the folder or the recorded file by its absolute path when it passes `_SAFE_PATH`, else `<this sitting's charter>`; the reminder names `the records folder` for a folder `_SAFE_PATH` refuses.
+- Doctor's `records` row follows `guard` and shows only in a git checkout, so a temp cwd's report keeps the pin's rows. `broken` is `warn` by R7, where commons GUIDE §12 says `fail`.
+- A hook's own deadline (4.5 s for PostToolUse) is inside the resolver's 5 s bound: a resolver that hangs in a speaking PostToolUse cuts that hook (exit 124, nothing printed), which passes the call as the waiver's line would not be said.
+- R1: the newer scanner moves no test of `tests/test_hygiene.py`; it passes unchanged.
 
 ## 5. Forbidden reads
 

@@ -594,15 +594,19 @@ def read(repo, path) -> dict:
     }
 
 
-def show(repos, dir_of) -> dict:
+def show(repos, dir_of, held=None) -> dict:
     """R5 to R7: the object for each REPO, in order; `dir_of(repo)` names its charter folder
     (relative to the repo, or absolute). A REPO is skipped as not a directory, no charter or
-    unreadable, and the read goes on. Reads only."""
+    unreadable, and the read goes on. Reads only. Packet rr5a R5: `held(repo)`, where given,
+    a dict {why, ...} skips the REPO unread with those keys beside it, or None to read it."""
     doc = {"schema": SCHEMA, "ok": True, "repos": [], "skipped": []}
     for repo in repos:
-        why = None
+        why, extra = None, None
         if not os.path.isdir(repo):
             why = NO_DIR
+        elif held is not None and held(repo) is not None:
+            extra = dict(held(repo))
+            why = extra.pop("why")
         else:
             path = newest(os.path.join(repo, dir_of(repo)))
             if path is None:
@@ -613,7 +617,7 @@ def show(repos, dir_of) -> dict:
                 except (OSError, ValueError):
                     why = UNREADABLE
         if why:
-            doc["skipped"].append({"repo": os.path.realpath(repo), "why": why})
+            doc["skipped"].append({"repo": os.path.realpath(repo), "why": why, **(extra or {})})
     return doc
 
 

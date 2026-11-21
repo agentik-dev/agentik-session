@@ -12,14 +12,14 @@
 
 ## Done-ness
 - [x] The packet, with the pin's timings
-- [ ] R1, the sync
-- [ ] R2 to R7, with `tests/test_rr5a_*.py`
+- [x] R1, the sync (`7eb7703`): `tests/test_hygiene.py` passes unchanged, no test moved
+- [x] R2 to R7: `records.py`, the verbs, the hooks, doctor; `tests/test_rr5a_charter_folder.py` and `tests/test_rr5a_hooks.py`, 51 passed in both venvs
 - [ ] `make stamp`, then `make check` through the gate queue
 
 ## Handover
 - (none yet)
 
 ## Next act
-R1: commons' `scripts/sync` into this worktree, its own commit.
+The full suite, the timings, hygiene, then `make stamp` and `make check` through the gate queue.
 
 ## Exit

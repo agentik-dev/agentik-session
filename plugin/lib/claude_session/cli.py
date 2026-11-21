@@ -18,8 +18,8 @@ import time
 from pathlib import Path
 
 from . import (admission, charter, doctor, gitinfo, harness, hooks, install, instructionguard,
-               launch, ledger, measure, meter, mod, plug, resolver, rules, sessionconfig,
-               store, tiers)
+               launch, ledger, measure, meter, mod, plug, records, resolver, rules,
+               sessionconfig, store, tiers)
 from . import state as statefile
 from . import SEMVER
 from .yamlsubset import dump
@@ -540,6 +540,22 @@ def _charter_dir(section: dict) -> str:
     return (c.get("dir") if isinstance(c, dict) else None) or charter.DEFAULT_DIR
 
 
+def _records_dir(cwd, given, default: str, verb: str) -> str:
+    """Packet rr5a R4, R5: the charter folder of `open` and a bare `close`. An absolute `given`
+    (--dir) stands; in `out` the folder is `<records>/<given or default>`; in `unset` and
+    `broken` with no `given` the verb refuses with the records line, exit 2; else the pin's,
+    relative to cwd."""
+    if given and os.path.isabs(given):
+        return given
+    a = records.answer(cwd)
+    s = records.state(a)
+    if s == "out":
+        return records.folder(a, given or default)
+    if s in ("unset", "broken") and not given:
+        _die(f"{verb}: {records.line(a)}", 2)
+    return given or default
+
+
 def _this_meter() -> dict | None:
     state = resolver.state_dir(os.environ)
     sid = sessionconfig.session_id()
@@ -624,7 +640,8 @@ def cmd_charter(args) -> int:
         if len(args.args) != 1:
             _die('charter open wants one goal: agentik-session charter open "<goal>"')
         section = _session_section(cwd)
-        d, row = args.dir or _charter_dir(section), os.environ.get("RELAY_ROW")
+        d = _records_dir(cwd, args.dir, _charter_dir(section), "charter open")
+        row = os.environ.get("RELAY_ROW")
         # design/05 §6: --continue adopts today's newest charter, when it is of this suffix
         # and under 3,584 bytes, recorded and printed as a new one is, its bytes untouched.
         path = charter.adoptable(d, row) if getattr(args, "cont", False) else None
@@ -657,7 +674,7 @@ def cmd_charter(args) -> int:
     else:
         # Packet S54 R2, FW1a R11: this sitting's recorded charter, else today's newest of its
         # suffix; an outside record, or two of the suffix with no record, refuses.
-        d = args.dir or _charter_dir(_session_section(cwd))
+        d = _records_dir(cwd, args.dir, _charter_dir(_session_section(cwd)), "charter close")
         try:
             path = charter.bare_target(d, os.environ.get("RELAY_ROW"), _recorded_charter(),
                                        _recorded_charter("replaced"))
@@ -701,9 +718,26 @@ def _charter_show(args) -> int:
         rc, top = gitinfo._git(cwd, "rev-parse", "--show-toplevel")
         repos = [top.strip() if rc == 0 and top.strip() else cwd]
 
+    answers = {}
+
+    def held(repo: str):
+        """Packet rr5a R5: `unset` and `broken` read no charter; the state stands beside the
+        repo. An explicit --dir reads as at the pin."""
+        a = answers.setdefault(repo, records.answer(repo))
+        s = records.state(a)
+        if args.dir or s not in ("unset", "broken"):
+            return None
+        return {"why": f"records {s}",
+                "records": {"state": s, "why": a.get("why"), "line": records.line(a)}}
+
     def dir_of(repo: str) -> str:
-        if args.dir:
-            return args.dir
+        a = answers.setdefault(repo, records.answer(repo))
+        if args.dir:                         # rr5a R4: a relative --dir is joined in `out`
+            return records.folder(a, args.dir) or args.dir
+        d = _dir_of(repo)
+        return records.folder(a, d) or d
+
+    def _dir_of(repo: str) -> str:
         try:                                 # the repo's own session.charter.dir; writes nothing
             section = resolver.resolve(repo, sessionconfig.session_id() or "unsaved",
                                        os.environ, profile=hooks.launch_profile(os.environ)
@@ -714,7 +748,7 @@ def _charter_show(args) -> int:
         d = _charter_dir(section) if isinstance(section, dict) else None
         return d if isinstance(d, str) and d else charter.DEFAULT_DIR
 
-    doc = charter.show(repos, dir_of)
+    doc = charter.show(repos, dir_of, held)
     if args.json:
         print(json.dumps(doc, indent=2, ensure_ascii=False))
     else:
@@ -1260,7 +1294,8 @@ def _records_here(d, section: dict) -> os.PathLike | None:
     scwd = (resolver.load_request(sdir) or {}).get("cwd")
     if not isinstance(scwd, str) or not os.path.isabs(scwd):
         return None
-    want = os.path.join(scwd, hooks._charter({"session": section}))
+    dd = hooks._charter({"session": section})
+    want = records.folder(records.answer(scwd), dd) or os.path.join(scwd, dd)   # rr5a R4
     return sdir if _same(os.path.abspath(d), want) else None
 
 
@@ -1313,6 +1348,9 @@ def _respawn_check(args) -> tuple[str, str, str, str | None] | None:
     if args.state and not args.respawn:
         _die("checkpoint --state FILE is read only with --respawn; add --respawn", 2)
     if not args.charter:
+        a = records.answer(os.getcwd())             # rr5a R5: no charter to name
+        if records.state(a) in ("unset", "broken"):
+            _die(f"checkpoint --respawn: {records.line(a)}", 2)
         _die("checkpoint --respawn needs --charter FILE, the sitting's charter "
              "(there is no default)", 2)
     if not args.respawn:
@@ -1529,8 +1567,15 @@ NO_SETUP = ("no agentik setup here (no history/sittings/ in a git repo); make on
 def agentik_setup(cwd) -> bool:
     """Packet akt-run R2: the cwd's git top holds a `history/sittings/` folder."""
     rc, top = gitinfo._git(str(cwd), "rev-parse", "--show-toplevel")
-    return rc == 0 and bool(top.strip()) and os.path.isdir(
-        os.path.join(top.strip(), "history", "sittings"))
+    if not (rc == 0 and bool(top.strip())):
+        return False
+    a = records.answer(top.strip())              # rr5a R4: `out` reads <records>/<dir>
+    s = records.state(a)
+    if s == "out":
+        section = _rules_section(top.strip())
+        return os.path.isdir(records.folder(a, _charter_dir(section) if section else
+                                            charter.DEFAULT_DIR))
+    return s == "own" and os.path.isdir(os.path.join(top.strip(), "history", "sittings"))
 
 
 def run_defaults(cwd, env, claude_args) -> tuple:
