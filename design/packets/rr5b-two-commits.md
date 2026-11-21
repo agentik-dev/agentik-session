@@ -13,9 +13,7 @@
 ## 1. What the source says: the code at the pin
 
 - `checkpoint --commit <paths...>` runs `commit.commit_paths` in the cwd's work tree: one lock, one witness, one `commit --only`. In `out` a record path is refused as `<p> is outside the repo at <top>`, so no record can be committed through the tool.
-- The respawn's clean check and `charter close`'s commit line already run git in the file's own folder, so in `out` they reach the holder.
-- `charter check FILE` reads FILE in every state; since rr5a, `check --dir` in `broken` refuses a folder in the clone.
-- Reconcile's `since_landing` runs `git -C <hq> log ... -- history/sittings`, the hq's own tree.
+- The respawn's clean check and the close's commit line run git in the file's folder: the holder in `out`. `charter check FILE` reads FILE in every state. `since_landing` logs `history/sittings` in the hq.
 
 The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik's public tools keeps its working records in agentik-hq. As a tool's row lands, its charters, packets, wish list and questions move to agentik-hq/repos/<tool>/ and leave the public tree in one commit; what is already pushed stays in the public history (design/28)." 2026-11-21: "Read the newest charter under history/sittings and act from its Next act". Entry 37, verbatim: "Never commit. The tool repos are public. Commit no hostname, address, email, person's name, account detail, or private repo's name or path; examples use made-up names."
 
@@ -46,9 +44,19 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 | 9 | no test reads the live home, `~/.claude` or live state; every repository a test commits in is a temp one | |
 | 10 | `scripts/hygiene --require-private --commits main..HEAD` exits 0; `make stamp`, then `make check` green through the gate | |
 
-## 4. Choices inside the rulings
+## 4. Findings that name this row: the choices inside the rulings
 
-Filled as the build lands.
+- `own`, `unset`, `broken`, and `out` with no record path named run the pin's code (`_commit_one`); the one resolver start is `records.answer(cwd)`.
+- A path is the clone's when its real path (`commit._where`) is the work tree's top or under it, else a record when it is the records folder or under it; it goes to the holder relative to the holder's top.
+- `commit.precheck(cwd, paths)` makes the core's refusals (a snapshot not put back, `_require_state`, `_require_paths`) with no lock, for each repository, before the first commit; the core makes them again under its lock. The line names `the clone at <top>` or `the records' repository at <holder>`; under neither, the pin's line.
+- `commit_paths` gains `got`, a list the `ok` sha is appended to under the lock, so the half's line names the clone's own commit.
+- The half's line exits with the holder's code (git's 1 for a red hook, 124 for its lock, 2 for a refusal) and records nothing; the second run records. A red clone exits 1 as at the pin, the holder not tried, the record paths named.
+- `nothing to commit in the clone` (or `in the records' repository`) prints, and the checkpoint records.
+- No holder: one stdout line, `... the records folder is in no repository, so nothing of the record paths is committed: <paths>`.
+- `_named` needs no change: it already matches by real path, so a record charter or a folder holding it passes; a test says so. The close's line (`git -C <dir> add -- <name> && git -C <dir> commit ... -- <name>`) already commits the file alone (a path given to `git commit` is `--only`); a test with a stranger staged in the holder says so. With no holder, `_charter_dirty` reads unknown, and the close then asks the resolver and prints `next: nothing is committed: the records folder is in no repository`.
+- `charter check` asks the resolver in every state (as `--dir` did); in `broken` a `--dir` or any FILE in the clone refuses the whole call before a file is read.
+- `since_landing` in `out` runs the charters' log in the holder over `<prefix>/history/sittings`; its commit count stays the hq's own log; `out` with no holder reads the hq, as at the pin.
+- The README source is unchanged: its line holds, and it is 14 bytes under its bound.
 
 ## 5. Forbidden reads
 
@@ -56,4 +64,4 @@ No transcript, no live state root, no file under `~/.claude`, no relay ledger.
 
 ## 6. Report
 
-The hand-back to the hq coordinator: the branch tip, the acceptance table at the pin and now, the gate job, the choices made, what was not done.
+To the hq coordinator: the branch tip, the acceptance table at the pin and now, the gate job, the choices, what was not done.

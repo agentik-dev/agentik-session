@@ -2208,7 +2208,9 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("-m", "--message")
     cp.add_argument("-c", "--commit", action="store_true",
                     help="commit the named paths first, and nothing else (no add -u, no "
-                         "sweep): checkpoint --commit <paths...>")
+                         "sweep): checkpoint --commit <paths...>; where the records live "
+                         "outside the clone, the record paths are a second commit, in the "
+                         "records folder's own repository")
     cp.add_argument("--respawn", action="store_true",
                     help="mark a RESPAWN close, the sitting's last act: the charter's "
                          "Next act must open on RESPAWN (needs --charter)")
