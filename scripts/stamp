@@ -33,6 +33,9 @@ Run in a branch's work tree (DIR, default the working directory) after it merges
            first S4 row in the file's order leaves it and becomes, byte for byte, the
            last row of the table under `## From the open findings` in
            history/NICE-overflow.md. No S4 row left: `red nice`.
+           In a tree that declares its records out (`records: out` in
+           `.hygiene-allow` at HEAD, read by the vendored resolver's own rule) no
+           row moves and NICE_TO_HAVE.md is not read (packet rr5c R4).
 
 The count's equation is asked only while HEAD is a merge of two parents whose second
 is REF's commit or its ancestor: the collected count must equal B + M - A, B collected
@@ -65,6 +68,7 @@ only, Python 3.9 syntax; this repo's own, not vendored.
 """
 import hashlib
 import json
+import importlib.util
 import os
 import re
 import shutil
@@ -422,6 +426,20 @@ def nice_moves(repo, nice):
 
 # the stamp
 
+def declares(repo):
+    """Packet rr5c R4: whether the tree at `repo` declares its records out, read as the
+    vendored resolver (plugin/lib/agentik_records.py) reads it: its DECLARED lines in the
+    files at HEAD. No resolver beside this script: the pin's answer, no."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "plugin", "lib",
+                        "agentik_records.py")
+    if not os.path.isfile(path):
+        return False
+    spec = importlib.util.spec_from_file_location("_stamp_agentik_records", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return bool(mod._declares(repo))
+
+
 def plan(repo, base, forced):
     """(writes in order, stdout lines, reds, notes)."""
     if not os.path.isdir(repo):
@@ -440,7 +458,9 @@ def plan(repo, base, forced):
         raise Stop("--base %s names no commit" % base)
     ref_sha = out.decode("ascii").strip()
 
-    files = {p: read(repo, p) for p in (MANIFEST, SOURCE, README, SIDECAR, NICE)}
+    out = declares(repo)                         # rr5c R4: no wish list in such a tree
+    names = (MANIFEST, SOURCE, README, SIDECAR) + (() if out else (NICE,))
+    files = {p: read(repo, p) for p in names}
     texts = {}
     for p in (SOURCE, README):
         try:
@@ -474,7 +494,7 @@ def plan(repo, base, forced):
                         % (p, SIDECAR))
     new[SIDECAR] = sidecar
 
-    moves = nice_moves(repo, files[NICE])
+    moves = None if out else nice_moves(repo, files[NICE])
     if isinstance(moves, str):
         reds.append(moves)
         moves = None

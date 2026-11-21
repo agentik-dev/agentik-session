@@ -14,7 +14,7 @@
 - [x] The packet
 - [x] R2 lines: `send` and `valid` through `_records_of`; tests/test_rr5c_lines.py (3 of 5 red at the pin)
 - [x] R3 reconcile: the record under `<records>/<record>`, `unset`/`broken` refused; `live` through `records.folder`; idle unchanged (its segment test holds a holder's path); tests/test_rr5c_reconcile.py (5 of 8 red at the pin)
-- [ ] R4 stamp, R5 doclint
+- [x] R4 stamp, R5 doclint: stamp reads the declaration through the vendored resolver's `_declares`; doclint's subfolder read already held at the pin (its docstring says so); tests/test_rr5c_scripts.py (2 of 6 red at the pin)
 - [ ] R6 lead 6
 - [ ] R7 the loop, R7b
 - [ ] R8 the words
@@ -25,6 +25,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-R4 and R5: `scripts/stamp` in a declaring tree, doclint over a subfolder; tests/test_rr5c_scripts.py.
+R6: lead 6, `charter check`'s rules before the holder's commit; tests/test_rr5c_commit.py.
 
 ## Exit
