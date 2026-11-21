@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -47,9 +48,16 @@ def cmd_hook(args) -> int:
     """The hook, and last the row of what it did (S49 Amendment 1): `code` is what this process
     will exit with, whichever way the handler leaves. A KeyboardInterrupt dies by the signal, so
     it has no row. Nothing after the row but the interpreter's teardown, which record_hook's
-    flush keeps from moving the exit."""
+    flush keeps from moving the exit.
+    Packet hk1 R1, for a call the shim measures: SIGTERM writes the row with exit 143 and exits
+    143; the hook's own deadline (harness.deadline, half a second inside its wall) writes it with
+    exit 124 and exits 0 with nothing printed, so the call passes as an engine's cut lets it.
+    Both leave by `os._exit`, so nothing buffered is printed and no teardown runs; `done`, set
+    before the row of a hook that ended, keeps a late signal from writing a second one."""
     t0 = harness.take_t0(os.environ)
     code = 1                        # an uncaught exception's exit
+    done = []
+    armed = _arm_cut(t0, args.event, done) if t0 is not None else None
     try:
         code = hooks.dispatch(args.event)
         return code
@@ -60,7 +68,48 @@ def cmd_hook(args) -> int:
         code = None
         raise
     finally:
+        done.append(True)
+        _disarm_cut(armed)
         harness.record_hook(t0, args.event, code, os.environ)
+
+
+def _arm_cut(t0, event, done):
+    """hk1 R1: the SIGTERM handler and the deadline's timer; the handlers they replace, or None
+    when they cannot be set (not the main thread, no timer): a failure arms nothing."""
+    def cut(row, leave):
+        def handler(signum, frame):
+            if done:                # the hook ended: its own row is written or being written
+                return
+            done.append(True)
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            except Exception:       # noqa: BLE001 - a cut never raises
+                pass
+            harness.record_hook(t0, event, row, os.environ, flush=False)
+            os._exit(leave)
+        return handler
+    try:
+        old = (signal.signal(signal.SIGTERM, cut(harness.CUT_TERM, harness.CUT_TERM)),
+               signal.signal(signal.SIGALRM, cut(harness.CUT_DEADLINE, 0)))
+    except Exception:               # noqa: BLE001 - a measure never fails a hook
+        return None
+    try:
+        signal.setitimer(signal.ITIMER_REAL, max(harness.deadline(event), 0.001))
+    except Exception:               # noqa: BLE001 - no timer: TERM alone is armed
+        pass
+    return old
+
+
+def _disarm_cut(old) -> None:
+    """The timer stopped and the two handlers put back; never raises."""
+    if old is None:
+        return
+    try:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGTERM, old[0])
+        signal.signal(signal.SIGALRM, old[1])
+    except Exception:               # noqa: BLE001 - a measure never fails a hook
+        pass
 
 
 
@@ -436,7 +485,9 @@ def _report_hooks(args) -> int:
     """`report --hooks` (packet S49): this plugin's hooks per event, then claude_md_bytes.
     `--since` filters the ledger's rows only, and the output says so: a hook row has no time."""
     state = resolver.state_dir(os.environ)
-    stats = harness.hook_stats(harness.read_hooks(state))
+    hook_rows = harness.read_hooks(state)
+    stats = harness.hook_stats(hook_rows)
+    cut = harness.cut_stats(hook_rows)          # hk1 R2: exit 124 and 143, by event
     rows = ledger.read(state, args.since)
     md = harness.claude_md_stats(rows)
     line = harness.claude_md_line(rows, args.since)
@@ -445,9 +496,12 @@ def _report_hooks(args) -> int:
         return 2
     if args.json:
         print(json.dumps({"events": stats, "events_filtered": False, "since": args.since,
-                          "ledger_rows": len(rows), "claude_md_bytes": md}, indent=2))
+                          "ledger_rows": len(rows), "claude_md_bytes": md, "cut": cut},
+                         indent=2))
         return 0
     print(harness.hooks_table(stats))
+    if cut:
+        print(harness.cut_line(cut))
     if args.since:
         print("hook rows: all of them, unfiltered; a hook row has no time, so --since "
               "filters the ledger only")

@@ -938,6 +938,24 @@ def _check_bands(env) -> list:
     return [Check("bands", True, note, warn=True) for note in demand.schedule(env)[2]]
 
 
+def _check_hooks_cut(env) -> Check | None:
+    """Packet hk1 R2: `warn` while `hooks.jsonl` (both generations) holds a PreToolUse cut at
+    its wall, since a guard that was cut passed its line unread; no row otherwise. A row has no
+    session (S49 Amendment 1), so this reads the account's log."""
+    from . import harness
+    try:
+        cut = harness.cut_stats(harness.read_hooks(resolver.state_dir(env))).get("PreToolUse")
+    except Exception:       # noqa: BLE001 - a measure never fails doctor
+        return None
+    if not cut:
+        return None
+    n = cut[str(harness.CUT_DEADLINE)] + cut[str(harness.CUT_TERM)]
+    return Check("hooks", True,
+                 f"{n} PreToolUse cut at the wall in hooks.jsonl ({cut['124']} at the deadline, "
+                 f"exit 124; {cut['143']} by TERM, exit 143): a guard that was cut passed its "
+                 "line unread; `agentik session report --hooks` counts them by event", warn=True)
+
+
 def _check_follow(env) -> Check | None:
     """Only while the shim's switch is on (design/04 §3), so no other row moves."""
     if not hooks.follow_launcher_on(env):
@@ -1016,6 +1034,9 @@ def run(env=None, cwd=None) -> Report:
     sub = _check_subagent_model(env, sections, cwd)
     if sub:
         add(sub)                 # mt1 R2: only when the variable is off the table
+    cut = _check_hooks_cut(env)
+    if cut:
+        add(cut)                 # hk1 R2: only while a PreToolUse was cut, before follow
     follow = _check_follow(env)
     if follow:
         add(follow)              # sc2: last, and only while on

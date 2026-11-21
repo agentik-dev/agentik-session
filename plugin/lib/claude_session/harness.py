@@ -5,7 +5,9 @@ pops it on entry and ends with `record_hook`, which appends `{"event","ms","exit
 `<state>/hooks.jsonl` and nothing else: no session, time, path, prompt or tool input (Amendment
 1). `exit` is the tool's own, and `ms` runs from the shim's `date` to just before the append, so
 interpreter teardown is not in it. Lost, and absent rather than wrong: a CLI older than the
-plugin, an argparse refusal before the handler, an interpreter failure, a kill.
+plugin, an argparse refusal before the handler, an interpreter failure, a SIGKILL. A hook cut
+at its wall says so (packet hk1): on SIGTERM its row reads exit 143, and at its own deadline,
+HOOK_DEADLINE, half a second inside the wall, exit 124 and the call passes with no output.
 `hooks.dispatch` calls `rotate` on every hook: at HOOKS_CAP or more the file becomes
 `hooks.jsonl.1`, replacing the last, so the two hold at most twice the cap plus any line racing
 the rename. `report --hooks` reads both. Nothing that decides reads any of this, and no failure
@@ -31,6 +33,16 @@ HOOK_T0 = "AGENTIK_SESSION_HOOK_T0"     # the shim's start, in ns: read here and
 _T0 = re.compile(r"[0-9]{19}")
 _EVENT = re.compile(r"[A-Za-z]+")
 HOOKS_CAP = 1048576
+# Packet hk1 R1: each hook's wall, in seconds, as `plugin/hooks/hooks.json` gives its `timeout`
+# (a test holds the two equal), and the hook's own deadline, half a second inside it.
+HOOK_WALL = {"SessionStart": 10, "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5,
+             "PostToolBatch": 5, "UserPromptSubmit": 5, "Stop": 5, "StopFailure": 5,
+             "SessionEnd": 15, "PreCompact": 5, "PostModelSwitch": 5, "InstructionsLoaded": 5,
+             "SubagentStop": 5}
+HOOK_MARGIN = 0.5
+HOOK_DEADLINE = {e: w - HOOK_MARGIN for e, w in HOOK_WALL.items()}
+CUT_DEADLINE = 124          # the hook's own deadline fired: the row's exit; the hook exits 0
+CUT_TERM = 143              # SIGTERM: the row's exit and the hook's
 PROJECT_FILES = ("CLAUDE.md", os.path.join(".claude", "CLAUDE.md"), "CLAUDE.local.md")
 MD_HOPS = 5                 # an import chain's depth, as Claude Code documents it
 MD_MAX_FILES = 64           # a floor past this: the walk stops counting
@@ -70,20 +82,26 @@ def exit_status(code) -> int:
     return int(code) if isinstance(code, int) else 1
 
 
-def record_hook(t0, event, code, env) -> None:
+def deadline(event) -> float:
+    """The hook's own deadline in seconds; an event not in the map takes PreToolUse's."""
+    return HOOK_DEADLINE.get(event, HOOK_DEADLINE["PreToolUse"])
+
+
+def record_hook(t0, event, code, env, flush=True) -> None:
     """The hook's row, the last thing on its path. Nothing here moves the exit, stdout or stderr,
     or raises; any failure writes nothing and says nothing. No row for a start that is not 19
     ASCII digits or reads ahead of the clock, an event that is not letters, or a code no exit
     status can hold. Stdout is flushed first: teardown's flush of a closed stdout turns the exit
     into 120, so a flush that fails here writes no row, and teardown fails as it would have.
     Regular files only, and no link followed (`lstat`'s semantics, race-free): a dangling link,
-    a link to a file, a FIFO, a directory or an absent state folder write nothing, make nothing."""
+    a link to a file, a FIFO, a directory or an absent state folder write nothing, make nothing.
+    A cut hook (hk1) passes `flush=False`: what it had buffered is never printed."""
     try:
         if not (isinstance(t0, str) and _T0.fullmatch(t0)
                 and isinstance(event, str) and _EVENT.fullmatch(event)
                 and type(code) is int and 0 <= code <= 255):
             return
-        if sys.stdout is not None:
+        if flush and sys.stdout is not None:
             sys.stdout.flush()
         ms = (time.time_ns() - int(t0)) // 1000000
         if ms < 0:
@@ -161,6 +179,25 @@ def hooks_table(stats: dict) -> str:
     return _columns(("event", "count", "p50_ms", "p95_ms", "nonzero"),
                     [(e, str(s["count"]), str(s["p50"]), str(s["p95"]), str(s["nonzero"]))
                      for e, s in stats.items()])
+
+
+def cut_stats(rows: list[dict]) -> dict:
+    """Packet hk1 R2: `{event: {"124": n, "143": n}}` for each event with a cut row, in name
+    order: 124 its own deadline, 143 SIGTERM."""
+    out = {}
+    for r in rows:
+        if r["exit"] in (CUT_DEADLINE, CUT_TERM):
+            c = out.setdefault(r["event"], {str(CUT_DEADLINE): 0, str(CUT_TERM): 0})
+            c[str(r["exit"])] += 1
+    return {e: out[e] for e in sorted(out)}
+
+
+def cut_line(cut: dict) -> str | None:
+    """The one line `report --hooks` prints after its table when a hook was cut, else None."""
+    if not cut:
+        return None
+    return "cut: " + "; ".join(f"{e} {c['124']} at the deadline (124), {c['143']} by TERM (143)"
+                               for e, c in cut.items())
 
 
 def claude_md_stats(rows: list[dict]) -> dict | None:
