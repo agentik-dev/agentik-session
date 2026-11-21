@@ -36,6 +36,9 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 ## 4. Findings that name this row: the choices inside the rulings
 
 - R1: the fixture is read with `splitlines()`; no line at the pin holds a newline, so each stands on one line as harvested.
+- R2: `OVERFLOW` stays the temp repos' path, where the stamp writes; line 9 reads `OVERFLOW_SHAPE`.
+- R3, the rehearsal's reds (job `20261121-091800-3036`, exit 2): three tests ran in the clone's own tree and so read its records state, `unset` there; each now runs outside any checkout (`own`, as at the pin), its assertions unchanged:
+  - `test_hook_session_start.py`: the charter reminder and the s39 cases read `payload_outside`, the fixture's cwd copied to the temp folder.
 
 ## 5. Forbidden reads
 

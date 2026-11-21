@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,15 @@ def payload():
     d = json.loads(FIXTURE.read_text())
     d["cwd"] = str(ROOT / d["cwd"])
     d["transcript_path"] = str(ROOT / d["transcript_path"])
+    return d
+
+
+def payload_outside(tmp_path):
+    """rs1 R3: the fixture's cwd copied out of the clone, so the charter line reads no records
+    state of the clone; in no git checkout it is `own`, as the clone was at the pin."""
+    d = payload()
+    d["cwd"] = str(shutil.copytree(ROOT / "tests" / "fixtures" / "repo", tmp_path / "fixture-repo",
+                                   dirs_exist_ok=True))
     return d
 
 
@@ -139,7 +149,7 @@ def test_set_rewrites_the_resolved_file(tmp_path, monkeypatch):
 
 
 def test_charter_reminder_when_required_and_none_open_today(tmp_path):
-    ctx = hooks.session_start(payload(), env_for(tmp_path))["hookSpecificOutput"]["additionalContext"]
+    ctx = hooks.session_start(payload_outside(tmp_path), env_for(tmp_path))["hookSpecificOutput"]["additionalContext"]
     assert ctx.endswith('; charter: none open today under history/sittings, '
                         'run agentik-session charter open "<goal>"')
 
@@ -305,7 +315,7 @@ def _s39_state(tmp_path, to="test-session", name="s39-chain"):
 
 def _s39_ctx(tmp_path, **extra):
     env = env_for(tmp_path, **{"CLAUDE_SESSION_CHAIN": "s39-chain", **extra})
-    return hooks.session_start(payload(), env)["hookSpecificOutput"]["additionalContext"]
+    return hooks.session_start(payload_outside(tmp_path), env)["hookSpecificOutput"]["additionalContext"]
 
 
 def test_s39_the_line_names_the_state_handed_to_this_session(tmp_path):
