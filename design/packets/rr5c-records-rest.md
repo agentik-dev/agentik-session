@@ -45,7 +45,15 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 
 ## 4. Findings that name this row: the choices inside the rulings
 
-(filled as each ruling lands)
+- R2: `lines._records_of` asks `records.answer` (cached per folder); a fault or timeout reads as no records folder, the pin's verdict. The send's `own` refusal keeps the pin's words.
+- R3: the unset/broken refusal comes before the key's own checks; `idle` is unchanged, its `/history/sittings/` segment holds a holder's path (a test says so).
+- R4: stamp loads the vendored `plugin/lib/agentik_records.py` beside it and calls its `_declares`; with none there, the pin.
+- R5: doclint's subfolder read held at the pin (`git -C DIR ls-files` lists relative to DIR); its docstring and two tests hold it.
+- R6: `charter check`'s refusals alone (not its WAITING warning) on each existing file under the charter folder; computed before the clone's commit, applied at the holder's. Nine rr5b tests committed a red fixture charter: their fixture bytes are now a green charter, no assertion changed.
+- R7b: the list is the scanner's, `.hygiene-live` included; in `records.py`, one cli hunk with R6, so one commit.
+- R7: the line is the relay's with `the loop` for `the relay`; checked before `refusals` (its `ps`).
+- R8: the README source is unchanged (14 bytes under its bound).
+- Commons' two pages: placed by commons' `scripts/sync`; no test pinned the old list of copies.
 
 ## 5. Forbidden reads
 
