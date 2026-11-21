@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] The packet
-- [ ] R2 lines
+- [x] R2 lines: `send` and `valid` through `_records_of`; tests/test_rr5c_lines.py (3 of 5 red at the pin)
 - [ ] R3 reconcile
 - [ ] R4 stamp, R5 doclint
 - [ ] R6 lead 6
@@ -25,6 +25,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-R2: `lines.send` and `valid` through the resolver, its tests in `tests/test_rr5c_lines.py`.
+R3: reconcile's record and `live` through the resolver, tests/test_rr5c_reconcile.py.
 
 ## Exit

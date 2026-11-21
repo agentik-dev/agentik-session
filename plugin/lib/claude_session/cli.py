@@ -2389,7 +2389,8 @@ def build_parser() -> argparse.ArgumentParser:
                                        "sitting; print the line's id")
     ls_.add_argument("checkout", help="the checkout's top level the line is addressed to")
     ls_.add_argument("--file", required=True, metavar="PATH",
-                     help="a file inside this checkout, the line's whole text")
+                     help="a file inside this checkout, or under its records folder where "
+                          "its records live outside it, the line's whole text")
     ll = lsub.add_parser("list", help="the lines addressed to this checkout, and those it sent")
     ll.add_argument("--json", action="store_true")
     lw = lsub.add_parser("show", help="one line's pointer whole")
