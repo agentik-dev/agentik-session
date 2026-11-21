@@ -21,12 +21,12 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 ## 2. Rulings (brief rr5a)
 
 - R1, the sync: commons' `scripts/sync` from its main, in a commit of its own; nothing synced is edited here. No `records: out` line.
-- R2, one read: `records.answer(folder)` runs `agentik_records.resolve` in a child killed as a process group at `gitinfo`'s 5 s, once a folder a process. Past the bound or on any fault it answers `failed`, which every caller reads as `broken`, with the reason `timeout` or the fault's one line. It never raises.
+- R2, one read: `records.answer(folder)` runs `agentik_records.resolve` in a child killed as a process group at `gitinfo`'s 5 s, once a folder a process. Past the bound or on any fault it answers `failed`, which every caller reads as `broken`, with the reason `timeout` or the fault's one line. It never raises. Review 1: in a hook the bound is its deadline less 2.5 s (2 s at most in PostToolUse); the bound, the cut (124) and TERM (143) kill the group (F1); `records` must be an absolute path, else `failed` (F5).
 - R3, `own` is the pin, byte for byte, in every verb's output, exit and writes and every hook's output.
 - R4, `out`: the charter folder is `<records>/<dir>` (`--dir` wins as today, and an absolute one is not joined), from the main checkout, a subfolder and a worktree alike, for `open`, `check`, `close`, `show` and each REPO, the record of the open, `agentik_setup`, SessionStart's reminder and the CHECKPOINT line: the absolute path where the recorded file lies directly in `<records>/<dir>` and passes `_SAFE_PATH`, else `<this sitting's charter>`.
-- R5, `unset` and `broken`: `open` and `close` with no file and no `--dir`, and `checkpoint --respawn` with no `--charter`, refuse with one line and exit 2: the key to set; for `broken` its value and the reason. `show` reads no charter and says the state beside the repo. The hooks never refuse: SessionStart asks for no charter and says the `broken` line once; the CHECKPOINT line is the waiver's.
+- R5, `unset` and `broken`: `open` and `close` with no file and no `--dir`, and `checkpoint --respawn` with no `--charter`, refuse with one line and exit 2: the key to set; for `broken` its value and the reason. `show` reads no charter and says the state beside the repo. The hooks never refuse: SessionStart asks for no charter and says the `broken` line once; the CHECKPOINT line is the waiver's. Review 1: a `failed` read costs the path alone (`<this sitting's charter>`), its line says git did not answer, no "set it" (F4); a `--dir` in the clone is refused for `open`, `close` in `unset` and `broken`, for `show`, `check` in `broken` (F3).
 - R6, the hot path: PreToolUse, a silent PostToolUse, Stop and UserPromptSubmit start no process they did not start at the pin.
-- R7, doctor's `records` row: `ok`, `in the repo` (`own`); `ok`, the folder (`out`); `warn`, the key (`unset`); `warn`, the key, the value and the reason (`broken`).
+- R7, doctor's `records` row: `ok`, `in the repo` (`own`); `ok`, the folder (`out`); `warn`, the key (`unset`); `fail`, the key, the value and the reason (`broken`) (GUIDE §12, review 1).
 - R8, not this row: `checkpoint --commit`, the close's commit line, reconcile, `lines`, `stamp`, doclint, `unattended`.
 
 ## 3. Interfaces: the acceptance table (baseline read at `00d96cf`)
@@ -37,23 +37,23 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 | 2 | `out` from a worktree and a subfolder: the main checkout's folder | the worktree's, the subfolder's |
 | 3 | `--dir` relative and absolute in `out`: R4 | relative to cwd |
 | 4 | the hooks in each state: the reminder, the CHECKPOINT line off and under a launcher, the record of the open; the resolver stubbed to raise and to sleep | `<cwd>/<dir>` in every state |
-| 5 | R6: `subprocess.Popen` counted in four hooks, `own` and `out` | no resolver child |
+| 5 | R6: asks and `Popen`s counted over nine hot paths in four states: 0 and 0 (review 1's F2) | no resolver child |
 | 6 | a stub `git` that sleeps 30 s: `broken`, `timeout`, within 6 s, the group gone | no read |
 | 7 | doctor's `records` row in each state, text and JSON | no row |
 | 8 | every test of the pin passes, but those the newer scanner moves | the scanner moves none; `tests/test_bare_machine.py`'s `NOT_STATE` gains `("records", "_read")`, the one table its meta-test asks a new JSON reader to join |
-| 9 | the median of 30: a silent PostToolUse process, `charter show` in `own` | 66.6 ms, 74.9 ms; now 68.1 ms, 139.6 ms (the pin again in the same minute: 66.1, 74.8): `show` pays one resolver child |
+| 9 | the median of 30: a silent PostToolUse process, `charter show` in `own` | 66.6 ms, 74.9 ms; now 68.1 ms, 139.6 ms (the pin again in the same minute: 66.1, 74.8): `show` pays one resolver child; after review 1, the silent PostToolUse 68.9 and 66.6 ms, `1b92b2d` in the same minutes 69.1 and 65.7 |
 | 10 | `scripts/hygiene --require-private --commits main..HEAD` exits 0; `make stamp`, then `make check` green through the gate | |
 
 ## 4. Findings that name this row: the choices inside the rulings
 
 - `records.answer` is None where the folder stands in no git checkout or no git answers (the resolver's `NoRepo`): every caller reads that as `own`, the pin. Its own state `failed` (`timeout`, or the fault's last line) reads as `broken` through `records.state`. The child has the ledger tool's shape: `python -I -S -c`, its own session, killed with its group at `records.BOUND`, gitinfo's 5 s.
-- An explicit `--dir` wins in every state: absolute as given; relative, joined to `records` in `out` and to the working directory (or the REPO for `show`) elsewhere, so in `unset` and `broken` a verb given `--dir` runs as at the pin, the record of the open included.
+- An explicit `--dir` wins: absolute as given; relative, joined to `records` in `out` and to the working directory (or the REPO for `show`) elsewhere. In the clone (by real path, under the answer's `repo` or the cwd's work tree, found by its `.git`) it refuses as F3 has it; outside, as at the pin. `check FILE` reads its file in every state.
 - `show` in `unset` and `broken` skips the REPO with `why` `records unset` or `records broken` and a `records` object beside it (`state`, `why`, `line`); `own` and `out` add no field.
 - `checkpoint --respawn` with no `--charter` refuses at the pin in every state; in `unset` and `broken` the line it says is the records line, with the same exit 2.
 - SessionStart asks the resolver only where `charter.required` is on, the one place its reminder speaks; in `broken` it says `; records: <the line>` there instead of the reminder.
 - The CHECKPOINT line in `out` names the folder or the recorded file by its absolute path when it passes `_SAFE_PATH`, else `<this sitting's charter>`; the reminder names `the records folder` for a folder `_SAFE_PATH` refuses.
-- Doctor's `records` row follows `guard` and shows only in a git checkout, so a temp cwd's report keeps the pin's rows. `broken` is `warn` by R7, where commons GUIDE §12 says `fail`.
-- A hook's own deadline (4.5 s for PostToolUse) is inside the resolver's 5 s bound: a resolver that hangs in a speaking PostToolUse cuts that hook (exit 124, nothing printed), which passes the call as the waiver's line would not be said.
+- Doctor's `records` row follows `guard` and shows only in a git checkout, so a temp cwd's report keeps the pin's rows. A `failed` read fails it too.
+- A speaking PostToolUse asks before `meter.save`: a cut leaves the band to the next call. A child enters `records._LIVE` with ALRM and TERM held.
 - R1: the newer scanner moves no test of `tests/test_hygiene.py`; it passes unchanged.
 
 ## 5. Forbidden reads

@@ -17,12 +17,15 @@
 - [x] F4: where git did not answer, the line says so and its reason, with no "set it"
 - [x] F5: `_read` takes `records` only as an absolute path (or none outside `out`), else a failed read with its reason
 - [x] Doctor: the `records` row is `fail` in `broken` (GUIDE §12), `warn` in `unset`, `ok` in `own` and `out`, text and JSON
-- [ ] NICE rows; the packet true; `make stamp`, then `make check`, through the gate
+- [x] NICE rows n370 to n375 (`0932695`); the packet true to the build; doclint silent; hygiene `--commits main..HEAD` 0 hits
+- [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
-- Choices: the packet's §4 and its review 1 section.
+- Choices: the packet's §4. F1: the resolver is asked before `meter.save` (the band spent once the line is made); a `failed` read gives `<this sitting's charter>`; HOOK_MARGIN 2.5 s.
+- decide, owner: the coordinator. `charter check FILE` in `broken` still reads a file inside the clone (the brief names `--dir` alone; GUIDE §12 says refuse each read); consumer: rr5b.
+- decide, owner: the coordinator. A `failed` read (git timed out) fails doctor's row, as R2 reads it `broken`; consumer: the suite's doctor.
 
 ## Next act
-The NICE rows (n370 to n375), then the packet, the stamp and the check.
+`make stamp` through the gate, then `make check`.
 
 ## Exit
