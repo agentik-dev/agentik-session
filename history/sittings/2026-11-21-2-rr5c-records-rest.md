@@ -19,13 +19,14 @@
 - [x] R7 the loop, R7b: `unattended.run` refuses before `refusals` (its `ps`) with RECORDS_REFUSAL, the relay's words with `the loop`; status and report untouched; tests/test_rr5c_loop.py (7 of 8 red at the pin)
 - [x] R8 the words: RUNBOOK's reconcile paragraph; `line send`'s help (in R2's commit); the README source unchanged (14 bytes under its bound)
 - [x] commons' two pages (`scripts/sync` from commons): commons 6a2155c's sync placed CONTRIBUTING.md and SECURITY.md and listed them; `--check` prints no behind or unlisted line; no test pinned the old list
-- [ ] `make stamp`, `make check` through the gate
+- [x] `make stamp`, `make check` through the gate: stamp `20261121-080446-3015` exit 0 (2.0.0-alpha.157, 5580 tests); the check's job is in the build record
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 - decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-`make stamp`, then `make check`, through the gate queue.
+`make check` through the gate on this commit; then the coordinator's read.
 
 ## Exit
+Build 1: R1 to R8 and commons' two pages built, each its tests; stamped at 2.0.0-alpha.157; this commit is the one `make check` runs on.
