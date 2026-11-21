@@ -4,6 +4,7 @@ and the half's line. Every name is made up and every repository a test commits i
 test's own."""
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -147,3 +148,35 @@ def test_rr5b_f1_own_commits_a_link_in_the_clone_as_at_the_pin(make, tmp_path):
     (w.clone / "link.md").symlink_to(far)
     rc, out, err = run("checkpoint", "--commit", "link.md", "-m", "cp")
     assert rc == 0 and w.took(w.clone) == ["link.md"], (out, err)
+
+
+# ---- the half's line: its record paths absolute, the call's message carried ------------------
+
+def half(make, *m):
+    w = make("out")
+    hook = w.hold / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 5\n")
+    hook.chmod(0o755)
+    rel = os.path.relpath(w.charter, w.clone)
+    rc, out, err = run("checkpoint", "--commit", "a.py", rel, *m)
+    said = [l for l in err.splitlines() if l.startswith("error: checkpoint --commit:")]
+    assert rc == 1 and len(said) == 1, (out, err)
+    hook.unlink()
+    return w, rel, said[0]
+
+
+def test_rr5b_half_line_names_absolute_paths_and_carries_the_message(make, monkeypatch):
+    w, rel, said = half(make, "-m", "it's the round")
+    again = said.split("commit them with ", 1)[1]
+    assert again == f"checkpoint --commit {w.charter} -m 'it'\"'\"'s the round'", said
+    assert f"): {w.charter};" in said and f" {rel}" not in said
+    (w.clone / "sub").mkdir()
+    monkeypatch.chdir(w.clone / "sub")                   # another cwd: the line still holds
+    rc, out, err = run(*shlex.split(again))
+    assert rc == 0 and w.took(w.hold) == [f"repos/demo/{CHARTER}"], (out, err)
+    assert git(w.hold, "log", "-1", "--format=%s") == "it's the round"
+
+
+def test_rr5b_half_line_without_a_message_carries_none(make):
+    w, rel, said = half(make)
+    assert said.endswith(f"commit them with checkpoint --commit {w.charter}"), said

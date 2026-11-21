@@ -1520,7 +1520,7 @@ def _under(full: str, top: str) -> bool:
     return full == top or full.startswith(top.rstrip(os.sep) + os.sep)
 
 
-def _commit_named(workdir: str, paths: list, msg: str) -> None:
+def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
     """Packet rr5b R1 to R5. `own`, `unset` and `broken` (and `out` with no record path named):
     the pin, `_commit_one`. In `out` each path is sorted by its real path: under the work tree
     the call stands in, the clone's; under the records folder, a record; under neither, the
@@ -1596,9 +1596,10 @@ def _commit_named(workdir: str, paths: list, msg: str) -> None:
         why = f"the records' repository at {hold}: exit {code}"
     if sha is None:
         _die(f"commit failed: {why}; nothing recorded", code)
-    again = " ".join(shlex.quote(n) for n in names)
+    full = [f for _, f in theirs]                   # review 1: right from any cwd, its -m kept
+    again = " ".join(shlex.quote(f) for f in full) + (f" -m {shlex.quote(given)}" if given else "")
     _die(f"checkpoint --commit: the clone's commit stands: {sha}; the record paths are not "
-         f"committed ({why}): {', '.join(names)}; nothing recorded; commit them with "
+         f"committed ({why}): {', '.join(full)}; nothing recorded; commit them with "
          f"checkpoint --commit {again}", code)
 
 
@@ -1620,7 +1621,7 @@ def cmd_checkpoint(args) -> int:
             _die("not a git repository, so there is nothing to commit")
         msg = args.message or ("checkpoint" if not sessionconfig.get_active()
                                else f"checkpoint ({cfg.name})")
-        _commit_named(workdir, paths, msg)
+        _commit_named(workdir, paths, msg, args.message)
     if not sessionconfig.save_overlay({hooks.COUNTER: 0,
                                        hooks.LAST_CHECKPOINT: time.time()}):
         _die("could not record the checkpoint (no session overlay path)")
