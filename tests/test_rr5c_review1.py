@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from test_rr5b_two_commits import CHARTER, KEY, counter, git, make, run  # noqa: F401
+from test_land3_stamp import NICE, box, nice_text  # noqa: F401  (fixture)
 from test_rr5c_commit import declare_or_break
 
 RED = "history/sittings/2026-11-22-1.md"
@@ -113,3 +114,16 @@ def test_rr5c_r2_design_named_whole_with_only_a_file_outside_its_packets_commits
     rc, out, err = run("checkpoint", "--commit", "a.py", "design", "-m", "cp")
     assert rc == 0, (out, err)
     assert sorted(w.took(w.clone)) == ["a.py", "design/notes.md"]
+
+
+# ---- R4 (build 1's own): a tree that does not declare moves its rows as at the pin ------------
+
+def test_rr5c_r4_an_undeclared_tree_moves_its_rows_when_the_sidecar_is_written(box):
+    box.write(NICE, nice_text(24576 + 310))
+    box.commit("quince: a full NICE file")
+    box.write("plugin/lib/pear.py", "def pear():\n    return 2\n")   # the version moves
+    p = box.stamp()
+    assert p.returncode == 0, (p.stdout, p.stderr)
+    assert "stamp: moved n4, n6 to history/NICE-overflow.md" in p.stdout.splitlines()
+    assert "stamp: sidecar written" in p.stdout.splitlines()
+    assert len(box.read(NICE).encode()) < 24576

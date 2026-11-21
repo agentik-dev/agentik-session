@@ -458,8 +458,8 @@ def plan(repo, base, forced):
         raise Stop("--base %s names no commit" % base)
     ref_sha = out.decode("ascii").strip()
 
-    out = declares(repo)                         # rr5c R4: no wish list in such a tree
-    names = (MANIFEST, SOURCE, README, SIDECAR) + (() if out else (NICE,))
+    declared = declares(repo)                    # rr5c R4: no wish list in such a tree
+    names = (MANIFEST, SOURCE, README, SIDECAR) + (() if declared else (NICE,))
     files = {p: read(repo, p) for p in names}
     texts = {}
     for p in (SOURCE, README):
@@ -494,7 +494,7 @@ def plan(repo, base, forced):
                         % (p, SIDECAR))
     new[SIDECAR] = sidecar
 
-    moves = None if out else nice_moves(repo, files[NICE])
+    moves = None if declared else nice_moves(repo, files[NICE])
     if isinstance(moves, str):
         reds.append(moves)
         moves = None
