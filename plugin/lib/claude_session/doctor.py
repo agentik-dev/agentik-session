@@ -985,7 +985,8 @@ def _check_guard(env, cwd) -> Check:
 
 
 def _check_records(cwd) -> Check | None:
-    """Packet rr5a R7: where this repo's records are; no row outside a git checkout."""
+    """Packet rr5a R7: where this repo's records are; no row outside a git checkout. `ok` in
+    `own` and `out`, `warn` in `unset`, `fail` in `broken` (GUIDE §12)."""
     a = records.answer(str(cwd))
     if a is None:
         return None
@@ -995,6 +996,8 @@ def _check_records(cwd) -> Check | None:
     if s == "out":
         held = "" if a.get("holder") else " (in no repository: nothing of it is committed)"
         return Check("records", True, f"{a.get('records')}{held}")
+    if s == "broken":                       # GUIDE §12 and review 1: `broken` fails
+        return Check("records", False, records.line(a))
     return Check("records", True, records.line(a), warn=True)
 
 

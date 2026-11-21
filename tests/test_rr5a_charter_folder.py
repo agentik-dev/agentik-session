@@ -270,16 +270,18 @@ def test_doctor_row_in_each_state(tmp_path, state):
     text = doctor.render(rep).splitlines()[0]
     got = json.loads(json.dumps(rep.as_dict()))
     js = [x for x in json.dumps(got) if x]
-    assert row.name == "records" and row.ok and js
+    assert row.name == "records" and js
     if state == "own":
         assert text.startswith("ok   records") and text.endswith("in the repo") and not row.warn
     elif state == "out":
         assert text.startswith("ok   records") and text.endswith(str(rec)) and not row.warn
     else:
-        assert text.startswith("warn records") and row.warn
         assert "git config agentik.records <folder>" in text
-        if state == "relative":
+        if state == "relative":                       # review 1: `broken` is `fail`
             assert "value repos/demo; reason relative" in text
+            assert not row.ok and not row.warn
+        else:
+            assert text.startswith("warn records") and row.warn
     assert row.detail in json.dumps(got)
     assert doctor._check_records(tmp_path / "nowhere-made-up") is None
 
@@ -375,3 +377,19 @@ def test_records_is_taken_only_as_an_absolute_path(tmp_path, monkeypatch, value)
         f"def resolve(start):\n    return {{'state': 'own', 'records': None, 'repo': start}}\n")
     assert records.state(records.answer(str(c))) == "own"
 
+
+# --- doctor's `broken` is `fail`, as GUIDE §12 has it ----------------------------------------
+
+@pytest.mark.parametrize("state", ["relative", "missing"])
+def test_doctor_row_is_fail_in_broken(tmp_path, state):
+    c, _ = layout(tmp_path, state)
+    row = doctor._check_records(c)
+    rep = doctor.Report()
+    rep.checks.append(row)
+    text = doctor.render(rep).splitlines()[0]
+    got = rep.as_dict()
+    assert row.name == "records" and not row.ok and not row.warn
+    assert text.startswith("FAIL records") or text.split()[0].lower() == "fail", text
+    assert f"reason {state}" in text and row.detail in json.dumps(got)
+    assert [ch["status"] for ch in got["checks"] if ch["name"] == "records"] == ["fail"]
+    assert got["failed"] == 1

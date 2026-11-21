@@ -16,13 +16,13 @@
 - [x] F3: a `--dir` whose real path is in the clone refused for `open` and `close` in `unset` and `broken`, for `show` and `check` in `broken`; outside it stands
 - [x] F4: where git did not answer, the line says so and its reason, with no "set it"
 - [x] F5: `_read` takes `records` only as an absolute path (or none outside `out`), else a failed read with its reason
-- [ ] Doctor: `broken` is `fail`
+- [x] Doctor: the `records` row is `fail` in `broken` (GUIDE §12), `warn` in `unset`, `ok` in `own` and `out`, text and JSON
 - [ ] NICE rows; the packet true; `make stamp`, then `make check`, through the gate
 
 ## Handover
 - Choices: the packet's §4 and its review 1 section.
 
 ## Next act
-Doctor's row, its test first.
+The NICE rows (n370 to n375), then the packet, the stamp and the check.
 
 ## Exit
