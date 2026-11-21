@@ -47,13 +47,16 @@ def cmd_budget(args) -> int:
 def cmd_hook(args) -> int:
     """The hook, and last the row of what it did (S49 Amendment 1): `code` is what this process
     will exit with, whichever way the handler leaves. A KeyboardInterrupt dies by the signal, so
-    it has no row. Nothing after the row but the interpreter's teardown, which record_hook's
-    flush keeps from moving the exit.
+    it has no row. Nothing after the row but the handlers put back and the interpreter's
+    teardown, which record_hook's flush keeps from moving the exit.
     Packet hk1 R1, for a call the shim measures: SIGTERM writes the row with exit 143 and exits
     143; the hook's own deadline (harness.deadline, half a second inside its wall) writes it with
     exit 124 and exits 0 with nothing printed, so the call passes as an engine's cut lets it.
     Both leave by `os._exit`, so nothing buffered is printed and no teardown runs; `done`, set
-    before the row of a hook that ended, keeps a late signal from writing a second one."""
+    before the row of a hook that ended, keeps a late signal from writing a second one.
+    Review 1's F2: the handlers stay in place until that row is written, so a TERM as the hook
+    ends meets a handler that has seen `done` and returns: the row is the cut's or the finished
+    one, once, never none."""
     t0 = harness.take_t0(os.environ)
     code = 1                        # an uncaught exception's exit
     done = []
@@ -69,8 +72,8 @@ def cmd_hook(args) -> int:
         raise
     finally:
         done.append(True)
-        _disarm_cut(armed)
         harness.record_hook(t0, args.event, code, os.environ)
+        _disarm_cut(armed)
 
 
 def _arm_cut(t0, event, done):

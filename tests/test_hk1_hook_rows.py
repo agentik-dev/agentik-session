@@ -19,25 +19,28 @@ HOOKS_JSON = ROOT / "plugin" / "hooks" / "hooks.json"
 
 # ---- R1: the real cmd_hook in a subprocess, its dispatch replaced
 
-def _tool(box: Path, body: str, deadline=None, after="") -> Path:
+def _tool(box: Path, body: str, deadline=None, after="", before="") -> Path:
     """A script running the real `cli.main`, `hooks.dispatch` replaced by `body`; `deadline`
-    sets the constant in the child, never by sleeping out the wall."""
+    sets the constant in the child, never by sleeping out the wall; `before` runs first."""
     set_deadline = (f"harness.HOOK_DEADLINE['PreToolUse'] = {deadline}\n"
                     if deadline is not None else "")
     p = box / "tool.py"
     p.write_text(
         "import sys, time\nfrom claude_session import cli, harness, hooks\n" + set_deadline
-        + f"def dispatch(event):\n    {body}\n"
+        + before + f"def dispatch(event):\n    {body}\n"
         "hooks.dispatch = dispatch\ncode = cli.main(sys.argv[1:])\n" + after
         + "raise SystemExit(code)\n")
     return p
 
 
 def _env(box: Path, t0=True) -> dict:
+    """`t0` True is a measured start now; a str is that start as the shim exported it."""
     env = {"PATH": "/usr/bin:/bin", "HOME": str(box / "home"),
            "XDG_STATE_HOME": str(box / "xdg"), "PYTHONPATH": str(ROOT / "plugin" / "lib")}
-    if t0:
+    if t0 is True:
         env[harness.HOOK_T0] = str(time.time_ns())
+    elif isinstance(t0, str):
+        env[harness.HOOK_T0] = t0
     return env
 
 
@@ -126,6 +129,29 @@ def test_hk1_a3_the_handlers_are_put_back(box):
         os.environ.pop(harness.HOOK_T0, None)
     assert (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGALRM)) == before
     assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+# Review 1's F2: a TERM in the window between the hook's end and its row. The child sends
+# itself SIGTERM as the finished hook's row is about to be written (the row's own call, so no
+# timing loop): the handler, still in place, has seen the hook end and holds the signal off,
+# so the row is the finished one, written once. At 1eb62ba the handlers were already put back
+# there, so the TERM killed the process with no row.
+TERM_AT_THE_ROW = """import os, signal
+_real = harness.record_hook
+def _record(t0, event, code, env, flush=True):
+    if flush:                   # the finished hook's row, not a cut's
+        os.kill(os.getpid(), signal.SIGTERM)
+    return _real(t0, event, code, env, flush=flush)
+harness.record_hook = _record
+"""
+
+
+def test_hk1_f2_a_term_as_the_hook_ends_leaves_the_finished_row(box):
+    p = _spawn(box, _tool(box, "print('{\"a\": 1}'); return 0", before=TERM_AT_THE_ROW))
+    out, err = p.communicate(timeout=20)
+    assert (p.returncode, out) == (0, '{"a": 1}\n'), err
+    assert [(r["event"], r["exit"]) for r in _rows(box)] == [("PreToolUse", 0)]
+
 
 
 def test_hk1_a4_the_constant_is_each_wall_less_half_a_second():
