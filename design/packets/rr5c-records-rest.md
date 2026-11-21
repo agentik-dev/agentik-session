@@ -5,7 +5,7 @@
 | from | the hq coordinator, 2026-11-21, brief rr5c-records-rest (the last of rr5's three rows; hq design/28 §3 items 13, 18, 19, §11 lead 6; commons GUIDE §12; rr5b review 1's F4, ruled); the owner's words below |
 | pin | `5780e9a` on main (rr5b-two-commits landed, plugin 2.0.0-alpha.156). Worktree `.claude/worktrees/rr5c-records-rest`; `.venv`, `.venv-floor` linked |
 | wall | this worktree; no push, `--amend`, rebase, merge or install; no bare `make` (the gate queue only); no `claude`; no test reads live state or writes the live home; no relay verb; commons and the relay read-only |
-| may touch | `plugin/lib/claude_session/lines.py` (`send`, `valid`), `reconcile/runner.py`, `reconcile/live.py`, `reconcile/idle.py`, `cli.py` (`_commit_named`, `line send`'s help), `unattended.py` (`run`), `records.py` (the record names), `scripts/stamp`, `scripts/doclint`, `RUNBOOK.md`, what commons' `scripts/sync` places, `tests/test_rr5c_*.py`, a test that pins the old list of copies, the rr5b tests' fixture charters (R6), this packet, the charter |
+| may touch | `plugin/lib/claude_session/lines.py` (`send`, `valid`), `reconcile/runner.py`, `reconcile/live.py`, `reconcile/idle.py`, `cli.py` (`_commit_named`, `line send`'s help), `unattended.py` (`run`), `records.py` (the record names), `commit.py` (`taken`, review 1's round), `scripts/stamp`, `scripts/doclint`, `RUNBOOK.md`, what commons' `scripts/sync` places, `tests/test_rr5c_*.py`, a test that pins the old list of copies, the rr5b tests' fixture charters (R6), this packet, the charter |
 | verify | pytest under `.venv` and `.venv-floor` on the new files and the touched modules' tests; `scripts/doclint`; `scripts/hygiene --require-private --commits main..HEAD`; `make stamp`, then `make check`, once, last, through the gate queue |
 | acceptance | §3 |
 | budget | about 90 tool calls a build, `claude-opus-5-5`; the packet first, then the failing tests, then the change |
@@ -22,12 +22,12 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 ## 2. Rulings (brief rr5c)
 
 - R1, `own` is the pin: every verb and script touched gives the pin's output, exit and writes; no hook starts a process it did not start at the pin.
-- R2, a line's file: in `out`, `line send` takes a file in the sender's checkout or under its records folder, and the refusal names both when neither holds. `valid` asks the resolver for `from` (for `to` on a close's line back) only when the pin's test fails; `out` and under its `records` passes; any other answer is the pin's verdict.
+- R2, a line's file: in `out`, `line send` takes a file in the sender's checkout or under its records folder, and the refusal names both when neither holds. `valid` asks the resolver for `from` (for `to` on a close's line back) only when the pin's test fails; `out` and under its `records` passes; any other answer is the pin's verdict. R2 stands over R1 for a pointer the pin's test fails: the resolver is asked once, bounded, since only it can say the state (review 1's L4, ruled).
 - R3, reconcile: in `out` the record is `<records>/<record>`, `_inside` judged against the records folder; `live` reads the charter folder through `records`. `unset` and `broken` refuse with the state's line, exit 2, nothing written.
 - R4, `stamp`: a tree that declares `records: out` at `HEAD` (the resolver's reading) moves no wish-list row and does not stop for its absence; else the pin.
 - R5, doclint: `--repo` at a subfolder of a work tree lints that folder, paths relative to it; at a top, the pin.
-- R6, lead 6: a holder commit's paths under the charter folder are linted by `charter check`'s rules first; a refusal prints the check's lines and refuses the holder's commit in rr5b's half form.
-- R7, the loop: `unattended run` refuses a repo not in `own`, before any write or process of the run, in one line that names the key. R7b: in `unset` and `broken`, `checkpoint --commit` refuses a named clone path under a record name (the scanner's list), exit 2, nothing committed.
+- R6, lead 6: the charters the holder's commit would take are linted by `charter check`'s rules first: each file under the charter folder with a charter's name (`charter.NAME`) that is new or changed in the holder, named itself or through a folder above it, as the holder's git lists them; a file that is no charter, a charter the holder holds unchanged and a removal are not read. A refusal prints the check's lines and refuses the holder's commit in rr5b's half form.
+- R7, the loop: `unattended run` refuses a repo not in `own`, before any write or process of the run, in one line that names the key. R7b: in `unset` and `broken`, `checkpoint --commit` refuses, before any commit, where a path the clone's commit would take lies under a record name (the scanner's list): each named path judged as the core spells it (`core._where`), and a named folder by the files under it the commit would take; exit 2, the state's line, nothing committed. A folder with no record to commit passes.
 - R8, the words: `RUNBOOK.md` on the reconcile record; `line send`'s help.
 
 ## 3. Interfaces: the acceptance table (baseline read at `5780e9a`)
@@ -49,8 +49,8 @@ The owner's words: the coordinating repo's entry 63, verbatim: "Each of agentik'
 - R3: the unset/broken refusal comes before the key's own checks; `idle` is unchanged, its `/history/sittings/` segment holds a holder's path (a test says so).
 - R4: stamp loads the vendored `plugin/lib/agentik_records.py` beside it and calls its `_declares`; with none there, the pin.
 - R5: doclint's subfolder read held at the pin (`git -C DIR ls-files` lists relative to DIR); its docstring and two tests hold it.
-- R6: `charter check`'s refusals alone (not its WAITING warning) on each existing file under the charter folder; computed before the clone's commit, applied at the holder's. Nine rr5b tests committed a red fixture charter: their fixture bytes are now a green charter, no assertion changed.
-- R7b: the list is the scanner's, `.hygiene-live` included; in `records.py`, one cli hunk with R6, so one commit.
+- R6: `charter check`'s refusals alone (not its WAITING warning) on each charter `commit.taken` lists for the holder (`git diff --name-only HEAD` and `ls-files -o --exclude-standard` over the named paths); where git cannot list them, the holder's commit is refused; computed before the clone's commit, applied at the holder's. Nine rr5b tests committed a red fixture charter: their fixture bytes are now a green charter, no assertion changed.
+- R7b: the list is the scanner's, `.hygiene-live` included; in `records.py`, one cli hunk with R6, so one commit. A named path under a record name is refused whether or not it changed, as built; a folder above one is judged by `commit.taken`, and where git cannot list its files the commit is refused.
 - R7: the line is the relay's with `the loop` for `the relay`; checked before `refusals` (its `ps`).
 - R8: the README source is unchanged (14 bytes under its bound).
 - Commons' two pages: placed by commons' `scripts/sync`; no test pinned the old list of copies.
