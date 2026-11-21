@@ -175,41 +175,62 @@ def test_no_hook_raises_or_refuses_with_a_resolver_that_raises_or_sleeps(env, tm
 
 # --- R6: the hot path --------------------------------------------------------------------
 
-@pytest.mark.parametrize("state", ["own", "out"])
+# Review 1's F2: the resolver's asks are counted by a recorder that raises nothing (so no
+# `except Exception` can swallow it) around the real read, and every process started is
+# counted, over each hot-hook path; both hold at the pin's count, 0. An ask at the top of
+# `pre_tool_use` (the review's mutant) reds it.
+PIN_STARTS = 0
+
+
+def hot_paths(c, tmp_path):
+    base = {"session_id": SID, "cwd": str(c)}
+    tr = lambda: str(transcript(tmp_path, 1000))                    # noqa: E731
+    return [
+        ("pre", lambda e: hooks.pre_tool_use(
+            {**base, "tool_name": "Bash", "tool_input": {"command": "ls"}}, e)),
+        ("pre-write", lambda e: hooks.pre_tool_use(
+            {**base, "tool_name": "Write",
+             "tool_input": {"file_path": str(c / "x.md"), "content": "x"}}, e)),
+        ("post-silent", lambda e: hooks.post_tool_use(
+            {**base, "tool_name": "Read", "transcript_path": tr()}, e)),
+        ("post-no-transcript", lambda e: hooks.post_tool_use(
+            {**base, "tool_name": "Read", "transcript_path": str(tmp_path / "none.jsonl")}, e)),
+        ("post-no-cwd", lambda e: hooks.post_tool_use(
+            {"session_id": SID, "tool_name": "Read", "transcript_path": tr()}, e)),
+        ("post-gone-cwd", lambda e: hooks.post_tool_use(
+            {"session_id": SID, "cwd": str(tmp_path / "gone"), "tool_name": "Read",
+             "transcript_path": tr()}, e)),
+        ("stop", lambda e: hooks.stop(base, e)),
+        ("stop-no-cwd", lambda e: hooks.stop({"session_id": SID}, e)),
+        ("ups", lambda e: hooks.user_prompt_submit({**base, "prompt": "hello"})),
+    ]
+
+
+@pytest.mark.parametrize("state", STATES)
 def test_hot_hooks_start_no_resolver(env, tmp_path, monkeypatch, state):
     c, _ = layout(tmp_path, state)
     resolved(env)
-    starts = []
-    real = subprocess.Popen
+    paths = hot_paths(c, tmp_path)
+    starts, asks = [], []
+    real_popen, real_read = subprocess.Popen, records._read
 
     def counted(*a, **k):
         starts.append(a[0] if a else k.get("args"))
-        return real(*a, **k)
-    monkeypatch.setattr(subprocess, "Popen", counted)
+        return real_popen(*a, **k)
 
-    def never(folder):
-        raise AssertionError("the resolver was asked on the hot path")
-    monkeypatch.setattr(records, "_read", never)
-    base = {"session_id": SID, "cwd": str(c)}
-    hooks.pre_tool_use({**base, "tool_name": "Bash", "tool_input": {"command": "ls"}}, env)
-    hooks.post_tool_use({**base, "tool_name": "Read",
-                         "transcript_path": str(transcript(tmp_path, 1000))}, env)
-    hooks.stop(base, env)
-    hooks.user_prompt_submit({**base, "prompt": "hello"})
-    assert [s for s in starts if "agentik_records" in json.dumps(s, default=str)] == []
-    count = len(starts)
-    # the same four in the other state start the same count
-    other = "out" if state == "own" else "own"
-    d2 = tmp_path / "o"
-    c2, _ = layout(d2, other)
-    starts.clear()
-    base = {"session_id": SID, "cwd": str(c2)}
-    hooks.pre_tool_use({**base, "tool_name": "Bash", "tool_input": {"command": "ls"}}, env)
-    hooks.post_tool_use({**base, "tool_name": "Read",
-                         "transcript_path": str(transcript(tmp_path, 1000))}, env)
-    hooks.stop(base, env)
-    hooks.user_prompt_submit({**base, "prompt": "hello"})
-    assert len(starts) == count
+    def recorded(folder):
+        asks.append(folder)
+        return real_read(folder)
+    monkeypatch.setattr(subprocess, "Popen", counted)
+    monkeypatch.setattr(records, "_read", recorded)
+    got = {}
+    for name, f in paths:
+        starts.clear()
+        asks.clear()
+        records.reset()
+        f(env)
+        got[name] = (len(starts), len(asks))
+    assert got == {name: (PIN_STARTS, 0) for name, _ in paths}
 
 
 # --- review 1's F1: the resolver's bound inside a hook ----------------------------------
