@@ -19,6 +19,7 @@
 - [x] Doctor: the `records` row is `fail` in `broken` (GUIDE §12), `warn` in `unset`, `ok` in `own` and `out`, text and JSON
 - [x] NICE rows n370 to n375 (`0932695`); the packet true to the build; doclint silent; hygiene `--commits main..HEAD` 0 hits
 - [x] `make stamp` through the gate (`20261120-235343-2945` exit 0): 5497 tests, n325 to n328 to the overflow
+- [x] `make check` on `3ff71f7` (`20261120-235701-2947`): every test green in both venvs, red at recordlint alone (three NICE rows over 400 characters), mended here
 - [ ] `make check` through the gate on this commit: its job is in the coordinator's record
 
 ## Handover
