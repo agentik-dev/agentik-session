@@ -138,7 +138,8 @@ def describe(parser) -> dict:
              {"kind": "status", "name": "meter", "argv": ["status", "--json"]},
              {"kind": "status", "name": "gate", "argv": ["gate", "status", "--json"]},
              {"kind": "status", "name": "unattended", "argv": ["unattended", "status", "--json"]},
-             {"kind": "status", "name": "sittings", "argv": ["status", "--all", "--json"]}]
+             {"kind": "status", "name": "sittings", "argv": ["status", "--all", "--json"]},
+             {"kind": "status", "name": "charter", "argv": ["charter", "show", "--json"]}]
     return {"schema": "agentik.describe/1", "ok": True, "tool": TOOL, "version": SEMVER,
             "summary": SUMMARY, "repo": REPO, "plugin": PLUGIN, "needs": needs,
             "verbs": verbs, "reads": reads}

@@ -113,9 +113,9 @@ def test_describe_json(box):
     assert man["repository"] == f"https://github.com/{d['repo']}"     # the manifest's names
     assert d["plugin"] == f"{man['name']}@agentik" and d["version"] == man["version"]
     assert [r["name"] for r in d["reads"]] == ["config", "doctor", "meter", "gate", "unattended",
-                                               "sittings"]                    # su4 R4
+                                               "sittings", "charter"]   # su4 R4, ak10c4
     assert [r["kind"] for r in d["reads"]] == ["config", "doctor", "status", "status", "status",
-                                               "status"]
+                                               "status", "status"]
     assert d["reads"][0]["argv"] == ["describe", "config", "--json"]
     assert d["reads"][1]["argv"] == ["doctor", "--json"]
     assert all(v["top"] is False for v in d["verbs"])
@@ -126,6 +126,22 @@ def test_describe_json(box):
     plugins = [n for n in d["needs"] if n["kind"] == "plugin"]
     assert len(plugins) == 3 and all(n["optional"] and n["why"] for n in plugins)
     assert [n["name"] for n in plugins] == [f"{x['name']}@agentik" for x in doctor.SIBLINGS]
+
+
+def test_describe_names_the_charter_read(box):
+    """ak10c4: the suite's own table names this read for session today (its status screen and
+    its inbox); the table goes once each tool says its own reads. The pin's four status reads
+    stand before it, and no read carries `wall_s`."""
+    rc, out, _ = sh(box, "describe", "--json")
+    reads = json.loads(out)["reads"]
+    assert rc == 0 and reads[-1] == {"kind": "status", "name": "charter",
+                                     "argv": ["charter", "show", "--json"]}
+    assert reads[2:6] == [
+        {"kind": "status", "name": "meter", "argv": ["status", "--json"]},
+        {"kind": "status", "name": "gate", "argv": ["gate", "status", "--json"]},
+        {"kind": "status", "name": "unattended", "argv": ["unattended", "status", "--json"]},
+        {"kind": "status", "name": "sittings", "argv": ["status", "--all", "--json"]}]
+    assert len(reads) == 7 and not [r for r in reads if "wall_s" in r]
 
 
 def test_the_describe_bound_is_red_for_a_describe_that_waits(box, tmp_path):
