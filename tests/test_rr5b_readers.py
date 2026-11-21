@@ -141,7 +141,7 @@ def test_rr5b_a8_since_landing_in_out_runs_its_log_in_the_holder(make):
     since = 2_000_000_000 - 14 * 86400
     assert f["evidence"]["command"] == (
         "git -C %s log --since=@%d --diff-filter=A --name-only --format= -- "
-        "repos/demo/history/sittings | grep -E '/%s' | sort -u | wc -l"
+        "'repos/demo/history/sittings' | grep -E '/%s' | sort -u | wc -l"
         % (live.sh(str(w.hold)), since, live.NAME_ERE))
     assert r.calls[0] == (str(w.hold), ("log", "--since=@%d" % since, "--diff-filter=A",
                                         "--name-only", "--format=", "--",

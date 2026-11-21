@@ -107,8 +107,9 @@ def since_landing(ctx) -> dict:
             newest, where = t, repo
     since = newest if newest is not None else int(ctx["now"] - ctx["window"] * 86400)
     at, sittings = _sittings(hq)
+    shown = sittings if at == hq else sh(sittings)     # rr5b review 1 F3: the holder's folder
     cmd = ("git -C %s log --since=@%d --diff-filter=A --name-only --format= -- %s"
-           " | grep -E '/%s' | sort -u | wc -l" % (sh(at), since, sittings, NAME_ERE))
+           " | grep -E '/%s' | sort -u | wc -l" % (sh(at), since, shown, NAME_ERE))
     if where is not None:
         cmd = ("git -C %s log main --merges --first-parent -1 --format='landing %%ct %%h'; "
                % sh(where)) + cmd

@@ -74,3 +74,41 @@ def test_rr5b_f2_a_path_whose_stat_fails_all_the_way_up_reads_as_inside(make, tm
         raise OSError("no stat")
     monkeypatch.setattr(records.os, "stat", stat)
     assert records.inside(None, far, str(w.clone))
+
+
+# ---- F3: the printed command of `since_landing` is the one it ran ----------------------------
+
+class Git:
+    def git(self, repo, *args):
+        p = subprocess.run(["git", "-C", repo, *args], text=True, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        return p.stdout if p.returncode == 0 else None
+
+
+def test_rr5b_f3_the_printed_command_quotes_a_sittings_folder_with_a_space(make, tmp_path):
+    root = Path(os.path.realpath(tmp_path))
+    make("own")
+    clone = root / "my demo"
+    clone.mkdir()
+    git(clone, "init", "-q", "-b", "main")
+    (clone / "a").write_text("x\n")
+    git(clone, "add", "a")
+    git(clone, "commit", "-qm", "base")
+    hold = root / "hold"
+    rec = hold / "repos" / "my demo"
+    (rec / "history" / "sittings").mkdir(parents=True)
+    (rec / "history" / "sittings" / "2026-11-21-1.md").write_text("# c\n")
+    git(hold, "init", "-q", "-b", "main")
+    git(hold, "add", ".")
+    git(hold, "commit", "-qm", "base")
+    git(clone, "config", KEY, str(rec))
+    records.reset()
+    assert records.state(records.answer(str(clone))) == "out"
+    ctx = {"hq": "my demo", "roots": {"hq": str(clone), "repos": str(root)}, "window": 14,
+           "now": __import__("time").time(), "goal": [], "readers": Git(), "threshold": 5}
+    f = live.since_landing(ctx)
+    assert f["value"] == 1, f
+    p = subprocess.run(["/bin/sh", "-c", f["evidence"]["command"]], text=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert p.returncode == 0 and p.stdout.strip() == "1", (f["evidence"]["command"], p.stdout,
+                                                            p.stderr)
