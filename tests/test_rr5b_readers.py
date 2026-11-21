@@ -11,9 +11,9 @@ import pytest
 from claude_session import cli, records
 from claude_session.reconcile import live
 
-from test_rr5b_two_commits import CHARTER, KEY, World, git, make, run  # noqa: F401
+from test_rr5b_two_commits import BODY, CHARTER, KEY, World, git, make, run  # noqa: F401
 
-RESPAWN = "# Sitting 2026-11-21-1: demo\n\n## Next act\nRESPAWN: go on\n"
+RESPAWN = "# Sitting 2026-11-21-1: demo\n" + BODY + "\n## Next act\nRESPAWN: go on\n"
 
 
 # ---- acceptance 7 (R6): `charter check FILE` --------------------------------------------------

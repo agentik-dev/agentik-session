@@ -235,6 +235,20 @@ def inside(a: dict | None, path, cwd) -> bool:
         return True
 
 
+# Packet rr5c R7b: the record names, as the vendored scanner (`scripts/hygiene`'s RECORD_DIRS
+# and RECORD_FILES) holds them, each at the root and case-folded; a test holds the two equal.
+RECORD_DIRS = ("history/", "design/packets/", "bugs/")
+RECORD_FILES = ("HANDOFF.md", "NICE_TO_HAVE.md", "OPEN-QUESTIONS.md", "relay/queue.yaml",
+                ".hygiene-live")
+
+
+def record_name(rel: str) -> bool:
+    """Whether `rel`, a path relative to a work tree's top, lies under a record name."""
+    folded = rel.replace(os.sep, "/").casefold()
+    return ((folded + "/").startswith(tuple(d.casefold() for d in RECORD_DIRS))
+            or folded in {f.casefold() for f in RECORD_FILES})
+
+
 def _shown(v) -> str:
     return _CONTROL.sub(lambda m: "\\u%04x" % ord(m.group()), str(v))
 

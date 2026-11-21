@@ -15,7 +15,7 @@
 - [x] R2 lines: `send` and `valid` through `_records_of`; tests/test_rr5c_lines.py (3 of 5 red at the pin)
 - [x] R3 reconcile: the record under `<records>/<record>`, `unset`/`broken` refused; `live` through `records.folder`; idle unchanged (its segment test holds a holder's path); tests/test_rr5c_reconcile.py (5 of 8 red at the pin)
 - [x] R4 stamp, R5 doclint: stamp reads the declaration through the vendored resolver's `_declares`; doclint's subfolder read already held at the pin (its docstring says so); tests/test_rr5c_scripts.py (2 of 6 red at the pin)
-- [ ] R6 lead 6
+- [x] R6 lead 6: `_charter_reds` before the holder's commit, the half's form; the rr5b fixtures' charters made green (9 pin tests committed a red one); R7b `_refuse_records_here` with `records.RECORD_DIRS`/`RECORD_FILES` (the scanner's, `.hygiene-live` included), in the same commit as one cli hunk; tests/test_rr5c_commit.py (12 of 15 red at the pin)
 - [ ] R7 the loop, R7b
 - [ ] R8 the words
 - [ ] commons' two pages (`scripts/sync` from commons)
@@ -23,8 +23,9 @@
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
+- decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-R6: lead 6, `charter check`'s rules before the holder's commit; tests/test_rr5c_commit.py.
+R7: `unattended run` refuses a repo not in `own`; tests/test_rr5c_loop.py.
 
 ## Exit

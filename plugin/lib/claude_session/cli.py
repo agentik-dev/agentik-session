@@ -1520,6 +1520,41 @@ def _under(full: str, top: str) -> bool:
     return full == top or full.startswith(top.rstrip(os.sep) + os.sep)
 
 
+def _refuse_records_here(workdir: str, paths: list, a) -> None:
+    """Packet rr5c R7b: in `unset` and `broken`, a named path in the clone under a record name
+    (`records.record_name`) is refused before any commit with the state's line, exit 2."""
+    from . import commit as core
+    try:
+        top = os.path.realpath(core._top(workdir))
+    except core.Refused:
+        return                                      # the pin's refusal comes from the core
+    here = os.path.realpath(workdir)
+    for p in paths:
+        full = os.path.normpath(os.path.join(here, p))
+        if _under(full, top) and full != top and records.record_name(os.path.relpath(full, top)):
+            _die(f"checkpoint --commit: {p} is a record path in the clone; {records.line(a)}; "
+                 "nothing committed", 2)
+
+
+def _charter_reds(workdir: str, a, theirs: list) -> list:
+    """Packet rr5c R6 (hq design/28 §11 lead 6): `charter check`'s refusal lines for each
+    record path under the charter folder, before the holder's commit takes it; a path that
+    is no file (a removal) is not read."""
+    d = records.folder(a, _charter_dir(_session_section(workdir)))
+    if not d:
+        return []
+    d, out = os.path.realpath(d), []
+    for p, full in theirs:
+        if not (_under(os.path.realpath(full), d) and os.path.isfile(full)):
+            continue
+        try:
+            refusals = charter.check(full)
+        except OSError as e:
+            refusals = [e.strerror or str(e)]
+        out.extend(f"{p}: refused: {r}" for r in refusals)
+    return out
+
+
 def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
     """Packet rr5b R1 to R5. `own`, `unset` and `broken` (and `out` with no record path named):
     the pin, `_commit_one`. In `out` each path is sorted by its real path: under the work tree
@@ -1529,6 +1564,8 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
     when the checkpoint is to be recorded; else exits with the line."""
     from . import commit as core
     a = records.answer(workdir)
+    if records.state(a) in ("unset", "broken"):     # rr5c R7b: no record is written in the clone
+        _refuse_records_here(workdir, paths, a)
     if records.state(a) != "out" or not a.get("records"):
         return _commit_one(workdir, paths, msg)
     try:
@@ -1565,6 +1602,7 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
             core.precheck(hold, rel)
         except core.Refused as err:
             _die(f"checkpoint --commit: the records' repository at {hold}: {err}", 2)
+    reds = _charter_reds(workdir, a, theirs) if hold else []
     sha = None
     if mine:
         got = []
@@ -1583,17 +1621,22 @@ def _commit_named(workdir: str, paths: list, msg: str, given=None) -> None:
         print("checkpoint --commit: the records folder is in no repository, so nothing of the "
               f"record paths is committed: {', '.join(names)}")
         return None
-    try:
-        code = core.commit_paths(hold, rel, msg, os.environ)
-    except core.Nothing:
-        print("nothing to commit in the records' repository")
-        return None
-    except core.Refused as err:
-        why, code = f"the records' repository at {hold}: {err}", 2
+    if reds:                                        # rr5c R6: a red charter stays out
+        for line in reds:
+            print(line, file=sys.stderr)
+        why, code = f"the records' repository at {hold}: charter check refused it", 2
     else:
-        if code == 0:
+        try:
+            code = core.commit_paths(hold, rel, msg, os.environ)
+        except core.Nothing:
+            print("nothing to commit in the records' repository")
             return None
-        why = f"the records' repository at {hold}: exit {code}"
+        except core.Refused as err:
+            why, code = f"the records' repository at {hold}: {err}", 2
+        else:
+            if code == 0:
+                return None
+            why = f"the records' repository at {hold}: exit {code}"
     if sha is None:
         _die(f"commit failed: {why}; nothing recorded", code)
     full = [f for _, f in theirs]                   # review 1: right from any cwd, its -m kept
