@@ -2,7 +2,10 @@
 
 import json
 import os
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -164,7 +167,8 @@ def test_no_hook_raises_or_refuses_with_a_resolver_that_raises_or_sleeps(env, tm
     c, _ = layout(tmp_path, "own")
     resolved(env)
     got = line(env, tmp_path, c, chained)
-    assert hooks.PLAIN_TAIL in got
+    # review 1's F1: a read with no answer costs the path alone, the pin's line where it knows none
+    assert f"charter {hooks.NO_CHARTER}; " in got and hooks.PLAIN_TAIL not in got
     records.reset()
     assert hooks._charter_reminder(required(), str(c)).startswith("; records: agentik.records")
 
@@ -206,3 +210,130 @@ def test_hot_hooks_start_no_resolver(env, tmp_path, monkeypatch, state):
     hooks.stop(base, env)
     hooks.user_prompt_submit({**base, "prompt": "hello"})
     assert len(starts) == count
+
+
+# --- review 1's F1: the resolver's bound inside a hook ----------------------------------
+# The real `cli.main(['hook', 'PostToolUse'])` in a child, as the shim starts it (HOOK_T0 set,
+# so the hook's own cut is armed), in an `own` clone at 80% context, with a `git` on PATH that
+# notes its pid and sleeps. At 1b92b2d the resolver's 5 s bound outlived PostToolUse's 4.5 s
+# deadline: the cut printed nothing, spent the band, and left the resolver's group alive.
+
+HOOK = ("import json, sys\n"
+        "from claude_session import cli, harness, records\n"
+        "o = json.loads(sys.argv[2])\n"
+        "harness.HOOK_DEADLINE.update(o.get('deadline', {}))\n"
+        "if 'margin' in o:\n"
+        "    records.HOOK_MARGIN = o['margin']\n"
+        "sys.exit(cli.main(['hook', sys.argv[1]]))\n")
+
+
+def sleepy_git(tmp_path):
+    b = tmp_path / "bin"
+    b.mkdir(exist_ok=True)
+    pids = tmp_path / "git-pids"
+    (b / "git").write_text(f'#!/bin/sh\necho $$ >> "{pids}"\nexec /bin/sleep 37\n')
+    (b / "git").chmod(0o755)
+    return b, pids
+
+
+def alive(pids) -> list:
+    if not pids.exists():
+        return []
+    left = []
+    for p in {int(x) for x in pids.read_text().split()}:
+        try:
+            os.kill(p, 0)
+            left.append(p)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            left.append(p)
+    return left
+
+
+def gone(pids, within=3.0) -> bool:
+    end = time.monotonic() + within
+    while alive(pids) and time.monotonic() < end:
+        time.sleep(0.05)
+    for p in alive(pids):
+        os.kill(p, 9)
+        return False
+    return True
+
+
+def hook_child(env, tmp_path, c, slow, opts=None, popen=False):
+    e = dict(env)
+    if slow:
+        b, _ = sleepy_git(tmp_path)
+        e["PATH"] = f"{b}{os.pathsep}{e['PATH']}"
+    e["AGENTIK_SESSION_HOOK_T0"] = str(time.time_ns())
+    pl = {"session_id": SID, "transcript_path": str(transcript(tmp_path, 144000)),
+          "tool_name": "Read", "cwd": str(c), "hook_event_name": "PostToolUse"}
+    argv = [sys.executable, "-c", HOOK, "PostToolUse", json.dumps(opts or {})]
+    if popen:
+        p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, env=e)
+        p.stdin.write(json.dumps(pl))
+        p.stdin.close()
+        return p
+    t = time.monotonic()
+    p = subprocess.run(argv, input=json.dumps(pl), capture_output=True, text=True, env=e,
+                       timeout=60)
+    return p, time.monotonic() - t
+
+
+def test_a_slow_git_costs_the_path_alone_inside_the_deadline(env, tmp_path):
+    c, _ = layout(tmp_path, "own")
+    resolved(env)
+    p, dt = hook_child(env, tmp_path, c, slow=True)
+    pids = tmp_path / "git-pids"
+    assert pids.exists(), p.stderr                     # the resolver did ask git
+    assert gone(pids), "a child of the resolver outlived the hook"
+    assert p.returncode == 0 and dt < 4.5, (dt, p.stderr)
+    got = json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert got.startswith("CHECKPOINT: 80.0% context")
+    assert f"charter {hooks.NO_CHARTER}; bring the charter current, commit, then exit" in got
+
+
+def test_the_resolvers_bound_in_a_post_tool_use_is_two_seconds_at_most(monkeypatch):
+    monkeypatch.setattr(records, "_END", [])
+    assert records.bound() == records.BOUND
+    records.within(time.monotonic() + 4.5)             # PostToolUse's own deadline
+    try:
+        assert records.bound() <= 2.0
+        records.within(time.monotonic() + 1.0)         # a hook near its end asks for nothing
+        starts = []
+        monkeypatch.setattr(records.subprocess, "Popen", lambda *a, **k: starts.append(a))
+        assert records._read("/") == records._failed("/", "timeout") and starts == []
+    finally:
+        records.within(None)
+
+
+def test_the_cut_kills_the_resolvers_group_and_spends_no_band(env, tmp_path):
+    c, _ = layout(tmp_path, "own")
+    resolved(env)
+    # the deadline brought inside the bound, so the cut (exit 124) falls while git sleeps
+    p, dt = hook_child(env, tmp_path, c, slow=True,
+                       opts={"deadline": {"PostToolUse": 1.0}, "margin": -10})
+    pids = tmp_path / "git-pids"
+    assert pids.exists() and p.returncode == 0 and p.stdout == "", (p.stdout, p.stderr)
+    assert gone(pids, within=1.0), "the cut left the resolver's group alive"
+    pids.unlink()
+    p, _ = hook_child(env, tmp_path, c, slow=False)    # the next call, git well: the line
+    got = json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert got.startswith("CHECKPOINT: 80.0% context"), got
+
+
+def test_a_term_kills_the_resolvers_group(env, tmp_path):
+    c, _ = layout(tmp_path, "own")
+    resolved(env)
+    p = hook_child(env, tmp_path, c, slow=True, opts={"margin": -10}, popen=True)
+    pids = tmp_path / "git-pids"
+    end = time.monotonic() + 10
+    while not (pids.exists() and pids.read_text().strip()) and time.monotonic() < end:
+        time.sleep(0.02)
+    p.send_signal(signal.SIGTERM)
+    assert p.wait(timeout=10) == 143
+    p.stdout.close()
+    p.stderr.close()
+    assert gone(pids, within=1.0), "a TERM left the resolver's group alive"

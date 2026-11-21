@@ -1897,8 +1897,8 @@ def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) 
     posture = (resolved.get("session") or {}).get("posture")
     off = "off" in (cfg.posture, posture)
     speak = False if off else _signal(m)
-    meter.save(sdir, m, st)
     if not speak:
+        meter.save(sdir, m, st)
         if off or m.used_pct >= 100.0 * float(m.checkpoint_at):    # r1 F1: D13's, as _signal
             return {}
         now = _now()
@@ -1907,12 +1907,22 @@ def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) 
         _meter_stamp(sdir, now, True)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                        "additionalContext": _meter_words(m.as_dict())}}
+    out = _speaking(payload, env, sdir, m, resolved, room)
+    meter.save(sdir, m, st)                 # rr5a F1: the band is spent once its line is made
+    return out
+
+
+def _speaking(payload: dict, env, sdir: Path, m, resolved: dict, room: str | None) -> dict:
+    """The CHECKPOINT line of a PostToolUse that speaks (D13); rr5a R4, R5 and review 1's F1:
+    a records read that got no answer costs the charter's path alone."""
     if not discipline(resolved.get("session")):                # st1 R5, C1
         return _checkpoint_out(m, None)
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
     a = records.answer(payload.get("cwd"))            # rr5a R2: only where the line speaks
     s = records.state(a)
+    if records.failed(a):                             # F1: the pin's line with no path
+        return _checkpoint_out(m, NO_CHARTER, [NO_CHARTER] if chained else None, room=room)
     if s in ("unset", "broken"):                      # rr5a R5: the waiver's form
         return _checkpoint_out(m, None)
     if s == "out" and not d.startswith("?"):          # rr5a R4: the absolute path

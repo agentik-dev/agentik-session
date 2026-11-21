@@ -5,6 +5,9 @@
 bound, once a folder a process. None where `folder` stands in no git checkout (or no git is
 there): the pin's behaviour. Past the bound, or on any fault, the state is FAILED with `why`
 `timeout` or the fault's one line, which every caller reads as `broken` (`state`). Never raises.
+Review 1's F1: inside a hook (`within`, set by `cli.cmd_hook`) the bound is the hook's own
+remaining time less HOOK_MARGIN, so PostToolUse's 4.5 s deadline gives the child 2 s at most,
+and the hook's cut and its TERM kill each child alive (`kill_live`) before they leave.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 
 from . import gitinfo
 
@@ -21,6 +25,7 @@ KEY = "agentik.records"
 BOUND = gitinfo._TIMEOUT                  # session's git bound, 5 s
 FAILED = "failed"
 SET_LINE = f"git config {KEY} <folder>"
+HOOK_MARGIN = 2.5                         # what a hook keeps after the child's bound (F1)
 _LIB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CHILD = ("import json, sys\n"
           "sys.path.insert(0, sys.argv[1])\n"
@@ -32,6 +37,8 @@ _CHILD = ("import json, sys\n"
           "v = r.values(sys.argv[2]) if a and a['state'] == 'broken' else []\n"
           "print(json.dumps({'answer': a, 'values': v}))\n")
 _ANSWERS: dict = {}
+_END: list = []                           # inside a hook: the monotonic time of its deadline
+_LIVE: set = set()                        # the children alive now, by pid (their group's id)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
@@ -50,16 +57,62 @@ def _failed(folder: str, why: str) -> dict:
             "prefix": None, "state": FAILED, "why": why, "values": []}
 
 
-def _read(folder: str):
-    argv = [sys.executable or "/usr/bin/python3", "-I", "-S", "-c", _CHILD, _LIB, folder]
+def within(end) -> None:
+    """F1: the hook's deadline as a `time.monotonic()` value, or None outside a hook."""
+    _END[:] = [] if end is None else [float(end)]
+
+
+def bound() -> float:
+    """The child's bound: gitinfo's 5 s, and inside a hook its remaining time less HOOK_MARGIN."""
+    if not _END:
+        return BOUND
+    return min(BOUND, _END[0] - time.monotonic() - HOOK_MARGIN)
+
+
+def kill_live() -> None:
+    """F1: kill each child alive with its group (the hook's cut and TERM call it). Never raises."""
+    for pid in list(_LIVE):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except Exception:                               # noqa: BLE001 - a cut never raises
+            pass
+
+
+_CUTS = {getattr(signal, n) for n in ("SIGALRM", "SIGTERM") if hasattr(signal, n)}
+
+
+def _start(argv):
+    """The child, entered in _LIVE with the cut's signals held, so a cut never meets a child it
+    does not know; OSError as Popen raises it."""
+    try:
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, _CUTS)
+    except Exception:                                   # noqa: BLE001 - no mask: as it is
+        held = None
     try:
         child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                  errors="replace", start_new_session=True)
+        _LIVE.add(child.pid)
+        return child
+    finally:
+        if held is not None:
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+            except Exception:                           # noqa: BLE001
+                pass
+
+
+def _read(folder: str):
+    argv = [sys.executable or "/usr/bin/python3", "-I", "-S", "-c", _CHILD, _LIB, folder]
+    limit = bound()
+    if limit <= 0:                                      # F1: no time left to ask in
+        return _failed(folder, "timeout")
+    try:
+        child = _start(argv)
     except OSError as e:
         return _failed(folder, _one_line(e))
     try:
-        out, err = child.communicate(timeout=BOUND)
+        out, err = child.communicate(timeout=limit)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(child.pid, signal.SIGKILL)
@@ -67,6 +120,8 @@ def _read(folder: str):
             pass
         child.communicate()
         return _failed(folder, "timeout")
+    finally:
+        _LIVE.discard(child.pid)
     if child.returncode != 0:
         return _failed(folder, _one_line(err) if err.strip() else f"exit {child.returncode}")
     try:
@@ -104,6 +159,11 @@ def state(a: dict | None) -> str:
         return "own"
     s = a.get("state")
     return "broken" if s == FAILED else s if s in ("own", "out", "unset", "broken") else "broken"
+
+
+def failed(a: dict | None) -> bool:
+    """Review 1's F1 and F4: the read got no usable answer (a timeout, a fault, garbage)."""
+    return isinstance(a, dict) and a.get("state") == FAILED
 
 
 def folder(a: dict | None, d: str) -> str | None:

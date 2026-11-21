@@ -56,7 +56,9 @@ def cmd_hook(args) -> int:
     before the row of a hook that ended, keeps a late signal from writing a second one.
     Review 1's F2: the handlers stay in place until that row is written, so a TERM as the hook
     ends meets a handler that has seen `done` and returns: the row is the cut's or the finished
-    one, once, never none."""
+    one, once, never none.
+    Packet rr5a, review 1's F1: the records resolver asked inside the hook ends its child by the
+    hook's own deadline less its margin, and a cut kills any child still alive."""
     t0 = harness.take_t0(os.environ)
     code = 1                        # an uncaught exception's exit
     done = []
@@ -64,6 +66,7 @@ def cmd_hook(args) -> int:
     # malformed one (the shim exports "" when `date` fails) arms nothing, as at the pin.
     measured = isinstance(t0, str) and harness._T0.fullmatch(t0) is not None
     armed = _arm_cut(t0, args.event, done) if measured else None
+    records.within(time.monotonic() + harness.deadline(args.event))
     try:
         code = hooks.dispatch(args.event)
         return code
@@ -75,6 +78,7 @@ def cmd_hook(args) -> int:
         raise
     finally:
         done.append(True)
+        records.within(None)
         harness.record_hook(t0, args.event, code, os.environ)
         _disarm_cut(armed)
 
@@ -91,6 +95,7 @@ def _arm_cut(t0, event, done):
                 signal.setitimer(signal.ITIMER_REAL, 0)
             except Exception:       # noqa: BLE001 - a cut never raises
                 pass
+            records.kill_live()     # rr5a F1: no resolver's group outlives the hook
             harness.record_hook(t0, event, row, os.environ, flush=False)
             os._exit(leave)
         return handler
