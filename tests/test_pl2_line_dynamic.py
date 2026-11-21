@@ -372,14 +372,18 @@ def test_7_the_checkpoint_line_comes_first_and_the_pair_fits(hk):
     assert len(json.dumps(out)) <= hooks.MAX_OUT
 
 
-def test_7_the_respawn_line_is_dropped_where_the_pair_does_not_fit(hk, monkeypatch):
+def test_7_the_full_respawn_line_is_dropped_where_the_pair_does_not_fit(hk, monkeypatch):
+    """Packet rc3 R1: the full line and the one with the charter unnamed are dropped where
+    neither pair fits; the short form is said in their place."""
     t = _stamped()
     _mark(t + 1)
     big = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                                  "additionalContext": "CHECKPOINT: " + "x" * 500}}
+                                  "additionalContext": "CHECKPOINT: " + "x" * 400}}
     monkeypatch.setattr(hooks, "_post_meter", lambda *a, **k: big)
     out = hooks.post_tool_use(_bash(SCRIPT), os.environ)
-    assert _ctx(out) == big["hookSpecificOutput"]["additionalContext"]
+    assert _ctx(out) == (big["hookSpecificOutput"]["additionalContext"] + "\n\n"
+                         + hooks.UNCONFIRMED_SHORT)
+    assert len(json.dumps(out)) <= hooks.MAX_OUT
 
 
 def test_7_the_refusal_says_a_notice_come_means_ended_and_run_again_now(hk):
