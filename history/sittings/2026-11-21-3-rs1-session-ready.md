@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] The packet
 - [x] R1 the packets' lines: `tests/fixtures/g7/packet-lines.txt`, 161 lines (14 refused) from the pin's 135 packets, harvested once from a `git archive` of the pin; test 5 reads it, its count pinned
-- [ ] R2 the overflow's shape: `tests/fixtures/land3/NICE-overflow.md`, line 9 reads it
+- [x] R2 the overflow's shape: `tests/fixtures/land3/NICE-overflow.md` (head, `## From the open findings` with two made-up rows, a borrowed section after), line 9 reads it as `OVERFLOW_SHAPE`; `OVERFLOW` stays the temp repos' path
 - [ ] R3 the rehearsal: the scratch clone's `make check` through the gate; its mends
 - [ ] `make stamp`, `make check` through the gate
 
@@ -21,6 +21,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-R2: the overflow fixture; line 9 reads it.
+R3: the scratch clone, its records removed, `make check` through the gate.
 
 ## Exit
