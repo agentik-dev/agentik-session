@@ -18,7 +18,8 @@
 - [x] F5: `_read` takes `records` only as an absolute path (or none outside `out`), else a failed read with its reason
 - [x] Doctor: the `records` row is `fail` in `broken` (GUIDE §12), `warn` in `unset`, `ok` in `own` and `out`, text and JSON
 - [x] NICE rows n370 to n375 (`0932695`); the packet true to the build; doclint silent; hygiene `--commits main..HEAD` 0 hits
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate (`20261120-235343-2945` exit 0): 5497 tests, n325 to n328 to the overflow
+- [ ] `make check` through the gate on this commit: its job is in the coordinator's record
 
 ## Handover
 - Choices: the packet's §4. F1: the resolver is asked before `meter.save` (the band spent once the line is made); a `failed` read gives `<this sitting's charter>`; HOOK_MARGIN 2.5 s.
@@ -26,6 +27,7 @@
 - decide, owner: the coordinator. A `failed` read (git timed out) fails doctor's row, as R2 reads it `broken`; consumer: the suite's doctor.
 
 ## Next act
-`make stamp` through the gate, then `make check`.
+The coordinator's read of this round; no landing, install or push from this sitting.
 
 ## Exit
+Build 2: review 1's F1 to F5 and doctor's row built, each test red at `1b92b2d`; the NICE rows and the packet; stamped; this commit is the one `make check` runs on, and the record is not touched after it.
