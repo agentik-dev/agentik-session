@@ -19,7 +19,7 @@ Build 1 (to `10b994f`): R1 to R8 built, stamped, its check green.
 - [x] The half's line: absolute record paths and the call's `-m`
 - [x] NICE rows n376 to n379 (F5 and three observations; the stamp moves the oldest S4 rows past the bound)
 - [x] The packet true to what is built (R2 with F1, R4 the half, R6 with F2 and F4, R7 with F3; §3 row 11)
-- [x] `make stamp` through the gate (`20261121-015045-2972` exit 0): 5538 tests, n329 to n331 to the overflow
+- [x] `make stamp` through the gate (`20261121-015045-2972` exit 0): 5538 tests, n329 to n331 to the overflow; the check (`20261121-015108-2973`) red on plugin-version-check alone, so `make stamp STAMP_VERSION=2.0.0-alpha.156` (`20261121-015741-2976` exit 0), as rr5a's round named its version
 - [ ] `make check` through the gate on the stamp's commit: its job is in the coordinator's record
 
 ## Handover
