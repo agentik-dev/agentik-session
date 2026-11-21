@@ -16,12 +16,13 @@
 - [x] R1 to R3: `hooks.py` `_with_respawn`, `_after`, `_checkpoint_out`, `_post_meter`, `_post_tool_use`; pl2's drop test re-worded; 1591 passed in the 28 files that pin the hooks' lines, both venvs
 - [x] R4: respawn-r1 §3.3's sentence and change log line; NICE n346, n347, n352 leave (n351 stays)
 - [x] R5: `.hygiene-allow` loses the gc1 pair and the FW4d pair with their comments; `scripts/hygiene --require-private` and `--commits main..HEAD` both exit 0 without them
-- [ ] `make stamp`, then `make check`, through the gate
+- [x] `make stamp` through the gate: job `20261120-160252-2845`, exit 0; alpha.150, 5333 to 5389 tests
+- [ ] `make check` through the gate
 
 ## Handover
 - Choices: listed in the packet's §4 as they are made.
 
 ## Next act
-`make stamp`, then `make check`, through the gate queue.
+`make check` through the gate queue.
 
 ## Exit
