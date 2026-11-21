@@ -3,7 +3,7 @@ text, live in one module, `shellreader.py`, and no answer changed.
 
 1 the module imports alone; 2 each of its 53 names lives once (g8a: the cutter gone), the guard and the loop holding
 the module's own objects; 3 one splitter; 4 the lines where the readers differ, pinned as the
-pin reads them, so that the next row changes each knowingly; 5 the repo's own packets' lines.
+pin reads them, so that the next row changes each knowingly; 5 the repo's own packets' lines, a fixture since rs1.
 """
 import os
 import subprocess
@@ -131,15 +131,16 @@ def test_4_the_table_is_32_lines():
     assert len(TABLE) == len({s for s, _, _ in TABLE}) == 32
 
 
-# ---- 5: the repo's own packets ----------------------------------------------------------
+# ---- 5: the repo's own packets' lines, a fixture (rs1 R1) -------------------------------
+
+# every acceptance shell line `unattended.acceptance` yielded over the packets at `2bfa312`,
+# one a line, in the packets' sorted order: the packets are records, which leave the clone
+LINES = ROOT / "tests" / "fixtures" / "g7" / "packet-lines.txt"
+
 
 def test_5_the_packets_lines_both_sides():
-    lines = []
-    for p in sorted((ROOT / "design" / "packets").glob("*.md")):
-        try:
-            lines += [it.shell for it in unattended.acceptance(p.read_text(encoding="utf-8"))]
-        except unattended.AcceptanceError:
-            continue
+    lines = LINES.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 161 and all(lines), len(lines)
     refused = [ln for ln in lines if unattended.unbounded(ln)]
     assert all("make" in ln.split() for ln in refused), refused
     assert refused and len(lines) - len(refused) >= 100, (len(lines), len(refused))
