@@ -15,13 +15,13 @@
 - [x] The failing tests in `tests/test_rc3_respawn_short.py` and pl2's re-worded drop test: 26 of 118 red at the pin (the short constant alone added), 0 now
 - [x] R1 to R3: `hooks.py` `_with_respawn`, `_after`, `_checkpoint_out`, `_post_meter`, `_post_tool_use`; pl2's drop test re-worded; 1591 passed in the 28 files that pin the hooks' lines, both venvs
 - [x] R4: respawn-r1 §3.3's sentence and change log line; NICE n346, n347, n352 leave (n351 stays)
-- [ ] R5: the allow rows
+- [x] R5: `.hygiene-allow` loses the gc1 pair and the FW4d pair with their comments; `scripts/hygiene --require-private` and `--commits main..HEAD` both exit 0 without them
 - [ ] `make stamp`, then `make check`, through the gate
 
 ## Handover
 - Choices: listed in the packet's §4 as they are made.
 
 ## Next act
-R5: the gc1 pair out of `.hygiene-allow`, the FW4d pair where both scans pass without it.
+`make stamp`, then `make check`, through the gate queue.
 
 ## Exit
