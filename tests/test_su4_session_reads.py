@@ -303,9 +303,10 @@ def test_su4_4_all_and_transcript_are_one_or_the_other(root):
 
 def test_su4_6_describe_names_the_sittings_read(root):
     rc, out, _ = run_cli("describe", "--json")
-    reads = json.loads(out)["reads"]
-    assert reads[-1] == {"kind": "status", "name": "sittings", "argv": ["status", "--all", "--json"]}
-    rc, out, _ = run_cli(*reads[-1]["argv"])
+    reads = {r["name"]: r for r in json.loads(out)["reads"]}      # ak10c4: charter's comes last
+    assert reads["sittings"] == {"kind": "status", "name": "sittings",
+                                 "argv": ["status", "--all", "--json"]}
+    rc, out, _ = run_cli(*reads["sittings"]["argv"])
     d = json.loads(out)
     assert rc == 0 and d["schema"] == "agentik.session.sittings/1" and d["sittings"] == []
 
