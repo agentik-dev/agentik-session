@@ -26,7 +26,7 @@
 - [x] Build 2, item 3: the packet's R2 (over R1, L4 ruled), R6 and R7b as built; `commit.py` in its may-touch row
 - [x] Build 2, item 4: NICE n380 (L3), n381 (L5), n382 (rr5b review 2's link lead); the file past its bound until `make stamp` moves the oldest S4 rows
 - [x] Build 2, outside the four items: `scripts/stamp`'s R4 flag was shadowed by the sidecar's `git rev-list` output, so an own tree moved no NICE row whenever the sidecar was written; renamed `declared`, a test
-- [x] Build 2: hygiene exit 0; stamp `20261121-084810-3025` exit 0 (5595 tests; n332, n334, n335 to the overflow); `make check`'s job is in the build record
+- [x] Build 2: hygiene exit 0; stamp `20261121-084810-3025` exit 0 (n332, n334, n335 to the overflow); check `-3026` exit 2 (plugin-version-check), so stamp `-3028` to alpha.158; `make check`'s job is in the build record
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
@@ -37,4 +37,4 @@
 `make check` through the gate on this commit; then the coordinator's read of review 1's round.
 
 ## Exit
-Build 2: review 1's four items built, each its commit and tests, and stamp's shadowed flag fixed; stamped at 2.0.0-alpha.157, 5595 tests; this commit is the one `make check` runs on.
+Build 2: review 1's four items built, each its commit and tests, and stamp's shadowed flag fixed; stamped at 2.0.0-alpha.158, 5595 tests; this commit is the one `make check` runs on.
