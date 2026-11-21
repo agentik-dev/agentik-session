@@ -187,8 +187,9 @@ class Resolved:
     tier_origins: dict = field(default_factory=dict)  # {role: the layer its model is from}
 
     def as_dict(self) -> dict:
-        return {"provider": self.provider, **self.sections,
-                OLD_RELAY: copy.deepcopy(self.sections.get("relay") or {})}
+        """The resolved file's document: `relay` alone (packet hk1 R4; the relay reads it), no
+        `agent-relay` copy; a layer that still names the old key is read by `_relay_key`."""
+        return {"provider": self.provider, **self.sections}
 
 
 def repo_dir(cwd) -> Path:

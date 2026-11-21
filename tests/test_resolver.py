@@ -40,12 +40,11 @@ def test_defaults_alone(world):
     assert s["push"] == "never" and s["device"] == "never"
     assert r.sections["relay"]["enabled"] == "auto"
     assert "decisions" not in r.sections                # ss3 R4: no tool read it
-    # agentik-r1 ruling 5: the section is `relay`, with a copy under the old key until r2
+    # agentik-r1 ruling 5: the section is `relay`; packet hk1 R4: the old key's copy is gone
     # S38 ruling 4: `gate` joins the sections, empty until a repo layer sets it
-    assert list(r.as_dict()) == ["provider", "session", "respeak", "relay", "gate",
-                                 "agent-relay"]
+    assert list(r.as_dict()) == ["provider", "session", "respeak", "relay", "gate"]
     assert r.sections["gate"] == {}
-    assert r.as_dict()["agent-relay"] == r.sections["relay"] and r.renamed == []
+    assert r.as_dict()["relay"] == r.sections["relay"] and r.renamed == []
     assert r.provider["version"] == SEMVER and r.provider["plugin"] == "session"
 
 
@@ -128,7 +127,7 @@ def test_c6_the_old_relay_key_is_read_and_relay_wins(world):
     r = run(world)
     assert r.sections["relay"] == {"enabled": "off", "queue": "q.yaml",
                                    "merge": "merge-on-green"}
-    assert r.as_dict()["agent-relay"] == r.sections["relay"]
+    assert "agent-relay" not in r.as_dict() and r.as_dict()["relay"] == r.sections["relay"]
     assert r.renamed == ["config.yaml: agent-relay is read as relay; rename the key"]
     put("repo", 'relay: {enabled: "on"}\nagent-relay: {enabled: "off"}\n')
     r = run(world)
