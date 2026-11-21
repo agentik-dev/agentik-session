@@ -131,6 +131,10 @@ def _read(folder: str):
             return None
         if a.get("state") not in ("own", "out", "unset", "broken"):
             return _failed(folder, f"state {a.get('state')!r}")
+        recs = a.get("records")                         # F5: an absolute path, or none
+        if not (recs is None and a["state"] != "out"
+                or isinstance(recs, str) and os.path.isabs(recs)):
+            return _failed(folder, _one_line(f"records is not an absolute path: {recs!r}"))
         a = dict(a)
         a["values"] = [str(v) for v in got.get("values") or []]
         return a

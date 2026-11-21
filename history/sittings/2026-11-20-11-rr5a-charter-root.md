@@ -15,7 +15,7 @@
 - [x] F2: the hot-path test counts asks (a recorder that raises nothing) and processes over nine paths in four states, against the pin's 0; the review's mutant (an ask atop `pre_tool_use`) reds it, `{'pre': (1, 1)}`
 - [x] F3: a `--dir` whose real path is in the clone refused for `open` and `close` in `unset` and `broken`, for `show` and `check` in `broken`; outside it stands
 - [x] F4: where git did not answer, the line says so and its reason, with no "set it"
-- [ ] F5: `records` only an absolute path
+- [x] F5: `_read` takes `records` only as an absolute path (or none outside `out`), else a failed read with its reason
 - [ ] Doctor: `broken` is `fail`
 - [ ] NICE rows; the packet true; `make stamp`, then `make check`, through the gate
 
@@ -23,6 +23,6 @@
 - Choices: the packet's §4 and its review 1 section.
 
 ## Next act
-F5, its test first.
+Doctor's row, its test first.
 
 ## Exit

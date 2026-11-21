@@ -353,3 +353,25 @@ def test_a_git_that_did_not_answer_says_so_and_not_set_it(tmp_path, monkeypatch,
     code, out, err = run(capsys, "charter", "open", "g")
     assert code == 2 and "git did not answer" in err and "set it" not in err
 
+
+# --- review 1's F5: `records` only as an absolute path ------------------------------------
+
+@pytest.mark.parametrize("value", [5, ["x"], "rel/demo", "", {"a": 1}])
+def test_records_is_taken_only_as_an_absolute_path(tmp_path, monkeypatch, value):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "agentik_records.py").write_text(
+        "class NoRepo(Exception):\n    pass\n\n"
+        "def values(start):\n    return []\n\n"
+        f"def resolve(start):\n    return {{'state': 'out', 'records': {value!r}, 'repo': start}}\n")
+    monkeypatch.setattr(records, "_LIB", str(lib))
+    c, _ = layout(tmp_path, "own")
+    a = records.answer(str(c))
+    assert records.state(a) == "broken" and records.failed(a)
+    assert "absolute" in a["why"] and records.folder(a, "history/sittings") is None
+    records.reset()
+    (lib / "agentik_records.py").write_text(
+        "class NoRepo(Exception):\n    pass\n\n"
+        f"def resolve(start):\n    return {{'state': 'own', 'records': None, 'repo': start}}\n")
+    assert records.state(records.answer(str(c))) == "own"
+
