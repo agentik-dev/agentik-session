@@ -34,7 +34,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import (budget, charter, gate, harness, install, instructionguard, instructions, ledger,
-               lineguard, meter, policystore, resolver, rules, sessionconfig, store,
+               lineguard, meter, policystore, records, resolver, rules, sessionconfig, store,
                workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
@@ -1380,6 +1380,19 @@ def _charter_reminder(session: dict, cwd) -> str:
     if not isinstance(c, dict) or c.get("required") is not True:
         return ""
     d = _charter({"session": session})
+    a = records.answer(cwd)                         # packet rr5a R4, R5
+    s = records.state(a)
+    if s == "unset":
+        return ""
+    if s == "broken":
+        return "; records: " + records.line(a)
+    if s == "out" and not d.startswith("?"):
+        f = records.folder(a, d)
+        if any(Path(f).glob(f"{charter.today()}-*.md")):
+            return ""
+        return (f"; charter: none open today under "
+                f"{f if _SAFE_PATH.match(f) else 'the records folder'}, run "
+                f'agentik-session charter open "<goal>"')
     if not d.startswith("?") and any((Path(cwd) / d).glob(f"{charter.today()}-*.md")):
         return ""
     return (f"; charter: none open today under {d}, run "
@@ -1480,6 +1493,22 @@ def _charter_file(cwd, sdir: Path, d: str) -> list[str]:
     except Exception:                                   # noqa: BLE001
         out = []
     return [f for f in out if _SAFE_PATH.match(f)] + [NO_CHARTER]
+
+
+def _charter_file_out(sdir: Path, folder: str) -> list[str]:
+    """Packet rr5a R4, in `out`: the recorded charter by its absolute path alone, where it is a
+    file directly in `folder` (`<records>/<dir>`) and passes _SAFE_PATH; NO_CHARTER last.
+    No relative spelling. A failure reads as none. Never raises."""
+    out = []
+    try:
+        rec = _load_json(sdir / CHARTER_REC).get("path")
+        if (isinstance(rec, str) and os.path.isabs(rec) and _SAFE_PATH.match(rec)
+                and os.path.isfile(rec)
+                and os.path.realpath(os.path.dirname(rec)) == os.path.realpath(folder)):
+            out = [rec]
+    except Exception:                                   # noqa: BLE001
+        out = []
+    return out + [NO_CHARTER]
 
 
 def _checkpoint_out(m: meter.Meter, charter: str | None,
@@ -1868,8 +1897,8 @@ def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) 
     posture = (resolved.get("session") or {}).get("posture")
     off = "off" in (cfg.posture, posture)
     speak = False if off else _signal(m)
-    meter.save(sdir, m, st)
     if not speak:
+        meter.save(sdir, m, st)
         if off or m.used_pct >= 100.0 * float(m.checkpoint_at):    # r1 F1: D13's, as _signal
             return {}
         now = _now()
@@ -1878,10 +1907,28 @@ def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) 
         _meter_stamp(sdir, now, True)
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                        "additionalContext": _meter_words(m.as_dict())}}
+    out = _speaking(payload, env, sdir, m, resolved, room)
+    meter.save(sdir, m, st)                 # rr5a F1: the band is spent once its line is made
+    return out
+
+
+def _speaking(payload: dict, env, sdir: Path, m, resolved: dict, room: str | None) -> dict:
+    """The CHECKPOINT line of a PostToolUse that speaks (D13); rr5a R4, R5 and review 1's F1:
+    a records read that got no answer costs the charter's path alone."""
     if not discipline(resolved.get("session")):                # st1 R5, C1
         return _checkpoint_out(m, None)
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
+    a = records.answer(payload.get("cwd"))            # rr5a R2: only where the line speaks
+    s = records.state(a)
+    if records.failed(a):                             # F1: the pin's line with no path
+        return _checkpoint_out(m, NO_CHARTER, [NO_CHARTER] if chained else None, room=room)
+    if s in ("unset", "broken"):                      # rr5a R5: the waiver's form
+        return _checkpoint_out(m, None)
+    if s == "out" and not d.startswith("?"):          # rr5a R4: the absolute path
+        f = records.folder(a, d)
+        return _checkpoint_out(m, f if _SAFE_PATH.match(f) else NO_CHARTER,
+                               _charter_file_out(sdir, f) if chained else None, room=room)
     return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None,
                            room=room)
 

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import (SEMVER, demand, hooks, install, instructionguard, instructions, measure, meter,
-               mod, resolver)
+               mod, records, resolver)
 
 PLUGIN_ID = "session@agentik"
 # agentik-r1 §6.3 c7: the ID before the switch (§8.3); alone, it is a warn naming the switch.
@@ -984,6 +984,23 @@ def _check_guard(env, cwd) -> Check:
     return Check("guard", True, detail, warn=warn)
 
 
+def _check_records(cwd) -> Check | None:
+    """Packet rr5a R7: where this repo's records are; no row outside a git checkout. `ok` in
+    `own` and `out`, `warn` in `unset`, `fail` in `broken` (GUIDE §12)."""
+    a = records.answer(str(cwd))
+    if a is None:
+        return None
+    s = records.state(a)
+    if s == "own":
+        return Check("records", True, "in the repo")
+    if s == "out":
+        held = "" if a.get("holder") else " (in no repository: nothing of it is committed)"
+        return Check("records", True, f"{a.get('records')}{held}")
+    if s == "broken":                       # GUIDE §12 and review 1: `broken` fails
+        return Check("records", False, records.line(a))
+    return Check("records", True, records.line(a), warn=True)
+
+
 class NoCwd(Exception):
     """The working directory is gone (review 2, R2-F3)."""
 
@@ -1027,6 +1044,9 @@ def run(env=None, cwd=None) -> Report:
     for row in _check_instructions(env, cwd, plugins, sections):
         add(row)                 # g1: after launcher, so every row of the pin keeps its place
     add(_check_guard(env, cwd))  # g2 R5: after the instructions rows, one row
+    rec = _check_records(cwd)
+    if rec:
+        add(rec)                 # rr5a R7: after guard, only in a git checkout
     for row in _check_renamed(cwd, _renamed(env, cwd)):
         add(row)                 # agentik-r1 §6.3: after measure, so no row moves
     for row in _check_bands(env):
