@@ -18,7 +18,7 @@
 - [x] R6 lead 6: `_charter_reds` before the holder's commit, the half's form; the rr5b fixtures' charters made green (9 pin tests committed a red one); R7b `_refuse_records_here` with `records.RECORD_DIRS`/`RECORD_FILES` (the scanner's, `.hygiene-live` included), in the same commit as one cli hunk; tests/test_rr5c_commit.py (12 of 15 red at the pin)
 - [x] R7 the loop, R7b: `unattended.run` refuses before `refusals` (its `ps`) with RECORDS_REFUSAL, the relay's words with `the loop`; status and report untouched; tests/test_rr5c_loop.py (7 of 8 red at the pin)
 - [x] R8 the words: RUNBOOK's reconcile paragraph; `line send`'s help (in R2's commit); the README source unchanged (14 bytes under its bound)
-- [ ] commons' two pages (`scripts/sync` from commons)
+- [x] commons' two pages (`scripts/sync` from commons): commons 6a2155c's sync placed CONTRIBUTING.md and SECURITY.md and listed them; `--check` prints no behind or unlisted line; no test pinned the old list
 - [ ] `make stamp`, `make check` through the gate
 
 ## Handover
@@ -26,6 +26,6 @@
 - decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-commons' two pages: `scripts/sync` from commons into this worktree.
+`make stamp`, then `make check`, through the gate queue.
 
 ## Exit
