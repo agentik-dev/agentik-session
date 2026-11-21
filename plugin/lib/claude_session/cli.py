@@ -1521,19 +1521,35 @@ def _under(full: str, top: str) -> bool:
 
 
 def _refuse_records_here(workdir: str, paths: list, a) -> None:
-    """Packet rr5c R7b: in `unset` and `broken`, a named path in the clone under a record name
-    (`records.record_name`) is refused before any commit with the state's line, exit 2."""
+    """Packet rr5c R7b, review 1's round: in `unset` and `broken`, the clone's commit is refused
+    before it starts, with the state's line, exit 2, where a named path lies under a record name
+    (`records.record_name`), each judged as the core spells it (`core._where`), or where a file
+    the commit would take under a named folder does (`core.taken`, git's own reading)."""
     from . import commit as core
     try:
         top = os.path.realpath(core._top(workdir))
     except core.Refused:
         return                                      # the pin's refusal comes from the core
-    here = os.path.realpath(workdir)
+    here, inner = os.path.realpath(workdir), []
     for p in paths:
-        full = os.path.normpath(os.path.join(here, p))
-        if _under(full, top) and full != top and records.record_name(os.path.relpath(full, top)):
+        full = core._where(here, p)
+        if not _under(full, top) or full == top:
+            continue                                # the core's own refusal stands
+        if records.record_name(os.path.relpath(full, top)):
             _die(f"checkpoint --commit: {p} is a record path in the clone; {records.line(a)}; "
                  "nothing committed", 2)
+        inner.append(p)
+    if not inner:
+        return
+    files = core.taken(workdir, inner)
+    if files is None:
+        _die("checkpoint --commit: git cannot say which files the clone's commit would take, "
+             f"so none is known not to be a record path in the clone; {records.line(a)}; "
+             "nothing committed", 2)
+    for f in files:
+        if records.record_name(f):
+            _die(f"checkpoint --commit: {f}, which a named path takes, is a record path in the "
+                 f"clone; {records.line(a)}; nothing committed", 2)
 
 
 def _charter_reds(workdir: str, a, theirs: list, hold: str, rel: list) -> list:

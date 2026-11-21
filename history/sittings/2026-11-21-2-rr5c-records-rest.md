@@ -22,7 +22,7 @@
 - [x] `make stamp`, `make check` through the gate: stamp `20261121-080446-3015` exit 0 (2.0.0-alpha.157, 5580 tests); the check's job is in the build record
 
 - [x] Build 2, item 1 (R6, review 1's F1, L1, L2): `_charter_reds` lints the charters `commit.taken` says the holder's commit takes; tests/test_rr5c_review1.py
-- [ ] Build 2, item 2 (R7b, F2, F3): the clone's paths as the core spells and takes them
+- [x] Build 2, item 2 (R7b, F2, F3): `_refuse_records_here` judges each named path through `core._where` and a named folder by the files `commit.taken` lists; tests/test_rr5c_review1.py
 - [ ] Build 2, item 3: the packet's R2, R6, R7b words
 - [ ] Build 2, item 4: three NICE rows (L3, L5, rr5b's link lead)
 - [ ] Build 2: hygiene, stamp and `make check` through the gate
@@ -32,7 +32,7 @@
 - decide, owner: the coordinator (the review's reader): R6 and acceptance 7 meet in nine rr5b tests that commit a red fixture charter in `out`; their fixture's bytes were made a green charter, no assertion changed.
 
 ## Next act
-Build 2's item 2: R7b in `_refuse_records_here` through `core._where` and `commit.taken`.
+Build 2's item 3: the packet's R2, R6 and R7b as built.
 
 ## Exit
-Build 2 in flight: item 1 landed.
+Build 2 in flight: items 1 and 2 landed.
