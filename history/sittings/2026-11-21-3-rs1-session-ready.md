@@ -14,13 +14,15 @@
 - [x] The packet
 - [x] R1 the packets' lines: `tests/fixtures/g7/packet-lines.txt`, 161 lines (14 refused) from the pin's 135 packets, harvested once from a `git archive` of the pin; test 5 reads it, its count pinned
 - [x] R2 the overflow's shape: `tests/fixtures/land3/NICE-overflow.md` (head, `## From the open findings` with two made-up rows, a borrowed section after), line 9 reads it as `OVERFLOW_SHAPE`; `OVERFLOW` stays the temp repos' path
-- [ ] R3 the rehearsal: run 1 (`20261121-091800-3036`, exit 2) red on three tests run in the clone's tree (its records state `unset`): mended, the hook's two in one commit, s19 in one; one floor red, `git add` EINVAL in a temp repo, no record read; run 2 to come
+- [ ] R3 the rehearsal: run 1 (`20261121-091800-3036`, exit 2) red on three tests run in the clone's tree (its records state `unset`): mended, the hook's two in one commit, s19 in one; one floor red, `git add` EINVAL in a temp repo, no record read; run 2 (`20261121-092754-3040`, exit 2): every test green, hygiene red on the fixture's three lines naming old tool names (`renamed`); each held as a made-up `quince-` name, verdicts unchanged; run 3 to come
 - [ ] `make stamp`, `make check` through the gate
 
 ## Handover
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
+- decide, owner: the coordinator: R3's three reds ran in the clone's tree and read its records state (`unset` in the rehearsal), not a record file; ruled this row's and mended, since the move leaves them red.
+- decide, owner: the coordinator: the g7 fixture's lines 29, 93, 109 hold made-up names for two old tool names; verbatim needs an allow row `tests/fixtures/g7/packet-lines.txt: renamed`.
 
 ## Next act
-R3: the scratch clone, its records removed, `make check` through the gate.
+R3: the rehearsal's run 3 on the new head.
 
 ## Exit

@@ -26,7 +26,7 @@ sed -n 3p README.md | grep -c 'src="assets/icon.svg"'
 grep -c 'url(#' assets/icon.svg
 .venv/bin/python -c 'import xml.dom.minidom as m;print(m.parse("assets/icon.svg").getElementsByTagName("title")[0].firstChild.data)'
 .venv/bin/python -c 'import importlib.machinery as m,importlib.util as u;s=u.spec_from_loader("h",m.SourceFileLoader("h","scripts/hygiene"));h=u.module_from_spec(s);s.loader.exec_module(h);print(sum(len(p.findall(open(f).read())) for f in ("README.md","design/readme/source.md") for n,p in h.COMPILED if n not in ("person","sibling")))'
-grep -l -E '\.\./(claude-code|agent-relay)' README.md design/readme/source.md | wc -l
+grep -l -E '\.\./(claude-code|quince-relay)' README.md design/readme/source.md | wc -l
 grep -c -E '^Status: version .v2\.0\.0-alpha\.1., rendered .2026-[0-9]{2}-[0-9]{2}., .[0-9]+. tests' README.md
 git status --short | wc -l
 .venv/bin/python -m pytest -q tests/test_bounded.py -k 'stopped_guardian or nested_stop or nonfinite' 2>&1 | tail -1
@@ -90,7 +90,7 @@ test "$(shasum -a 256 scripts/hygiene | cut -c1-64)" = "$(grep -o '[0-9a-f]\{64\
 python3 -c 'import json;print([d["marketplace"] for d in json.load(open("plugin/.claude-plugin/plugin.json"))["dependencies"]])'
 cat README.md design/conventions.md | grep -c 'CLAUDE_SESSION_ID'
 grep -c '"provider"' design/conventions.md
-for w in '/session:read' 'charter open' 'resolved.json' 'CLAUDE_CODE_SESSION_ID' 'make check' '/session:status' 'claude-session report' 'PreToolUse' '^0.6'; do grep -q -- "$w" README.md || echo "$w"; done | wc -l
+for w in '/session:read' 'charter open' 'resolved.json' 'CLAUDE_CODE_SESSION_ID' 'make check' '/session:status' 'quince-session report' 'PreToolUse' '^0.6'; do grep -q -- "$w" README.md || echo "$w"; done | wc -l
 grep -c 'until S6' .hygiene-allow
 grep -c '/usr/bin/python3' install-wrapper.sh
 git status --short | wc -l
@@ -106,7 +106,7 @@ for f in hygiene doclint; do grep -qF "$(shasum -a 256 scripts/$f | cut -c1-64)"
 python3 -m claude_session checkpoint --help | grep -c 'add -A'
 python3 -m claude_session checkpoint --help | grep -c 'tracked'
 grep -c 'tracked' design/readme/source.md
-grep -o 'claude-session [a-z-]\+' RUNBOOK.md | sort -u | grep -c -E 'reset|statusline'
+grep -o 'quince-session [a-z-]\+' RUNBOOK.md | sort -u | grep -c -E 'reset|statusline'
 grep -c -i -E 'schedul|usage window|six named|fork' RUNBOOK.md
 python3 -m claude_session doctor --json 2>/dev/null | python3 -c 'import json,sys;c=[c for c in json.load(sys.stdin)["checks"] if c["name"]=="python"][0];print(c["ok"],"newest" in c["detail"])'
 grep -c '/usr/bin/python3' claude_session/doctor.py

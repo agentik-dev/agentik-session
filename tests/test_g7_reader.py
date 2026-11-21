@@ -135,6 +135,8 @@ def test_4_the_table_is_32_lines():
 
 # every acceptance shell line `unattended.acceptance` yielded over the packets at `2bfa312`,
 # one a line, in the packets' sorted order: the packets are records, which leave the clone
+# (rs1: lines 29, 93 and 109 name two tools' old names, which the hygiene scan refuses in a
+# live file; each is a made-up `quince-` name there, `unbounded`'s verdict unchanged)
 LINES = ROOT / "tests" / "fixtures" / "g7" / "packet-lines.txt"
 
 
