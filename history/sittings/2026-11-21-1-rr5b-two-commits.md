@@ -14,7 +14,7 @@
 - [x] The packet
 - [x] The failing tests, `tests/test_rr5b_*.py`: 17 red at the pin (`4d356cc`)
 - [x] R1 to R5: the split, `commit.precheck` for both before either, the half's line, no holder; fw5 and cli tests unchanged and green
-- [ ] R6, R7: `check FILE` in `broken`; the close line; `since_landing`
+- [x] R6, R7: `check FILE` in `broken` refused in the clone; the close's pin line stands (a test), with no holder it says nothing is committed; `since_landing` in the holder
 - [ ] R8: RUNBOOK and help; doclint, hygiene
 - [ ] `make stamp`, then `make check` through the gate
 
@@ -22,6 +22,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-R6 and R7: `check FILE` in `broken`, the close with no holder, `since_landing` in the holder.
+R8: RUNBOOK's and the help's sentence; the packet's choices; doclint, hygiene; then the stamp and the check through the gate.
 
 ## Exit

@@ -630,10 +630,10 @@ def cmd_charter(args) -> int:
     if args.action == "check":
         if not args.args:
             _die("charter check wants at least one file")
-        if args.dir:                         # rr5a F3: `broken` reads nothing in the clone
-            a = records.answer(os.getcwd())
-            if records.state(a) == "broken" and records.inside(a, args.dir, os.getcwd()):
-                _die(f"charter check: {records.line(a)}", 2)
+        a = records.answer(os.getcwd())     # rr5a F3, rr5b R6: `broken` reads nothing in
+        if records.state(a) == "broken" and any(  # the clone, a --dir or a FILE
+                records.inside(a, p, os.getcwd()) for p in [args.dir or None, *args.args] if p):
+            _die(f"charter check: {records.line(a)}", 2)
         bad = red = 0
         section = _rules_section(os.getcwd())
         for f in args.args:
@@ -703,8 +703,14 @@ def cmd_charter(args) -> int:
     print(path)
     # Packet S22: the exit line is written, so name what takes it (a commit) and, on a
     # RESPAWN close, the checkpoint that marks it; callers read the path, first.
-    if _charter_dirty(str(path)):
+    dirty = _charter_dirty(str(path))
+    if dirty:
         print(f"next: {_commit_line(str(path))}")
+    elif dirty is None:                      # rr5b R7: a record in no repository says so
+        a = records.answer(cwd)
+        if (records.state(a) == "out" and not a.get("holder") and a.get("records")
+                and _under(os.path.realpath(path), os.path.realpath(a["records"]))):
+            print("next: nothing is committed: the records folder is in no repository")
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             line = charter.next_act_line(fh.read())

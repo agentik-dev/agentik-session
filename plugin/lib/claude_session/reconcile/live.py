@@ -12,7 +12,7 @@ import collections
 import os
 import re
 
-from .. import charter
+from .. import charter, records
 from . import finding, sh
 
 NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-(\d+)(-[A-Za-z0-9._-]+)?\.md$")
@@ -83,6 +83,18 @@ def goal_unchanged(ctx) -> dict:
                    {"charters": len(rows), "distinct": len(count)}, files)
 
 
+def _sittings(hq: str) -> tuple:
+    """Packet rr5b R7: the repository and the path the charters' log reads: the hq and
+    `history/sittings` (the pin), or in `out` the holder and `<prefix>/history/sittings`.
+    `out` with no holder reads the hq, as the pin does."""
+    a = records.answer(hq)
+    if records.state(a) == "out" and a.get("holder") and a.get("prefix") is not None:
+        prefix = a["prefix"]
+        path = charter.DEFAULT_DIR if prefix in ("", ".") else prefix + "/" + charter.DEFAULT_DIR
+        return str(a["holder"]), path
+    return hq, charter.DEFAULT_DIR
+
+
 def since_landing(ctx) -> dict:
     roots, git = ctx["roots"], ctx["readers"].git
     hq = str(roots["hq"])
@@ -94,13 +106,14 @@ def since_landing(ctx) -> dict:
         if t is not None and (newest is None or t > newest):
             newest, where = t, repo
     since = newest if newest is not None else int(ctx["now"] - ctx["window"] * 86400)
+    at, sittings = _sittings(hq)
     cmd = ("git -C %s log --since=@%d --diff-filter=A --name-only --format= -- %s"
-           " | grep -E '/%s' | sort -u | wc -l" % (sh(hq), since, charter.DEFAULT_DIR, NAME_ERE))
+           " | grep -E '/%s' | sort -u | wc -l" % (sh(at), since, sittings, NAME_ERE))
     if where is not None:
         cmd = ("git -C %s log main --merges --first-parent -1 --format='landing %%ct %%h'; "
                % sh(where)) + cmd
-    added = git(hq, "log", "--since=@%d" % since, "--diff-filter=A", "--name-only", "--format=",
-                "--", charter.DEFAULT_DIR)
+    added = git(at, "log", "--since=@%d" % since, "--diff-filter=A", "--name-only", "--format=",
+                "--", sittings)
     commits = git(hq, "log", "--since=@%d" % since, "--format=%h")
     if added is None or commits is None:
         value, opened, n_commits = None, None, None
