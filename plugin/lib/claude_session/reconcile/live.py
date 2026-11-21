@@ -22,11 +22,18 @@ SPACE = re.compile(rb"[ \t\n\v\f\r]+")       # [[:space:]] in the C locale
 NEWEST = 20
 
 
+def _folder(hq) -> str:
+    """Packet rr5c R3: the hq's charter folder, `<records>/history/sittings` in `out`, else
+    the pin's `<hq>/history/sittings`."""
+    return (records.folder(records.answer(str(hq)), charter.DEFAULT_DIR)
+            or os.path.join(str(hq), charter.DEFAULT_DIR))
+
+
 def charters(hq) -> list:
     """The hq's charter paths, oldest first by (date, n, name) as `ls | grep | sort` lists
     them (a folder of that name included: its `grep` reads nothing); OSError when the folder
     is unreadable."""
-    d = os.path.join(str(hq), charter.DEFAULT_DIR)
+    d = _folder(hq)
     found = []
     for name in os.listdir(d):
         m = NAME.match(name)
@@ -65,7 +72,7 @@ def goal_unchanged(ctx) -> dict:
            " | xargs grep -a -h -m1 '^| *goal *|' | sed -E 's/^[|] *goal *[|]//; s/[|,].*//;"
            " s/[0-9]//g; s/[[:space:]]+/ /g; s/^ //; s/ $//'"
            " | sort | uniq -c | sort -rn | head -1"
-           % (sh(os.path.join(hq, charter.DEFAULT_DIR)), NAME_ERE, NEWEST))
+           % (sh(_folder(hq)), NAME_ERE, NEWEST))
     try:
         rows = {}
         for p in charters(hq)[-NEWEST:]:

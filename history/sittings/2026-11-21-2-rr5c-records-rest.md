@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] The packet
 - [x] R2 lines: `send` and `valid` through `_records_of`; tests/test_rr5c_lines.py (3 of 5 red at the pin)
-- [ ] R3 reconcile
+- [x] R3 reconcile: the record under `<records>/<record>`, `unset`/`broken` refused; `live` through `records.folder`; idle unchanged (its segment test holds a holder's path); tests/test_rr5c_reconcile.py (5 of 8 red at the pin)
 - [ ] R4 stamp, R5 doclint
 - [ ] R6 lead 6
 - [ ] R7 the loop, R7b
@@ -25,6 +25,6 @@
 - The repo has no `CLAUDE.md` at the pin; the brief names one.
 
 ## Next act
-R3: reconcile's record and `live` through the resolver, tests/test_rr5c_reconcile.py.
+R4 and R5: `scripts/stamp` in a declaring tree, doclint over a subfolder; tests/test_rr5c_scripts.py.
 
 ## Exit

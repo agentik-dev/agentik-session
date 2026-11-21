@@ -99,7 +99,7 @@ def _kind(v) -> str:
     return kind(v)
 
 
-def check(cwd, env, value=None) -> dict:
+def check(cwd, env, value=None, base=None) -> dict:
     """The key with its defaults, plus `tree_doc` (the tree file's JSON). `value` given is
     checked instead of the resolved key. Raises ConfigError, one line per bad key."""
     from . import THRESHOLDS
@@ -186,9 +186,10 @@ def check(cwd, env, value=None) -> dict:
         bad.append(f"{_PATH}.read.every is {rd['every']} hours; it is at least read.floor "
                    f"({rd['floor']})")
     out["read"] = {k: rd[k] for k in READ_KEYS}
-    if not _inside(cwd, out["record"]):
-        rec = out["record"]                                  # ss4 R2: as `tree`
-        bad.append(f"{_PATH}.record must be a relative folder inside the repo, not "
+    if not _inside(cwd if base is None else base, out["record"]):   # rr5c R3: `base`, the
+        rec = out["record"]                                  # records folder in `out`
+        where = "the repo" if base is None else f"the records folder, {base}"
+        bad.append(f"{_PATH}.record must be a relative folder inside {where}, not "
                    + (repr(rec) if isinstance(rec, str) else _kind(rec)))
     if bad:
         raise ConfigError("\n".join(bad))
@@ -262,8 +263,14 @@ def run(cwd, env, now: float, force: bool = False, warn=None) -> tuple:
     folder that cannot be written, and OSError when the write fails. `warn` takes the one
     line that names the records ahead of now."""
     cwd = Path(cwd)
-    cfg = check(cwd, env)
-    folder = cwd / cfg["record"]
+    from .. import records                  # rr5c R3: the record lives where the records do
+    a = records.answer(str(cwd))
+    s = records.state(a)
+    if s in ("unset", "broken"):
+        raise ConfigError(f"{_PATH}.record: {records.line(a)}; nothing written")
+    base = Path(a["records"]) if s == "out" and a.get("records") else None
+    cfg = check(cwd, env, base=base)
+    folder = (cwd if base is None else base) / cfg["record"]
     last, _, ahead = last_run(folder, now)
     if ahead and warn is not None:
         warn(f"reconcile: left out of the cadence, stamped after now: "
