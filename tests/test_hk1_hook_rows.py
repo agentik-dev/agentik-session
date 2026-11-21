@@ -153,6 +153,14 @@ def test_hk1_f2_a_term_as_the_hook_ends_leaves_the_finished_row(box):
     assert [(r["event"], r["exit"]) for r in _rows(box)] == [("PreToolUse", 0)]
 
 
+# Review 1's F3: a start that is not the 19 digits `record_hook` takes arms nothing, so the call
+# runs as at the pin (no deadline, no row): the shim exports an empty one when `date` fails.
+@pytest.mark.parametrize("t0", ["", "17952401694580840N", "123"])
+def test_hk1_f3_a_malformed_start_arms_nothing(box, t0):
+    p = _spawn(box, _tool(box, "time.sleep(0.5); print('x'); return 0", deadline=0.1), t0=t0)
+    out, err = p.communicate(timeout=20)
+    assert (p.returncode, out, _rows(box)) == (0, "x\n", []), err
+
 
 def test_hk1_a4_the_constant_is_each_wall_less_half_a_second():
     walls = {e: h["hooks"][0]["timeout"]

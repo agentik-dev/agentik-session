@@ -60,7 +60,10 @@ def cmd_hook(args) -> int:
     t0 = harness.take_t0(os.environ)
     code = 1                        # an uncaught exception's exit
     done = []
-    armed = _arm_cut(t0, args.event, done) if t0 is not None else None
+    # Review 1's F3: armed only for the start record_hook takes (19 digits); an empty or
+    # malformed one (the shim exports "" when `date` fails) arms nothing, as at the pin.
+    measured = isinstance(t0, str) and harness._T0.fullmatch(t0) is not None
+    armed = _arm_cut(t0, args.event, done) if measured else None
     try:
         code = hooks.dispatch(args.event)
         return code
