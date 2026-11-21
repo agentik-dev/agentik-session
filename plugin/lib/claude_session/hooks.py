@@ -1475,11 +1475,12 @@ def _charter_file(cwd, sdir: Path, d: str) -> list[str]:
 
 
 def _checkpoint_out(m: meter.Meter, charter: str | None,
-                    files: list[str] | None = None) -> dict:
+                    files: list[str] | None = None, room: str | None = None) -> dict:
     """The pin's line off a launcher (`files` None); under one (S33), a line per spelling
     of the charter file in `files`, the first that fits MAX_OUT. `charter` None (a profile
     under the waiver, packet st1 R5 and C2): PLAIN_TAIL alone, on either road, with no
-    wind-down tail."""
+    wind-down tail. `room` (packet rc3 R2, under a launcher only): the first spelling whose
+    line leaves room for `room` after it, as `_after` puts it; where none does, as above."""
     c = m.ceilings
     head = (f"CHECKPOINT: {m.pct_context}% context ({m.context}/{c['context']}), "
             f"{m.pct_turns}% turns ({m.turns}/{c['turns']}); ")
@@ -1487,12 +1488,18 @@ def _checkpoint_out(m: meter.Meter, charter: str | None,
              [f"charter {f}; " + RESPAWN_TAIL.format(f=f) for f in files] if files is not None
              else [f"charter {path}; bring the charter current, commit, then exit"
                    for path in (charter, "?")])
+    outs = []
     for tail in tails:
         line = head + tail + ("" if charter is None else WIND_DOWN.format(pct=m.used_pct))
         if m.used_pct >= 100.0:
             line += "\n" + (PLAIN_EXIT if charter is None else EXIT_RULE)     # st1 D3
-        out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-                                      "additionalContext": line}}
+        outs.append({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                            "additionalContext": line}})
+    if room and charter is not None and files is not None:
+        for out in outs:
+            if len(json.dumps(_after(out, room))) <= MAX_OUT:
+                return out
+    for out in outs:
         if len(json.dumps(out)) <= MAX_OUT:
             return out
     return {}
@@ -1530,6 +1537,8 @@ UNCONFIRMED = ("RESPAWN unconfirmed: no foreground Bash call of the main thread 
                "sitting runs `agentik session checkpoint --respawn --charter {f}` again in a "
                "foreground call of its own, then ends the turn.")
 UNSAFE_CHARTER = "<the charter>"
+# Packet rc3 R1: the last of pl2 R7's three forms at PostToolUse, where neither line fits.
+UNCONFIRMED_SHORT = "RESPAWN unconfirmed: run the close again in the foreground."
 
 
 def _respawn_close(cmd) -> bool:
@@ -1791,7 +1800,9 @@ def _post_tool_use(payload: dict, env) -> dict:
     if sdir is not None:
         _confirm(payload, sdir)
         _job_open(payload, sdir)                         # rc2 R2: never raises
-    return _with_respawn(_post_meter(payload, env, sdir), _ran_unconfirmed(payload, env, sdir))
+    line = _ran_unconfirmed(payload, env, sdir)          # rc3 R2: read first, it only reads
+    return _with_respawn(_post_meter(payload, env, sdir,
+                                     room=UNCONFIRMED_SHORT if line else None), line)
 
 
 def _ran_unconfirmed(payload: dict, env, sdir: Path | None) -> str | None:
@@ -1813,20 +1824,30 @@ def _ran_unconfirmed(payload: dict, env, sdir: Path | None) -> str | None:
         return None
 
 
+def _after(out: dict, line: str) -> dict:
+    """The handler's context, then `line` (pl2 R7's pair, as `_with_respawn` says it)."""
+    ctx = ((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
+    return {"hookSpecificOutput": {**((out or {}).get("hookSpecificOutput") or {}),
+                                   "hookEventName": "PostToolUse",
+                                   "additionalContext": f"{ctx}\n\n{line}" if ctx else line}}
+
+
 def _with_respawn(out: dict, line: str | None) -> dict:
-    """The handler's context, then the respawn line (pl2 R7), the pair within MAX_OUT; the
-    line dropped where it does not fit."""
+    """The handler's context, then the respawn line (pl2 R7) in the first of three forms
+    whose pair fits MAX_OUT (packet rc3 R1): the line as given, the line with UNSAFE_CHARTER
+    for the path, UNCONFIRMED_SHORT; where none fits, the handler's output."""
     if not line:
         return out
-    ctx = ((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
-    new = {"hookSpecificOutput": {**((out or {}).get("hookSpecificOutput") or {}),
-                                  "hookEventName": "PostToolUse",
-                                  "additionalContext": f"{ctx}\n\n{line}" if ctx else line}}
-    return new if len(json.dumps(new)) <= MAX_OUT else out
+    for form in (line, UNCONFIRMED.format(f=UNSAFE_CHARTER), UNCONFIRMED_SHORT):
+        new = _after(out, form)
+        if len(json.dumps(new)) <= MAX_OUT:
+            return new
+    return out
 
 
-def _post_meter(payload: dict, env, sdir: Path | None) -> dict:
-    """The main thread's meter at PostToolUse (§2.2), and the CHECKPOINT line by D13."""
+def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) -> dict:
+    """The main thread's meter at PostToolUse (§2.2), and the CHECKPOINT line by D13; under a
+    launcher its line leaves `room` where a spelling of the charter can (packet rc3 R2)."""
     tp = payload.get("transcript_path")
     if sdir is None or not tp:
         return {}
@@ -1853,7 +1874,8 @@ def _post_meter(payload: dict, env, sdir: Path | None) -> dict:
         return _checkpoint_out(m, None)
     chained = CHAIN_RE.match(str(env.get(CHAIN_VAR) or ""))       # F4: cli.py's check
     d = _charter(resolved)
-    return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None)
+    return _checkpoint_out(m, d, _charter_file(payload.get("cwd"), sdir, d) if chained else None,
+                           room=room)
 
 
 def post_tool_use_failure(payload: dict, env=None) -> dict:
