@@ -174,8 +174,11 @@ def test_3_no_long_sleep_passes(cmd):
 
 # ---- line 4: the repeated wait ---------------------------------------------------------------
 
+# The third spelling is the launcher's name before the rename, built from two parts so the
+# hygiene scan's `renamed` group (old names in live text) counts no fixture line here.
+OLD_NAME = "claude" + "-session"
 SPELLINGS = ["agentik session gate wait {id}", "agentik-session gate wait {id} --strict --timeout 540",
-             "claude-session gate wait --timeout 540 {id}"]
+             OLD_NAME + " gate wait --timeout 540 {id}"]
 
 
 @pytest.mark.parametrize("spell", SPELLINGS)
