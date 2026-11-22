@@ -119,6 +119,13 @@ def _hm(t: datetime, tz) -> str:
     return (t.astimezone(tz) if tz is not None else t.astimezone()).strftime("%H:%M")
 
 
+def _pts(x: float) -> str:
+    """Points to one decimal; a room that rounds to zero reads `0.0`, never `-0.0` (brief 2
+    R3). Only the shown number is rounded: the verdict reads the unrounded room."""
+    s = f"{x:.1f}"
+    return "0.0" if s == "-0.0" else s
+
+
 def _whole(m: float) -> int:
     return max(1, int(m + 0.5))
 
@@ -136,8 +143,8 @@ def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, e
     """R7: the one line a launch is told, in the verdict's form. `last` is `latest`'s: None
     with none out, and with every one out overdue (brief 2 R2), where the bound is now plus
     `alone` and a held launch is still told to start a shorter helper."""
-    this, cost = f"this {plain(k)}", f"{back:.1f}"
-    head = f"launch: room {rm:.1f} to the line, {_out(n_out)}; {this} (about {_whole(median)} min, {cost}) fits"
+    this, cost = f"this {plain(k)}", _pts(back)
+    head = f"launch: room {_pts(rm)} to the line, {_out(n_out)}; {this} (about {_whole(median)} min, {cost}) fits"
     if word == "wide":
         return head + ", wide"
     bound = f"the {alone:g} min a narrow launch may take with " + (
@@ -154,15 +161,15 @@ def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, e
         gap = _whole((end - now).total_seconds() / 60.0 - alone)
         return (f"launch: narrow: {this} would end about {_hm(end, tz)}, {gap} min past "
                 f"{bound}; {SHORTER if n_out else RESPAWN}")
-    return (f"launch: no room: {rm:.1f} to the line, {_out(n_out)}, and {this} takes {cost}; "
+    return (f"launch: no room: {_pts(rm)} to the line, {_out(n_out)}, and {this} takes {cost}; "
             + (NEXT if n_out else RESPAWN))
 
 
 def status_line(rm: float, out: list, tz=None) -> str:
     """R10: the room, and each helper out ((kind, end) pairs) with its expected end."""
     if not out:
-        return f"launch: room {rm:.1f} to the line, none out"
-    return (f"launch: room {rm:.1f} to the line, {len(out)} out: "
+        return f"launch: room {_pts(rm)} to the line, none out"
+    return (f"launch: room {_pts(rm)} to the line, {len(out)} out: "
             + ", ".join(f"a {plain(k)} about {_hm(e, tz)}" for k, e in out))
 
 

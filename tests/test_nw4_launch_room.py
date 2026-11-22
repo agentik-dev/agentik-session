@@ -478,6 +478,30 @@ def test_r2b2_a_second_helper_not_overdue_keeps_the_first_build_s_verdicts(postu
         assert denied(_pre(_call(*new))) == (held and posture == "deny")
 
 
+# ---- brief 2, R3: no negative zero ---------------------------------------------------------
+
+def test_r3b2_the_pure_forms_print_no_negative_zero():
+    rm = room.room(80, 80.04, [])
+    assert rm < 0 and room.verdict(rm, 2.5, NOW + M, [], NOW, 10, 15) == "none"
+    said = room.line("none", rm, 0, "review", 9.5, 2.5, NOW + M, None, NOW, 15, timezone.utc)
+    assert said.startswith("launch: no room: 0.0 to the line, none out") and "-0.0" not in said
+    assert room.status_line(rm, []) == "launch: room 0.0 to the line, none out"
+
+
+@pytest.mark.parametrize("posture", ["signal", "ask", "deny"])
+def test_r3b2_a_meter_of_80_04_prints_no_negative_zero_in_the_hook_or_status(posture, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    _session(posture, 80.04)
+    _ledger([])
+    told = room.told(_call(*REVIEW), os.environ, posture)
+    assert told[1] and told[0].startswith("launch: no room: 0.0 to the line, none out")
+    out = json.dumps(_pre(_call(*REVIEW)))
+    assert "-0.0" not in out and "launch: no room: 0.0 to the line" in out
+    rc, said = _status()
+    assert rc == 0 and "-0.0" not in said
+    assert said.splitlines()[-1] == "launch: room 0.0 to the line, none out"
+
+
 # ---- R12: the keys -------------------------------------------------------------------------
 
 def _resolved(tmp_path, profile=None, repo_text=None):
