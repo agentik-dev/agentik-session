@@ -18,7 +18,8 @@ from . import instructionguard, resolver, shellreader, store
 HEAD = "agentik-session: refused by"
 PRODUCT = "product"                       # armed in every session (question 53: on everywhere)
 PLUGIN = "entry 11 of agentik-session's DECISIONS.md, in every session"   # g10 R7
-ISSUE_BY = "a rule of the agentik-session plugin, in every session"     # rp7 R7: no entry holds it
+# rp7 R7, in5s R5: the by of the issue and reply rules, which no entry holds
+PLUGIN_RULE = "a rule of the agentik-session plugin, in every session"
 STRICT, LOOSE = instructionguard.STRICT, instructionguard.LOOSE
 ARM_BYTES = 262144                        # R7: the first bytes of each file read for a title
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
@@ -28,17 +29,22 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 
 def looks(command: str, helper: bool = False) -> bool:
     """R5: whether a line may hold a rule's command: `git` or `rm` as a substring, case-blind
-    (rp7 R6: or `issue` and `send` both),
+    (rp7 R6: or `issue` and `send` both; in5s R6: or `reply`, or `inbox` and `answer` both),
     once each backslash-newline is taken out; for a helper's line (g10 R5) `gate` too, and each
     word read again with its quotes and backslashes taken out (review 1 fix 3). A line it passes
     is never read."""
     t = command.replace("\\\n", "").lower()
-    if "git" in t or "rm" in t or ("issue" in t and "send" in t):     # rp7 R6: in every session
+    if "git" in t or "rm" in t or _product_words(t):                  # rp7, in5s R6: every session
         return True
     if not helper:
         return False
     t = t.replace("'", "").replace('"', "").replace("\\", "")
-    return "git" in t or "rm" in t or "gate" in t or ("issue" in t and "send" in t)
+    return "git" in t or "rm" in t or "gate" in t or _product_words(t)
+
+
+def _product_words(t: str) -> bool:
+    """rp7 R6, in5s R6: the narrowest words the issue and reply rules' lines each hold."""
+    return ("issue" in t and "send" in t) or "reply" in t or ("inbox" in t and "answer" in t)
 
 
 # ---- R6, R7: the folder, the checkout, the arming ---------------------------------------------
@@ -833,8 +839,55 @@ def _issue(c, k, ctx, cell):
 
 
 def _never(text: str) -> bool:
-    """rp7 R8: the issue rule's loose judge: an unread part passes (design/20 item 16)."""
+    """rp7 R8, in5s R7: the issue and reply rules' loose judge: an unread part passes
+    (design/20 item 16)."""
     return False
+
+
+# ---- in5s: the reply rule -----------------------------------------------------------------------
+
+_DECISIONS = "agentik-decisions"
+
+
+def _ledger(w: str) -> bool:
+    """in5s R3: `--ledger`, or an abbreviation argparse takes, with its operand the next word."""
+    return len(w) > 2 and "=" not in w and "--ledger".startswith(w)
+
+
+def _first_verb(words: list, takes=None):
+    """in5s R1: the first word that does not open with `-`, past each operand `takes` names."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if not w.startswith("-"):
+            return w
+        i += 2 if takes is not None and takes(w) else 1
+    return None
+
+
+def _reply(c, k, ctx, cell):
+    """in5s R1 to R3: the door, past its leading flags, then `decisions`, or the decisions tool's
+    own launcher, then `reply`; or the door or the suite's launcher, then `inbox`, then `answer`:
+    the verb the next word that does not open with `-`, past `--ledger`'s operand for decisions.
+    `-h` or `--help` anywhere after the tool's word passes. A word the shell expands is no verb's
+    (g10's door, its veil off)."""
+    got = _launched(c)
+    if got is None:
+        return None
+    base, rest = got
+    if base == "agentik":
+        rest = rest[_past_door(rest):]
+    elif base == _DECISIONS:
+        rest = ["decisions", *rest]
+    elif base != _SUITE:
+        return None
+    if not rest or _HELP.intersection(rest[1:]):
+        return None
+    if rest[0] == "decisions" and base != _SUITE:
+        hit = _first_verb(rest[1:], _ledger) == "reply"
+    else:
+        hit = rest[0] == "inbox" and _first_verb(rest[1:]) == "answer"
+    return (None, (PRODUCT,)) if hit else None
 
 
 # ---- R13: unread text ---------------------------------------------------------------------------
@@ -894,6 +947,7 @@ RULES = (
     ("sweep", "Commits", _sweep, _loosely(_LOOSE_SWEEP)),
     ("push", "Pushes", _push, _loose_push),                   # g10: a helper's call alone (R1)
     ("issue", PRODUCT, _issue, _never),                       # rp7: every call, no cwd needed
+    ("reply", PRODUCT, _reply, _never),                       # in5s: every call, no cwd needed
 )
 _GIT_RULES = frozenset({"init", "identity", "sweep", "push"})
 _HELPER_RULES = frozenset({"push"})
@@ -922,9 +976,15 @@ def _reason(name: str, cell: str, top, got, how: str) -> str:
                 f"{top}. Pass it per command: `git -c user.name=<name> -c user.email=<address> "
                 "commit ...`.")
     elif name == "issue":                                   # rp7 R4, R7: no entry holds it
-        text = (f"{HEAD} the issue rule, {ISSUE_BY}: `issue send` files a public issue and wants "
-                "a person's typed word on a terminal. Hand the user the line to run in a terminal "
-                "of their own.")
+        text = (f"{HEAD} the issue rule, {PLUGIN_RULE}: `issue send` files a public issue and "
+                "wants a person's typed word on a terminal. Hand the user the line to run in a "
+                "terminal of their own.")
+    elif name == "reply":                                   # in5s R4, R5: no entry holds it
+        text = (f"{HEAD} the reply rule, {PLUGIN_RULE}: `reply` and `inbox answer` type the "
+                "owner's answer onto a question's answer line and are the owner's alone, at a "
+                "terminal. Read the line with `agentik decisions questions` and enter what he "
+                "typed with `agentik decisions answer N`; to have him answer, hand him the line to "
+                "run.")
     elif name == "push":
         text = (f"{HEAD} the push rule, {by}, arms it for the checkout {top}: a helper never "
                 "pushes. Hand back the branch and its head; the sitting that started you pushes.")

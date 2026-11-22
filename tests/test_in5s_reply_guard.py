@@ -1,4 +1,4 @@
-"""in5s-reply-guard: a model's `decisions reply` and `inbox answer` are refused in every session.
+"""in5s-reply-guard: a model's `agentik decisions reply` and `inbox answer`, refused (R1 to R8).
 
 Every case is a payload through `hooks.pre_tool_use` under a temp home H: a main thread's call and
 a helper's alike, with no rule's title armed anywhere. P is `H/plain` (no checkout), O `H/open`
@@ -24,8 +24,8 @@ SID, TUID = "s1", "toolu_1"
 HEAD = "agentik-session: refused by"
 HELPER = {"agent_id": "agent-1"}
 REASON = (f"{HEAD} the reply rule, a rule of the agentik-session plugin, in every session: "
-          "`decisions reply` and `inbox answer` type the owner's answer onto a question's answer "
-          "line and are the owner's alone, at a terminal. Read the line with `agentik decisions "
+          "`reply` and `inbox answer` type the owner's answer onto a question's answer line and "
+          "are the owner's alone, at a terminal. Read the line with `agentik decisions "
           "questions` and enter what he typed with `agentik decisions answer N`; to have him "
           "answer, hand him the line to run.")
 ISSUE = (f"{HEAD} the issue rule, a rule of the agentik-session plugin, in every session: "
@@ -192,8 +192,9 @@ def test_r3_an_unknown_flag_takes_no_operand(box):
 # ---- R6: the first look -------------------------------------------------------------------------
 
 def test_r6_the_first_look(box):
-    for line in ("agentik decisions reply", "AGENTIK DECISIONS REPLY", "agentik decisions \\\nreply",
-                 "agentik inbox answer quince 3", "agentik-decisions reply 3"):
+    for line in ("agentik decisions reply", "AGENTIK DECISIONS REPLY",
+                 "agentik decisions \\\nreply", "agentik inbox answer quince 3",
+                 "agentik-decisions reply 3"):
         assert lineguard.looks(line) is True and lineguard.looks(line, helper=True) is True
     for line in ("agentik decisions questions", "agentik inbox quince", "agentik inbox",
                  "agentik decisions answer 3", "ls"):
