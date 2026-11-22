@@ -408,7 +408,8 @@ def test_the_table(box):
     assert [(r[0], r[1]) for r in lineguard.RULES] == [
         ("rm", "product"), ("init", "product"), ("identity", "product"), ("sweep", "Commits"),
         ("push", "Pushes"),                                     # g10 R1: the fifth rule
-        ("issue", "product")]                                   # rp7 R1: the sixth rule
+        ("issue", "product"),                                   # rp7 R1: the sixth rule
+        ("reply", "product")]                                   # in5s R1: the seventh rule
 
 
 # ---- the fix of review 1 -----------------------------------------------------------------------
