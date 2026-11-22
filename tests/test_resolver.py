@@ -419,7 +419,10 @@ def test_gate_joins_the_sections_from_the_repo_layers(world):
 def test_gate_config_reads_the_user_layer_alone(world):
     env, _, put = world
     # nw5 R9: the kept check's three keys, their defaults, in the user layer alone.
-    check = {"check_drop": ["DECISIONS_BASE"], "check_links": [".venv", ".venv-floor"], "check_age": 21600}
+    # nw5 brief 2 R2: check_drop's default is the names that differ by session or by process.
+    drop = ["DECISIONS_BASE", "CLAUDE_CODE_*", "CLAUDE_SESSION_*", "CLAUDE_PID", "CLAUDE_EFFORT",
+            "CLAUDECODE", "AI_AGENT", "*_SESSION_ID", "SSH_AUTH_SOCK", "OLDPWD", "SHLVL", "_"]
+    check = {"check_drop": drop, "check_links": [".venv", ".venv-floor"], "check_age": 21600}
     assert resolver.gate_config(env) == {"ntfy_url": None, "ntfy_topic": None, "wall": 5400,
                                          **check}
     put("repo", "gate:\n  ntfy_url: https://repo.invalid\n  ntfy_topic: r\n  check_age: 5\n")

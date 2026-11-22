@@ -23,9 +23,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "plugin" / "lib" / "agentik-session"
 EIGHT = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS",
          "MAKEFILES", "MAKELEVEL")
-DROP = resolver.GATE_DEFAULTS["check_drop"][0]     # the one name check_drop holds by default
+DROP = resolver.GATE_DEFAULTS["check_drop"][0]     # the one name check_drop held at first
+# Brief 2, R2: the names that differ by session or by process, patterns among them.
+DEFAULT_DROP = [DROP, "CLAUDE_CODE_*", "CLAUDE_SESSION_*", "CLAUDE_PID", "CLAUDE_EFFORT",
+                "CLAUDECODE", "AI_AGENT", "*_SESSION_ID", "SSH_AUTH_SOCK", "OLDPWD", "SHLVL", "_"]
 KEYS = {"id", "key", "started", "ended", "tree", "head", "main", "worktree", "links", "exit",
-        "cut", "clean"}
+        "cut", "clean", "env"}
 
 
 def run(*argv):
@@ -106,8 +109,9 @@ class Box:
         argv = ["gate", "land", *flags, str(self.path), "work", sha or self.sha,
                 str(self.message)]
         if "--dry-run" in flags:
+            # os.environ, not the C environ, which readline gives LINES and COLUMNS
             p = subprocess.run([sys.executable, str(RUNNER), *argv], capture_output=True,
-                               text=True, cwd=str(self.tmp))
+                               text=True, cwd=str(self.tmp), env=dict(os.environ))
             return p.returncode, p.stdout, p.stderr
         rc, out, err = run(*argv)
         words = err.split()
@@ -146,6 +150,13 @@ def box(tmp_path, monkeypatch):
 
 def ok(box, gid=None):
     return "land scratch: ok %s, main readied%s\n" % (box.sha, gid and ", check " + gid or "")
+
+
+def as_check_job(root, gid, tree):
+    """The result a `--check` job of `tree` leaves, for a record made outside a runner: a
+    record is taken only under its own job's command (brief 2, R5)."""
+    gate.result_path(root, gid).write_text(json.dumps(
+        {"id": gid, "command": [*gate.self_argv(), *gate.CHECK_JOB, str(tree)], "exit": 0}))
 
 
 def ran_own(err):
@@ -277,6 +288,7 @@ def test_4_and_9_the_readied_form_takes_a_check_of_the_readied_head(tmp_path):
     assert p.returncode == 0, p.stderr
     rec = json.loads((gate.entry_dir(root, b) / "check.json").read_text())
     assert (rec["head"], rec["exit"], rec["clean"]) == (head, 0, True)
+    as_check_job(root, b, c.tree)
     before = c.ran().count("check")
     rc, out, err = c.land(sha, env={gate.JOB_MARK: d})
     version = json.loads(c.show(head, "plugin/.claude-plugin/plugin.json"))["version"]
@@ -324,8 +336,13 @@ def test_5_a_sibling_worktrees_record(box):
     twin = box.path / ".claude" / "worktrees" / "twin"
     git(box.path, "worktree", "add", "-q", "-b", "twin", str(twin), box.sha)
     box.check(twin)
+    # brief 2, R5: a check job of another worktree is no job of this one: its record is skipped
+    assert land.kept_check(box.root, str(box.path), str(box.tree), "work", box.sha, box.sha,
+                           box.main()) == (None, "no record of this tree")
+    gid = box.check()
+    box.rewrite(gid, worktree=os.path.realpath(twin))
     rc, out, err = box.land()
-    assert (rc, out, box.count()) == (0, ok(box), 2) and "ran in another worktree" in err
+    assert (rc, out, box.count()) == (0, ok(box), 3) and "ran in another worktree" in err
 
 
 def test_5_main_moved_under_the_same_head_and_tree(box):
@@ -440,6 +457,7 @@ def test_7_the_dry_run_of_a_stamp_repo(tmp_path):
     subprocess.run([sys.executable, str(RUNNER), "gate", "run", "--check", "--in-job",
                     str(c.tree)], env={**c.env, gate.JOB_MARK: gid}, check=True,
                    capture_output=True, cwd=str(tmp_path))
+    as_check_job(root, gid, c.tree)
     rc, out, err = c.land(c.head(), extra=["--dry-run"], in_job=False,
                           env={gate.JOB_MARK: ""})
     assert rc == 0 and out.splitlines()[-2] == (
@@ -508,7 +526,7 @@ def test_r9_the_three_keys_and_a_mistyped_one(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     cfg = resolver.gate_config(os.environ)
     assert (cfg["check_drop"], cfg["check_links"], cfg["check_age"]) == (
-        [DROP], [".venv", ".venv-floor"], 21600)
+        DEFAULT_DROP, [".venv", ".venv-floor"], 21600)
     f = tmp_path / ".claude" / "agentik" / "profiles.yaml"
     f.parent.mkdir(parents=True)
     f.write_text("gate:\n  check_drop: [A, B]\n  check_links: 3\n  check_age: 60\n")
@@ -517,3 +535,196 @@ def test_r9_the_three_keys_and_a_mistyped_one(tmp_path, monkeypatch):
     assert (cfg["check_drop"], cfg["check_links"], cfg["check_age"]) == (
         ["A", "B"], [".venv", ".venv-floor"], 60)
     assert said == ["gate: check_links is no list of names; the default stands"]
+
+
+# ---- brief 2, the fix of review 1 ---------------------------------------------------------
+
+SEEN = ("check:\n\t@echo run >> {o}/count\n\t@env > {o}/seen.$$CLAUDE_SESSION_GATE_JOB\n"
+        "\t@{body}\nhygiene:\n\t@true\nhygiene-range:\n\t@true\n")
+
+
+def remake(box, body="true", extra=None):
+    """Commit a Makefile whose check dumps its environment by job id (and files); the box's
+    sha follows."""
+    (box.tree / "Makefile").write_text(SEEN.format(o=box.out, body=body))
+    for rel, text in (extra or {}).items():
+        (box.tree / rel).write_text(text)
+    git(box.tree, "add", "Makefile", *(extra or {}))
+    git(box.tree, "commit", "-qm", "work: makefile")
+    box.sha = git(box.tree, "rev-parse", "HEAD")
+
+
+def seen(box, gid):
+    """The names (and their values) the check of job `gid` saw."""
+    text = (box.out / ("seen." + gid)).read_text()
+    return dict(ln.split("=", 1) for ln in text.splitlines() if "=" in ln)
+
+
+def digest(value):
+    import hashlib
+    return hashlib.sha256(value.encode("utf-8", "surrogateescape")).hexdigest()[:16]
+
+
+def concrete(pattern):
+    return pattern.replace("*", "NW5X")
+
+
+# R2 (F1): what reaches the check is recorded and compared.
+
+@pytest.mark.parametrize("case", ["set at the queue", "set at the landing", "changed"])
+def test_b2_r2_a_name_that_differs_runs_the_landings_own(box, monkeypatch, case):
+    remake(box)
+    at_queue, at_land = {"set at the queue": ("1", None), "set at the landing": (None, "1"),
+                         "changed": ("1", "2")}[case]
+    monkeypatch.delenv("NW5_KNOB", raising=False)
+    if at_queue:
+        monkeypatch.setenv("NW5_KNOB", at_queue)
+    gid = box.check()
+    assert box.record(gid)["exit"] == 0
+    monkeypatch.setenv("NW5_KNOB", at_land) if at_land else monkeypatch.delenv("NW5_KNOB")
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 2), err
+    assert "land-step: check: runs its own (environment: NW5_KNOB differs)" in err
+
+
+@pytest.mark.parametrize("pattern", DEFAULT_DROP, ids=lambda p: p.replace("*", "x") or "x")
+def test_b2_r2_a_name_the_default_drops_takes_the_record(box, monkeypatch, pattern):
+    remake(box)
+    name = concrete(pattern)
+    monkeypatch.setenv(name, "one")
+    gid = box.check()
+    # make and sh set some of these names afresh (SHLVL, _): the value is never ours
+    assert seen(box, gid).get(name) != "one" and name not in box.record(gid)["env"]
+    monkeypatch.setenv(name, "two")
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box, gid), 1), err
+
+
+def test_b2_r2_the_landings_own_run_sees_none_of_the_default(box, monkeypatch):
+    remake(box)
+    for pattern in DEFAULT_DROP:
+        monkeypatch.setenv(concrete(pattern), "nw5-ours")
+    rc, out, err = box.land("--fresh")
+    assert (rc, out, box.count()) == (0, ok(box), 1), err
+    (lid, rec), = land.check_records(box.root)
+    env = seen(box, lid)
+    assert [p for p in DEFAULT_DROP if env.get(concrete(p)) == "nw5-ours"] == []
+    assert not {concrete(p) for p in DEFAULT_DROP} & set(rec["env"])
+    # the job's mark is kept and never compared; PWD is the folder the check runs in
+    assert env[gate.JOB_MARK] == lid and gate.JOB_MARK not in rec["env"]
+    assert env["PWD"] == os.path.realpath(box.tree) and rec["env"]["PWD"] == digest(env["PWD"])
+
+
+def test_b2_r2_the_record_holds_no_value(box, monkeypatch):
+    remake(box)
+    monkeypatch.setenv("NW5_KNOB", "a-value-nw5-only")
+    gid = box.check()
+    text = (gate.entry_dir(box.root, gid) / "check.json").read_text()
+    assert "a-value-nw5-only" not in text
+    env = box.record(gid)["env"]
+    assert env["NW5_KNOB"] == digest("a-value-nw5-only")
+    assert gate.JOB_MARK not in env and set(env) <= set(seen(box, gid))
+    assert all(isinstance(v, str) and len(v) == 16 for v in env.values())
+
+
+def test_b2_r2_a_user_pattern_is_honoured_and_a_mistyped_one_is_the_default(box, monkeypatch):
+    remake(box)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    f = Path(os.environ["HOME"]) / ".claude" / "agentik" / "profiles.yaml"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("gate:\n  check_drop: [NW5_*]\n")
+    monkeypatch.setenv("NW5_KNOB", "one")
+    gid = box.check()
+    assert "NW5_KNOB" not in seen(box, gid)
+    monkeypatch.setenv("NW5_KNOB", "two")
+    rc, out, err = box.land("--dry-run")
+    assert "check: would take " + gid in out.splitlines(), out
+    f.write_text("gate:\n  check_drop: NW5_*\n")
+    said = []
+    cfg = resolver.gate_config(os.environ, said.append)
+    assert cfg["check_drop"] == DEFAULT_DROP
+    assert said == ["gate: check_drop is no list of names; the default stands"]
+
+
+# R3 (F2): an index entry status does not show is no clean tree.
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_b2_r3_a_marked_index_entry_is_refused_at_the_queue(box, flag):
+    remake(box, "grep -q green state.txt", {"state.txt": "red\n"})
+    git(box.tree, "update-index", flag, "state.txt")
+    (box.tree / "state.txt").write_text("green\n")
+    rc, out, err = run("gate", "run", str(box.tree), "--check")
+    assert rc == 2 and len(err.strip().splitlines()) == 1 and "state.txt" in err, err
+    assert not gate.gate_dir(box.root).exists() or not gate.entries(box.root)
+    assert not list(land.check_records(box.root))
+
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_b2_r3_a_mark_set_after_the_queue_is_not_clean(box, monkeypatch, flag):
+    remake(box, "grep -q red state.txt", {"state.txt": "red\n"})
+    serve = gate.spawn_serve
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    gid = box.check()
+    git(box.tree, "update-index", flag, "state.txt")
+    gate.serve(box.root, gate.Fx(idle=0, poll=0.05))
+    rec = box.record(gid)
+    assert (rec["exit"], rec["clean"]) == (0, False)
+    git(box.tree, "update-index", flag.replace("--", "--no-"), "state.txt")
+    monkeypatch.setattr(gate, "spawn_serve", serve)
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 2) and "is not clean" in err, err
+
+
+# R4 (F3): a newer red of the check job's own form voids, whatever its record.
+
+@pytest.mark.parametrize("record", ["torn", "absent"])
+def test_b2_r4_a_newer_red_check_job_voids_whatever_its_record(box, record):
+    g1 = box.check()
+    box.flag("red")
+    r2 = box.check()
+    assert box.record(r2)["exit"] == 2
+    path = gate.entry_dir(box.root, r2) / "check.json"
+    path.write_text('{"id": "' + r2 + '", "tre') if record == "torn" else path.unlink()
+    box.flag("red", False)
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 3), err
+    assert "%s is red after %s" % (r2, g1) in err
+
+
+# R5 (F4): a record is taken only from the check's own job or a landing of the branch.
+
+def test_b2_r5_a_record_of_another_jobs_command_is_skipped(box):
+    rc, out, err = run("gate", "run", str(box.tree), "--", "/bin/sh", "-c",
+                       '"$0" "$1" gate run "$2" --check --in-job', sys.executable, str(RUNNER),
+                       str(box.tree))
+    gid = out.split()[1]
+    assert box.record(gid)["exit"] == 0 and box.count() == 1
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 2), err
+    assert "runs its own (no record of this tree)" in err
+
+
+# R6 (F5): check.json is read only from a regular file, and never blocks.
+
+def test_b2_r6_a_fifo_record_never_holds_the_landing(box):
+    g1 = box.check()
+    fake = "%s-%d" % (g1[:15], int(g1[16:]) + 40)
+    d = gate.entry_dir(box.root, fake)
+    d.mkdir()
+    os.mkfifo(d / "check.json")
+    t = time.time()
+    rc, out, err = box.land("--wall", "20")      # a red is a cut, never a hang
+    assert (rc, out, box.count()) == (0, ok(box, g1), 1), err
+    assert time.time() - t < 15
+    assert [n for n, _ in land.check_records(box.root)] == [g1]
+
+
+# R7 (F6): the no-stamp dry run reads the sha given.
+
+def test_b2_r7_the_no_stamp_dry_run_reads_the_sha(box):
+    box.check()
+    base = box.main()
+    rc, out, err = box.land("--dry-run", sha=base)
+    assert "check: would run its own (sha)" in out.splitlines(), out
+    assert "would take" not in out
+    assert box.land(sha=base)[:2] == (1, "land scratch: red sha exit 1\n")

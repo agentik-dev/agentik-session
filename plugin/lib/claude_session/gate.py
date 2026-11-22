@@ -361,6 +361,17 @@ def land_branch(command) -> str | None:
     return None
 
 
+def check_worktree(command) -> str | None:
+    """The worktree of a kept check's job, a command closing with `gate run --check --in-job`
+    and one word (packet nw5-check-proof, brief 2, R4 and R5); else None."""
+    if not isinstance(command, list) or len(command) < len(CHECK_JOB) + 1:
+        return None
+    if tuple(command[-len(CHECK_JOB) - 1:-1]) != CHECK_JOB:
+        return None
+    where = command[-1]
+    return where if isinstance(where, str) and where else None
+
+
 def _dirty(repo: str) -> int | None:
     """The count of lines of `git -C <repo> --no-optional-locks -c core.fsmonitor=false status
     --porcelain --untracked-files=all`, run as `_head` runs git: no `GIT_*` from the caller,

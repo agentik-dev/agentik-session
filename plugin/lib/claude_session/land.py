@@ -133,13 +133,16 @@ here: that stays with the orchestrator.
 
 One check proves a landing (packet nw5-check-proof, design/31 items 21 to 24). The check step
 runs `run_check`, the one function `gate run <worktree> --check` runs too: `make check` without
-the eight names `main` drops, the fresh mark or a name of `gate.check_drop`, writing
-`check.json` in the job's folder at its start (`exit` null) and at its end. Before it, after
-`require_no_overlap` has read main, `kept_check` reads the newest record of this repo's key for
-the head's tree and takes it when it is exit 0, clean and not cut, of the head (or of one the
-job's own trailed commits follow), in this worktree, with that main, the same links, within
-`gate.check_age`, and no newer red `make check` of that tree or red result naming the branch
-(this plugin's own landing aside) follows it. A kept record skips the run, says `check: kept
+the eight names `main` drops, the fresh mark or a name a pattern of `gate.check_drop` matches
+(the job's mark kept), `PWD` the folder's real path, writing `check.json` in the job's folder at
+its start (`exit` null, `env` each name's value digest) and at its end; a skip-worktree or
+assume-unchanged index entry is dirt. Before it, after `require_no_overlap` has read main,
+`kept_check` reads the newest record of this repo's key for the head's tree under a job of the
+check's own form or a landing of the branch, and takes it when it is exit 0, clean and not cut,
+of the head (or of one the job's own trailed commits follow), in this worktree, with that main,
+the same links and the same environment, within `gate.check_age`, and no newer red `make check`
+of that tree, red check job of this worktree or red result naming the branch (this plugin's
+own landing aside) follows it. A kept record skips the run, says `check: kept
 <id>` and ends the land line, ok or red, with `, check <id>`, after every other ending. `gate
 land --fresh` (`CLAUDE_SESSION_LAND_FRESH=1` in the job's env) always runs; `--dry-run` prints
 `check: would take <id>[ if the stamp writes nothing]` or `check: would run its own (<why>)`.
@@ -1416,10 +1419,48 @@ def check_config():
     return cfg["check_drop"], cfg["check_links"], cfg["check_age"]
 
 
+def dropped(name, drop):
+    """Whether `name` is one of `drop`, a name or a shell pattern, case kept (brief 2, R2)."""
+    import fnmatch
+    return any(fnmatch.fnmatchcase(name, p) for p in drop)
+
+
 def bare_env(drop=()):
-    """This process's environment less the eight names, the fresh mark and `drop`."""
+    """This process's environment less the eight names, the fresh mark and each name `drop`
+    matches; the gate's job mark is kept, since a check's own `gate run` reads it."""
+    from . import gate
     return {k: v for k, v in os.environ.items()
-            if k not in DROPPED and k != FRESH and k not in drop}
+            if k not in DROPPED and k != FRESH and (k == gate.JOB_MARK or not dropped(k, drop))}
+
+
+def check_env(tree, drop):
+    """The environment the one function runs `make check` with in `tree`: `bare_env(drop)`,
+    `PWD` the real path of the folder it runs in (brief 2, R2)."""
+    return {**bare_env(drop), "PWD": os.path.realpath(tree)}
+
+
+def env_digest(env):
+    """Each name of `env` but the job's mark, mapped to its value's SHA-256, 16 hex digits:
+    the record holds no value (brief 2, R2)."""
+    import hashlib
+    from . import gate
+    return {k: hashlib.sha256(v.encode("utf-8", "surrogateescape")).hexdigest()[:16]
+            for k, v in sorted(env.items()) if k != gate.JOB_MARK}
+
+
+def env_differs(was, now):
+    """The first name, in sorted order, whose digest differs between two `env_digest`s, a
+    name set in one alone counted; None where they are equal."""
+    return next((k for k in sorted(set(was) | set(now)) if was.get(k) != now.get(k)), None)
+
+
+def index_marks(tree):
+    """The entries `git ls-files -v` marks skip-worktree (`S`) or assume-unchanged (a lower-
+    case tag), which status never shows (brief 2, R3); None where git cannot read them."""
+    code, out = read(tree, "ls-files", "-v", env=bare_env())
+    if code != 0:
+        return None
+    return [ln for ln in out.splitlines() if ln[:1] == "S" or ln[:1].islower()]
 
 
 def links_of(tree, names):
@@ -1428,10 +1469,13 @@ def links_of(tree, names):
 
 
 def _dirt(tree):
+    """The status lines and the marked index entries; None where either cannot be read."""
     try:
-        return worktree_dirt(tree, env=bare_env())
+        dirt = worktree_dirt(tree, env=bare_env())
     except Red:
         return None
+    marks = index_marks(tree)
+    return None if marks is None else dirt + marks
 
 
 def _rev(tree, rev):
@@ -1467,14 +1511,15 @@ def run_check(tree, root=None, gid=None, log=None):
     import time
     from . import gate
     drop, names, _ = check_config()
-    env = bare_env(drop)
+    env = check_env(tree, drop)
     path, rec, start_dirt = check_path(root, gid), None, None
     if path is not None:
         start_dirt = _dirt(tree)
         rec = {"id": gid, "key": gate.repo_key(tree), "started": time.time(), "ended": None,
                "tree": _rev(tree, "HEAD^{tree}"), "head": _rev(tree, "HEAD"),
                "main": _rev(tree, MAIN + "^{commit}"), "worktree": os.path.realpath(tree),
-               "links": links_of(tree, names), "exit": None, "cut": None, "clean": None}
+               "links": links_of(tree, names), "exit": None, "cut": None, "clean": None,
+               "env": env_digest(env)}
         write_check(path, rec)
     note("check: make check in " + tree)
     begin = log_size(log)
@@ -1520,9 +1565,54 @@ def check_records(root):
     except OSError:
         return
     for n in sorted(names, key=lambda n: (n[:15], int(n[16:])), reverse=True):
-        rec = gate._load(gate.entry_dir(root, n) / CHECK_FILE)
+        rec = _regular_record(gate.entry_dir(root, n) / CHECK_FILE)
         if rec is not None:
             yield n, rec
+
+
+def _regular_record(path):
+    """A record read only where it is a regular file, opened so that a FIFO cannot block
+    (brief 2, R6): its mapping, or None, as for a file that does not parse."""
+    import json
+    import stat
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks = []
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                break
+            chunks.append(b)
+        d = json.loads(b"".join(chunks).decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    finally:
+        os.close(fd)
+    return d if isinstance(d, dict) else None
+
+
+def job_command(root, gid):
+    """The command of job `gid`, read from its result, else from its entry; None."""
+    from . import gate
+    doc = _regular_record(gate.result_path(root, gid))
+    if doc is not None and "command" in doc:
+        return doc.get("command")
+    return next((e.get("command") for e in gate.entries(root) if e.get("id") == gid), None)
+
+
+def own_job(root, gid, tree, branch):
+    """Whether job `gid` is the check job's own form for `tree` or this plugin's landing of
+    `branch` (brief 2, R5): a record under any other command is skipped."""
+    from . import gate
+    command = job_command(root, gid)
+    where = gate.check_worktree(command)
+    return (where is not None and gate.repo_path(where) == os.path.realpath(tree)) \
+        or gate.land_branch(command) == branch
 
 
 def _newer(a, b):
@@ -1536,7 +1626,8 @@ def _words(command):
 
 def newer_red(root, gid, key, tree, want, branch):
     """A red result newer than the record that voids it (R4), its id, or None: a `make check`
-    of today's form in that worktree on a head of that tree, or a result of this key whose
+    of today's form in that worktree on a head of that tree; a check job's own form for that
+    worktree, of this key, whatever its record (brief 2, R4); or a result of this key whose
     command names the branch as a word, this plugin's own landing aside."""
     from . import gate, publish
     real = os.path.realpath(tree)
@@ -1550,6 +1641,9 @@ def newer_red(root, gid, key, tree, want, branch):
         if gate.repo_path(doc.get("repo")) == real and publish.is_check_command(command) \
                 and isinstance(head, str) and _rev(tree, head + "^{tree}") == want:
             return n
+        where = gate.check_worktree(command)
+        if doc.get("key") == key and where is not None and gate.repo_path(where) == real:
+            return n
         if doc.get("key") == key and gate.land_branch(command) is None \
                 and branch in _words(command):
             return n
@@ -1561,11 +1655,12 @@ def kept_check(root, repo, tree, branch, given, head, ours):
     of this key for the head's tree decides alone."""
     import time
     from . import gate
-    _, names, age = check_config()
+    drop, names, age = check_config()
     want = _rev(tree, head + "^{tree}")
     key = gate.repo_key(tree)
     found = next(((n, r) for n, r in check_records(root)
-                  if r.get("key") == key and want and r.get("tree") == want), None)
+                  if r.get("key") == key and want and r.get("tree") == want
+                  and own_job(root, n, tree, branch)), None)
     if found is None:
         return None, "no record of this tree"
     gid, rec = found
@@ -1588,6 +1683,12 @@ def kept_check(root, repo, tree, branch, given, head, ours):
         return None, "%s ran with main at %s" % (gid, str(rec.get("main"))[:12])
     if rec.get("links") != links_of(tree, names):
         return None, "%s's links differ now" % gid
+    was = rec.get("env")
+    if not isinstance(was, dict):
+        return None, "%s holds no environment" % gid
+    name = env_differs(was, env_digest(check_env(tree, drop)))
+    if name is not None:
+        return None, "environment: %s differs" % name
     ended = rec.get("ended")
     if not isinstance(ended, (int, float)) or isinstance(ended, bool) \
             or time.time() - ended > age:
@@ -1640,7 +1741,11 @@ def land(repo, branch, sha, message, log=None, dry=False, root=None, gid=None, f
         sha = head
     elif dry:
         print("ready: no stamp target; a branch behind main is red sha", flush=True)
-        _, head = read(repo, "rev-parse", "--verify", "-q", "refs/heads/" + branch)
+        try:
+            head = require_sha(repo, branch, sha)       # brief 2, R7: the sha the landing reads
+        except Red:
+            print("check: would run its own (sha)", flush=True)
+            return True
         print(dry_check(root, repo, tree, branch, head, head, fresh, False), flush=True)
         return True
     at("sha")

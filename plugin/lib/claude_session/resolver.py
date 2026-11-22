@@ -72,8 +72,13 @@ PLUGIN = "session"
 # tool read it; a layer that still sets it is an unknown key.
 SECTIONS = ("session", "respeak", "relay", "gate", "tiers")
 GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400,
-                 # packet nw5-check-proof R9: the kept check's three keys, the user layer alone
-                 "check_drop": ["DECISIONS_BASE"], "check_links": [".venv", ".venv-floor"],
+                 # packet nw5-check-proof R9: the kept check's three keys, the user layer alone;
+                 # brief 2 R2: check_drop's names and shell patterns differ by session or by
+                 # process, and no check may read them
+                 "check_drop": ["DECISIONS_BASE", "CLAUDE_CODE_*", "CLAUDE_SESSION_*",
+                                "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDECODE", "AI_AGENT",
+                                "*_SESSION_ID", "SSH_AUTH_SOCK", "OLDPWD", "SHLVL", "_"],
+                 "check_links": [".venv", ".venv-floor"],
                  "check_age": 21600}
 DEPENDENT = ("respeak", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
@@ -570,8 +575,8 @@ def gate_config(env, log=None) -> dict:
 
 
 def _check_keys(g: dict, out: dict, log) -> None:
-    """Packet nw5-check-proof R9: `check_drop` and `check_links`, lists of names, and
-    `check_age`, positive seconds; a mistyped one reads as its default, one line through
+    """Packet nw5-check-proof R9: `check_drop` and `check_links`, lists of names (brief 2,
+    R2: `check_drop`'s may be shell patterns), and `check_age`, positive seconds; a mistyped one reads as its default, one line through
     `log`."""
     for k in ("check_drop", "check_links"):
         v = g.get(k)

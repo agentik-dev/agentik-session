@@ -934,14 +934,18 @@ agentik session gate status                       # running, queued, the last fi
   message, made as a dangling commit and scanned as `<sha>..<commit>`.
 - One check proves a landing (packet nw5-check-proof). `agentik session gate run
   <worktree> --check` queues the landing's own check in a clean worktree, untracked
-  files counted (exit 2 and nothing queued for a dirty one, or a command after it):
-  `make check` without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `MAKEFLAGS`,
-  `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`, `MAKELEVEL` or a name of `gate.check_drop`,
-  its record `<state>/gate/<id>/check.json`. A landing then takes the newest record of
-  the readied head's tree where it is green, clean, not cut, of that head (or one the
-  landing's own commits follow), in the branch's own worktree, with main where the
-  landing reads it, the same `gate.check_links`, within `gate.check_age` (six hours),
-  and no newer red `make check` of that tree or red job naming the branch: its note
+  files and skip-worktree or assume-unchanged entries counted (exit 2 and nothing
+  queued for a dirty one, or a command after it): `make check` without `GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`,
+  `MAKELEVEL` or a name a pattern of `gate.check_drop` matches (by default the names
+  that differ by session or by process), its record `<state>/gate/<id>/check.json`,
+  which digests each name that reached the check and holds no value. A landing then
+  takes the newest record of the readied head's tree, of a `--check` job or a landing,
+  where it is green, clean, not cut, of that head (or one the landing's own commits
+  follow), in the branch's own worktree, with main where the landing reads it, the same
+  `gate.check_links` and environment, within `gate.check_age` (six hours), and no newer
+  red `make check` of that tree, red `--check` job of that worktree or red job naming
+  the branch: its note
   says `check: kept <id>`, and the land line ends `, check <id>`. Else it runs its own
   through the same function, which keeps its record too. `gate land --fresh` always
   runs its own; `--dry-run` says `check: would take <id> ...` or `check: would run its

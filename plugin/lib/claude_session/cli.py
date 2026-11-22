@@ -1995,6 +1995,13 @@ def _gate_check(root, args, env, command):
     if dirt:
         _die(f"gate run --check: {real} is not clean, so its check proves no tree "
              f"({len(dirt)} status lines; the first: {dirt[0][:80]})", 2)
+    marks = land.index_marks(real)      # brief 2, R3: what status never shows
+    if marks is None:
+        _die(f"gate run --check: cannot read the index of {real}", 2)
+    if marks:
+        _die(f"gate run --check: {real} is not clean, so its check proves no tree "
+             f"({len(marks)} index entries marked skip-worktree or assume-unchanged; "
+             f"the first: {marks[0][:80]})", 2)
     return [*gate.self_argv(), *gate.CHECK_JOB, real]
 
 
