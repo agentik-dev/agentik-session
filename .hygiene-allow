@@ -138,6 +138,8 @@ plugin/lib/claude_session/lineguard.py: sibling,renamed
 tests/test_g10_push_guard.py: sibling,renamed,home
 # rp7: the tests name this repo's own ledger file, to show the issue rule's reason cites no entry, two lines since bd805e1.
 tests/test_rp7_guard.py: sibling
+# in5s: the reply rule's tests name the public ledger tool whose verb the rule reads, the rule's own command words, since 4f3890a.
+tests/test_in5s_reply_guard.py: sibling
 # g10: the packet names this repo's own ledger file (§1 and A9), since its first commit (408ac16).
 design/packets/g10-push-guard.md: sibling
 # rp7: the packet names this repo's own ledger file (§1, entry 11 carried verbatim), one line since its first commit (5209ce9).
