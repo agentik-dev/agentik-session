@@ -300,8 +300,10 @@ def _path_lines(bin_dir, env) -> list:
 
 def cmd_status(args) -> int:
     """The session's meter: one line, or meter.json with --json; then the band, the spend mix
-    and the admission's mode, which the prompt line no longer says (pl1 R3). `--all` (packet
-    su4, R3): every open sitting, one line each, or `agentik.session.sittings/1`."""
+    and the admission's mode, which the prompt line no longer says (pl1 R3), and last, in a
+    session that keeps the sitting discipline, the `launch:` line: the room left to the line and
+    each helper out with its expected end (nw4 R10). `--all` (packet su4, R3): every open
+    sitting, one line each, or `agentik.session.sittings/1`."""
     env = os.environ
     if getattr(args, "all", False):        # packet su4, R3: every open sitting, a read
         rows = hooks.sittings(env, time.time())
@@ -353,6 +355,10 @@ def cmd_status(args) -> int:
                 c = facts.get("ceiling")
                 print(f"admission mode: {facts['mode']}"
                       + (f" · ceiling {admission.ceiling_word(c)}" if c is not None else ""))
+            from . import room
+            told = room.status_for(sid, env)   # nw4 R10: under the discipline; never raises
+            if told:
+                print(told)
             return 0
     print(json.dumps(plug.envelope("meter", d), indent=2) if args.json else _role_line(d))
     return 0

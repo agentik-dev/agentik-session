@@ -594,7 +594,8 @@ the first measure replaces it. The meter and the ceilings then follow the readin
 
 `CHECKPOINT: ...` arrives at the profile's `checkpoint_at` (80% by default),
 then every tenth tool; `EXIT: ...` arrives at 100%. `agentik session status`
-prints the meter; `agentik session budget` the zone and checkpoint cadence.
+prints the meter, and in a session that keeps the discipline its `launch:` line last (the
+room to the line and each helper out); `agentik session budget` the zone and checkpoint cadence.
 
 Postures, least to most restrictive, all confirmed by test:
 
@@ -748,6 +749,25 @@ prompt cache's lifetime.
   pass. The value is the session's resolved one, read at each call, so a helper is judged by
   its coordinator's session; its first waits are kept in `helper-waits.json` under that
   session's folder (at most 256). The main thread is never denied or told.
+- A sitting is told its room at each launch. In a session that keeps the sitting discipline
+  (every shipped profile but `starter`), the PreToolUse hook counts, at a main thread's Agent
+  or Task call, `room = 100 x checkpoint_at - the meter - launch.back for each helper out`
+  (the meter is the larger of the context and turns shares; a helper is out from its spawn in
+  the admission ledger to its `done`, a resumed one to its next) and says one line, as
+  context and to the person: `launch: room 21.5 to the line, 3 out; this review (about 10
+  min, 2.5) fits, wide`; a narrow launch (under `launch.narrow.points` left after it) fits
+  only where it ends no later than the last helper out, or with none out within
+  `launch.narrow.alone` minutes, else `launch: narrow: this builder would end about 14:52, 12
+  min after the last one out; start a shorter helper or write its brief for the next
+  sitting`; with nothing left, `launch: no room: ...`. With no helper out, a held launch ends
+  `bring the charter current and respawn; the successor starts it`. Under `off` nothing is
+  said, under `signal` and `ask` the call passes, and under `deny` a held launch is refused
+  with the line as its reason. An end is the start plus the kind's median minutes, past it
+  the ninth decile, past that now; a kind (build, fix, phase, review, refute, or the type's
+  name) takes the ledger's minutes from ten runs, else the profile's `launch.kinds`. A
+  helper's own spawn is never counted or told, and a fault in a read gives no line.
+  `agentik session status` prints the same room last, `launch: room 21.5 to the line, 2 out:
+  a builder about 14:52, a review about 14:20`, or `..., none out`.
 - Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
