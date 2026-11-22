@@ -735,6 +735,19 @@ prompt cache's lifetime.
   nothing written, to move the record off a charter still open in the same directory: close
   it, open in a worktree, or take it on purpose with `charter open --replace`; a bare close
   then refuses while the replaced file stays open.
+- An agent is never the wait. The profile key `helpers.wait` (`allow`, `say` or `refuse`;
+  `allow` ships, and `frontier`, `orchestrator` and `orchestrator-opus` state `refuse`) is
+  what the PreToolUse hook does with a helper's Bash that holds, as a command the shell runs,
+  a `sleep` of 60 seconds or more (its arguments summed; in a list, a loop, a substitution or
+  a `bash -c` script too, background or not) or this tool's `gate wait <id>` on a job the same
+  helper already waited on (`gate wait --chain` a second time too). Under `refuse` the call
+  is denied with one line: queue the run with `agentik session gate run`, write
+  `gate | <id> running` in your record and hand back; under `say` the same line is the
+  call's context and it runs. A heredoc's body, a quoted word or a message is never a
+  command; a sleep under a minute, an unread duration (`sleep "$N"`) and a reader's fault
+  pass. The value is the session's resolved one, read at each call, so a helper is judged by
+  its coordinator's session; its first waits are kept in `helper-waits.json` under that
+  session's folder (at most 256). The main thread is never denied or told.
 - Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 

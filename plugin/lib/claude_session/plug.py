@@ -49,6 +49,7 @@ SUMMARIES = {
     "permission_mode": "What Claude Code may do without asking, as `start` sets it for the "
                        "session.",
     "posture": "What the budget guard does at a ceiling: off, signal, ask or deny.",
+    "helpers.wait": "A helper's second wait on one job, or long sleep: allow, say or refuse.",
     "lane": "Where the work runs: the seat, the local model for subagents, or the local model "
             "alone.",
     "ceilings.context": "The context, in tokens, this sitting is metered against.",
@@ -418,6 +419,8 @@ def _choices(key, f) -> list | None:
         return list(tiermod.EFFORTS)
     if key == "posture":
         return list(resolver.POSTURES)
+    if key == "helpers.wait":
+        return list(resolver.HELPER_WAITS)
     if key == "permission_mode":
         return list(sessionconfig.PERMISSION_MODES)
     if key == "profile":

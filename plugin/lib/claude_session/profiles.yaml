@@ -15,6 +15,11 @@
 # is read as `tiers.build`'s model one release more, and `start` exports that model as
 # CLAUDE_CODE_SUBAGENT_MODEL. `lane`, `plugins` and `notes` are `start`'s (the former
 # sessionconfig table, folded here).
+# `helpers.wait` (packet nw3-helper-wait) is what the PreToolUse hook does with a helper's
+# second `gate wait` on one job and its `sleep` of 60 seconds or more: `allow` (the shipped
+# default, entry 10: nothing asked of a first session), `say` (the rule is said, the call
+# passes) or `refuse`; the three coordinator profiles, frontier, orchestrator and
+# orchestrator-opus, state `refuse`. The main thread is never refused.
 # Strict YAML subset (D12): mappings, scalars, flat lists, one-level flow maps.
 
 # The window each model family runs on. A model string names its family
@@ -84,6 +89,7 @@ defaults:
   pacing: {enabled: true, fallback: 1800, waiting: 3, meter_line_minutes: 30}
   respeak: {narrative: tech}
   relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
+  helpers: {wait: allow}
 
 profiles:
   frontier:
@@ -105,6 +111,7 @@ profiles:
     verify: null
     respeak: {narrative: tech}
     relay: {enabled: auto}
+    helpers: {wait: refuse}
     plugins: [respeak]
     notes: "Frontier resources. Spend them on judgement, not bulk retrieval."
   balanced:
@@ -175,6 +182,7 @@ profiles:
     charter: {required: true}
     ceilings: {context: 180000, turns: 400}
     ceilings_1m: {context: 400000, turns: 400}
+    helpers: {wait: refuse}
   orchestrator-opus:
     description: The orchestrator for small and medium projects, Opus on its 1M window. A continuous loop; at the checkpoint it brings its charter current and respawns.
     model: opus[1m]
@@ -187,6 +195,7 @@ profiles:
     charter: {required: true}
     ceilings: {context: 180000, turns: 400}
     ceilings_1m: {context: 400000, turns: 400}
+    helpers: {wait: refuse}
   # What runs when nothing names a profile, off a launcher (packet st1-starter, entry 10):
   # the shipped defaults with the meter on, and the fields that would ask more of a session
   # off. `charter.discipline` (the one new field; absent is true) is the waiver, set by this

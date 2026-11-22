@@ -18,6 +18,7 @@ Hook output contract (from the CLI's own documentation):
 
 from __future__ import annotations
 
+import argparse
 import codecs
 import hashlib
 import json
@@ -35,8 +36,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import (budget, charter, gate, harness, install, instructionguard, instructions, ledger,
-               lineguard, meter, policystore, records, resolver, rules, sessionconfig, store,
-               workflowguard)
+               lineguard, meter, policystore, records, resolver, rules, sessionconfig,
+               shellreader, store, workflowguard)
 from .budget import CLEAR, EXHAUSTED, RESERVE, UNKNOWN, WINDDOWN
 
 SPAWNING_TOOLS = {"Agent", "Task", "Workflow"}
@@ -419,6 +420,180 @@ def _helper_charter(payload: dict) -> bool:
     return isinstance(cmd, str) and HELPER_CHARTER.search(cmd) is not None
 
 
+# Packet nw3-helper-wait: an agent is never the wait. Under the session's resolved
+# `helpers.wait` (`allow` ships; `say`, `refuse`), a helper's (agent_id) Bash is judged by the
+# commands `shellreader.commands` reads from its line: a `sleep` whose arguments add to
+# LONG_SLEEP seconds or more, and this tool's `gate wait <id>` (or `--chain`) on a job this
+# helper already waited on, kept in HELPER_WAITS under the session's folder. A heredoc's body,
+# a quoted word and a message are no command, so nothing in them counts. A fault says nothing.
+HELPER_WAITS = "helper-waits.json"      # {"waits": [[agent_id, id], ...]}, the newest last
+HELPER_WAITS_MAX = 256                  # pairs kept; the oldest go first (well under SMALL)
+LONG_SLEEP = 60
+HELPER_WAIT_RULE = ("Queue the run with agentik session gate run, write gate | <id> running in "
+                    "your record and hand back; the result reaches the coordinator.")
+HELPER_WAIT_DENY = "agentik-session: denied a helper's wait."
+HELPER_WAIT_SAY = "agentik-session: a helper is never the wait."
+CHAIN_WAIT = "--chain"                  # the chain stands for the id; no job id is an option
+_TOOL_WORDS = frozenset({"agentik-session", "claude-session", "claude_session"})
+_DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)\Z")
+_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _regular_json(path: Path) -> dict:
+    """`_load_json` of a regular file only, read whole as the hook's other readers of the
+    file read it: a FIFO, a folder or anything else is {}, and the read never blocks."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return {}
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return {}
+        chunks = []
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                break
+            chunks.append(b)
+        d = json.loads(b"".join(chunks).decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    finally:
+        os.close(fd)
+    return d if isinstance(d, dict) else {}
+
+
+def _helper_wait_value(payload: dict, env) -> str:
+    """The resolved `helpers.wait` of the payload's session (a helper runs in its
+    coordinator's), `allow` where none is read."""
+    sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+    s = _regular_json(sdir / "resolved.json").get("session") if sdir else None
+    h = s.get("helpers") if isinstance(s, dict) else None
+    v = h.get("wait") if isinstance(h, dict) else None
+    return v if v in ("say", "refuse") else "allow"
+
+
+def _sleep_seconds(args: list) -> float | None:
+    """GNU sleep's sum of its arguments, None where one is not read as a duration."""
+    total = 0.0
+    for a in args or [None]:
+        if a in ("inf", "infinity"):
+            return math.inf
+        m = _DURATION.match(a) if isinstance(a, str) else None
+        if m is None:
+            return None
+        total += float(m.group(1)) * _UNIT[m.group(2)]
+    return total
+
+
+def _seconds_word(n: float) -> str:
+    if math.isinf(n):
+        return "infinity"
+    return str(int(n)) if n == int(n) else f"{n:.3f}".rstrip("0")
+
+
+class _WaitWords(argparse.ArgumentParser):
+    """`gate wait`'s words, read by argparse's own rules: an error raises, nothing prints."""
+
+    def error(self, message):
+        raise ValueError(message)
+
+
+def _wait_parser() -> argparse.ArgumentParser:
+    """The options `cli`'s `gate wait` parser takes (a test holds the two alike), `--help` a
+    flag here so that it prints nothing."""
+    p = _WaitWords(prog="gate wait", add_help=False)
+    p.add_argument("-h", "--help", action="store_true")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--chain", action="store_true")
+    p.add_argument("--timeout", type=float, metavar="SECONDS")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--strict", action="store_true")
+    return p
+
+
+def _wait_id(c) -> str | None:
+    """The job a command of this tool's `gate wait` names, its words read as the CLI's parser
+    reads them (an abbreviation of an option is that option, so `--time 540` skips its value):
+    the id, CHAIN_WAIT for `--chain`; None for any other command, a line the parser refuses
+    or asks help of, and an id not read (a variable, a substitution)."""
+    args = list(c.args)
+    if c.name == "agentik" and args[:1] == ["session"]:
+        args = args[1:]
+    elif c.name not in _TOOL_WORDS:
+        return None
+    if args[:2] != ["gate", "wait"]:
+        return None
+    try:
+        ns, extras = _wait_parser().parse_known_intermixed_args(args[2:])
+    except (ValueError, TypeError):
+        return None
+    if extras or ns.help:
+        return None
+    if ns.chain:
+        return CHAIN_WAIT
+    job = ns.id
+    if not isinstance(job, str) or "$" in job or "`" in job:
+        return None
+    return _token(job, 96)
+
+
+def _helper_wait(payload: dict, env) -> dict | None:
+    """Packet nw3-helper-wait R2 to R8: a helper's Bash under `say` or `refuse` whose line
+    holds a long sleep or a second wait on one job: the denial (`refuse`) or the passing call's
+    context (`say`); None otherwise, under `allow`, for the main thread and on any fault. A
+    first wait is recorded only where the call passes."""
+    if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
+        return None
+    try:
+        value = _helper_wait_value(payload, env)
+        if value == "allow":
+            return None
+        ti = payload.get("tool_input")
+        command = ti.get("command") if isinstance(ti, dict) else None
+        if not isinstance(command, str):
+            return None
+        cwd = payload.get("cwd")
+        here = cwd if isinstance(cwd, str) and os.path.isabs(cwd) and "\0" not in cwd else None
+        cmds, _ = shellreader.commands(command, here, env)
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        aid = _token(payload.get("agent_id"))
+        doc = _small_json(sdir / HELPER_WAITS) or {}
+        waits = [w for w in doc.get("waits") or [] if isinstance(w, list) and len(w) == 2]
+        seen = {(a, j) for a, j in waits}
+        clause, new = None, []
+        for c in cmds:
+            if c.name == "sleep":
+                n = _sleep_seconds(c.args)
+                if clause is None and n is not None and n >= LONG_SLEEP:
+                    clause = f"a sleep of {_seconds_word(n)} s"
+                continue
+            j = _wait_id(c)
+            if j is None:
+                continue
+            if (aid, j) in seen:
+                clause = clause or ("a second wait on the chain" if j == CHAIN_WAIT
+                                    else f"a second wait on {j}")
+                continue
+            seen.add((aid, j))
+            new.append([aid, j])
+        if clause and value == "refuse":
+            return _deny(f"agentik-session: an agent is never the wait ({clause}). "
+                         + HELPER_WAIT_RULE, HELPER_WAIT_DENY)
+        if new:
+            store._write_private(sdir / HELPER_WAITS,
+                                 json.dumps({"waits": (waits + new)[-HELPER_WAITS_MAX:]}))
+        if clause:
+            return {"hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": (f"agentik-session: an agent is never the wait "
+                                              f"({clause}). " + HELPER_WAIT_RULE)},
+                    "systemMessage": HELPER_WAIT_SAY}
+    except Exception:                                   # noqa: BLE001  (R8: a fault passes)
+        return None
+    return None
+
+
 MODEL_REC = "model.json"    # the session's model: SessionStart's, then each PostModelSwitch's
 MODEL_UNKNOWN = ("the session's model is not known (no record yet, or a switch its records "
                  "have not both seen: retry after one tool call)")
@@ -719,7 +894,13 @@ def _deny(reason: str, note: str | None) -> dict:
 def pre_tool_use(payload: dict, env=None) -> dict:
     """The spawn gate (§2.2): under `ask` or `deny`, a spawn in the late zones
     asks, and under `deny` one in the reserve is refused. A subagent's call: {}.
-    Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only."""
+    Every tool's call is stamped first (respawn-r1 §3.3); the gate acts on spawns only.
+    The Bash refusals come before the call opens, in this order: a helper's charter open or
+    close (n33), a RESPAWN close in the background (rc1), the stray writes (g8, lineguard),
+    a gated file's write (g2b), the main thread's close while a job is out (rc2), and, under
+    the session's `helpers.wait` (nw3), a helper's second wait on one gate job or its sleep of
+    a minute or more: denied under `refuse`, said as context on a passing call under `say`,
+    untouched under `allow`, the shipped default."""
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
     if _helper_charter(payload):     # n33 R6: whatever the posture, and no call opened
         return {
@@ -775,7 +956,14 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         if line:
             return _deny(line, "agentik-session: asked once before a RESPAWN close while a "
                                "background job is not known to have ended.")
+    said = None
+    if tool == "Bash":               # nw3: under helpers.wait, a helper's alone; never raises
+        said = _helper_wait(payload, os.environ if env is None else env)
+        if said and "permissionDecision" in said["hookSpecificOutput"]:
+            return said              # refuse: a refused call opens none
     _open_call(payload, os.environ if env is None else env)
+    if said:
+        return said                  # say: the call passes, and the rule is said
     if tool not in SPAWNING_TOOLS:
         return {}
     if payload.get("agent_id"):

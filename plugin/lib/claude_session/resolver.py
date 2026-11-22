@@ -81,7 +81,8 @@ OLD_RELAY = "agent-relay"
 SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools",
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
                 "builders", "push", "device", "charter", "verify", "respawn", "priority",
-                "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes", "run")
+                "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes", "run",
+                "helpers")
 # `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
@@ -89,6 +90,10 @@ RESPAWN_KEYS = ("cap", "floor", "settle")
 # Packet akt-run R1: what a bare `run` (and `akt`) sends: its first prompt and its `--model`.
 RUN_KEYS = ("prompt", "model")
 POSTURES = ("off", "signal", "ask", "deny")
+# Packet nw3-helper-wait R1: `helpers` is a mapping whose one key is `wait`, one of these; the
+# PreToolUse hook reads it from the resolved `session` section (hooks.HELPER_WAIT).
+HELPERS_KEYS = ("wait",)
+HELPER_WAITS = ("allow", "say", "refuse")
 SHIPPED = Path(__file__).with_name("profiles.yaml")
 REPO_DIR = Path(".claude") / "agentik"
 # agentik-r1 §6.3 c4, c5: the repo's and the user's folders before the rename.
@@ -564,6 +569,11 @@ def _validate(s: dict) -> None:
     """The ceilings are checked per window, in _window_ceilings."""
     if s.get("posture") not in POSTURES:
         raise ResolveError(f"posture must be one of {', '.join(POSTURES)}")
+    hp = s.get("helpers")                 # packet nw3-helper-wait R1, in the posture's voice
+    if not isinstance(hp, dict) or any(k not in HELPERS_KEYS for k in hp):
+        raise ResolveError("helpers must be a mapping of " + ", ".join(HELPERS_KEYS))
+    if hp.get("wait") not in HELPER_WAITS:
+        raise ResolveError(f"helpers.wait must be one of {', '.join(HELPER_WAITS)}")
     cp = s.get("checkpoint_at")
     if not isinstance(cp, (int, float)) or isinstance(cp, bool) or not 0 < cp <= 1:
         raise ResolveError("checkpoint_at must be in (0, 1]")

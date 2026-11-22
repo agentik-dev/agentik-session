@@ -560,6 +560,8 @@ READERS = {
     ("hooks", "_load_json"): ("h.json", {"at": 1.0}, lambda m, d: m["hooks"]._load_json(d / "h.json")),
     ("hooks", "_small_json"): ("activity.json", {"at": 1.0},          # packet su4, R3
                                lambda m, d: m["hooks"]._small_json(d / "activity.json")),
+    ("hooks", "_regular_json"): ("resolved.json", RESOLVED,           # packet nw3, brief 2 R2
+                                 lambda m, d: m["hooks"]._regular_json(d / "resolved.json")),
     ("hooks", "_unconfirmed_line"): (                                 # packet rc1, R2
         "state/agentik-session/sessions/%s/respawn.json" % S,
         {"session": S, "charter": "/w/c.md", "charter_sha256": "0" * 64, "written": 1.0,
