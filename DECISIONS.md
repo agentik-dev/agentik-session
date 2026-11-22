@@ -16,18 +16,18 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 ### The refusals
 
-11. **Three shell spellings are refused in every session.** The plugin's PreToolUse hook refuses three shell spellings in every session, on every install, with no entry of any repo arming them: `rm -r` on a bare variable, anywhere; `git init`, and a git identity being set, where the shell stands in a checkout and the line names no other place. A `cd` in the line is not trusted for the last two. Each refusal names the safe spelling, so the hook refuses a spelling and never the act. (2026-11-17; the owner's answer to decision 11, the owner's answer to hq's decision 53 on 2026-11-17)
+11. **Three shell spellings are refused in every session.** The plugin's PreToolUse hook refuses four shell spellings in every session, on every install, with no entry of any repo arming them: `rm -r` on a bare variable, anywhere; `git init`, and a git identity being set, where the shell stands in a checkout and the line names no other place; and `agentik issue send` in a tool call, which a person types at a terminal, as the refusal says. A `cd` in the line is not trusted for `git init` or the identity. Each refusal names the safe spelling, so the hook refuses a spelling and never the act. (2026-11-17; amended 2026-11-22, the owner's answer to decision 14, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
+
+15. **A helper is never the wait.** Under the profile key `helpers.wait: refuse` the plugin refuses a helper's second wait on one gate job and a helper's `sleep` command of a minute or more, and its refusal says to queue the run, record its id and hand back. The shipped default allows both. (2026-11-22; the owner's answer to decision 15, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
 
 ### The session's start
 
 12. **A declared watcher that is not running is said at session start.** Where a watcher the user file declares is not running, a session says so when it starts: one line, printed only while something declared is missing, on the person's screen and to the session itself, which can act on it. When every declared watcher runs, nothing is printed. The prompt band carries no mark for it. (2026-11-17; the owner's answer to decision 12, the owner's answer to hq's decision 55 on 2026-11-17)
 
+### The gate
+
+13. **A gate job's result follows the chain.** A job queued by a chain's sitting or by its helper, through any verb, is addressed to the chain. Its line is taken by a sitting of that chain that has not closed, so a result that lands at or after a close reaches the successor. A job queued outside a chain is addressed to the session that queued it. A respawn never waits for a gate job. (2026-11-22; the owner's answer to decision 13, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
+
 ## Proposed
-
-13. **A gate job's result follows the chain.** Enter it: the behaviour is built, installed and relied on by every respawn, and an entry is what makes a later change to it a question for the owner. (proposed 2026-11-22; OPEN-QUESTIONS.md)
-
-14. **Entry 11 names the fourth refusal.** Amend entry 11: the refusal is built and guards an act that publishes, and the entry is where a reader looks for what every session is refused. (proposed 2026-11-22; OPEN-QUESTIONS.md)
-
-15. **A helper is never the wait.** Enter it: the key is built and three profiles rely on it, and a default of allow changes nothing for an install that has not asked for the refusal. (proposed 2026-11-22; OPEN-QUESTIONS.md)
 
 ## Superseded
