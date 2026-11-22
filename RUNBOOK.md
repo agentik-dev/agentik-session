@@ -756,8 +756,8 @@ prompt cache's lifetime.
   the admission ledger to its `done`, a resumed one to its next) and says one line, as
   context and to the person: `launch: room 21.5 to the line, 3 out; this review (about 10
   min, 2.5) fits, wide`; a narrow launch (under `launch.narrow.points` left after it) fits
-  only where it ends no later than the last helper out, or with none out within
-  `launch.narrow.alone` minutes, else `launch: narrow: this builder would end about 14:52, 12
+  only where it ends no later than the last helper out, or with none out, or every one out
+  past its ninth decile, within `launch.narrow.alone` minutes, else `launch: narrow: this builder would end about 14:52, 12
   min after the last one out; start a shorter helper or write its brief for the next
   sitting`; with nothing left, `launch: no room: ...`. With no helper out, a held launch ends
   `bring the charter current and respawn; the successor starts it`. Under `off` nothing is

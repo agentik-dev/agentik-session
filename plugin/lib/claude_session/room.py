@@ -5,7 +5,7 @@ PreToolUse hook says how many points of the context ceiling are left to the chec
 every helper out has handed back, and whether the new helper fits; `agentik session status`
 prints the same room with each helper out and its expected end.
 
-`room`, `ends`, `kind`, `table`, `minutes`, `verdict`, `line` and `status_line` are pure. `told`
+`room`, `ends`, `kind`, `table`, `minutes`, `latest`, `verdict`, `line` and `status_line` are pure. `told`
 and `status_for` read the session's resolved `session` section (its `launch` keys), its
 `meter.json` and the admission ledger's two files; they write nothing and never raise: a fault
 in any read gives no line. A hand-back's cost, `back`, is the profile's, the same for every kind,
@@ -94,16 +94,24 @@ def minutes(tab: dict, k: str) -> tuple:
     return tab[k] if k in tab else tab[FALLBACK]
 
 
+def latest(out_ends: list, now: datetime) -> datetime | None:
+    """The latest end among the helpers out, where it is after now; None with none out, and
+    where every one out is past its ninth decile, so its end is now (brief 2 R2)."""
+    last = max(out_ends) if out_ends else None
+    return last if last is not None and last > now else None
+
+
 def verdict(rm: float, back: float, end: datetime, out_ends: list, now: datetime,
             points: float, alone: float) -> str:
-    """R6: `wide`, `fits` (narrow, and it ends no later than the latest end out, or with none
-    out than now plus `alone` minutes), `narrow` (narrow, and it would end later) or `none`."""
+    """R6: `wide`, `fits` (narrow, and it ends no later than the latest end out, or, with none
+    out or every one out overdue, than now plus `alone` minutes), `narrow` (narrow, and it would
+    end later) or `none`."""
     after = rm - back
     if after >= points:
         return "wide"
     if after < 0:
         return "none"
-    last = max(out_ends) if out_ends else now + timedelta(minutes=alone)
+    last = latest(out_ends, now) or now + timedelta(minutes=alone)
     return "fits" if end <= last else "narrow"
 
 
@@ -125,25 +133,27 @@ def plain(k: str) -> str:
 
 def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, end: datetime,
          last: datetime | None, now: datetime, alone: float, tz=None) -> str:
-    """R7: the one line a launch is told, in the verdict's form."""
+    """R7: the one line a launch is told, in the verdict's form. `last` is `latest`'s: None
+    with none out, and with every one out overdue (brief 2 R2), where the bound is now plus
+    `alone` and a held launch is still told to start a shorter helper."""
     this, cost = f"this {plain(k)}", f"{back:.1f}"
     head = f"launch: room {rm:.1f} to the line, {_out(n_out)}; {this} (about {_whole(median)} min, {cost}) fits"
     if word == "wide":
         return head + ", wide"
-    alone_w = f"{alone:g}"
+    bound = f"the {alone:g} min a narrow launch may take with " + (
+        "every one out overdue" if n_out else "none out")
     if word == "fits":
         return head + (f", narrow: it ends about {_hm(end, tz)}, by the last one out at "
                        f"{_hm(last, tz)}" if last is not None else
-                       f", narrow: it ends about {_hm(end, tz)}, within the {alone_w} min a "
-                       "narrow launch may take with none out")
+                       f", narrow: it ends about {_hm(end, tz)}, within {bound}")
     if word == "narrow":
         if last is not None:
             gap = _whole((end - last).total_seconds() / 60.0)
             return (f"launch: narrow: {this} would end about {_hm(end, tz)}, {gap} min after "
                     f"the last one out; {SHORTER}")
         gap = _whole((end - now).total_seconds() / 60.0 - alone)
-        return (f"launch: narrow: {this} would end about {_hm(end, tz)}, {gap} min past the "
-                f"{alone_w} min a narrow launch may take with none out; {RESPAWN}")
+        return (f"launch: narrow: {this} would end about {_hm(end, tz)}, {gap} min past "
+                f"{bound}; {SHORTER if n_out else RESPAWN}")
     return (f"launch: no room: {rm:.1f} to the line, {_out(n_out)}, and {this} takes {cost}; "
             + (NEXT if n_out else RESPAWN))
 
@@ -282,7 +292,7 @@ def told(payload: dict, env, posture) -> tuple | None:
         out_ends = [e for _, e in rd["out"]]
         word = verdict(rd["room"], rd["back"], end, out_ends, now, rd["points"], rd["alone"])
         text = line(word, rd["room"], len(out_ends), k, median, rd["back"], end,
-                    max(out_ends) if out_ends else None, now, rd["alone"], TZ)
+                    latest(out_ends, now), now, rd["alone"], TZ)
         return text, word in HELD
     except Exception:                                   # noqa: BLE001  (a check, never a crash)
         return None

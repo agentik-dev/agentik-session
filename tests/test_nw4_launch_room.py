@@ -417,6 +417,67 @@ def test_r1b2_a_torn_last_line_is_skipped_as_at_the_first_build(at_once):
     assert room.told(_call(*REVIEW), os.environ, "signal") == (FITS, False)
 
 
+# ---- brief 2, R2: beside helpers all past their ninth decile, the bound for none out --------
+
+SCRIBE = ("notes", "records:scribe")
+GHOST = [_spawn(NOW - 180 * M, "g1", ADVERSARY, "review 1 of row-g")]    # past 18.3: ends now
+FRESH = _spawn(NOW - 10 * M, "f1")                                          # ends about 14:19
+OVER = ", within the 15 min a narrow launch may take with every one out overdue"
+OVER_SCRIBE = ("launch: room 7.5 to the line, 1 out; this scribe (about 1 min, 2.5) fits, "
+               "narrow: it ends about 14:00" + OVER)
+OVER_REVIEW = ("launch: room 7.5 to the line, 1 out; this review (about 10 min, 2.5) fits, "
+               "narrow: it ends about 14:09" + OVER)
+OVER_BUILD = ("launch: narrow: this builder would end about 14:29, 14 min past the 15 min a "
+              "narrow launch may take with every one out overdue; start a shorter helper or "
+              "write its brief for the next sitting")
+FRESH_SCRIBE = ("launch: room 9.0 to the line, 2 out; this scribe (about 1 min, 2.5) fits, "
+                "narrow: it ends about 14:00, by the last one out at 14:19")
+
+
+@pytest.mark.parametrize("after", [0.0, 5.0, 9.9])
+def test_r2b2_the_verdict_beside_overdue_helpers(after):
+    rm = after + 2.5
+    for over in ([NOW], [NOW, NOW]):
+        assert room.verdict(rm, 2.5, NOW + timedelta(minutes=0.4), over, NOW, 10, 15) == "fits"
+        assert room.verdict(rm, 2.5, NOW + timedelta(minutes=9.5), over, NOW, 10, 15) == "fits"
+        assert room.verdict(rm, 2.5, NOW + timedelta(minutes=29.1), over, NOW, 10, 15) == "narrow"
+    fresh = [NOW, NOW + 5 * M]                 # one not overdue: R6 as at the first build
+    assert room.verdict(rm, 2.5, NOW + timedelta(minutes=0.4), fresh, NOW, 10, 15) == "fits"
+    assert room.verdict(rm, 2.5, NOW + timedelta(minutes=9.5), fresh, NOW, 10, 15) == "narrow"
+    assert room.verdict(rm, 2.5, NOW + timedelta(minutes=29.1), fresh, NOW, 10, 15) == "narrow"
+
+
+def test_r2b2_the_line_s_pure_forms_beside_overdue_helpers():
+    e = NOW + timedelta(minutes=29.1)
+    assert room.line("narrow", 7.5, 1, "build", 29.1, 2.5, e, None, NOW, 15, timezone.utc) == OVER_BUILD
+    e = NOW + timedelta(minutes=9.5)
+    assert room.line("fits", 7.5, 1, "review", 9.5, 2.5, e, None, NOW, 15, timezone.utc) == OVER_REVIEW
+
+
+@pytest.mark.parametrize("posture", ["signal", "ask", "deny"])
+def test_r2b2_the_line_beside_one_overdue_review(posture):
+    _session(posture, 70.0)
+    _ledger(GHOST)
+    for new, want, held in ((SCRIBE, OVER_SCRIBE, False), (REVIEW, OVER_REVIEW, False),
+                            (BUILD, OVER_BUILD, True)):
+        assert room.told(_call(*new), os.environ, posture) == (want, held)
+        out = _pre(_call(*new))
+        if held and posture == "deny":
+            assert denied(out) and out["hookSpecificOutput"]["permissionDecisionReason"] == want
+        else:
+            assert not denied(out) and ctx(out) == want
+
+
+@pytest.mark.parametrize("posture", ["signal", "ask", "deny"])
+def test_r2b2_a_second_helper_not_overdue_keeps_the_first_build_s_verdicts(posture):
+    _session(posture, 66.0)
+    _ledger(GHOST + [FRESH])
+    for new, want, held in ((SCRIBE, FRESH_SCRIBE, False), (REVIEW, FITS, False),
+                            (BUILD, NARROW, True)):
+        assert room.told(_call(*new), os.environ, posture) == (want, held)
+        assert denied(_pre(_call(*new))) == (held and posture == "deny")
+
+
 # ---- R12: the keys -------------------------------------------------------------------------
 
 def _resolved(tmp_path, profile=None, repo_text=None):
