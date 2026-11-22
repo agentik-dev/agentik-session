@@ -54,6 +54,7 @@ import copy
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -82,7 +83,7 @@ SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools
                 "permission_mode", "posture", "ceilings", "ceilings_1m", "checkpoint_at",
                 "builders", "push", "device", "charter", "verify", "respawn", "priority",
                 "pacing", "admission", "reconcile", "tiers", "lane", "plugins", "notes", "run",
-                "helpers")
+                "helpers", "launch")
 # `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
@@ -94,6 +95,11 @@ POSTURES = ("off", "signal", "ask", "deny")
 # PreToolUse hook reads it from the resolved `session` section (hooks.HELPER_WAIT).
 HELPERS_KEYS = ("wait",)
 HELPER_WAITS = ("allow", "say", "refuse")
+# Packet nw4-launch-room R12: `launch` is a mapping of these; `narrow` of NARROW_KEYS; `kinds`
+# maps each kind to {median, p90}, minutes, the ninth decile at least the median (room.py).
+LAUNCH_KEYS = ("back", "narrow", "kinds")
+NARROW_KEYS = ("points", "alone")
+KIND_KEYS = ("median", "p90")
 SHIPPED = Path(__file__).with_name("profiles.yaml")
 REPO_DIR = Path(".claude") / "agentik"
 # agentik-r1 §6.3 c4, c5: the repo's and the user's folders before the rename.
@@ -574,6 +580,7 @@ def _validate(s: dict) -> None:
         raise ResolveError("helpers must be a mapping of " + ", ".join(HELPERS_KEYS))
     if hp.get("wait") not in HELPER_WAITS:
         raise ResolveError(f"helpers.wait must be one of {', '.join(HELPER_WAITS)}")
+    _validate_launch(s.get("launch"))     # packet nw4-launch-room R12
     cp = s.get("checkpoint_at")
     if not isinstance(cp, (int, float)) or isinstance(cp, bool) or not 0 < cp <= 1:
         raise ResolveError("checkpoint_at must be in (0, 1]")
@@ -601,6 +608,38 @@ def _validate(s: dict) -> None:
         rules.check(s)                    # priority and pacing (S21)
     except ValueError as e:
         raise ResolveError(str(e)) from None
+
+
+def _positive(v) -> bool:
+    return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+            and v > 0)
+
+
+def _validate_launch(ln) -> None:
+    """Packet nw4-launch-room R12: a point and a minute count are positive numbers, and a
+    kind's ninth decile is at least its median."""
+    if not isinstance(ln, dict) or any(k not in LAUNCH_KEYS for k in ln) or len(ln) != 3:
+        raise ResolveError("launch must be a mapping of " + ", ".join(LAUNCH_KEYS))
+    if not _positive(ln["back"]):
+        raise ResolveError("launch.back must be a positive number of points")
+    nr = ln["narrow"]
+    if not isinstance(nr, dict) or sorted(nr) != sorted(NARROW_KEYS):
+        raise ResolveError("launch.narrow must be a mapping of " + ", ".join(NARROW_KEYS))
+    if not _positive(nr["points"]):
+        raise ResolveError("launch.narrow.points must be a positive number of points")
+    if not _positive(nr["alone"]):
+        raise ResolveError("launch.narrow.alone must be a positive number of minutes")
+    kinds = ln["kinds"]
+    if not isinstance(kinds, dict) or not kinds:
+        raise ResolveError("launch.kinds must map each kind to " + ", ".join(KIND_KEYS))
+    for k, v in kinds.items():
+        if not isinstance(v, dict) or sorted(v) != sorted(KIND_KEYS):
+            raise ResolveError("launch.kinds: a kind (withheld) is not a mapping of "
+                               + ", ".join(KIND_KEYS))
+        if not (_positive(v["median"]) and _positive(v["p90"])):
+            raise ResolveError("launch.kinds: a kind's median and p90 must be positive minutes")
+        if v["p90"] < v["median"]:
+            raise ResolveError("launch.kinds: a kind's p90 must be at least its median")
 
 
 def _normalized(body: dict, unknown: list, layer: str) -> dict:
