@@ -177,6 +177,8 @@ def test_config_empty_home(box):
             assert not s["value"] and s["default"], s["key"]
         elif s["key"] == "charter.discipline":   # st1 fix C1: starter's alone, absent is true
             assert s["value"] is False and s["default"] is None
+        elif s["key"] == "helpers.wait":   # nw3: starter inherits allow, frontier states refuse
+            assert s["value"] == "allow" and s["default"] == "refuse"
         else:
             assert s["value"] == s["default"], s["key"]
         assert not str(s["source"]["path"] or "").startswith(str(home)), s["key"]
@@ -185,7 +187,7 @@ def test_config_empty_home(box):
     eff = next(s for s in d["settings"] if s["key"] == "effort")
     assert eff["value"] == "high"
     # st1: starter states no effort, so the shipped defaults' line holds it
-    assert eff["source"] == {"layer": "default", "path": SHIPPED, "line": 47}
+    assert eff["source"] == {"layer": "default", "path": SHIPPED, "line": 52}   # nw3: +5 header
     assert [v["layer"] for v in eff["values"]] == ["default"]
     assert {"tiers.build.model", "gate.wall", "ceilings.context", "posture"} <= set(keys)
     assert not {"description", "subagents", "window", "models"} & set(keys)
@@ -204,7 +206,7 @@ def test_config_repo_effort(box):
     assert s["live"] is False
     f.unlink()
     s = one(box, "effort")
-    assert s["source"] == {"layer": "default", "path": SHIPPED, "line": 47}   # st1: starter's
+    assert s["source"] == {"layer": "default", "path": SHIPPED, "line": 52}   # st1: starter's; nw3: +5
     assert s["change"]["path"] == str(home / ".claude" / "agentik" / "profiles.yaml")
 
 
