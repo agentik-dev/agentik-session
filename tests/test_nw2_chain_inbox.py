@@ -411,3 +411,191 @@ def test_est_counts_the_greens_of_the_same_command(root, repo):
     assert gate.command_kind(["true"]) == "true"
     e = put(root, repo, {}, None, command=check)
     assert gate.entry_estimates(root) == {e["id"]: 500.0}
+
+
+# ---- brief 2: review 1's blocks and notes -------------------------------------------------
+
+def _red_own_and_chain(root, repo):
+    """A closed sitting A holding one red of its own (`--session A`) and one of its chain,
+    its shown record a folder, so the record's write fails after the own line moved."""
+    gate.write_sitting(root, NAME, A, T0)
+    own = put(root, repo, cenv(), A, named=True)
+    ch = put(root, repo, cenv(), A)
+    gate.serve(root, Fx(rc=2).make())
+    (close(root, A) / gate.SHOWN).mkdir()
+    return own, ch
+
+
+def test_an_unwritable_shown_record_still_prints_the_own_red_line(root, repo, monkeypatch):
+    monkeypatch.setattr(hooks, "MAX_OUT", 10 ** 6)
+    own, ch = _red_own_and_chain(root, repo)
+    chained(monkeypatch, A)
+    first = prompt(A)
+    assert [ln for ln in first if own["id"] in ln and "exit 2" in ln]
+    assert box(root) == [f"{ch['id']}.json"]                  # the chain's line never moved
+    again = prompt(A)                                         # shown again, still left
+    assert not [ln for ln in again if own["id"] in ln] and box(root) == [f"{ch['id']}.json"]
+
+
+def test_inbox_take_returns_what_it_moved_when_the_record_fails(root, repo, monkeypatch):
+    own, ch = _red_own_and_chain(root, repo)
+    got = gate.inbox_take(root, A, chain=NAME, closed=True)
+    assert [ln for ln in got if own["id"] in ln]
+    assert [ln for ln in got if ln.startswith(gate.CLOSED_WORDS) and ch["id"] in ln]
+    assert box(root) == [f"{ch['id']}.json"]
+
+
+def test_a_wait_in_the_gap_before_the_line_never_answers_2(root, repo, monkeypatch):
+    clock = SimpleNamespace(t=0.0)
+    kw = dict(sleep=lambda s: setattr(clock, "t", clock.t + s), clock=lambda: clock.t,
+              spawn=lambda r: True, alive=lambda pid: True)
+    gate.write_sitting(root, NAME, A, T0)
+    put(root, repo, cenv(), A)
+    seen, real = {}, gate.inbox_write
+
+    def gap(r, sid, result):
+        seen["wait"] = gate.wait_chain(root, NAME, A, timeout=5, **kw)
+        return real(r, sid, result)
+    monkeypatch.setattr(gate, "inbox_write", gap)
+    gate.serve(root, Fx(rc=1).make())
+    monkeypatch.setattr(gate, "inbox_write", real)
+    assert seen["wait"] != (2, 0)
+    assert gate.wait_chain(root, NAME, A, timeout=5, **kw) == (0, 1)
+    chained(monkeypatch, A)
+    assert prompt(A)                                          # the line taken
+    assert gate.wait_chain(root, NAME, A, timeout=5, **kw) == (2, 0)
+
+
+LAND_A = ["/usr/bin/python3", "/p/cli.py", "gate", "land", "--in-job", "/w/r", "b1", "a" * 40, "/m1"]
+LAND_B = ["/usr/bin/python3", "/p/cli.py", "gate", "land", "--in-job", "/w/r", "b2", "b" * 40, "/m2"]
+
+
+@pytest.mark.parametrize("argv,kind", [
+    (["make", "check"], "make check"),
+    (["make", "-j", "4", "check"], "make check"),
+    (["make", "-j4", "check"], "make check"),
+    (["make", "-j", "check"], "make check"),
+    (["make", "-C", "/w/repo", "check"], "make check"),
+    (["make", "-C", "/w/repo", "stamp"], "make stamp"),
+    (["make", "-C/w/repo", "stamp"], "make stamp"),
+    (["make", "-f", "ci.mk", "check"], "make check"),
+    (["make", "--file", "ci.mk", "check"], "make check"),
+    (["make", "--directory=/w/repo", "--file=ci.mk", "check"], "make check"),
+    (["make", "--directory", "/w/repo", "check"], "make check"),
+    (["make", "-I", "inc", "-o", "a.o", "-W", "b.c", "V=1", "check"], "make check"),
+    (["make", "-sC", "/w/repo", "check"], "make check"),
+    (["/usr/bin/make", "-C", "/w/repo", "check"], "make check"),
+    (["make"], "make"),
+    (["make", "-C", "/w/repo"], "make"),
+    (["/bin/sh", "-c", "make check > log 2>&1"], "make check"),
+    (["/bin/sh", "-c", "make -C /w/repo stamp > log 2>&1"], "make stamp"),
+    (["/bin/sh", "-c", "cd /w/repo && make -j 8 check"], "make check"),
+    (["/bin/sh", "-c", "make stamp && make check"], "make stamp"),
+    (["/bin/sh", "-c", "make > log 2>&1"], "make"),
+    (["git", "commit", "-m", "make it so"], "git commit -m make it so"),
+    (["/bin/sh", "-c", "echo make it so"], "/bin/sh -c echo make it so"),
+    (["cmake", "--build", "."], "cmake --build ."),
+    (["true"], "true"),
+    (LAND_A, "gate land"),
+    (LAND_B, "gate land"),
+])
+def test_a_jobs_kind_is_makes_own_target(argv, kind):
+    assert gate.command_kind(argv) == kind
+
+
+def _greens_of(root, repo, commands, seconds=(6.0, 7.0, 8.0)):
+    k = gate.repo_key(str(repo))
+    for n, (cmd, s) in enumerate(zip(commands, seconds), 1):
+        gid = f"20261101-000000-{n}"
+        gate.entry_dir(root, gid).mkdir(parents=True)
+        gate.result_path(root, gid).write_text(json.dumps(
+            {"id": gid, "repo": str(repo), "command": cmd, "exit": 0, "cut": None,
+             "seconds": s, "key": k}))
+    return k
+
+
+def test_three_stamps_under_dash_c_give_a_check_no_estimate(root, repo):
+    stamp = ["make", "-C", str(repo), "stamp"]
+    k = _greens_of(root, repo, [stamp] * 3)
+    assert gate.key_estimates(root, ["make", "-C", str(repo), "check"]) == {}
+    assert gate.key_estimates(root, stamp) == {k: (7.0, 3)}
+
+
+def test_landings_share_an_estimate(root, repo):
+    third = LAND_A[:6] + ["b3", "c" * 40, "/m3"]
+    k = _greens_of(root, repo, [LAND_A, LAND_B, third], (60.0, 70.0, 80.0))
+    fourth = LAND_A[:6] + ["b4", "d" * 40, "/m4"]
+    assert gate.key_estimates(root, fourth) == {k: (70.0, 3)}
+
+
+def test_a_closed_sittings_wait_says_it_has_closed(root, repo, monkeypatch):
+    monkeypatch.setattr(gate, "spawn_serve", lambda r, popen=None: True)
+    chained(monkeypatch, A)
+    gate.write_sitting(root, NAME, A, T0)
+    close(root, A)
+    rc, out, err = run("gate", "wait", "--chain", "--timeout", "0.1")   # no line waits
+    assert rc == 1 and out == "" and "has closed" in err and "successor" in err
+    put(root, repo, cenv(), A)
+    gate.serve(root, Fx(rc=2).make())
+    rc, out, err = run("gate", "wait", "--chain", "--timeout", "0.1")   # a red waits
+    assert rc == 1 and out == "" and "has closed" in err and "successor" in err
+    assert len(box(root)) == 1
+
+
+def test_status_chain_refuses_json(root, monkeypatch):
+    monkeypatch.setattr(gate, "spawn_serve", lambda r, popen=None: True)
+    chained(monkeypatch, A)
+    rc, out, err = run("gate", "status", "--chain", "--json")
+    assert rc == 2 and out == "" and "--json" in err
+    assert run("gate", "status", "--chain")[0] == 0
+
+
+def test_a_label_adds_no_field_to_a_line(root, monkeypatch):
+    chained(monkeypatch, A)
+    gate.write_sitting(root, NAME, A, T0)
+    labels = ["row", "a|b\nexit 0 in 1 min; log /fake", "x\x1b[2Jy\x7f\x9b;z", "r;" * 40]
+    for n, lab in enumerate(labels, 1):
+        gate.inbox_write(root, A, {"id": f"20261122-070000-{n}", "repo": "/r/row", "exit": 1,
+                                   "seconds": 60.0, "ended": time.time(), "log": "/g/log",
+                                   "chain": NAME, "label": lab, "head": SHA,
+                                   "dirty": {"start": 0, "end": 0}})
+    got = prompt(A) + prompt(A)                               # three a take, then one
+    assert len(got) == 4
+    for ln in got:
+        assert ln.count(";") == got[0].count(";") and ln.count("; log ") == 1
+        assert not [c for c in ln if ord(c) < 32 or 127 <= ord(c) < 160]
+    assert gate._label("x\x1b[2Jy\x7f;z") == "x [2Jy z"
+    assert len(gate._label("r;" * 40).encode()) <= gate.LABEL_MOST
+
+
+def test_a_closed_sitting_leaves_a_corrupt_chain_line(root, monkeypatch):
+    gate.write_sitting(root, NAME, A, T0)
+    close(root, A)
+    d = gate.chain_inbox(root, NAME)
+    d.mkdir(parents=True)
+    (d / "20261122-070000-5.json").write_text("{not json")
+    chained(monkeypatch, A)
+    assert prompt(A) == [] and box(root) == ["20261122-070000-5.json"]
+    assert not (d / "read").exists() or os.listdir(d / "read") == []
+    gate.write_sitting(root, NAME, B, T0)                     # a live sitting sets it aside
+    chained(monkeypatch, B)
+    assert prompt(B) == [] and box(root) == []
+    assert os.listdir(d / "read") == ["20261122-070000-5.json"]
+
+
+def test_a_set_aside_that_fails_stops_no_take(root, repo, monkeypatch):
+    monkeypatch.setattr(hooks, "MAX_OUT", 10 ** 6)
+    gate.write_sitting(root, NAME, A, T0)
+    own = put(root, repo, cenv(), A, named=True)
+    fresh = put(root, repo, cenv(), A)
+    gate.serve(root, Fx(rc=2).make())
+    d = gate.chain_inbox(root, NAME)
+    stale = "20261101-000000-9"
+    gate.inbox_write(root, A, {"id": stale, "repo": "/r", "exit": 0, "seconds": 1.0,
+                               "ended": time.time() - 30 * 3600, "log": "/l", "chain": NAME})
+    (d / "old").write_text("not a folder\n")
+    chained(monkeypatch, A)
+    got = prompt(A)
+    assert [ln for ln in got if own["id"] in ln] and [ln for ln in got if fresh["id"] in ln]
+    assert box(root) == [f"{stale}.json"]                     # left where it is
+    assert os.listdir(root / "sessions" / A / "inbox") == ["read"]

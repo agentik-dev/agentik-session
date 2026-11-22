@@ -536,8 +536,11 @@ def chain_count(root, name: str) -> int:
 
 
 def _label(text) -> str:
-    """A label as a line holds it: one line, cut to `LABEL_MOST` bytes on a character."""
-    t = " ".join(str(text or "").split())
+    """A label as a line holds it: one line, each control character and `;` a space (brief
+    2, R6: a label adds no field), cut to `LABEL_MOST` bytes on a character."""
+    t = "".join(" " if c == ";" or unicodedata.category(c) == "Cc" else c
+                for c in str(text or ""))
+    t = " ".join(t.split())
     return t.encode()[:LABEL_MOST].decode("utf-8", "ignore")
 
 
@@ -985,15 +988,19 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     if isinstance(chain, str) and CHAIN_RE.match(chain):     # nw2 R1: kept, the pin's keys first
         result.update({"chain": chain, "label": e.get("label") or ""})
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
-    _unlink(_queue(root) / f"{gid}.json")
-    _unlink(cancel_path(root, gid))
     caller = e.get("caller")
     if "chain" in result:
+        # Brief 2, R2: a chain's line is written while its entry is still queued, so a
+        # `wait_chain` that reads no open job then reads the line, and never answers 2 in
+        # between. A runner that dies here leaves the entry beside its result, which the
+        # next one only drops (`_recover`, `_step`): the line is not written twice.
         try:
             inbox_write(root, caller, result)
         except OSError as err:
             fx.log(f"gate {gid}: the inbox of chain {result['chain']} was not written: {err}")
-    elif isinstance(caller, str) and caller:
+    _unlink(_queue(root) / f"{gid}.json")
+    _unlink(cancel_path(root, gid))
+    if "chain" not in result and isinstance(caller, str) and caller:
         try:
             inbox_write(root, caller, result)
         except OSError as err:
@@ -1223,16 +1230,94 @@ def wait_line(result: dict) -> str:
     return head + f"log {result.get('log')}"
 
 
+MAKES = ("make", "gmake")
+SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+MAKE_VALUE = frozenset("CfIoW")          # make's short options whose value follows
+MAKE_NUMBER = frozenset("jl")            # and those whose value, a number, may follow
+MAKE_LONG = frozenset(("--directory", "--file", "--makefile", "--include-dir", "--old-file",
+                       "--assume-old", "--what-if", "--new-file", "--assume-new"))
+MAKE_LONG_NUMBER = frozenset(("--jobs", "--load-average", "--max-load"))
+_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_NUMBER = re.compile(r"\d+(\.\d+)?$")
+_PREFIXES = ("env", "exec", "command", "nohup", "time")
+
+
+def _make_target(words: list[str]) -> str:
+    """make's own target among the words after `make`: the first that is no option, no
+    option's value and no variable's assignment (nw2 brief 2, R3); '' with none."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if w == "--":
+            rest = [x for x in words[i:] if not _ASSIGN.match(x)]
+            return rest[0] if rest else ""
+        if w.startswith("--"):
+            if w in MAKE_LONG:
+                i += 1
+            elif w in MAKE_LONG_NUMBER and i < len(words) and _NUMBER.match(words[i]):
+                i += 1
+            continue
+        if w.startswith("-") and len(w) > 1:
+            for k, c in enumerate(w[1:], 1):
+                if c in MAKE_VALUE or c in MAKE_NUMBER:
+                    if k == len(w) - 1 and i < len(words) and (
+                            c in MAKE_VALUE or _NUMBER.match(words[i])):
+                        i += 1                         # the value is the next word
+                    break                              # else the rest of this word is it
+            continue
+        if not _ASSIGN.match(w):
+            return w
+    return ""
+
+
+def _simple_commands(argv: list[str]) -> list[list[str]]:
+    """The argv, or a shell's `-c` string cut at its operators into its simple commands, each
+    without its redirections."""
+    if not (len(argv) >= 3 and os.path.basename(argv[0]) in SHELLS
+            and re.fullmatch(r"-[a-z]*c", argv[1])):
+        return [argv]
+    try:
+        lex = shlex.shlex(argv[2], posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        toks = argv[2].split()
+    out, cur, skip = [], [], False
+    for t in toks:
+        if skip:
+            skip = False
+        elif t and all(ch in "();<>|&" for ch in t):
+            if "<" in t or ">" in t:                   # a redirection: its file, its fd
+                skip = True
+                if cur and cur[-1].isdigit():
+                    cur.pop()
+            else:
+                out.append(cur)
+                cur = []
+        else:
+            cur.append(t)
+    return out + [cur]
+
+
 def command_kind(command) -> str:
-    """design/31 item 1: an estimate's command, `make <target>` where the command holds
-    one (a `/bin/sh -c 'make check > log'` and `make check` are one), else the argv."""
-    words = " ".join(str(c) for c in command).split() if isinstance(command, list) else []
-    for i, w in enumerate(words[:-1]):
-        if os.path.basename(w) in ("make", "gmake"):
-            for t in words[i + 1:]:
-                if not t.startswith("-") and "=" not in t:
-                    return "make " + t.strip("'\";")
-    return " ".join(words)
+    """design/31 item 1: an estimate's command. A landing's job is `gate land`. A command
+    word `make` (the argv's first, or a shell `-c` string's, after `;`, `&&`, `|` and the
+    like) gives `make <target>`, make's own target, with no option's value taken for it
+    (brief 2, R3), or `make` with none: a `/bin/sh -c 'make check > log'`, `make -C repo
+    check` and `make check` are one. Else the argv, its words joined by one space."""
+    if not isinstance(command, list):
+        return ""
+    argv = [str(c) for c in command]
+    if any(tuple(argv[i:i + 3]) == LAND_JOB for i in range(len(argv) - 2)):
+        return "gate land"
+    for words in _simple_commands(argv):
+        while words and (_ASSIGN.match(words[0]) or words[0] in _PREFIXES):
+            words = words[1:]
+        if words and os.path.basename(words[0]) in MAKES:
+            target = _make_target(words[1:])
+            return f"make {target}" if target else "make"
+    return " ".join(" ".join(argv).split())
 
 
 def last_line(path, gid: str, prefix: str = "") -> str | None:
@@ -1534,10 +1619,11 @@ def _shown(root, sid: str) -> set:
     return {i for i in ids if isinstance(i, str)} if isinstance(ids, list) else set()
 
 
-def _set_aside(d: Path, now: float) -> int:
+def _set_aside(d: Path, now: float) -> tuple[int, set]:
     """nw2 R2: the chain's lines older than `OLD_LINE` (by `at`, else the file's mtime)
-    renamed into `inbox/old/`; how many."""
-    n = 0
+    renamed into `inbox/old/`; how many, and the ids of those a failed set-aside left where
+    they are (brief 2, R9: `old` not made, a rename refused), which stop no take."""
+    n, stuck = 0, set()
     for p in _waiting(d):
         at = (_load(p) or {}).get("at")
         if not isinstance(at, (int, float)) or isinstance(at, bool):
@@ -1546,13 +1632,13 @@ def _set_aside(d: Path, now: float) -> int:
             except OSError:
                 continue
         if at < now - OLD_LINE:
-            _mkdir(d / "old")
             try:
+                _mkdir(d / "old")
                 os.rename(p, d / "old" / p.name)
                 n += 1
             except OSError:
-                pass
-    return n
+                stuck.add(p.stem)
+    return n, stuck
 
 
 def inbox_take(root, sid: str, limit=TAKE, fits=None, chain: str | None = None,
@@ -1562,8 +1648,12 @@ def inbox_take(root, sid: str, limit=TAKE, fits=None, chain: str | None = None,
     (the text so far) stops the take where the hook's output would pass its ceiling.
     `chain` (nw2 R2, `chain_taker`'s): the chain's inbox after the session's own, by the
     same rename under the same bounds; its lines older than `OLD_LINE` set aside first and
-    counted in one line. `closed` (`sitting_closed`): each chain line is shown once, after
-    CLOSED_WORDS, remembered in `sessions/<sid>/gate-shown.json`, and left where it is."""
+    counted in one line, a line whose set-aside fails left where it is. `closed`
+    (`sitting_closed`): each chain line is shown once, after CLOSED_WORDS, remembered in
+    `sessions/<sid>/gate-shown.json`, and left where it is, a corrupt one too.
+    A failure before any rename is no gate lines, and the files wait for the next hook;
+    after one, every line already taken is returned (brief 2, R1). A shown record that
+    cannot be written is not one: its lines are shown again at the next hook, never moved."""
     if not isinstance(sid, str) or not _SID.match(sid):
         return []
     d = _inbox(root, sid)
@@ -1571,57 +1661,70 @@ def inbox_take(root, sid: str, limit=TAKE, fits=None, chain: str | None = None,
     now = time.time() if now is None else now
     fits = fits or (lambda text: True)
     lines: list[str] = []
+    skip: set = set()                                  # the chain's ids this take passes by
     if cd is not None and not closed:
-        old = _set_aside(cd, now)
+        old, skip = _set_aside(cd, now)
         if old:
             lines.append(f"gate: {old} {'line' if old == 1 else 'lines'} of this chain older "
                          f"than 24 hours set aside in {cd / 'old'}")
     shown = _shown(root, sid) if cd is not None and closed else set()
+    skip |= shown
 
     def waiting() -> list[Path]:
         own = _waiting(d)
         if cd is None:
             return own
-        theirs = [p for p in _waiting(cd) if p.stem not in shown]
+        theirs = [p for p in _waiting(cd) if p.stem not in skip]
         return sorted(own + theirs, key=lambda p: _counter(p.stem))
-    files, took = waiting(), 0
+    files, took, moved = waiting(), 0, False
     newly = []
-    for i, p in enumerate(files):
-        if took >= limit:
-            break
-        home = p.parent
-        keep = closed and cd is not None and home == cd
-        body = _load(p)
-        if body is None:                               # unreadable: set aside, unprinted
-            _mkdir(home / "read")
+    try:
+        for i, p in enumerate(files):
+            if took >= limit:
+                break
+            home = p.parent
+            keep = closed and cd is not None and home == cd
+            body = _load(p)
+            if body is None:                           # unreadable: set aside, unprinted
+                if keep:                               # brief 2, R7: a closed sitting's stays
+                    skip.add(p.stem)
+                    continue
+                try:
+                    _mkdir(home / "read")
+                    os.rename(p, home / "read" / p.name)
+                except OSError:
+                    pass
+                continue
+            left = len(files) - i - 1
+            line = wait_line(body)
+            if keep:
+                line = f"{CLOSED_WORDS}: {line}"
+            if not fits("\n".join(lines + [line] + ([MORE.format(n=left)] if left else []))):
+                break
+            if keep:
+                newly.append(p.stem)
+            else:
+                try:
+                    _mkdir(home / "read")
+                    os.rename(p, home / "read" / p.name)
+                except OSError:
+                    continue                           # another hook took it first
+                moved = True
+            lines.append(line)
+            took += 1
+        skip |= set(newly)
+        if newly:
             try:
-                os.rename(p, home / "read" / p.name)
+                _write_private(Path(root) / "sessions" / sid / SHOWN,
+                               json.dumps({"ids": sorted(shown | set(newly))}) + "\n")
             except OSError:
-                pass
-            continue
-        left = len(files) - i - 1
-        line = wait_line(body)
-        if keep:
-            line = f"{CLOSED_WORDS}: {line}"
-        if not fits("\n".join(lines + [line] + ([MORE.format(n=left)] if left else []))):
-            break
-        if keep:
-            newly.append(p.stem)
-        else:
-            _mkdir(home / "read")
-            try:
-                os.rename(p, home / "read" / p.name)
-            except OSError:
-                continue                               # another hook took it first
-        lines.append(line)
-        took += 1
-    if newly:
-        _write_private(Path(root) / "sessions" / sid / SHOWN,
-                       json.dumps({"ids": sorted(shown | set(newly))}) + "\n")
-        shown |= set(newly)
-    rest = len(waiting())
-    if rest and fits("\n".join(lines + [MORE.format(n=rest)])):
-        lines.append(MORE.format(n=rest))
+                pass                                   # R1: shown again next time, never moved
+        rest = len(waiting())
+        if rest and fits("\n".join(lines + [MORE.format(n=rest)])):
+            lines.append(MORE.format(n=rest))
+    except Exception:                                  # noqa: BLE001
+        if not moved:
+            raise
     return lines
 
 
