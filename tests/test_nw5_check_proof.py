@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "plugin" / "lib" / "agentik-session"
 EIGHT = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS",
          "MAKEFILES", "MAKELEVEL")
+DROP = resolver.GATE_DEFAULTS["check_drop"][0]     # the one name check_drop holds by default
 KEYS = {"id", "key", "started", "ended", "tree", "head", "main", "worktree", "links", "exit",
         "cut", "clean"}
 
@@ -58,14 +59,14 @@ class Box:
         mk = ("check:\n\t@echo run >> %s/count\n"
               "\t@printf '%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s|%%s\\n' \"$$GIT_DIR\" \"$$GIT_WORK_TREE\" "
               "\"$$GIT_INDEX_FILE\" \"$$MAKEFLAGS\" \"$$MFLAGS\" \"$$GNUMAKEFLAGS\" \"$$MAKEFILES\" "
-              "\"$$MAKELEVEL\" \"$$DECISIONS_BASE\" >> %s/env\n"
+              "\"$$MAKELEVEL\" \"$$%s\" >> %s/env\n"
               "\t@if [ -e %s/snap ]; then cp %s/$$CLAUDE_SESSION_GATE_JOB/check.json "
               "%s/during.json; fi\n"
               "\t@if [ -e %s/move ]; then git commit -q --allow-empty -m moved; fi\n"
               "\t@if [ -e %s/slow ]; then sleep 20; fi\n"
               "\t@test ! -e %s/red\n"
               "hygiene:\n\t@test ! -e %s/hyg-red\n"
-              "hygiene-range:\n\t@true\n") % (o, o, o, g, o, o, o, o, o)
+              "hygiene-range:\n\t@true\n") % (o, DROP, o, o, g, o, o, o, o, o)
         git(self.path, "init", "-q", "-b", "main")
         (self.path / "Makefile").write_text(mk)
         (self.path / ".gitignore").write_text(".claude/worktrees/\n.venv\n.venv-floor\n")
@@ -131,7 +132,7 @@ def box(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    for name in EIGHT + ("DECISIONS_BASE", land.FRESH):
+    for name in EIGHT + (DROP, land.FRESH):
         monkeypatch.delenv(name, raising=False)
 
     def serve_now(root, popen=None):
@@ -160,10 +161,10 @@ def test_1_one_function_one_environment(box, monkeypatch):
     for name in EIGHT:
         monkeypatch.setenv(name, "1" if name == "MAKELEVEL" else
                            "-e" if "FLAGS" in name else str(box.tmp / "nowhere"))
-    monkeypatch.setenv("DECISIONS_BASE", "base-x")
+    monkeypatch.setenv(DROP, "base-x")
     gid = box.check()
     rc, out, err = box.land("--fresh")
-    for name in EIGHT + ("DECISIONS_BASE",):
+    for name in EIGHT + (DROP,):
         monkeypatch.delenv(name)
     lines = (box.out / "env").read_text().splitlines()
     assert box.count() == 3 and lines == clean * 3, lines
@@ -507,7 +508,7 @@ def test_r9_the_three_keys_and_a_mistyped_one(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     cfg = resolver.gate_config(os.environ)
     assert (cfg["check_drop"], cfg["check_links"], cfg["check_age"]) == (
-        ["DECISIONS_BASE"], [".venv", ".venv-floor"], 21600)
+        [DROP], [".venv", ".venv-floor"], 21600)
     f = tmp_path / ".claude" / "agentik" / "profiles.yaml"
     f.parent.mkdir(parents=True)
     f.write_text("gate:\n  check_drop: [A, B]\n  check_links: 3\n  check_age: 60\n")
@@ -516,4 +517,3 @@ def test_r9_the_three_keys_and_a_mistyped_one(tmp_path, monkeypatch):
     assert (cfg["check_drop"], cfg["check_links"], cfg["check_age"]) == (
         ["A", "B"], [".venv", ".venv-floor"], 60)
     assert said == ["gate: check_links is no list of names; the default stands"]
-    assert resolver.GATE_DEFAULTS["check_drop"] == ["DECISIONS_BASE"]

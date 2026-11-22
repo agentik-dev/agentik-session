@@ -130,6 +130,19 @@ minutes. An untracked
 `.venv` symlink at the worktree's top is no dirt either: it stays for the check, and only the link
 goes, after those reads pass, before `worktree remove`, which would refuse it. Publishing is not
 here: that stays with the orchestrator.
+
+One check proves a landing (packet nw5-check-proof, design/31 items 21 to 24). The check step
+runs `run_check`, the one function `gate run <worktree> --check` runs too: `make check` without
+the eight names `main` drops, the fresh mark or a name of `gate.check_drop`, writing
+`check.json` in the job's folder at its start (`exit` null) and at its end. Before it, after
+`require_no_overlap` has read main, `kept_check` reads the newest record of this repo's key for
+the head's tree and takes it when it is exit 0, clean and not cut, of the head (or of one the
+job's own trailed commits follow), in this worktree, with that main, the same links, within
+`gate.check_age`, and no newer red `make check` of that tree or red result naming the branch
+(this plugin's own landing aside) follows it. A kept record skips the run, says `check: kept
+<id>` and ends the land line, ok or red, with `, check <id>`, after every other ending. `gate
+land --fresh` (`CLAUDE_SESSION_LAND_FRESH=1` in the job's env) always runs; `--dry-run` prints
+`check: would take <id>[ if the stamp writes nothing]` or `check: would run its own (<why>)`.
 """
 
 import glob

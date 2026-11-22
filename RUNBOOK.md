@@ -932,6 +932,20 @@ agentik session gate status                       # running, queued, the last fi
   <branch>: <text>` or line 2 is not blank; and `red merge-file` with
   hygiene's code when `scripts/hygiene --commits` refuses the merge commit's
   message, made as a dangling commit and scanned as `<sha>..<commit>`.
+- One check proves a landing (packet nw5-check-proof). `agentik session gate run
+  <worktree> --check` queues the landing's own check in a clean worktree, untracked
+  files counted (exit 2 and nothing queued for a dirty one, or a command after it):
+  `make check` without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `MAKEFLAGS`,
+  `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`, `MAKELEVEL` or a name of `gate.check_drop`,
+  its record `<state>/gate/<id>/check.json`. A landing then takes the newest record of
+  the readied head's tree where it is green, clean, not cut, of that head (or one the
+  landing's own commits follow), in the branch's own worktree, with main where the
+  landing reads it, the same `gate.check_links`, within `gate.check_age` (six hours),
+  and no newer red `make check` of that tree or red job naming the branch: its note
+  says `check: kept <id>`, and the land line ends `, check <id>`. Else it runs its own
+  through the same function, which keeps its record too. `gate land --fresh` always
+  runs its own; `--dry-run` says `check: would take <id> ...` or `check: would run its
+  own (<why>)`. `gate publish` is unchanged: a `--check` job proves no push.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.
