@@ -42,6 +42,13 @@ sitting whose respawn mark is confirmed (`sitting_closed`) is shown each chain l
 leaves the file for the successor; a chain line older than `OLD_LINE` is set aside into
 `inbox/old/` and counted. `wait_chain` is `gate wait --chain`. An estimate counts the greens of
 one command kind (`command_kind`).
+
+One check proves a landing (packet nw5-check-proof, design/31 items 21 to 24). `gate run
+<worktree> --check` queues `CHECK_JOB`, which runs `land.run_check` there: `make check` without
+the eight names `land.main` drops and `gate.check_drop`'s, writing `<state>/gate/<id>/check.json`
+(0600, written then renamed) at its start with a null `exit` and again at its end. Nothing else
+writes that file; `_prune` removes it with its folder. Its kind is `make check`; `gate publish`
+reads no such job as a proof, since its command is no `make check` of today's form.
 """
 
 from __future__ import annotations
@@ -81,6 +88,7 @@ CUT_CALLER, CALLER_EXIT = "caller cut", 130     # a cancel mark's cut (fw5 R4)
 MORE = "{n} more: agentik session gate status"
 MORE_REPO = "{n} more: agentik session gate status --repo {path} --json"
 LAND_JOB = ("gate", "land", "--in-job")     # a landing's job, then repo, branch, sha, merge
+CHECK_JOB = ("gate", "run", "--check", "--in-job")    # a kept check's job, then its worktree
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name", "chain")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
@@ -1302,6 +1310,8 @@ def command_kind(command) -> str:
     argv = [str(c) for c in command]
     if any(tuple(argv[i:i + 3]) == LAND_JOB for i in range(len(argv) - 2)):
         return "gate land"
+    if any(tuple(argv[i:i + 4]) == CHECK_JOB for i in range(len(argv) - 3)):
+        return "make check"         # nw5 R3: it is that run, and shares its estimate
     for words in _simple_commands(argv) or ():
         while words and (_ASSIGN.match(words[0]) or words[0] in _PREFIXES):
             words = words[1:]

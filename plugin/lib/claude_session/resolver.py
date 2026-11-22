@@ -71,7 +71,10 @@ PLUGIN = "session"
 # layer alone (gate_config), since it serves every repo. Row ss3 R4: `decisions` left, since no
 # tool read it; a layer that still sets it is an unknown key.
 SECTIONS = ("session", "respeak", "relay", "gate", "tiers")
-GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
+GATE_DEFAULTS = {"ntfy_url": None, "ntfy_topic": None, "wall": 5400,
+                 # packet nw5-check-proof R9: the kept check's three keys, the user layer alone
+                 "check_drop": ["DECISIONS_BASE"], "check_links": [".venv", ".venv-floor"],
+                 "check_age": 21600}
 DEPENDENT = ("respeak", "relay")
 # agentik-r1 §6.3 c6: the relay's section before the rename. A layer's old key is read as
 # `relay`, and `relay` wins over it in one layer, with a warning; the resolved file carries
@@ -536,7 +539,7 @@ def gate_config(env, log=None) -> dict:
     reads as its default (no ntfy, a 5400 s wall); it never raises. `load_ceiling` and
     `max_running` (packet S47) appear only when set well, and the gate holds their defaults,
     since one follows the core count; a bad one is one line through `log`."""
-    out = dict(GATE_DEFAULTS)
+    out = {k: list(v) if isinstance(v, list) else v for k, v in GATE_DEFAULTS.items()}
     try:
         doc = _read(_user_file(env), [])
     except (ResolveError, OSError):
@@ -562,7 +565,25 @@ def gate_config(env, log=None) -> dict:
         out["max_running"] = m
     elif "max_running" in g and log:
         log("gate: max_running is no positive whole number; the default stands")
+    _check_keys(g, out, log)
     return out
+
+
+def _check_keys(g: dict, out: dict, log) -> None:
+    """Packet nw5-check-proof R9: `check_drop` and `check_links`, lists of names, and
+    `check_age`, positive seconds; a mistyped one reads as its default, one line through
+    `log`."""
+    for k in ("check_drop", "check_links"):
+        v = g.get(k)
+        if isinstance(v, list) and all(isinstance(x, str) and x.strip() for x in v):
+            out[k] = [x.strip() for x in v]
+        elif k in g and log:
+            log(f"gate: {k} is no list of names; the default stands")
+    a = g.get("check_age")
+    if isinstance(a, (int, float)) and not isinstance(a, bool) and 0 < a < float("inf"):
+        out["check_age"] = a
+    elif "check_age" in g and log:
+        log("gate: check_age is no positive number of seconds; the default stands")
 
 
 def _validate(s: dict) -> None:

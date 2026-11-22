@@ -32,7 +32,8 @@ SCHEMAS = {"meter": "agentik.session.meter/1", "gate": "agentik.session.gate/1",
 LAYERS = ("default", "user-defaults", "profile", "user", "repo", "local", "launch", "session")
 NOT_SETTINGS = ("description", "subagents", "ceilings_1m", "tiers")
 MAPPINGS = ("admission", "reconcile")      # a row a leaf a layer sets, none when unset
-GATE_KEYS = ("ntfy_url", "ntfy_topic", "wall", "load_ceiling", "max_running")
+GATE_KEYS = ("ntfy_url", "ntfy_topic", "wall", "load_ceiling", "max_running",
+             "check_drop", "check_links", "check_age")      # nw5 R9: the kept check's three
 SECRETS = ("gate.ntfy_topic",)
 LIVE = ("posture",)                        # `set posture`: the next read holds it
 LIVE_PREFIX = ("gate.", "reconcile.")      # gate_config and the reconciler read files each run

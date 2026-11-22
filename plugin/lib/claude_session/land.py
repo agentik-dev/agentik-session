@@ -185,10 +185,10 @@ def at(step):
     REACHED = step
 
 
-def read(cwd, *args):
+def read(cwd, *args, env=None):
     """A git read: (exit, stdout), its stderr kept out of the way."""
     p = subprocess.run(("git",) + args, cwd=cwd, stdin=DEVNULL, stdout=subprocess.PIPE,
-                       stderr=DEVNULL, universal_newlines=True)
+                       stderr=DEVNULL, universal_newlines=True, env=env)
     return p.returncode, p.stdout.strip()
 
 
@@ -646,9 +646,9 @@ def merge(repo, full, message):
             STANDS = "merged %s as %s; the merge stands" % (full, head)
 
 
-def worktree_dirt(tree):
+def worktree_dirt(tree, env=None):
     """The worktree's status lines, less an untracked `.venv` symlink at its top."""
-    code, status = read(tree, *STATUS)
+    code, status = read(tree, *STATUS, env=env)
     if code != 0:
         raise Red("worktree", note="cannot read the status of " + tree)
     return [line for line in status.splitlines() if line != "?? .venv"]
@@ -1225,22 +1225,9 @@ def readied_from(repo, tree, branch, full, head, dry):
     """Every commit from the sha given to the head is the job's: on the first-parent line, each
     closing with the trailer naming it, a merge's second parent on main; and the job's merge
     and stamp, run again from the sha given in a temp worktree, give each one's tree."""
-    if read(repo, "merge-base", "--is-ancestor", full, head)[0] != 0:
+    steps = job_steps(repo, full, head, full)
+    if steps is None:
         return False
-    steps, prev = [], full
-    for commit in read(repo, "rev-list", "--first-parent", "--reverse",
-                       "%s..%s" % (full, head))[1].split():
-        parents = read(repo, "rev-list", "--parents", "-n", "1", commit)[1].split()[1:]
-        body = read(repo, "log", "-1", "--format=%B", commit)[1].strip().split("\n")
-        if not parents or parents[0] != prev or len(parents) > 2 or body[-1] != TRAILER + full:
-            note("%s is not the job's commit from %s" % (commit, full))
-            return False
-        if len(parents) == 2 and read(repo, "merge-base", "--is-ancestor", parents[1],
-                                      MAIN)[0] != 0:
-            note("%s merges %s, which is not on main" % (commit, parents[1]))
-            return False
-        steps.append((commit, parents[1] if len(parents) == 2 else None))
-        prev = commit
     if dry:
         # R11 as review 1 ruled (F8): the rerun writes a temp worktree, so a dry run says the
         # head is taken by its trailers alone.
@@ -1248,6 +1235,31 @@ def readied_from(repo, tree, branch, full, head, dry):
               % (branch, full[:7]), flush=True)
         return True
     return rerun(repo, tree, branch, full, steps)
+
+
+def job_steps(repo, start, head, given, say=True):
+    """The commits from `start` to the head, each the job's: on the first-parent line, closing
+    with the trailer naming the sha given, a merge's second parent on main; a list of (commit,
+    the merged parent or None), or None. `readied_from`'s test, and nw5 R4's, no rerun."""
+    if read(repo, "merge-base", "--is-ancestor", start, head)[0] != 0:
+        return None
+    steps, prev = [], start
+    for commit in read(repo, "rev-list", "--first-parent", "--reverse",
+                       "%s..%s" % (start, head))[1].split():
+        parents = read(repo, "rev-list", "--parents", "-n", "1", commit)[1].split()[1:]
+        body = read(repo, "log", "-1", "--format=%B", commit)[1].strip().split("\n")
+        if not parents or parents[0] != prev or len(parents) > 2 or body[-1] != TRAILER + given:
+            if say:
+                note("%s is not the job's commit from %s" % (commit, start))
+            return None
+        if len(parents) == 2 and read(repo, "merge-base", "--is-ancestor", parents[1],
+                                      MAIN)[0] != 0:
+            if say:
+                note("%s merges %s, which is not on main" % (commit, parents[1]))
+            return None
+        steps.append((commit, parents[1] if len(parents) == 2 else None))
+        prev = commit
+    return steps
 
 
 def rerun(repo, tree, branch, full, steps):
@@ -1376,7 +1388,222 @@ def resolve_repo(arg):
               % (os.path.join(code, arg), below))
 
 
-def land(repo, branch, sha, message, log=None, dry=False):
+# ---- one check proves a landing (packet nw5-check-proof, design/31 items 21 to 24) ---------
+
+DROPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE") + MAKE_VARS   # the eight main drops
+FRESH = "CLAUDE_SESSION_LAND_FRESH"     # `gate land --fresh`, in the queued entry's env (R6)
+CHECK_FILE = "check.json"               # the check's record, beside its job's result (R2)
+KEPT = ""                               # the kept record's id, for the land line (R5)
+
+
+def check_config():
+    """(check_drop, check_links, check_age): the gate section's user layer (R9)."""
+    from . import resolver
+    cfg = resolver.gate_config(os.environ, note)
+    return cfg["check_drop"], cfg["check_links"], cfg["check_age"]
+
+
+def bare_env(drop=()):
+    """This process's environment less the eight names, the fresh mark and `drop`."""
+    return {k: v for k, v in os.environ.items()
+            if k not in DROPPED and k != FRESH and k not in drop}
+
+
+def links_of(tree, names):
+    """Whether each name is there in the tree, a link counted (R2)."""
+    return {name: os.path.lexists(os.path.join(tree, name)) for name in names}
+
+
+def _dirt(tree):
+    try:
+        return worktree_dirt(tree, env=bare_env())
+    except Red:
+        return None
+
+
+def _rev(tree, rev):
+    code, out = read(tree, "rev-parse", "-q", "--verify", rev, env=bare_env())
+    return out if code == 0 and out else None
+
+
+def check_path(root, gid):
+    """The record's path, where `gid` is a gate id whose folder the runner made; else None,
+    and the check keeps no record."""
+    from . import gate
+    if root is None or not isinstance(gid, str) or not gate.ID.match(gid):
+        return None
+    d = gate.entry_dir(root, gid)
+    return d / CHECK_FILE if d.is_dir() else None
+
+
+def write_check(path, rec):
+    import json
+    from . import gate
+    try:
+        gate._write_private(path, json.dumps(rec, indent=1) + "\n")
+    except OSError as err:
+        note("check: the record %s was not written: %s" % (path, err))
+
+
+def run_check(tree, root=None, gid=None, log=None):
+    """R1, the one function: `make check` in `tree`, without the eight names `main` drops, the
+    fresh mark, or a name of `gate.check_drop`; its output on stderr, as every step's. With a
+    gate job's folder it writes `check.json` there at the start, `exit` null, and again at the
+    end (R2). A cut writes 124 and the cut, then goes on as a cut. (code, the log's size at
+    the start), the size for `refused`."""
+    import time
+    from . import gate
+    drop, names, _ = check_config()
+    env = bare_env(drop)
+    path, rec, start_dirt = check_path(root, gid), None, None
+    if path is not None:
+        start_dirt = _dirt(tree)
+        rec = {"id": gid, "key": gate.repo_key(tree), "started": time.time(), "ended": None,
+               "tree": _rev(tree, "HEAD^{tree}"), "head": _rev(tree, "HEAD"),
+               "main": _rev(tree, MAIN + "^{commit}"), "worktree": os.path.realpath(tree),
+               "links": links_of(tree, names), "exit": None, "cut": None, "clean": None}
+        write_check(path, rec)
+    note("check: make check in " + tree)
+    begin = log_size(log)
+    code, cut = None, None
+    try:
+        code = run(tree, "make", "check", env=env)
+    except Red as red:
+        if red.step == "cut":
+            code = CUT
+            cut = gate.CUT_CALLER if root is not None and gate.ID.match(str(gid)) \
+                and gate.cancel_path(root, gid).exists() else gate.CUT_WALL
+        raise
+    finally:
+        if rec is not None and code is not None:
+            end_dirt = _dirt(tree)
+            rec.update(ended=time.time(), exit=code, cut=cut,
+                       clean=start_dirt == [] and end_dirt == [] and rec["head"] is not None
+                       and _rev(tree, "HEAD") == rec["head"])
+            write_check(path, rec)
+    return code, begin
+
+
+def check_main(argv, root, gid):
+    """`gate run --check --in-job <worktree>`, the job (R3): the one function there, the
+    gate's SIGTERM as a landing's (124, the record's end written); exit make's code."""
+    signal.signal(signal.SIGTERM, on_cut)
+    for name in DROPPED:
+        os.environ.pop(name, None)
+    try:
+        code, _ = run_check(os.path.realpath(argv[0]), root, gid)
+    except Red as red:
+        note("check: red %s exit %d" % (red.step, red.code))
+        return red.code
+    return code
+
+
+def check_records(root):
+    """(id, record) of each `check.json` under the gate, newest id first, the order
+    `publish.results` reads."""
+    from . import gate
+    try:
+        names = [n for n in os.listdir(gate.gate_dir(root)) if gate.ID.match(n)]
+    except OSError:
+        return
+    for n in sorted(names, key=lambda n: (n[:15], int(n[16:])), reverse=True):
+        rec = gate._load(gate.entry_dir(root, n) / CHECK_FILE)
+        if rec is not None:
+            yield n, rec
+
+
+def _newer(a, b):
+    return (a[:15], int(a[16:])) > (b[:15], int(b[16:]))
+
+
+def _words(command):
+    return [w for c in command if isinstance(c, str) for w in c.split()] \
+        if isinstance(command, list) else []
+
+
+def newer_red(root, gid, key, tree, want, branch):
+    """A red result newer than the record that voids it (R4), its id, or None: a `make check`
+    of today's form in that worktree on a head of that tree, or a result of this key whose
+    command names the branch as a word, this plugin's own landing aside."""
+    from . import gate, publish
+    real = os.path.realpath(tree)
+    for n, doc in publish.results(root):
+        if not _newer(n, gid):
+            break
+        x = doc.get("exit")
+        if x == 0 and not isinstance(x, bool):
+            continue
+        command, head = doc.get("command"), doc.get("head")
+        if gate.repo_path(doc.get("repo")) == real and publish.is_check_command(command) \
+                and isinstance(head, str) and _rev(tree, head + "^{tree}") == want:
+            return n
+        if doc.get("key") == key and gate.land_branch(command) is None \
+                and branch in _words(command):
+            return n
+    return None
+
+
+def kept_check(root, repo, tree, branch, given, head, ours):
+    """R4: (the kept record's id, "") or (None, the first test that failed). The newest record
+    of this key for the head's tree decides alone."""
+    import time
+    from . import gate
+    _, names, age = check_config()
+    want = _rev(tree, head + "^{tree}")
+    key = gate.repo_key(tree)
+    found = next(((n, r) for n, r in check_records(root)
+                  if r.get("key") == key and want and r.get("tree") == want), None)
+    if found is None:
+        return None, "no record of this tree"
+    gid, rec = found
+    x = rec.get("exit")
+    if x is None:
+        return None, "%s has no exit" % gid
+    if not (x == 0 and not isinstance(x, bool)):
+        return None, "%s exit %s" % (gid, x)
+    if rec.get("cut") is not None:
+        return None, "%s was cut" % gid
+    if rec.get("clean") is not True:
+        return None, "%s is not clean" % gid
+    seen = rec.get("head")
+    if seen != head and not (isinstance(seen, str) and seen
+                             and job_steps(repo, seen, head, given, say=False) is not None):
+        return None, "%s checked %s, not the landing's head" % (gid, str(seen)[:12])
+    if rec.get("worktree") != os.path.realpath(tree):
+        return None, "%s ran in another worktree" % gid
+    if rec.get("main") != ours:
+        return None, "%s ran with main at %s" % (gid, str(rec.get("main"))[:12])
+    if rec.get("links") != links_of(tree, names):
+        return None, "%s's links differ now" % gid
+    ended = rec.get("ended")
+    if not isinstance(ended, (int, float)) or isinstance(ended, bool) \
+            or time.time() - ended > age:
+        return None, "%s ended over gate.check_age ago" % gid
+    red = newer_red(root, gid, key, tree, want, branch)
+    if red:
+        return None, "%s is red after %s" % (red, gid)
+    return gid, ""
+
+
+def dry_check(root, repo, tree, branch, given, head, fresh, stamp):
+    """R6: the line that says which check the landing would take; it claims no more than it
+    read."""
+    if fresh:
+        return "check: would run its own (--fresh)"
+    code, ours = read(repo, "rev-parse", "--verify", "-q", MAIN + "^{commit}")
+    if code != 0:
+        return "check: would run its own (cannot read %s)" % MAIN
+    if stamp and read(repo, "merge-base", "--is-ancestor", ours, head)[0] != 0:
+        return "check: would run its own (main merged)"
+    if root is None:
+        return "check: would run its own (no gate folder)"
+    gid, why = kept_check(root, repo, tree, branch, given, head, ours)
+    if gid:
+        return "check: would take %s%s" % (gid, " if the stamp writes nothing" if stamp else "")
+    return "check: would run its own (%s)" % why
+
+
+def land(repo, branch, sha, message, log=None, dry=False, root=None, gid=None, fresh=False):
     """The steps; True when a dry run stopped after its reads (land4 R11)."""
     global UNSCANNED
     at("repo")
@@ -1390,28 +1617,41 @@ def land(repo, branch, sha, message, log=None, dry=False):
     at("worktree")
     tree = require_worktree(blocks, branch)
     at("sha")
+    given = None
     if stamps(tree):
         given, head = taken_head(repo, tree, branch, sha, dry)
         head = ready(repo, tree, branch, given, head, dry)
         if dry:
+            print(dry_check(root, repo, tree, branch, given, head, fresh, True), flush=True)
             return True
         sha = head
     elif dry:
         print("ready: no stamp target; a branch behind main is red sha", flush=True)
+        _, head = read(repo, "rev-parse", "--verify", "-q", "refs/heads/" + branch)
+        print(dry_check(root, repo, tree, branch, head, head, fresh, False), flush=True)
         return True
     at("sha")
     full = require_sha(repo, branch, sha)
+    given = given or full
     at("main")
     ours, merged = require_no_overlap(repo, full, branch)
     at("merge-file")
     scan_message(repo, tree, full, ours, merged, message)
 
     at("check")
-    note("check: make check in " + tree)
-    begin = log_size(log)
-    code = run(tree, "make", "check")
-    if code != 0:
-        raise Red("check", code, unrun=refused(log, begin) if begin is not None else "")
+    global KEPT
+    kept, why = (None, "--fresh") if fresh else (None, "") if root is None \
+        else kept_check(root, repo, tree, branch, given, full, ours)
+    if kept:
+        KEPT = kept
+        note("check: kept %s, make check exit 0 on this tree in %s with main at %s"
+             % (kept, tree, ours))
+    else:
+        if why:
+            note("check: runs its own (%s)" % why)
+        code, begin = run_check(tree, root, gid, log)
+        if code != 0:
+            raise Red("check", code, unrun=refused(log, begin) if begin is not None else "")
     at("hygiene")
     span = "%s..%s" % (MAIN, full)
     scan = tree_scan(tree)
@@ -1464,7 +1704,7 @@ def land(repo, branch, sha, message, log=None, dry=False):
         raise Red("branch", code, branch + " stays")
 
 
-def main(argv, log=None, dry=False):
+def main(argv, log=None, dry=False, root=None, gid=None, fresh=None):
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     signal.signal(signal.SIGTERM, on_cut)
@@ -1480,7 +1720,9 @@ def main(argv, log=None, dry=False):
         name = os.path.basename(os.path.normpath(argv[0]))
         repo = resolve_repo(argv[0])
         name = os.path.basename(repo)
-        if land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log, dry):
+        if fresh is None:
+            fresh = os.environ.get(FRESH) == "1"
+        if land(repo, argv[1], argv[2], os.path.abspath(argv[3]), log, dry, root, gid, fresh):
             print("land %s: dry run, nothing queued" % name, flush=True)
             return 0
     except Exception as err:
@@ -1491,9 +1733,11 @@ def main(argv, log=None, dry=False):
         print("land %s: red %s exit %d%s%s%s" % (name, red.step, red.code,
                                                  red.unrun and ", unrun " + red.unrun,
                                                  LEFT and ", " + LEFT,
-                                                 READIED and ", as " + READIED), flush=True)
+                                                 READIED and ", as " + READIED)
+              + (KEPT and ", check " + KEPT), flush=True)
         return red.code
-    print("land %s: ok %s, main readied%s%s" % (
+    print("land %s: ok %s, main readied%s%s%s" % (
         name, argv[2], UNSCANNED and ", " + UNSCANNED,
-        READIED and ", as %s%s" % (READIED, PLUGIN and ", plugin " + PLUGIN)), flush=True)
+        READIED and ", as %s%s" % (READIED, PLUGIN and ", plugin " + PLUGIN),
+        KEPT and ", check " + KEPT), flush=True)
     return 0

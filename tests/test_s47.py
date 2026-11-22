@@ -373,7 +373,9 @@ def test_s47_a_bad_value_reads_as_the_default_and_one_log_line(w, text):
     lines = []
     cfg = resolver.gate_config(env, lines.append)
     assert key not in cfg and len(lines) == 1 and key in lines[0]
-    assert resolver.gate_config(env) == {"ntfy_url": None, "ntfy_topic": None, "wall": 5400}
+    assert resolver.gate_config(env) == {"ntfy_url": None, "ntfy_topic": None, "wall": 5400,
+                                         # nw5 R9: the kept check's three defaults
+                                         "check_drop": ["DECISIONS_BASE"], "check_links": [".venv", ".venv-floor"], "check_age": 21600}
     w.put_in("one", "a")
     gate.serve(w.root, w.fx())
     assert len([x for x in w.logs if key in x]) == 1
