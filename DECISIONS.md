@@ -24,4 +24,8 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 ## Proposed
 
+13. **A gate job's result follows the chain.** Enter it: the behaviour is built, installed and relied on by every respawn, and an entry is what makes a later change to it a question for the owner. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+
+14. **Entry 11 names the fourth refusal.** Amend entry 11: the refusal is built and guards an act that publishes, and the entry is where a reader looks for what every session is refused. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+
 ## Superseded
