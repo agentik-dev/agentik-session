@@ -25,6 +25,7 @@ import math
 import os
 import re
 import selectors
+import shlex
 import signal
 import stat
 import subprocess
@@ -886,8 +887,12 @@ def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool,
     MAX_OUT: the whole output on PostToolUse (`alone` False, `out` the handler's), the
     inbox block alone on UserPromptSubmit. A helper's payload (agent_id) takes nothing.
     With a sitting's `line` (packet in3 R4), one file at most, under MAX_OUT less the
-    line's share, and the line after them. Never raises: a failure is no gate lines, and
-    the files wait for the next hook."""
+    line's share, and the line after them. Under a chain (packet nw2-chain-inbox R2) the
+    chain's inbox after the session's own, where `gate.chain_taker` names this session the
+    chain's sitting; from its confirmed respawn mark on, a chain line is shown once and left
+    for the successor. Never raises: a failure before any rename is no gate lines, and the
+    files wait for the next hook; after one, every line already taken is returned (brief 2,
+    R1)."""
     tail = [line] if line else []
     try:
         sid = payload.get("session_id")
@@ -898,8 +903,11 @@ def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool,
 
         def fits(text: str) -> bool:
             return len(json.dumps(_with_gate(base, event, [text]))) <= room
-        return gate.inbox_take(resolver.state_dir(env), sid, limit=1 if line else gate.TAKE,
-                               fits=fits) + tail
+        root = resolver.state_dir(env)
+        chain = gate.chain_taker(root, env, sid)
+        return gate.inbox_take(root, sid, limit=1 if line else gate.TAKE, fits=fits,
+                               chain=chain, closed=bool(chain) and gate.sitting_closed(root, sid)
+                               ) + tail
     except Exception:                                   # noqa: BLE001
         return tail
 
@@ -1232,15 +1240,39 @@ def session_start(payload: dict, env=None) -> dict:
     env = os.environ if env is None else env
     share = watcher_share(payload, env)
     line = _line_take(payload, env, start=True)         # packet in3 R4: after the watcher's
-    if share is None and line is None:
+    jobs = _gate_open(payload, env)                     # nw2 R4: the chain's open jobs
+    if share is None and line is None and jobs is None:
         return _start(payload, env)
     try:
         out = _start(payload, env)
     except Exception:                                   # noqa: BLE001 - R4: still said
         out = {}
-    if line is not None:
-        out = _with_gate(out, "SessionStart", [line])
+    if line is not None or jobs is not None:
+        out = _with_gate(out, "SessionStart", [x for x in (jobs, line) if x is not None])
     return out if share is None else _with_watcher(out, share)
+
+
+def _gate_open(payload: dict, env) -> str | None:
+    """design/31 item 11: the chain sitting's line of its chain's open gate jobs, or None
+    (no chain, another session, a helper, none open, any fault)."""
+    try:
+        sid = payload.get("session_id")
+        if payload.get("agent_id"):
+            return None
+        root = resolver.state_dir(env)
+        chain = gate.chain_taker(root, env, sid)
+        return gate.open_line(root, chain, time.time()) if chain else None
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _gate_open_count(env) -> int:
+    """The open gate jobs of the environment's chain (item 13's words), 0 on any fault."""
+    try:
+        name = str(env.get(CHAIN_VAR) or "")
+        return len(gate.open_jobs(resolver.state_dir(env), name)) if CHAIN_RE.match(name) else 0
+    except Exception:                                   # noqa: BLE001
+        return 0
 
 
 def _start(payload: dict, env=None) -> dict:
@@ -1699,9 +1731,34 @@ def _job_open(payload: dict, sdir: Path) -> None:
         task = task if isinstance(task, str) and task else None
         if task is None and not (isinstance(ti, dict) and ti.get("run_in_background") is True):
             return
-        store._write_private(sdir / JOBS / tid, json.dumps({"at": time.time(), "task": task}))
+        rec = {"at": time.time(), "task": task}
+        if isinstance(ti, dict) and gate_wait_call(ti.get("command")):
+            rec["watcher"] = True                       # nw2 R6: never asked about at a close
+        store._write_private(sdir / JOBS / tid, json.dumps(rec))
     except Exception:                                   # noqa: BLE001
         pass
+
+
+_WAIT_WORDS = (("agentik-session", "gate", "wait"), ("claude-session", "gate", "wait"),
+               ("agentik", "session", "gate", "wait"))
+
+
+def gate_wait_call(cmd) -> bool:
+    """nw2 R6: a command that is one `gate wait`, the watcher: the launcher's name (a path
+    to it too) then `gate wait`, after any `NAME=value` words, with no shell operator, no
+    redirection and no substitution. Any other command is a job the close asks about."""
+    if not isinstance(cmd, str) or any(c in cmd for c in ";&|<>`$()\n\\"):
+        return False
+    try:
+        words = shlex.split(cmd)
+    except ValueError:
+        return False
+    while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+        words = words[1:]
+    if not words:
+        return False
+    words[0] = os.path.basename(words[0])
+    return any(tuple(words[:len(w)]) == w for w in _WAIT_WORDS)
 
 
 def _jobs_open(sdir: Path) -> list:
@@ -1762,7 +1819,7 @@ def _jobs_out_line(payload: dict, env) -> str | None:
         sdir = _session_dir(payload.get("session_id"), env, fallback=False)
         if sdir is None:
             return None
-        recs = _jobs_open(sdir)
+        recs = [(p, rec) for p, rec in _jobs_open(sdir) if rec.get("watcher") is not True]
         if not any("asked" not in rec for _, rec in recs):
             return None
         ats = sorted((rec.get("at") for _, rec in recs),
@@ -1908,6 +1965,9 @@ def _post_meter(payload: dict, env, sdir: Path | None, room: str | None = None) 
         return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                        "additionalContext": _meter_words(m.as_dict())}}
     out = _speaking(payload, env, sdir, m, resolved, room)
+    n = _gate_open_count(env) if out and CHAIN_RE.match(str(env.get(CHAIN_VAR) or "")) else 0
+    if n and len(json.dumps(_after(out, gate.gate_words(n)))) <= MAX_OUT:
+        out = _after(out, gate.gate_words(n))           # nw2 R6: the jobs cross, unwaited
     meter.save(sdir, m, st)                 # rr5a F1: the band is spent once its line is made
     return out
 

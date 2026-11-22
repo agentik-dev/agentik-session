@@ -429,12 +429,12 @@ def _put_back(index: str, snap: str, unmoved=None):
     return None
 
 
-def _gate_check(top: str, argv: list, env, caller, wall) -> int:
+def _gate_check(top: str, argv: list, env, caller, wall, named: bool = False) -> int:
     from . import gate, resolver
     root = resolver.state_dir(env)
     try:
         e = gate.enqueue(root, top, argv, dict(env), [], wall, "commit check", caller,
-                         time.time())
+                         time.time(), named=named)       # nw2 R1: `--session`, no chain
     except gate.GateError as err:
         print(f"commit-step: the gate refuses: {err}", file=sys.stderr, flush=True)
         return 1
@@ -493,7 +493,8 @@ def commit(cwd: str, paths: list, check: str, message: str, env, args=None) -> i
             caller = gate.resolve_caller(args, env)
         except gate.GateError as err:
             raise Refused(str(err)) from None
-    return _core(cwd, paths, argv, ("-F", msg), env, gated, caller, gate._config(env)["wall"])
+    return _core(cwd, paths, argv, ("-F", msg), env, gated, caller, gate._config(env)["wall"],
+                 named=getattr(args, "session", None) is not None)
 
 
 def commit_paths(cwd: str, paths: list, message: str, env, got=None) -> int:
@@ -520,7 +521,7 @@ def precheck(cwd: str, paths: list) -> str:
     return top
 
 
-def _core(cwd, paths, argv, msg, env, gated, caller, wall, got=None) -> int:
+def _core(cwd, paths, argv, msg, env, gated, caller, wall, got=None, named=False) -> int:
     top = _top(cwd)
     name = os.path.basename(top)
     with _signals():
@@ -529,12 +530,14 @@ def _core(cwd, paths, argv, msg, env, gated, caller, wall, got=None) -> int:
             print(f"commit {name}: red lock exit {LOCK_RED}", flush=True)
             return LOCK_RED
         try:
-            return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got)
+            return _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got,
+                           named)
         finally:
             os.close(fd)                # the lock goes after the line, its sha read under it
 
 
-def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got=None) -> int:
+def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got=None,
+            named=False) -> int:
     index, snap = _git_path(top, "index"), _git_path(top, SNAP)
     witness = _git_path(top, WITNESS)
     if os.path.lexists(snap):
@@ -544,13 +547,13 @@ def _locked(top, cwd, name, paths, argv, msg, env, gated, caller, wall, got=None
     _require_paths(top, cwd, paths)
     try:
         return _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall,
-                          index, snap, witness, got)
+                          index, snap, witness, got, named)
     finally:
         _drop(witness)                  # on every way out (fw5 R2)
 
 
 def _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall, index, snap,
-               witness, got=None) -> int:
+               witness, got=None, named=False) -> int:
     """fw5 R1: the add, "nothing to commit" and `moved` on the witness, so no path of this call
     is in the shared index while its check runs; then `add -N` for what the shared index lacks
     and `commit --only`. FW4d's snapshot guards that span alone (R2)."""
@@ -566,7 +569,7 @@ def _witnessed(top, cwd, name, paths, argv, msg, env, gated, caller, wall, index
         if _git(cwd, "diff", "--cached", "--quiet", "HEAD", "--", *paths, index=witness)[0] == 0:
             raise Nothing("nothing to commit in the named paths")
         if argv:
-            code = (_gate_check(top, argv, env, caller, wall) if gated
+            code = (_gate_check(top, argv, env, caller, wall, named) if gated
                     else _direct_check(top, argv))
             if code != 0:
                 raise Red("check", code)

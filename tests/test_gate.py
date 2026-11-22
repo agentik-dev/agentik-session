@@ -118,7 +118,7 @@ def test_enqueue_writes_a_private_entry_with_its_eleven_keys(w):
     assert body == {"id": e["id"], "repo": os.path.realpath(w.repo), "command": ["a", "x"],
                     "env": ENV, "locks": [], "wall": 5400, "label": "land s38",
                     "caller": "sess-1", "queued": T0, "key": gate.repo_key(str(w.repo)),
-                    "key_name": "repo"}
+                    "key_name": "repo", "chain": None}
     assert [n for n in os.listdir(p.parent) if n.startswith(".")] == []   # written, renamed
 
 

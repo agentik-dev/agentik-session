@@ -125,15 +125,15 @@ def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w, tmp_path, monkeyp
     q = w.put("q")
     k = q["key"]
     for n, s in enumerate((120, 144), 1):
-        plant(w.root, n, seconds=float(s), key=k)
+        plant(w.root, n, seconds=float(s), key=k, command=q["command"])
     assert gate.estimates(w.root) == {}                         # two greens: none
     st = gate.status(w.root, T0, fx=w.fx())
     assert gate.entry_estimates(w.root) == {} and gate.status_lines(st, {})[0] == (
         f"queued {q['id']} {q['repo']} position 1")
     for n, s in enumerate((150, 140, 160), 3):
-        plant(w.root, n, seconds=float(s), key=k)
-    plant(w.root, 6, exit=1, seconds=1000.0, key=k)             # a red is not counted
-    plant(w.root, 7, exit=0, seconds=9.0, key=k, cut="wall cut")
+        plant(w.root, n, seconds=float(s), key=k, command=q["command"])
+    plant(w.root, 6, exit=1, seconds=1000.0, key=k, command=q["command"])             # a red is not counted
+    plant(w.root, 7, exit=0, seconds=9.0, key=k, command=q["command"], cut="wall cut")
     plant(w.root, 8, seconds=900.0, key="another")              # nor another key's green
     plant(w.root, 9, seconds=1.0, key=None)                     # nor a result older than FW2
     assert gate.estimates(w.root) == {k: 144.0}
@@ -142,7 +142,7 @@ def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w, tmp_path, monkeyp
     assert gate.status_lines(st, est)[0] == (
         f"queued {q['id']} {q['repo']} position 1; est 2.4 min")
     assert gate.status_lines(st)[0] == f"queued {q['id']} {q['repo']} position 1"
-    plant(w.root, 20, seconds=600.0, key=k)                     # a sixth: the oldest leaves
+    plant(w.root, 20, seconds=600.0, key=k, command=q["command"])                     # a sixth: the oldest leaves
     assert gate.estimates(w.root) == {k: 150.0}
     assert gate.est_text(144.0) == "2.4" and gate.est_text(322.3) == "5.4"
     scan = tmp_path / "scan"                                    # EST_SCAN: 201 greens of one
@@ -156,7 +156,7 @@ def test_fw2_est_is_the_median_of_the_keys_last_five_greens(w, tmp_path, monkeyp
 def test_fw2_status_keeps_its_shape_and_the_cli_adds_est(w, state):
     q = w.put("q", label="land s38")
     for n in range(1, 4):
-        plant(w.root, n, seconds=120.0, key=q["key"])
+        plant(w.root, n, seconds=120.0, key=q["key"], command=q["command"])
     g = w.root / "gate"
     (g / "runner.json").write_text(json.dumps({"pid": os.getpid(), "since": T0,
                                                "running": q["id"], "pgid": 1}))
@@ -168,7 +168,7 @@ def test_fw2_status_keeps_its_shape_and_the_cli_adds_est(w, state):
         " land s38; est 2.0 min")
     e = gate.enqueue(state, str(w.repo), ["a"], {}, [], 60, "", None, T0)
     for n in range(1, 4):
-        plant(state, 50 + n, seconds=120.0, key=e["key"])
+        plant(state, 50 + n, seconds=120.0, key=e["key"], command=e["command"])
     rc, out, _ = run("gate", "status", "--json")
     assert rc == 0 and json.loads(out)["est"] == {e["id"]: 120.0}
     rc, out, _ = run("gate", "status")
@@ -183,7 +183,7 @@ def test_fw2_run_says_est_on_stderr(state, tmp_path):
                    f"result {state / 'gate' / gid / 'result.json'}\n")
     k, said = gate.repo_key(str(tmp_path)), []
     for n, s in enumerate((60, 120, 600, 144, 150), 1):    # 3: median 2.0, mean 4.3;
-        plant(state, 100 + n, seconds=float(s), key=k)       # 5: median 2.4, mean 3.6
+        plant(state, 100 + n, seconds=float(s), key=k, command=["true"])   # 5: median 2.4
         rc, out, err = run("gate", "run", str(tmp_path), "--", "true")
         assert rc == 0 and out.count("\n") == 1 and out.startswith("queued ")
         said.append(err)

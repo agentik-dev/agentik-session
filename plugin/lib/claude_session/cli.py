@@ -1483,7 +1483,13 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
     except OSError as e:
         _die(f"checkpoint recorded, but the respawn marker was not written: {e}")
     if chain:
-        return "respawn marked; the launcher restarts this sitting after this turn ends"
+        from . import gate
+        try:
+            n = len(gate.open_jobs(resolver.state_dir(os.environ), chain))
+        except Exception:                               # noqa: BLE001 - the mark is written
+            n = 0
+        return ("respawn marked; the launcher restarts this sitting after this turn ends"
+                + (f"; {gate.gate_words(n)}" if n else ""))     # nw2 R6
     return "respawn marked; no launcher runs this sitting: print your start line and stop"
 
 
@@ -1894,6 +1900,10 @@ def cmd_gate(args) -> int:
     verb = args.gate_verb
     if verb == "serve":
         return gate.serve(root)
+    if verb == "wait" and args.chain:
+        return _gate_wait_chain(root, args, env)
+    if verb == "wait" and args.id is None:
+        _die("gate wait: an id is wanted, or --chain", 2)
     if verb == "wait":
         own = _own_entry(root, env)
         target = next((e for e in gate.entries(root) if e["id"] == args.id), None)
@@ -1908,6 +1918,16 @@ def cmd_gate(args) -> int:
     if verb == "publish":
         from . import publish
         return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
+    if verb == "status" and args.chain is not None:
+        if args.json:                                  # brief 2, R5: as `wait --chain` refuses
+            _die("gate status --chain takes no --json", 2)
+        name = args.chain or str(env.get(hooks.CHAIN_VAR) or "")
+        if not hooks.CHAIN_RE.match(name):
+            _die("gate status --chain: no chain is named, and $CLAUDE_SESSION_CHAIN names none",
+                 2)
+        gate.spawn_serve(root)
+        print("\n".join(gate.chain_status_lines(root, name, time.time())))
+        return 0
     if verb == "status":
         gate.spawn_serve(root)
         st = gate.status(root, time.time(), repo=getattr(args, "repo", None))
@@ -1928,7 +1948,8 @@ def cmd_gate(args) -> int:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
         e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
-                         args.label or "", caller, time.time())
+                         args.label or "", caller, time.time(),
+                         named=args.session is not None)     # nw2 R1: a session, no chain
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)
@@ -1936,7 +1957,7 @@ def cmd_gate(args) -> int:
           f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
           flush=True)
     # Packet FW2 R5: the estimate on stderr, so run's stdout stays the queued line alone.
-    got = gate.key_estimates(root).get(e["key"])
+    got = gate.key_estimates(root, e["command"]).get(e["key"])     # nw2 R7: this command's
     if got is not None:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
@@ -2076,7 +2097,7 @@ def _gate_land(root, args, env) -> int:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
         e = gate.enqueue(root, repo, command, dict(env), [], wall, f"land {branch}", caller,
-                         time.time())
+                         time.time(), named=args.session is not None)
     except gate.GateError as err:
         _die(f"gate land: {err}", 2)
     gate.spawn_serve(root)
@@ -2116,6 +2137,31 @@ def _gate_wall(env) -> int:
     """`run`'s default wall: the gate section's user layer, else 5400."""
     from . import gate
     return gate._config(env)["wall"]
+
+
+def _gate_wait_chain(root, args, env) -> int:
+    """design/31 item 12: `gate wait --chain [--timeout S]`: 0 when the chain's inbox holds a
+    line not yet taken (the count printed; the hook prints the lines), 2 with no open job and
+    no line, or for a session `sitting.json` does not name, 1 past the timeout."""
+    from . import gate
+    if args.id is not None or args.json or args.strict:
+        _die("gate wait --chain takes no id, --json or --strict", 2)
+    name = str(env.get(hooks.CHAIN_VAR) or "")
+    sid = env.get("CLAUDE_CODE_SESSION_ID") or ""
+    if gate.chain_taker(root, env, sid) != name or not name:
+        _die("gate wait --chain: this session is not its chain's sitting; wait by id: "
+             "agentik session gate wait <id>", 2)
+    rc, n = gate.wait_chain(root, name, sid, timeout=args.timeout)
+    if rc == 2:
+        _die(f"gate wait --chain: chain {name} has no open job and no line", 2)
+    if rc == 1 and gate.sitting_closed(root, sid):      # brief 2, R4: a line may wait
+        _die("gate wait --chain: this sitting has closed; the chain's lines wait for the "
+             "successor", 1)
+    if rc == 1:
+        _die(f"gate wait --chain: no line of chain {name} after {args.timeout:g} s", 1)
+    print(f"gate: {n} {'line' if n == 1 else 'lines'} of chain {name} waiting; the next "
+          "hook prints them")
+    return 0
 
 
 def _gate_wait(root, gid: str, timeout, as_json: bool, strict: bool = False) -> int:
@@ -2404,7 +2450,9 @@ def build_parser() -> argparse.ArgumentParser:
     gr.add_argument("--wait", action="store_true", help="then wait for the result")
     gr.add_argument("command", nargs="*", help="the command after --, run as argv")
     gw = gsub.add_parser("wait", help="wait for a gate's result and print its line")
-    gw.add_argument("id")
+    gw.add_argument("id", nargs="?")
+    gw.add_argument("--chain", action="store_true",
+                    help="wait for a line of this chain's inbox (the chain's sitting alone)")
     gw.add_argument("--timeout", type=float, metavar="SECONDS",
                     help="give up after SECONDS (exit 1)")
     gw.add_argument("--json", action="store_true", help="print result.json")
@@ -2445,6 +2493,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "plugin.json names and its make install; held while a run is live")
     gs = gsub.add_parser("status", help="what runs, what waits, the last five done")
     gs.add_argument("--json", action="store_true")
+    gs.add_argument("--chain", nargs="?", const="", metavar="NAME",
+                    help="the chain's open jobs and its results of the last 24 hours "
+                         "(default: $CLAUDE_SESSION_CHAIN)")
     gs.add_argument("--repo", type=_nonempty_path, metavar="PATH",
                     help="list this folder's jobs and every result kept for it, newest first")
     gv = gsub.add_parser("serve")     # internal: the runner that run, wait and status spawn

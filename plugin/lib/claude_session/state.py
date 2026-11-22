@@ -6,6 +6,11 @@ gate finish, so the tool writes none of the content; it checks the shape, copies
 bytes to the chain home as `state.md` and records them in `state.json`. At the next
 start the launcher stamps the record with the successor's id (`hand`), and SessionStart
 names the copy to that session alone (`hooks._state_reminder`; Amendment 1).
+
+The `## Gates` section keeps its shape and may say `- none` (packet nw2-chain-inbox): a
+chain's gate result is addressed to the chain and reaches the successor through the chain's
+inbox, so no line depends on the section. `main_sitting` is also the gate's test of a chain's
+sitting or helper (`gate.chain_for`), its helper's test aside.
 """
 from __future__ import annotations
 

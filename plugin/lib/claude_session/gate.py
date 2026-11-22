@@ -30,6 +30,18 @@ A result's last key, `make_env` (packet land5-publish, review 1 F2), names those
 sorted, `[]` when none, null where the entry's env is no mapping: a `make check` run under one
 of them may run nothing, and `gate publish` proves a check only where the list is there and
 empty. The gate scrubs nothing; a job's environment stays its caller's.
+
+A result follows the chain (packet nw2-chain-inbox, design/31 items 8 to 12). `enqueue` writes
+`chain` on every entry (`chain_for`): the chain's name where the caller is a chain's sitting or
+its helper and, where the chain's home holds `sitting.json`, the session it names; else null,
+and null under `--session`. A chain's result keeps `chain` and `label` and its line goes to
+`<state>/respawn/<chain>/inbox/`, never a session's; a result with no chain goes to its
+caller's inbox as before, and its keys and line are the pin's. `inbox_take` takes a session's
+own lines, then its chain's (`chain_taker`), by the same rename under the same bounds; a
+sitting whose respawn mark is confirmed (`sitting_closed`) is shown each chain line once and
+leaves the file for the successor; a chain line older than `OLD_LINE` is set aside into
+`inbox/old/` and counted. `wait_chain` is `gate wait --chain`. An estimate counts the greens of
+one command kind (`command_kind`).
 """
 
 from __future__ import annotations
@@ -51,6 +63,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import install
+from . import state as statefile
 
 ID = re.compile(r"^\d{8}-\d{6}-[1-9]\d{0,11}\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")     # hooks._SID's pattern (a test pins it)
@@ -69,7 +82,7 @@ MORE = "{n} more: agentik session gate status"
 MORE_REPO = "{n} more: agentik session gate status --repo {path} --json"
 LAND_JOB = ("gate", "land", "--in-job")     # a landing's job, then repo, branch, sha, merge
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
-              "key", "key_name")
+              "key", "key_name", "chain")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
                "caller", "cut", "head", "key", "load", "beside", "dirty", "make_env")
 MAKE_ENV = ("MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS", "MAKEFILES")    # land5 review 1, F2
@@ -87,6 +100,17 @@ EST_GREENS = 5              # the greens of one key it keeps
 EST_LEAST = 3               # under this many, a key has no estimate
 _HEAD = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DOT_GIT_MOST = 4096         # a `.git` file or a `commondir` is one short line
+CHAIN_VAR = "CLAUDE_SESSION_CHAIN"          # resolver.CHAIN_VAR (a test pins both)
+CHAIN_RE = re.compile(r"^(?!\.+\Z)[A-Za-z0-9._-]{1,64}\Z")    # resolver.CHAIN_RE
+SITTING = "sitting.json"            # the chain home's word on its live sitting (nw2 R2)
+MARKER, CONFIRMED = "respawn.json", "respawn-main.json"     # hooks.MARKER, hooks.CONFIRMED
+SHOWN = "gate-shown.json"           # a closed sitting's chain lines already shown, by id
+OLD_LINE = 86400.0                  # a chain line older than this is set aside (nw2 R2)
+LABEL_MOST = 48                     # a chain line's label, in bytes (nw2 R3)
+CHAIN_KEYS = ("chain", "label")     # a chain's result's keys after RESULT_KEYS
+CHAIN_INBOX_KEYS = ("chain", "head", "dirty", "label")
+CLOSED_WORDS = "this sitting has closed: the line stays for the successor"
+OPEN_NAMED = 3                      # the open jobs a start line names, then `and N more`
 JOB_MARK = "CLAUDE_SESSION_GATE_JOB"    # each job's env names its own id (packet FW4c, R2)
 
 
@@ -422,9 +446,155 @@ def resolve_caller(args, env) -> str | None:
     return sid if _SID.match(sid) else None
 
 
-def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
+def chain_home(root, name: str) -> Path:
+    return Path(root) / "respawn" / name
+
+
+def chain_inbox(root, name: str) -> Path:
+    return chain_home(root, name) / "inbox"
+
+
+def sitting_of(root, name: str) -> tuple[bool, str | None]:
+    """(whether the chain's home holds `sitting.json`, the session it names or None). A file
+    there that does not parse names no session."""
+    path = chain_home(root, name) / SITTING
+    if not path.exists():
+        return False, None
+    sid = (_load(path) or {}).get("session")
+    return True, sid if isinstance(sid, str) and _SID.match(sid) else None
+
+
+def write_sitting(root, name: str, sid: str, now) -> None:
+    """The launcher's word on the sitting it starts (nw2 R2)."""
+    _mkdir(chain_home(root, name))
+    _write_private(chain_home(root, name) / SITTING,
+                   json.dumps({"session": sid, "at": now}) + "\n")
+
+
+def _env_chain(env) -> str | None:
+    """The chain's name where the environment is a chain's sitting or its helper: no depth
+    mark and no relay row (`state.main_sitting`, its helper's test aside)."""
+    name = str(env.get(CHAIN_VAR) or "")
+    if not CHAIN_RE.match(name):
+        return None
+    return name if statefile.main_sitting({**env, "CLAUDE_SESSION_HELPER": ""}) else None
+
+
+def chain_for(root, env, caller, named: bool = False) -> str | None:
+    """design/31 item 8: the chain an entry is addressed to, or None. `named`: `--session`
+    was given, which names a session and no chain. With `sitting.json` in the chain's home,
+    only the session it names queues for the chain."""
+    name = None if named else _env_chain(env)
+    if name is None:
+        return None
+    there, sid = sitting_of(root, name)
+    if there and (sid is None or sid != caller):
+        return None
+    return name
+
+
+def chain_taker(root, env, sid) -> str | None:
+    """design/31 item 9: the chain whose inbox this main-thread session takes from, or None.
+    With `sitting.json`, the session it names; without, the environment's test of item 8,
+    no helper, and `lines.taker`'s test of the entrypoint (no `claude -p` or SDK child)."""
+    from . import lines
+    name = _env_chain(env)
+    if name is None or not isinstance(sid, str) or not _SID.match(sid):
+        return None
+    there, named = sitting_of(root, name)
+    if there:
+        return name if named == sid else None
+    if env.get("CLAUDE_SESSION_HELPER") == "1" \
+            or env.get("CLAUDE_CODE_ENTRYPOINT") in lines.CHILD_ENTRYPOINTS:
+        return None
+    return name
+
+
+def sitting_closed(root, sid) -> bool:
+    """The session's respawn mark is confirmed: `respawn-main.json` holds the sha256 of
+    `respawn.json`'s bytes. Any fault reads as open."""
+    import hashlib
+    if not isinstance(sid, str) or not _SID.match(sid):
+        return False
+    d = Path(root) / "sessions" / sid
+    try:
+        raw = (d / MARKER).read_bytes()
+    except OSError:
+        return False
+    conf = _load(d / CONFIRMED)
+    return isinstance(conf, dict) and conf.get("marker_sha256") == hashlib.sha256(raw).hexdigest()
+
+
+def open_jobs(root, name: str) -> list[dict]:
+    """The queued and running entries addressed to the chain, oldest first."""
+    return [e for e in entries(root) if e.get("chain") == name]
+
+
+def chain_count(root, name: str) -> int:
+    """The lines the chain's inbox still holds (the launcher's stop line, nw2 R4)."""
+    return len(_waiting(chain_inbox(root, name)))
+
+
+def _label(text) -> str:
+    """A label as a line holds it: one line, each control character and `;` a space (brief
+    2, R6: a label adds no field), cut to `LABEL_MOST` bytes on a character."""
+    t = "".join(" " if c == ";" or unicodedata.category(c) == "Cc" else c
+                for c in str(text or ""))
+    t = " ".join(t.split())
+    return t.encode()[:LABEL_MOST].decode("utf-8", "ignore")
+
+
+def open_line(root, name: str, now, alive=_alive) -> str | None:
+    """design/31 item 11: `gate: 2 jobs of this chain are open: <id> <label> running 31 min,
+    est 54; <id> <label> queued`, or None with none open."""
+    es = open_jobs(root, name)
+    if not es:
+        return None
+    running = set(_running_ids(root, alive))
+    parts = []
+    for e in es[:OPEN_NAMED]:
+        head = " ".join(x for x in (e["id"], _label(e.get("label"))) if x)
+        if e["id"] in running:
+            at = _started_at(root, e["id"])
+            mins = "?" if at is None else str(max(0, round((now - at) / 60)))
+            got = key_estimates(root, e.get("command")).get(entry_key(e))
+            parts.append(f"{head} running {mins} min"
+                         + (f", est {round(got[0] / 60)}" if got else ""))
+        else:
+            parts.append(f"{head} queued")
+    n = len(es)
+    more = f"; and {n - OPEN_NAMED} more" if n > OPEN_NAMED else ""
+    return (f"gate: {n} {'job' if n == 1 else 'jobs'} of this chain "
+            f"{'is' if n == 1 else 'are'} open: " + "; ".join(parts) + more)
+
+
+def gate_words(n: int) -> str:
+    """design/31 item 13's words for the CHECKPOINT line and the close."""
+    return (f"{n} gate {'job is' if n == 1 else 'jobs are'} open and cross to the successor: "
+            "do not wait for them")
+
+
+def chain_status_lines(root, name: str, now, alive=_alive) -> list[str]:
+    """`gate status --chain`: the chain's open jobs, then its results of the last 24 hours,
+    newest first, each `taken` or `waiting`."""
+    out = [open_line(root, name, now, alive) or f"gate: no job of chain {name} is open"]
+    box = chain_inbox(root, name)
+    for n in _result_names(root):
+        r = _load(result_path(root, n))
+        if r is None or r.get("chain") != name:
+            continue
+        ended = r.get("ended")
+        if not isinstance(ended, (int, float)) or ended < now - OLD_LINE:
+            continue
+        out.append(wait_line(r) + ("; waiting" if (box / f"{n}.json").exists() else "; taken"))
+    return out
+
+
+def enqueue(root, repo, command, env, locks, wall, label, caller, now,
+            named: bool = False) -> dict:
     """Write one entry (mode 0600, written then renamed) and return it. The id is
-    `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock)."""
+    `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
+    `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave."""
     real = os.path.realpath(str(repo))
     if not os.path.isdir(real):
         raise GateError(f"no such repo directory: {repo}")
@@ -448,7 +618,8 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now) -> dict:
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
                  "locks": [lock_path(p) for p in locks], "wall": wall,
                  "label": label or "", "caller": caller, "queued": now, "key": key,
-                 "key_name": os.path.basename(real)}
+                 "key_name": os.path.basename(real),
+                 "chain": chain_for(root, env, caller, named)}
         _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
     return entry
 
@@ -813,11 +984,24 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
               "log": str(d / "log"), "caller": e.get("caller"), "cut": cut,
               "head": _clean_head(e.get("head")), "key": _str_or_none(e.get("key")),
               **_machine(e), "make_env": make_env(e.get("env"))}
+    chain = e.get("chain")
+    if isinstance(chain, str) and CHAIN_RE.match(chain):     # nw2 R1: kept, the pin's keys first
+        result.update({"chain": chain, "label": e.get("label") or ""})
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
+    caller = e.get("caller")
+    if "chain" in result:
+        # Brief 2, R2: a chain's line is written while its entry is still queued, so a
+        # `wait_chain` that reads no open job then reads the line, and never answers 2 in
+        # between. A runner that dies here leaves the entry beside its result, which the
+        # next one only drops (`_recover`, `_step`): the line is not written twice. One that
+        # dies after the result and before the line leaves no line, as before this order.
+        try:
+            inbox_write(root, caller, result)
+        except OSError as err:
+            fx.log(f"gate {gid}: the inbox of chain {result['chain']} was not written: {err}")
     _unlink(_queue(root) / f"{gid}.json")
     _unlink(cancel_path(root, gid))
-    caller = e.get("caller")
-    if isinstance(caller, str) and caller:
+    if "chain" not in result and isinstance(caller, str) and caller:
         try:
             inbox_write(root, caller, result)
         except OSError as err:
@@ -1028,9 +1212,103 @@ def serve(root, fx: Fx | None = None) -> int:
 
 # ---- the reads ---------------------------------------------------------------
 
+def _start_dirt(d):
+    v = d.get("start") if isinstance(d, dict) else d
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
 def wait_line(result: dict) -> str:
-    return (f"gate {result.get('id')} {result.get('repo')}: exit {result.get('exit')} in "
-            f"{_minutes(result.get('seconds'))} min; log {result.get('log')}")
+    """The pin's line; a chain's (design/31 item 10) adds the head, the dirt when it is not
+    0 and the label cut to `LABEL_MOST` bytes, before the log."""
+    head = (f"gate {result.get('id')} {result.get('repo')}: exit {result.get('exit')} in "
+            f"{_minutes(result.get('seconds'))} min; ")
+    if "chain" in result:
+        h, dirt, lab = _clean_head(result.get("head")), _start_dirt(result.get("dirty")), \
+            _label(result.get("label"))
+        head += f"head {h[:7] if h else '?'}; "
+        head += f"dirty {dirt}; " if dirt else ""
+        head += f"{lab}; " if lab else ""
+    return head + f"log {result.get('log')}"
+
+
+MAKES = ("make", "gmake")
+SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+MAKE_VALUE = frozenset("CEfIoW")         # make's short options whose value follows
+MAKE_NUMBER = frozenset("jl")            # and those whose value, a number, may follow
+MAKE_LONG = frozenset(("--directory", "--eval", "--file", "--makefile", "--include-dir",
+                       "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new"))
+MAKE_LONG_NUMBER = frozenset(("--jobs", "--load-average", "--max-load"))
+_ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# A make variable's assignment on its command line, in each of GNU make's spellings: `V=x`,
+# `V:=x`, `V::=x`, `V:::=x`, `V+=x`, `V?=x`, `V!=x` (nw2 brief 4, R1).
+_MAKE_ASSIGN = re.compile(r"[A-Za-z0-9_.-]+(:{1,3}|[+?!])?=")
+_NUMBER = re.compile(r"\d+(\.\d+)?$")
+_PREFIXES = ("env", "exec", "command", "nohup", "time")
+
+
+def _make_target(words: list[str]) -> str:
+    """make's own target among the words after `make`: the first that is no option, no
+    option's value (`-E` and `--eval`'s too) and no variable's assignment in any of make's
+    spellings (nw2 brief 2, R3; brief 4, R1); '' with none."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if w == "--":
+            rest = [x for x in words[i:] if not _MAKE_ASSIGN.match(x)]
+            return rest[0] if rest else ""
+        if w.startswith("--"):
+            if w in MAKE_LONG:
+                i += 1
+            elif w in MAKE_LONG_NUMBER and i < len(words) and _NUMBER.match(words[i]):
+                i += 1
+            continue
+        if w.startswith("-") and len(w) > 1:
+            for k, c in enumerate(w[1:], 1):
+                if c in MAKE_VALUE or c in MAKE_NUMBER:
+                    if k == len(w) - 1 and i < len(words) and (
+                            c in MAKE_VALUE or _NUMBER.match(words[i])):
+                        i += 1                         # the value is the next word
+                    break                              # else the rest of this word is it
+            continue
+        if not _MAKE_ASSIGN.match(w):
+            return w
+    return ""
+
+
+def _simple_commands(argv: list[str]) -> list[list[str]] | None:
+    """The argv, or a shell's `-c` string cut at its operators into its simple commands, each
+    without its redirections, as the package's one shell reader reads them (`shellreader`'s
+    `_commands`; nw2 brief 3, R1); None where that reader cannot read the string (R2).
+    Imported here, not at the top: no module of the hooks' path pays for it (R2)."""
+    if not (len(argv) >= 3 and os.path.basename(argv[0]) in SHELLS
+            and re.fullmatch(r"-[a-z]*c", argv[1])):
+        return [argv]
+    try:
+        from .shellreader import _commands
+        return [words for words, outs in _commands(argv[2]) if outs is not None]
+    except Exception:                                  # a queued job still gets its entry
+        return None
+
+
+def command_kind(command) -> str:
+    """design/31 item 1: an estimate's command. A landing's job is `gate land`. A command
+    word `make` (the argv's first, or a shell `-c` string's, after `;`, `&&`, `|` and the
+    like) gives `make <target>`, make's own target, with no option's value taken for it
+    (brief 2, R3), or `make` with none: a `/bin/sh -c 'make check > log'`, `make -C repo
+    check` and `make check` are one. Else the argv, its words joined by one space."""
+    if not isinstance(command, list):
+        return ""
+    argv = [str(c) for c in command]
+    if any(tuple(argv[i:i + 3]) == LAND_JOB for i in range(len(argv) - 2)):
+        return "gate land"
+    for words in _simple_commands(argv) or ():
+        while words and (_ASSIGN.match(words[0]) or words[0] in _PREFIXES):
+            words = words[1:]
+        if words and os.path.basename(words[0]) in MAKES:
+            target = _make_target(words[1:])
+            return f"make {target}" if target else "make"
+    return " ".join(" ".join(argv).split())
 
 
 def last_line(path, gid: str, prefix: str = "") -> str | None:
@@ -1065,10 +1343,12 @@ def _result_names(root) -> list[str]:
         return []
 
 
-def _greens(root) -> dict:
+def _greens(root, command=None) -> dict:
     """{key: [seconds]}: each key's newest greens, at most `EST_GREENS`, from at most
     `EST_SCAN` results newest first. A green has `exit` 0, a null `cut`, a number of
-    `seconds` and a string `key`; a result older than FW2 has no key and is not counted."""
+    `seconds` and a string `key`; a result older than FW2 has no key and is not counted.
+    With `command`, only the greens of its `command_kind` (nw2 R7)."""
+    kind = None if command is None else command_kind(command)
     out: dict = {}
     read = 0
     for n in _result_names(root):
@@ -1081,18 +1361,19 @@ def _greens(root) -> dict:
         x, sec, k = r.get("exit"), r.get("seconds"), r.get("key")
         if (x == 0 and not isinstance(x, bool) and r.get("cut") is None
                 and isinstance(sec, (int, float)) and not isinstance(sec, bool)
-                and isinstance(k, str) and k):
+                and isinstance(k, str) and k
+                and (kind is None or command_kind(r.get("command")) == kind)):
             got = out.setdefault(k, [])
             if len(got) < EST_GREENS:
                 got.append(float(sec))
     return out
 
 
-def key_estimates(root) -> dict:
+def key_estimates(root, command=None) -> dict:
     """{key: (seconds, greens)} (packet FW2, R4): the median of a key's last `EST_LEAST` to
     `EST_GREENS` greens and how many it used; a key with fewer than `EST_LEAST` has none.
     The one source of an estimate: `estimates`, `entry_estimates` and `run`'s line read it."""
-    return {k: (statistics.median(v), len(v)) for k, v in _greens(root).items()
+    return {k: (statistics.median(v), len(v)) for k, v in _greens(root, command).items()
             if len(v) >= EST_LEAST}
 
 
@@ -1102,11 +1383,16 @@ def estimates(root) -> dict:
 
 
 def entry_estimates(root) -> dict:
-    """{entry id: seconds}: the queued and running entries whose key has an estimate."""
-    est = estimates(root)
-    if not est:
-        return {}
-    return {e["id"]: est[entry_key(e)] for e in entries(root) if entry_key(e) in est}
+    """{entry id: seconds}: the queued and running entries whose key has an estimate, of
+    the entry's own command kind (nw2 R7)."""
+    out, by = {}, {}
+    for e in entries(root):
+        kind = command_kind(e.get("command"))
+        if kind not in by:
+            by[kind] = {k: s for k, (s, _) in key_estimates(root, e.get("command")).items()}
+        if entry_key(e) in by[kind]:
+            out[e["id"]] = by[kind][entry_key(e)]
+    return out
 
 
 def est_text(s) -> str:
@@ -1286,60 +1572,177 @@ def status_lines(st: dict, est: dict | None = None) -> list[str]:
 # ---- the caller's inbox and ntfy ---------------------------------------------
 
 def inbox_write(root, sid: str, result: dict) -> Path | None:
-    """`<state>/sessions/<sid>/inbox/<id>.json` {at, kind, id, repo, exit, seconds, log}."""
-    if not isinstance(sid, str) or not _SID.match(sid) or not ID.match(str(result.get("id"))):
+    """`<state>/sessions/<sid>/inbox/<id>.json` {at, kind, id, repo, exit, seconds, log}; a
+    chain's result (nw2 R1) to `<state>/respawn/<chain>/inbox/<id>.json`, whatever `sid`,
+    with `chain`, `head`, `dirty` and `label` after those."""
+    if not ID.match(str(result.get("id"))):
         return None
-    d = _inbox(root, sid)
+    chain = result.get("chain")
+    if "chain" in result and not (isinstance(chain, str) and CHAIN_RE.match(chain)):
+        return None
+    if "chain" not in result and (not isinstance(sid, str) or not _SID.match(sid)):
+        return None
+    d = chain_inbox(root, chain) if "chain" in result else _inbox(root, sid)
     _mkdir(d)
     body = {"at": result.get("ended"), "kind": "gate", "id": result["id"],
             "repo": result.get("repo"), "exit": result.get("exit"),
             "seconds": result.get("seconds"), "log": result.get("log")}
+    if "chain" in result:
+        body.update({"chain": chain, "head": _clean_head(result.get("head")),
+                     "dirty": _start_dirt(result.get("dirty")),
+                     "label": _label(result.get("label"))})
     path = d / f"{result['id']}.json"
     _write_private(path, json.dumps(body) + "\n")
     return path
 
 
-def inbox_take(root, sid: str, limit=TAKE, fits=None) -> list[str]:
+def _waiting(d: Path) -> list[Path]:
+    try:
+        return sorted((p for p in d.iterdir() if p.suffix == ".json" and ID.match(p.stem)),
+                      key=lambda p: _counter(p.stem))
+    except OSError:
+        return []
+
+
+def _shown(root, sid: str) -> set:
+    got = _load(Path(root) / "sessions" / sid / SHOWN) or {}
+    ids = got.get("ids") if isinstance(got, dict) else None
+    return {i for i in ids if isinstance(i, str)} if isinstance(ids, list) else set()
+
+
+def _set_aside(d: Path, now: float) -> tuple[int, set]:
+    """nw2 R2: the chain's lines older than `OLD_LINE` (by `at`, else the file's mtime)
+    renamed into `inbox/old/`; how many, and the ids of those a failed set-aside left where
+    they are (brief 2, R9: `old` not made, a rename refused), which stop no take."""
+    n, stuck = 0, set()
+    for p in _waiting(d):
+        at = (_load(p) or {}).get("at")
+        if not isinstance(at, (int, float)) or isinstance(at, bool):
+            try:
+                at = p.stat().st_mtime
+            except OSError:
+                continue
+        if at < now - OLD_LINE:
+            try:
+                _mkdir(d / "old")
+                os.rename(p, d / "old" / p.name)
+                n += 1
+            except OSError:
+                stuck.add(p.stem)
+    return n, stuck
+
+
+def inbox_take(root, sid: str, limit=TAKE, fits=None, chain: str | None = None,
+               closed: bool = False, now=None) -> list[str]:
     """At most `limit` inbox files, oldest first, each taken by an atomic rename into
     `inbox/read/` and read as its wait line, then `<n> more: ...` when any remain. `fits`
-    (the text so far) stops the take where the hook's output would pass its ceiling."""
+    (the text so far) stops the take where the hook's output would pass its ceiling.
+    `chain` (nw2 R2, `chain_taker`'s): the chain's inbox after the session's own, by the
+    same rename under the same bounds; its lines older than `OLD_LINE` set aside first and
+    counted in one line, a line whose set-aside fails left where it is. `closed`
+    (`sitting_closed`): each chain line is shown once, after CLOSED_WORDS, remembered in
+    `sessions/<sid>/gate-shown.json`, and left where it is, a corrupt one too.
+    A failure before any rename is no gate lines, and the files wait for the next hook;
+    after one, every line already taken is returned (brief 2, R1). A shown record that
+    cannot be written is not one: its lines are shown again at the next hook, never moved."""
     if not isinstance(sid, str) or not _SID.match(sid):
         return []
     d = _inbox(root, sid)
+    cd = chain_inbox(root, chain) if chain else None
+    now = time.time() if now is None else now
+    fits = fits or (lambda text: True)
+    lines: list[str] = []
+    skip: set = set()                                  # the chain's ids this take passes by
+    if cd is not None and not closed:
+        old, skip = _set_aside(cd, now)
+        if old:
+            lines.append(f"gate: {old} {'line' if old == 1 else 'lines'} of this chain older "
+                         f"than 24 hours set aside in {cd / 'old'}")
+    shown = _shown(root, sid) if cd is not None and closed else set()
+    skip |= shown
 
     def waiting() -> list[Path]:
-        try:
-            return sorted((p for p in d.iterdir() if p.suffix == ".json" and ID.match(p.stem)),
-                          key=lambda p: _counter(p.stem))
-        except OSError:
-            return []
-    fits = fits or (lambda text: True)
-    files, lines = waiting(), []
-    for i, p in enumerate(files):
-        if len(lines) >= limit:
-            break
-        body = _load(p)
-        if body is None:                               # unreadable: set aside, unprinted
-            _mkdir(d / "read")
+        own = _waiting(d)
+        if cd is None:
+            return own
+        theirs = [p for p in _waiting(cd) if p.stem not in skip]
+        return sorted(own + theirs, key=lambda p: _counter(p.stem))
+    files, took, moved = waiting(), 0, False
+    newly = []
+    try:
+        for i, p in enumerate(files):
+            if took >= limit:
+                break
+            home = p.parent
+            keep = closed and cd is not None and home == cd
+            body = _load(p)
+            if body is None:                           # unreadable: set aside, unprinted
+                if keep:                               # brief 2, R7: a closed sitting's stays
+                    skip.add(p.stem)
+                    continue
+                try:
+                    _mkdir(home / "read")
+                    os.rename(p, home / "read" / p.name)
+                except OSError:
+                    pass
+                continue
+            left = len(files) - i - 1
+            line = wait_line(body)
+            if keep:
+                line = f"{CLOSED_WORDS}: {line}"
+            if not fits("\n".join(lines + [line] + ([MORE.format(n=left)] if left else []))):
+                break
+            if keep:
+                newly.append(p.stem)
+            else:
+                try:
+                    _mkdir(home / "read")
+                    os.rename(p, home / "read" / p.name)
+                except OSError:
+                    continue                           # another hook took it first
+                moved = True
+            lines.append(line)
+            took += 1
+        skip |= set(newly)
+        if newly:
             try:
-                os.rename(p, d / "read" / p.name)
+                _write_private(Path(root) / "sessions" / sid / SHOWN,
+                               json.dumps({"ids": sorted(shown | set(newly))}) + "\n")
             except OSError:
-                pass
-            continue
-        left = len(files) - i - 1
-        line = wait_line(body)
-        if not fits("\n".join(lines + [line] + ([MORE.format(n=left)] if left else []))):
-            break
-        _mkdir(d / "read")
-        try:
-            os.rename(p, d / "read" / p.name)
-        except OSError:
-            continue                                   # another hook took it first
-        lines.append(line)
-    rest = len(waiting())
-    if rest and fits("\n".join(lines + [MORE.format(n=rest)])):
-        lines.append(MORE.format(n=rest))
+                pass                                   # R1: shown again next time, never moved
+        rest = len(waiting())
+        if rest and fits("\n".join(lines + [MORE.format(n=rest)])):
+            lines.append(MORE.format(n=rest))
+    except Exception:                                  # noqa: BLE001
+        if not moved:
+            raise
     return lines
+
+
+def wait_chain(root, name: str, sid, poll=WAIT_POLL, timeout=None, sleep=None, clock=None,
+               spawn=None, alive=_alive) -> tuple[int, int]:
+    """design/31 item 12, `gate wait --chain`: (0, n) once the chain's inbox holds `n` lines
+    not yet taken; (2, 0) at once with no open job of the chain and no line; (1, 0) past
+    `timeout`. From the session's confirmed mark on, no line returns it: it sleeps until its
+    timeout, or until the restart ends it. Spawns `serve` as `wait` does."""
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    t0, first = clock(), True
+    box = chain_inbox(root, name)
+    while True:
+        if not sitting_closed(root, sid):
+            n = len(_waiting(box))
+            if n:
+                return 0, n
+            if not open_jobs(root, name):
+                n = len(_waiting(box))                 # written between the two reads
+                return (0, n) if n else (2, 0)
+        if first or not alive((runner_info(root) or {}).get("pid")):
+            (spawn or spawn_serve)(root)
+            first = False
+        left = None if timeout is None else timeout - (clock() - t0)
+        if left is not None and left <= 0:
+            return 1, 0
+        sleep(poll if left is None else min(poll, left))
 
 
 def notify(result: dict, cfg: dict, post=None) -> str | None:

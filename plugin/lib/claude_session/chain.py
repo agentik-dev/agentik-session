@@ -7,6 +7,12 @@ with the launcher's own environment minus `launch.scrub`'s list plus `CLAUDE_SES
 sitting only on a RESPAWN close the main thread confirmed, after the turn has ended
 and stood `settle` seconds, under the cap, the floor and the stop files; it never
 compacts, resumes, detaches or reads a transcript.
+
+A gate job's result follows the chain (packet nw2-chain-inbox, design/31 items 9, 11 and 13):
+before each start the launcher writes the sitting's id into the chain home's `sitting.json`,
+which names the one session that takes the chain's inbox, and starts the gate's runner where
+the queue holds an entry; `_ready` waits for nothing of the gate; the stop line says how many
+lines the chain's inbox still holds.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ try:
 except ImportError:                                     # pragma: no cover  (not POSIX)
     termios = None
 
-from . import charter, hooks, launch, ledger, meter, models, resolver
+from . import charter, gate, hooks, launch, ledger, meter, models, resolver
 from . import state as statefile
 
 # §3.1's allowlist; a refused flag is named, and adding one is a one-line change.
@@ -328,6 +334,12 @@ class Effects:
         except ProcessLookupError:
             pass
 
+    def gate_start(self, state: Path) -> None:
+        """nw2 R4: the gate's runner, as `gate status` starts it, where the queue holds an
+        entry, so a job whose runner died is run or closed with 125 between two sittings."""
+        if gate.entries(state):
+            gate.spawn_serve(state)
+
     def say(self, line: str) -> None:
         print(line, file=sys.stderr, flush=True)
 
@@ -503,6 +515,7 @@ class Chain:
             self._hand_state(prev, sid)
             self._hand_fill(prev, sid)
             self._hand_cap(prev, sid)
+            self._sitting(sid)
             try:
                 proc = self.fx.spawn([program, "--session-id", sid, *args], child_env)
             except OSError as e:                 # A-F6: a stop line, never a traceback
@@ -698,6 +711,20 @@ class Chain:
             return
         self._said = reason
 
+    def _sitting(self, sid: str) -> None:
+        """nw2 R2, R4: `sitting.json` names the sitting about to start, then the runner's
+        start; a fault in either is no stop (the chain's lines then wait in its inbox)."""
+        try:
+            gate.write_sitting(self.state, self.name, sid, self.fx.now())
+        except OSError as e:
+            self.fx.say(f"{self.name}: sitting.json was not written ({e})")
+        start = getattr(self.fx, "gate_start", None)
+        try:
+            if start is not None:
+                start(self.state)
+        except Exception as e:                           # noqa: BLE001 - never a stop
+            self.fx.say(f"{self.name}: the gate's runner did not start ({e})")
+
     def _ready(self, sdir: Path, now: float, mono: float | None = None) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,
         the end has stood `settle`, the helpers are quiet `settle` and none has a call open,
@@ -883,6 +910,14 @@ class Chain:
             if not quiet:
                 self.fx.say(f"{self.name}: the stop line was not written ({e})")
         if not quiet:
+            try:
+                left = gate.chain_count(self.state, self.name)
+            except Exception:                            # noqa: BLE001
+                left = 0
+            if left:                                     # nw2 R4: no sitting takes them now
+                self.fx.say(f"{self.name}: the chain's inbox still holds {left} gate "
+                            f"{'line' if left == 1 else 'lines'}: "
+                            f"{gate.chain_inbox(self.state, self.name)}")
             self.fx.say(f"{self.name}: the chain stopped ({reason}) after {self.restarts} "
                         "restart(s); to start it again:")
             self.fx.say(start_line(self.argv, env))
