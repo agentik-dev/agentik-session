@@ -993,7 +993,8 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
         # Brief 2, R2: a chain's line is written while its entry is still queued, so a
         # `wait_chain` that reads no open job then reads the line, and never answers 2 in
         # between. A runner that dies here leaves the entry beside its result, which the
-        # next one only drops (`_recover`, `_step`): the line is not written twice.
+        # next one only drops (`_recover`, `_step`): the line is not written twice. One that
+        # dies after the result and before the line leaves no line, as before this order.
         try:
             inbox_write(root, caller, result)
         except OSError as err:
@@ -1232,25 +1233,29 @@ def wait_line(result: dict) -> str:
 
 MAKES = ("make", "gmake")
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
-MAKE_VALUE = frozenset("CfIoW")          # make's short options whose value follows
+MAKE_VALUE = frozenset("CEfIoW")         # make's short options whose value follows
 MAKE_NUMBER = frozenset("jl")            # and those whose value, a number, may follow
-MAKE_LONG = frozenset(("--directory", "--file", "--makefile", "--include-dir", "--old-file",
-                       "--assume-old", "--what-if", "--new-file", "--assume-new"))
+MAKE_LONG = frozenset(("--directory", "--eval", "--file", "--makefile", "--include-dir",
+                       "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new"))
 MAKE_LONG_NUMBER = frozenset(("--jobs", "--load-average", "--max-load"))
 _ASSIGN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# A make variable's assignment on its command line, in each of GNU make's spellings: `V=x`,
+# `V:=x`, `V::=x`, `V:::=x`, `V+=x`, `V?=x`, `V!=x` (nw2 brief 4, R1).
+_MAKE_ASSIGN = re.compile(r"[A-Za-z0-9_.-]+(:{1,3}|[+?!])?=")
 _NUMBER = re.compile(r"\d+(\.\d+)?$")
 _PREFIXES = ("env", "exec", "command", "nohup", "time")
 
 
 def _make_target(words: list[str]) -> str:
     """make's own target among the words after `make`: the first that is no option, no
-    option's value and no variable's assignment (nw2 brief 2, R3); '' with none."""
+    option's value (`-E` and `--eval`'s too) and no variable's assignment in any of make's
+    spellings (nw2 brief 2, R3; brief 4, R1); '' with none."""
     i = 0
     while i < len(words):
         w = words[i]
         i += 1
         if w == "--":
-            rest = [x for x in words[i:] if not _ASSIGN.match(x)]
+            rest = [x for x in words[i:] if not _MAKE_ASSIGN.match(x)]
             return rest[0] if rest else ""
         if w.startswith("--"):
             if w in MAKE_LONG:
@@ -1266,7 +1271,7 @@ def _make_target(words: list[str]) -> str:
                         i += 1                         # the value is the next word
                     break                              # else the rest of this word is it
             continue
-        if not _ASSIGN.match(w):
+        if not _MAKE_ASSIGN.match(w):
             return w
     return ""
 

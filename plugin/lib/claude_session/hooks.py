@@ -890,8 +890,9 @@ def _gate_lines(payload: dict, env, event: str, out: dict, alone: bool,
     line's share, and the line after them. Under a chain (packet nw2-chain-inbox R2) the
     chain's inbox after the session's own, where `gate.chain_taker` names this session the
     chain's sitting; from its confirmed respawn mark on, a chain line is shown once and left
-    for the successor. Never raises: a failure is no gate lines, and the files wait for the
-    next hook."""
+    for the successor. Never raises: a failure before any rename is no gate lines, and the
+    files wait for the next hook; after one, every line already taken is returned (brief 2,
+    R1)."""
     tail = [line] if line else []
     try:
         sid = payload.get("session_id")

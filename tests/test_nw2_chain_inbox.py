@@ -503,6 +503,29 @@ def test_a_jobs_kind_is_makes_own_target(argv, kind):
     assert gate.command_kind(argv) == kind
 
 
+@pytest.mark.parametrize("argv,kind", [
+    (["make", "V=1", "check"], "make check"),
+    (["make", "V:=1", "check"], "make check"),
+    (["make", "V::=1", "check"], "make check"),
+    (["make", "V:::=1", "check"], "make check"),
+    (["make", "V+=1", "check"], "make check"),
+    (["make", "V?=1", "check"], "make check"),
+    (["make", "V!=echo 1", "check"], "make check"),
+    (["make", "a.b-c_9:=1", "check"], "make check"),
+    (["make", "CFLAGS+=-O2", "stamp"], "make stamp"),
+    (["make", "--", "V:=1", "check"], "make check"),
+    (["/bin/sh", "-c", "make V:=1 check > log 2>&1"], "make check"),
+    (["make", "-E", "x:=1", "check"], "make check"),
+    (["make", "--eval", "x:=1", "check"], "make check"),
+    (["make", "--eval=x:=1", "check"], "make check"),
+    (["make", "-E", "all: ; true", "check"], "make check"),
+])
+def test_a_make_assignment_in_any_spelling_is_never_the_target(argv, kind):
+    """Brief 4, R1: a word that assigns a make variable, in each of GNU make's spellings, and
+    the value after `-E` or `--eval` are never the target."""
+    assert gate.command_kind(argv) == kind
+
+
 def test_a_string_the_reader_refuses_gives_the_joined_argv(monkeypatch):
     """Brief 3, R2: the `-c` string is read by the one shell reader; where it cannot read it,
     the kind is the argv joined, and nothing is raised: a queued job still gets its entry."""
