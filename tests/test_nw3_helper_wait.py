@@ -320,3 +320,90 @@ def test_6_through_session_start(tmp_path):
         "session:\n  helpers: {wait: refuse}\n")
     assert hooks.session_start({"session_id": "nw3-start", "cwd": str(repo)}, _env())
     assert call("sleep 90", sid="nw3-start", cwd=str(repo))[1] == denied("a sleep of 90 s")
+
+
+# ---- brief 2, R1: an abbreviated option is read as the CLI reads it --------------------------
+
+JOB_A, JOB_B = "20261122-110000-0001", "20261122-110000-0002"
+
+
+@pytest.mark.parametrize("opt", ["--t 540", "--time 540", "--timeo 540", "--time=540",
+                                 "--timeout=540"])
+def test_b2_an_abbreviated_timeout_skips_its_value(opt):
+    _session("refuse")
+    wait = "agentik session gate wait " + opt + " {}"
+    assert call(wait.format(JOB_A))[1] == {}
+    assert call(wait.format(JOB_B))[1] == {}            # a first wait on B, never on 540
+    assert call(wait.format(JOB_A))[1] == denied(f"a second wait on {JOB_A}")
+    doc = json.loads((_sdir() / RECORD).read_text())
+    assert doc == {"waits": [[HELPER, JOB_A], [HELPER, JOB_B]]}
+
+
+@pytest.mark.parametrize("spell", ["--c", "--ch", "--chai"])
+def test_b2_an_abbreviated_chain_is_the_chains_wait(spell):
+    _session("refuse")
+    assert call("agentik session gate wait " + spell)[1] == {}
+    p, out = call("agentik session gate wait " + spell + " --time 30")
+    assert out == denied("a second wait on the chain") and not opened(p)
+    assert call("agentik session gate wait --chain")[1] == denied("a second wait on the chain")
+
+
+@pytest.mark.parametrize("line", [f"--bogus {JOB_A}", f"{JOB_A} {JOB_B}", f"--timeout {JOB_A}",
+                                  f"--chain=1 {JOB_A}", f"--json=1 {JOB_A}", f"--he {JOB_A}"])
+def test_b2_a_line_the_parser_refuses_is_no_wait(line):
+    _session("refuse")
+    assert call("agentik session gate wait " + line)[1] == {}
+    assert call("agentik session gate wait " + line)[1] == {}
+    assert not (_sdir() / RECORD).exists()
+
+
+@pytest.mark.parametrize("line", [f"--str --js {JOB_A}", f"{JOB_A} --str", f"-- {JOB_A}"])
+def test_b2_other_abbreviations_name_the_job(line):
+    _session("refuse")
+    assert call(f"agentik session gate wait {JOB_A}")[1] == {}
+    assert call("agentik session gate wait " + line)[1] == denied(f"a second wait on {JOB_A}")
+
+
+def test_b2_the_hooks_options_are_the_clis():
+    """The hook's reader of a wait's words holds the options `gate wait`'s parser holds."""
+    from claude_session import cli
+
+    def sub(parser, name):
+        acts = [a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction"]
+        return acts[0].choices[name]
+
+    def shape(parser):
+        return sorted((tuple(a.option_strings), a.dest, a.nargs, str(a.type))
+                      for a in parser._actions)       # help is a flag in the hook's
+    wait = sub(sub(cli.build_parser(), "gate"), "wait")
+    assert shape(hooks._wait_parser()) == shape(wait)
+    assert hooks._wait_parser().allow_abbrev == wait.allow_abbrev
+
+
+# ---- brief 2, R2: the check's read of the resolved file is of a regular file only -----------
+
+def test_b2_a_fifo_resolved_file_never_blocks(tmp_path):
+    import threading
+    pin = call("echo nw3", sid="nw3-fifo-pin")
+    os.makedirs(_sdir("nw3-fifo"), exist_ok=True)
+    fifo = _sdir("nw3-fifo") / "resolved.json"
+    os.mkfifo(fifo)
+    got = []
+    t = threading.Thread(target=lambda: got.append(call("echo nw3", sid="nw3-fifo")),
+                         daemon=True)
+    t.start()
+    t.join(5)
+    blocked = t.is_alive()
+    if blocked:                         # a red is a failure, never a hang: free the reader
+        os.close(os.open(fifo, os.O_WRONLY))
+        t.join(5)
+    assert not blocked, "a helper's Bash call blocked on a FIFO resolved file"
+    p, out = got[0]
+    assert out == pin[1] == {} and opened(p)
+
+
+def test_b2_a_folder_resolved_file_is_allow():
+    os.makedirs(_sdir("nw3-dir") / "resolved.json")
+    assert call("sleep 90", sid="nw3-dir")[1] == {}
+    assert call("agentik session gate wait J1", sid="nw3-dir")[1] == {}
+    assert call("agentik session gate wait J1", sid="nw3-dir")[1] == {}

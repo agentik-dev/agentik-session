@@ -18,6 +18,7 @@ Hook output contract (from the CLI's own documentation):
 
 from __future__ import annotations
 
+import argparse
 import codecs
 import hashlib
 import json
@@ -438,11 +439,35 @@ _DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)\Z")
 _UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
+def _regular_json(path: Path) -> dict:
+    """`_load_json` of a regular file only, read whole as the hook's other readers of the
+    file read it: a FIFO, a folder or anything else is {}, and the read never blocks."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return {}
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return {}
+        chunks = []
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                break
+            chunks.append(b)
+        d = json.loads(b"".join(chunks).decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    finally:
+        os.close(fd)
+    return d if isinstance(d, dict) else {}
+
+
 def _helper_wait_value(payload: dict, env) -> str:
     """The resolved `helpers.wait` of the payload's session (a helper runs in its
     coordinator's), `allow` where none is read."""
     sdir = _session_dir(payload.get("session_id"), env, fallback=False)
-    s = _load_json(sdir / "resolved.json").get("session") if sdir else None
+    s = _regular_json(sdir / "resolved.json").get("session") if sdir else None
     h = s.get("helpers") if isinstance(s, dict) else None
     v = h.get("wait") if isinstance(h, dict) else None
     return v if v in ("say", "refuse") else "allow"
@@ -467,10 +492,31 @@ def _seconds_word(n: float) -> str:
     return str(int(n)) if n == int(n) else f"{n:.3f}".rstrip("0")
 
 
+class _WaitWords(argparse.ArgumentParser):
+    """`gate wait`'s words, read by argparse's own rules: an error raises, nothing prints."""
+
+    def error(self, message):
+        raise ValueError(message)
+
+
+def _wait_parser() -> argparse.ArgumentParser:
+    """The options `cli`'s `gate wait` parser takes (a test holds the two alike), `--help` a
+    flag here so that it prints nothing."""
+    p = _WaitWords(prog="gate wait", add_help=False)
+    p.add_argument("-h", "--help", action="store_true")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--chain", action="store_true")
+    p.add_argument("--timeout", type=float, metavar="SECONDS")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--strict", action="store_true")
+    return p
+
+
 def _wait_id(c) -> str | None:
-    """The job a command of this tool's `gate wait` names: its id (the first word after
-    `wait` that is no option nor `--timeout`'s value), CHAIN_WAIT for `--chain`; None for any
-    other command or an id not read (a variable, a substitution)."""
+    """The job a command of this tool's `gate wait` names, its words read as the CLI's parser
+    reads them (an abbreviation of an option is that option, so `--time 540` skips its value):
+    the id, CHAIN_WAIT for `--chain`; None for any other command, a line the parser refuses
+    or asks help of, and an id not read (a variable, a substitution)."""
     args = list(c.args)
     if c.name == "agentik" and args[:1] == ["session"]:
         args = args[1:]
@@ -478,19 +524,16 @@ def _wait_id(c) -> str | None:
         return None
     if args[:2] != ["gate", "wait"]:
         return None
-    job, skip, chain = None, False, False
-    for w in args[2:]:
-        if skip:
-            skip = False
-        elif w == "--timeout":
-            skip = True
-        elif w == "--chain":
-            chain = True
-        elif not w.startswith("-") and job is None:
-            job = w
-    if chain:
+    try:
+        ns, extras = _wait_parser().parse_known_intermixed_args(args[2:])
+    except (ValueError, TypeError):
+        return None
+    if extras or ns.help:
+        return None
+    if ns.chain:
         return CHAIN_WAIT
-    if job is None or "$" in job or "`" in job:
+    job = ns.id
+    if not isinstance(job, str) or "$" in job or "`" in job:
         return None
     return _token(job, 96)
 
