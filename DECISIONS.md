@@ -30,4 +30,8 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 ## Proposed
 
+16. **A sitting is told its room at each launch.** Enter it: the rule is built and the three coordinator profiles show the line, and under `signal` and `ask` it only speaks, so the entry changes nothing a session does today. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+
+17. **One check proves a landing.** Enter it at landing: an entry written before the row lands would state a rule the product does not yet keep, and the six-hour bound is a value the code holds, which a later tuning can change without a question. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+
 ## Superseded
