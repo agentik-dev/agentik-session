@@ -16,6 +16,12 @@ a closed pointer after `KEEP`, an open one never. Nothing here writes outside th
 or reads the network. Packet rr5c R2: a file that is not under its checkout is asked of the
 resolver (`records.answer`, its bounded child, once a checkout a process): in `out` a file under
 the checkout's records folder passes; no other process is started.
+
+Packet in5t-line-text: `send_text` writes a line of one line of text, with no file and no
+sender, from any folder: `{"id", "to", "head", "sent", "form": "text"}`. The take prints it
+under the label every line carries, its sender's name `no checkout`, and its close records
+the close and sends no line back. A pointer with no `form` is read as before; one whose
+`form` is anything but `text` is no pointer.
 """
 from __future__ import annotations
 
@@ -248,7 +254,8 @@ def _first_line(path: str) -> str:
 def send(root, target: str, file: str, start: str, now=None) -> str:
     """R1: the pointer's id. Refused: the target no checkout's top or a worktree, the sender
     in no checkout or in a worktree, the file no file inside the sender's checkout, a path
-    that holds a character no printed line may hold."""
+    that holds a character no printed line may hold. The file form; the text form, which
+    names no sender, is `send_text`."""
     to = top(target)
     if to is None:
         why = ("is a worktree, not a checkout's top"

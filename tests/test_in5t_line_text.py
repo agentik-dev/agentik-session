@@ -292,3 +292,12 @@ def test_9_a_file_pointer_holds_no_form(two):
     alpha, beta = two
     lid = send(beta, alpha)
     assert "form" not in stored(alpha, lid)
+
+
+def test_9_the_callers_form_is_one_word_with_its_flag(two, capsys):
+    alpha, beta = two
+    for text in (TEXT, "-7 holds text"):
+        capsys.readouterr()
+        assert cli.main(["line", "send", str(alpha), f"--text={text}"]) == 0
+        lid = capsys.readouterr().out.strip()
+        assert stored(alpha, lid)["head"] == text

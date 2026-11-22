@@ -1849,7 +1849,8 @@ def cmd_run(args) -> int:
 def cmd_line(args) -> int:
     """`agentik session line send|list|show|close` (packet in3-line): a pointer under the
     state root, never a file of a checkout. This checkout is `CLAUDE_PROJECT_DIR`'s, else
-    the shell's. A refusal is exit 2 with its reason."""
+    the shell's. `send --text` (packet in5t-line-text) reads neither: a text line names no
+    sender, so it is sent the same from any folder. A refusal is exit 2 with its reason."""
     from . import lines
     env = os.environ
     root = resolver.state_dir(env)
@@ -2511,11 +2512,12 @@ def build_parser() -> argparse.ArgumentParser:
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
 
-    ln = sub.add_parser("line", help="a line between sittings: send a file's pointer to a "
-                                      "checkout, list, show, close (packet in3-line)")
+    ln = sub.add_parser("line", help="a line between sittings: send a file's pointer, or one "
+                                      "line of text, to a checkout; list, show, close (packet "
+                                      "in3-line)")
     lsub = ln.add_subparsers(dest="line_verb", required=True, metavar="send|list|show|close")
-    ls_ = lsub.add_parser("send", help="send a file of this checkout to another checkout's "
-                                       "sitting; print the line's id")
+    ls_ = lsub.add_parser("send", help="send a file of this checkout, or one line of text, "
+                                       "to another checkout's sitting; print the line's id")
     ls_.add_argument("checkout", help="the checkout's top level the line is addressed to")
     lsg = ls_.add_mutually_exclusive_group(required=True)
     lsg.add_argument("--file", metavar="PATH",
