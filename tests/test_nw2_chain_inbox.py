@@ -503,6 +503,21 @@ def test_a_jobs_kind_is_makes_own_target(argv, kind):
     assert gate.command_kind(argv) == kind
 
 
+def test_a_string_the_reader_refuses_gives_the_joined_argv(monkeypatch):
+    """Brief 3, R2: the `-c` string is read by the one shell reader; where it cannot read it,
+    the kind is the argv joined, and nothing is raised: a queued job still gets its entry."""
+    assert gate.command_kind(["/bin/sh", "-c", "make 'check"]) == "/bin/sh -c make 'check"
+    from claude_session import shellreader
+
+    def refuses(*a, **kw):
+        raise RuntimeError("unreadable")
+        yield                                                  # a generator, as the reader is
+
+    monkeypatch.setattr(shellreader, "_commands", refuses)
+    assert gate.command_kind(["/bin/sh", "-c", "make check"]) == "/bin/sh -c make check"
+    assert gate.command_kind(["make", "check"]) == "make check"
+
+
 def _greens_of(root, repo, commands, seconds=(6.0, 7.0, 8.0)):
     k = gate.repo_key(str(repo))
     for n, (cmd, s) in enumerate(zip(commands, seconds), 1):

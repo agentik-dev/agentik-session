@@ -1271,33 +1271,19 @@ def _make_target(words: list[str]) -> str:
     return ""
 
 
-def _simple_commands(argv: list[str]) -> list[list[str]]:
+def _simple_commands(argv: list[str]) -> list[list[str]] | None:
     """The argv, or a shell's `-c` string cut at its operators into its simple commands, each
-    without its redirections."""
+    without its redirections, as the package's one shell reader reads them (`shellreader`'s
+    `_commands`; nw2 brief 3, R1); None where that reader cannot read the string (R2).
+    Imported here, not at the top: no module of the hooks' path pays for it (R2)."""
     if not (len(argv) >= 3 and os.path.basename(argv[0]) in SHELLS
             and re.fullmatch(r"-[a-z]*c", argv[1])):
         return [argv]
     try:
-        lex = shlex.shlex(argv[2], posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        toks = list(lex)
-    except ValueError:
-        toks = argv[2].split()
-    out, cur, skip = [], [], False
-    for t in toks:
-        if skip:
-            skip = False
-        elif t and all(ch in "();<>|&" for ch in t):
-            if "<" in t or ">" in t:                   # a redirection: its file, its fd
-                skip = True
-                if cur and cur[-1].isdigit():
-                    cur.pop()
-            else:
-                out.append(cur)
-                cur = []
-        else:
-            cur.append(t)
-    return out + [cur]
+        from .shellreader import _commands
+        return [words for words, outs in _commands(argv[2]) if outs is not None]
+    except Exception:                                  # a queued job still gets its entry
+        return None
 
 
 def command_kind(command) -> str:
@@ -1311,7 +1297,7 @@ def command_kind(command) -> str:
     argv = [str(c) for c in command]
     if any(tuple(argv[i:i + 3]) == LAND_JOB for i in range(len(argv) - 2)):
         return "gate land"
-    for words in _simple_commands(argv):
+    for words in _simple_commands(argv) or ():
         while words and (_ASSIGN.match(words[0]) or words[0] in _PREFIXES):
             words = words[1:]
         if words and os.path.basename(words[0]) in MAKES:
