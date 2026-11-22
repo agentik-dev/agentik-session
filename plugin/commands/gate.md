@@ -23,7 +23,7 @@ exits the job's code, and a line on stdout marks the code as the job's.
 Under a chain the result follows the chain: a job queued by the chain's sitting or its
 helper, by any verb, lands in the chain's inbox, and the chain's live sitting takes it,
 the successor where the queuing sitting has closed. Its line adds the head, the dirt
-when not 0, and the label cut to 48 bytes. `agentik-session gate wait --chain` wakes
-on the chain's next line (0), exits 2 with no open job and no line, and 1 past
-`--timeout`; `agentik-session gate status --chain` lists the chain's open jobs and its
-results of the last day. A job outside a chain reaches its caller as before.
+when not 0, and the label cut to 48 bytes. `agentik-session gate wait --chain` wakes on
+the chain's next line (0), exits 2 with no open job and no line, 1 past `--timeout` (in a
+closed sitting: the lines wait for the successor); `gate status --chain` lists the chain's
+open jobs and its last day's results. A job outside a chain reaches its caller as before.

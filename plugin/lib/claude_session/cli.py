@@ -1919,6 +1919,8 @@ def cmd_gate(args) -> int:
         from . import publish
         return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
     if verb == "status" and args.chain is not None:
+        if args.json:                                  # brief 2, R5: as `wait --chain` refuses
+            _die("gate status --chain takes no --json", 2)
         name = args.chain or str(env.get(hooks.CHAIN_VAR) or "")
         if not hooks.CHAIN_RE.match(name):
             _die("gate status --chain: no chain is named, and $CLAUDE_SESSION_CHAIN names none",
@@ -2152,6 +2154,9 @@ def _gate_wait_chain(root, args, env) -> int:
     rc, n = gate.wait_chain(root, name, sid, timeout=args.timeout)
     if rc == 2:
         _die(f"gate wait --chain: chain {name} has no open job and no line", 2)
+    if rc == 1 and gate.sitting_closed(root, sid):      # brief 2, R4: a line may wait
+        _die("gate wait --chain: this sitting has closed; the chain's lines wait for the "
+             "successor", 1)
     if rc == 1:
         _die(f"gate wait --chain: no line of chain {name} after {args.timeout:g} s", 1)
     print(f"gate: {n} {'line' if n == 1 else 'lines'} of chain {name} waiting; the next "

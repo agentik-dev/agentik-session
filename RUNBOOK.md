@@ -898,7 +898,8 @@ agentik session gate status                       # running, queued, the last fi
   cut to 48 bytes; a chain line older than 24 hours is set aside in `old/` and
   counted. SessionStart names the chain's open jobs; `gate wait --chain
   [--timeout S]` wakes on a line (exit 0), exits 2 with nothing open and no
-  line, 1 past the timeout; the close does not ask about a background `gate
+  line, 1 past the timeout (in a closed sitting, saying the lines wait for the
+  successor); the close does not ask about a background `gate
   wait`, and a sitting with only gate jobs open closes at once.
 - `agentik session gate land <repo> <branch> <sha> <merge-file>` queues one
   landing as one gate job (packet FW4c): `make check` in the branch's worktree,
