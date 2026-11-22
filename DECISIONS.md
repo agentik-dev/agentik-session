@@ -28,4 +28,6 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 14. **Entry 11 names the fourth refusal.** Amend entry 11: the refusal is built and guards an act that publishes, and the entry is where a reader looks for what every session is refused. (proposed 2026-11-22; OPEN-QUESTIONS.md)
 
+15. **A helper is never the wait.** Enter it: the key is built and three profiles rely on it, and a default of allow changes nothing for an install that has not asked for the refusal. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+
 ## Superseded
