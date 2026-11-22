@@ -886,6 +886,20 @@ agentik session gate status                       # running, queued, the last fi
   <code> in <m> min; log <path>`, and the UserPromptSubmit and PostToolUse
   hooks print the same line at the next prompt or tool call (main thread only,
   at most three, then `<n> more: agentik session gate status`).
+- Under a chain (packet nw2-chain-inbox) the result is the chain's, not the
+  session's: a job queued by the chain's sitting or its helper, through `gate
+  run`, `gate land`, `commit` or the install, holds `chain`, and its line lands
+  in `respawn/<chain>/inbox/`. The session the chain home's `sitting.json` names
+  (the launcher writes it before each start) takes it; a sitting whose respawn
+  mark is confirmed is shown it once, `this sitting has closed: the line stays
+  for the successor`, and leaves it, so the successor's first prompt prints it.
+  `--session`, a session `sitting.json` does not name, and a `claude -p` child
+  keep today's address. The line adds `head`, `dirty` when not 0 and the label
+  cut to 48 bytes; a chain line older than 24 hours is set aside in `old/` and
+  counted. SessionStart names the chain's open jobs; `gate wait --chain
+  [--timeout S]` wakes on a line (exit 0), exits 2 with nothing open and no
+  line, 1 past the timeout; the close does not ask about a background `gate
+  wait`, and a sitting with only gate jobs open closes at once.
 - `agentik session gate land <repo> <branch> <sha> <merge-file>` queues one
   landing as one gate job (packet FW4c): `make check` in the branch's worktree,
   `scripts/hygiene` when present, the merge `--no-ff` on main, the worktree's
@@ -988,6 +1002,8 @@ under `<state>` (`${XDG_STATE_HOME:-~/.local/state}/agentik-session`, or
 | `gate/runner.log` | the runner's stdout and stderr |
 | `gate/<id>/log`, `gate/<id>/result.json` | the command's output; its result, written last, pruned after 14 days; it keeps `head` (the repo's commit, read before the spawn; null when unknown or never started) and `key` |
 | `sessions/<sid>/inbox/<id>.json` | the caller's message; a hook moves it to `inbox/read/` |
+| `respawn/<chain>/inbox/<id>.json` | a chain's job's message; its live sitting's hook moves it to `inbox/read/` |
+| `respawn/<chain>/sitting.json` | `{session, at}`: the sitting the launcher started last, the one that takes the chain's inbox |
 
 ## 6. Commit by path
 
