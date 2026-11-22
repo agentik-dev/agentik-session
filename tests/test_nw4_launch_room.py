@@ -345,6 +345,78 @@ def test_10_a_fault_gives_no_line_and_the_call_passes(fault):
     assert room.status_for(SID, os.environ) is None
 
 
+# ---- brief 2, R1: a ledger file that is no regular file never hangs the read ---------------
+
+class _Hung(BaseException):
+    """Raised by the test's own alarm: a BaseException, so no `except Exception` of the code
+    under test swallows it, and a hang is a failure, never a hang of the suite."""
+
+
+@pytest.fixture
+def at_once():
+    import signal
+
+    def hung(*_):
+        raise _Hung("the read blocked")
+    old = signal.signal(signal.SIGALRM, hung)
+    signal.setitimer(signal.ITIMER_REAL, 3.0)
+    yield
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    signal.signal(signal.SIGALRM, old)
+
+
+def _odd(where, what):
+    """The ledger's file `where` made `what`, the other one holding TWO's rows."""
+    d = admission.directory(os.environ)
+    d.mkdir(parents=True, exist_ok=True)
+    live, rotated = d / admission.LEDGER, d / admission.ROTATED
+    other = rotated if where == admission.LEDGER else live
+    other.write_text("".join(json.dumps(r) + "\n" for r in TWO))
+    p = d / where
+    if what == "fifo":
+        os.mkfifo(p)
+    elif what == "folder":
+        p.mkdir()
+    elif what == "unreadable":
+        p.write_text(json.dumps(TWO[0]) + "\n")
+        os.chmod(p, 0)
+    elif what == "binary":
+        p.write_bytes(b"\xff\xfe\x00garbage\n")
+    return p
+
+
+@pytest.mark.parametrize("what", ["fifo", "folder", "unreadable", "binary"])
+@pytest.mark.parametrize("where", [admission.LEDGER, admission.ROTATED])
+@pytest.mark.parametrize("posture", ["signal", "ask", "deny"])
+def test_r1b2_a_ledger_that_is_no_regular_file_gives_the_pin_s_output_at_once(
+        posture, where, what, at_once):
+    _odd(where, what)
+    for new in (REVIEW, BUILD):
+        _session(posture, 66.0)
+        out = _pre(_call(*new))
+        assert room.told(_call(*new), os.environ, posture) is None
+        _session(posture, 66.0, launch=None)          # the pin read no `launch` and no ledger
+        assert json.dumps(out, sort_keys=True) == json.dumps(_pre(_call(*new)), sort_keys=True)
+        assert "launch:" not in json.dumps(out)
+
+
+@pytest.mark.parametrize("what", ["fifo", "folder", "unreadable", "binary"])
+@pytest.mark.parametrize("where", [admission.LEDGER, admission.ROTATED])
+def test_r1b2_status_over_such_a_ledger_prints_at_once_with_no_launch_line(
+        monkeypatch, where, what, at_once):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
+    _odd(where, what)
+    _session("deny", 66.0)
+    rc, out = _status()
+    assert rc == 0 and "launch:" not in out and room.status_for(SID, os.environ) is None
+
+
+def test_r1b2_a_torn_last_line_is_skipped_as_at_the_first_build(at_once):
+    _session("signal", 66.0)
+    _ledger(TWO, raw="".join(json.dumps(r) + "\n" for r in TWO) + json.dumps(TWO[0])[:20])
+    assert room.told(_call(*REVIEW), os.environ, "signal") == (FITS, False)
+
+
 # ---- R12: the keys -------------------------------------------------------------------------
 
 def _resolved(tmp_path, profile=None, repo_text=None):

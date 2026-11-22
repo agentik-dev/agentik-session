@@ -13,8 +13,11 @@ until a later row measures it. `admission.ends`, a different function, is left a
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
+import stat
 from datetime import datetime, timedelta, timezone
 
 from . import admission, meter
@@ -165,19 +168,49 @@ def _positive(v) -> float:
     return float(v)
 
 
-def _ledger(env) -> list:
-    """R4: the rotated file's rows, then the live one's, each read once by `admission._rows`; a
-    file that holds bytes and no row that parses is a fault. A torn line is skipped, as every
+def _regular_rows(p) -> list:
+    """One ledger file's rows, read as `admission._rows` reads them, but only from a regular
+    file opened so that it never blocks (brief 2 R1): a FIFO, a folder or anything else that is
+    no regular file is a fault, and so is a file that holds bytes and no row that parses, or
+    bytes that are not UTF-8. A missing file has no rows; a torn line is skipped, as every
     reader of the ledger skips one."""
-    d = admission.directory(env)
-    rows: list = []
-    for name in (admission.ROTATED, admission.LEDGER):
-        p = d / name
-        got = admission._rows(p)
-        if not got and p.exists() and p.stat().st_size > 0:
-            raise ValueError("the admission ledger does not parse")
-        rows += got
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return []
+    except OSError:
+        if os.stat(p).st_size > 0:               # unreadable and not empty: as the first build
+            raise ValueError("the admission ledger cannot be read") from None
+        return []
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("the admission ledger is no regular file")
+        chunks = []
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                break
+            chunks.append(b)
+    finally:
+        os.close(fd)
+    raw = b"".join(chunks)
+    rows = []
+    for ln in raw.decode("utf-8").splitlines():
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(r, dict):
+            rows.append(r)
+    if not rows and raw:
+        raise ValueError("the admission ledger does not parse")
     return rows
+
+
+def _ledger(env) -> list:
+    """R4: the rotated file's rows, then the live one's, each read once by `_regular_rows`."""
+    d = admission.directory(env)
+    return _regular_rows(d / admission.ROTATED) + _regular_rows(d / admission.LEDGER)
 
 
 def _reading(sid: str, env, now: datetime) -> dict | None:

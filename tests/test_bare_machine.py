@@ -597,7 +597,10 @@ READERS = {
     ("unattended", "read_ledger"): ("ledger.jsonl", {"ts": NOW_TS, "kind": "stop", "reason": "queue-spent"},
                                lambda m, d: m["unattended"].read_ledger(d / "ledger.jsonl")),
     ("policystore", "load_policy"): ("policy.json", {"reserve_pct": 7.0}, None),
-    ("resolver", "load_request"): ("request.json", {"cwd": "/r", "profile": None},
+    ("room", "_regular_rows"): ("l.jsonl", {"ts": NOW_TS, "kind": "spawn"},   # nw4 brief 2 R1
+                                lambda m, d: importlib.import_module(
+                                    "claude_session.room")._regular_rows(d / "l.jsonl")),
+    ("resolver", "load_request"):("request.json", {"cwd": "/r", "profile": None},
                                    lambda m, d: m["resolver"].load_request(d)),
     ("resolver", "rewindow"): ("resolved.json", RESOLVED, lambda m, d: m["resolver"].rewindow(d, 200000)),
     ("rules", "_settings"): ("home/.claude/settings.json", SETTINGS,
