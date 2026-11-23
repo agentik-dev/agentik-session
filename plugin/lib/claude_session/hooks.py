@@ -9,6 +9,11 @@ The zone's input is `used_pct`, a share of the sitting's own ceilings, read
 from the session's `meter.json` (the PostToolUse hook writes it). With no meter
 the zone is `unknown` and every handler stays silent about budget.
 
+A main thread's spawn is also told its room (packet nw4-launch-room, room.py): in a session
+that keeps the sitting discipline, the points left to the checkpoint once every helper out has
+handed back, and whether the new helper fits, as context for the model and in `systemMessage`;
+refused only under the posture `deny`.
+
 Hook output contract (from the CLI's own documentation):
     {"systemMessage": ..., "continue": bool, "stopReason": ...,
      "hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...,
@@ -891,6 +896,27 @@ def _deny(reason: str, note: str | None) -> dict:
     return out
 
 
+def _told(out: dict, told: tuple | None) -> dict:
+    """`out` with the launch line (packet nw4-launch-room R9) as context for the model, in
+    `hookSpecificOutput.additionalContext`, and said to the person in `systemMessage`."""
+    if not told:
+        return out
+    out = dict(out)
+    hso = dict(out.get("hookSpecificOutput") or {"hookEventName": "PreToolUse"})
+    hso["additionalContext"] = told[0]
+    out["hookSpecificOutput"] = hso
+    out["systemMessage"] = (out["systemMessage"] + " " if out.get("systemMessage") else "") + told[0]
+    return out
+
+
+def _held(tool: str, told: tuple | None, posture) -> dict | None:
+    """Packet nw4-launch-room R8: under `deny`, a launch the room holds is refused, the line
+    its reason; else None."""
+    if told and told[1] and posture == "deny":
+        return _deny(told[0], f"agentik-session: held a {_token(tool)} spawn for room.")
+    return None
+
+
 def pre_tool_use(payload: dict, env=None) -> dict:
     """The spawn gate (§2.2): under `ask` or `deny`, a spawn in the late zones
     asks, and under `deny` one in the reserve is refused. A subagent's call: {}.
@@ -900,7 +926,14 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     a gated file's write (g2b), the main thread's close while a job is out (rc2), and, under
     the session's `helpers.wait` (nw3), a helper's second wait on one gate job or its sleep of
     a minute or more: denied under `refuse`, said as context on a passing call under `say`,
-    untouched under `allow`, the shipped default."""
+    untouched under `allow`, the shipped default.
+    A spawn goes through the family rule (wfd, wfg, h6), then the role check (mt1 R6), then, at
+    a main thread's Agent or Task call alone, the launch check (nw4): in a session that keeps
+    the sitting discipline and under `signal`, `ask` or `deny`, the room left to the line and
+    whether the helper fits (room.py) is said as context and to the person; under `deny` a
+    narrow launch that does not fit and one with no room are refused, after the zone gate's
+    own refusal. A helper's call, the `off` posture and a waived discipline are told nothing,
+    and a fault in its reads gives no line."""
     _tool_stamp(payload, os.environ if env is None else env, "PreToolUse")
     if _helper_charter(payload):     # n33 R6: whatever the posture, and no call opened
         return {
@@ -969,10 +1002,12 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     if payload.get("agent_id"):
         return _warned({}, warn)
     cfg, zone = state(payload.get("session_id"), env)
+    from . import room               # nw4: the launch line; never raises, None outside the rule
+    told = room.told(payload, os.environ if env is None else env, cfg.posture)
     if cfg.posture in ("off", "signal"):
-        return _warned({}, warn)     # signalling happens on the prompt, not here
+        return _told(_warned({}, warn), told)   # signalling happens on the prompt, not here
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
-        return _warned({}, warn)
+        return _held(tool, told, cfg.posture) or _told(_warned({}, warn), told)
     plain = (None if discipline(_session_section(payload.get("session_id"), env))
              else _plain_budget(zone, used_pct(payload.get("session_id"), env)))   # st1 C2
 
@@ -988,7 +1023,10 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "the rest is reserved for wrapping up."),
         }
 
-    return _warned({
+    held = _held(tool, told, cfg.posture)
+    if held:
+        return held
+    return _told(_warned({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
@@ -999,7 +1037,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
         }
-    }, warn)
+    }, warn), told)
 
 
 def _admission_line(sid=None) -> str | None:

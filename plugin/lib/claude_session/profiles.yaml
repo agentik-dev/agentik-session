@@ -90,6 +90,24 @@ defaults:
   respeak: {narrative: tech}
   relay: {enabled: auto, queue: relay/queue.yaml, merge: merge-on-green}
   helpers: {wait: allow}
+  # `launch` (packet nw4-launch-room) is what the PreToolUse hook counts at a main thread's
+  # Agent or Task call in a session that keeps the discipline: `back`, the points of the context
+  # ceiling one hand-back costs (the same for every kind until it is measured); `narrow.points`,
+  # the room after the launch under which it is narrow; `narrow.alone`, the minutes a narrow
+  # launch may take with none out or all overdue; and `kinds`, each kind's median and ninth decile in
+  # minutes, seeded from the measured runs (hq design/29), which the ledger's own replace for a
+  # kind with ten runs or more. A kind with no row takes general-purpose's.
+  launch:
+    back: 2.5
+    narrow: {points: 10, alone: 15}
+    kinds:
+      build: {median: 29.1, p90: 55.4}
+      fix: {median: 26.2, p90: 57.6}
+      phase: {median: 16.9, p90: 48.0}
+      review: {median: 9.5, p90: 18.3}
+      refute: {median: 9.7, p90: 17.3}
+      general-purpose: {median: 14.9, p90: 64.3}
+      scribe: {median: 0.4, p90: 0.9}
 
 profiles:
   frontier:
@@ -112,6 +130,17 @@ profiles:
     respeak: {narrative: tech}
     relay: {enabled: auto}
     helpers: {wait: refuse}
+    launch:
+      back: 2.5
+      narrow: {points: 10, alone: 15}
+      kinds:
+        build: {median: 29.1, p90: 55.4}
+        fix: {median: 26.2, p90: 57.6}
+        phase: {median: 16.9, p90: 48.0}
+        review: {median: 9.5, p90: 18.3}
+        refute: {median: 9.7, p90: 17.3}
+        general-purpose: {median: 14.9, p90: 64.3}
+        scribe: {median: 0.4, p90: 0.9}
     plugins: [respeak]
     notes: "Frontier resources. Spend them on judgement, not bulk retrieval."
   balanced:

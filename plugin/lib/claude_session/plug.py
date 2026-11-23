@@ -40,7 +40,9 @@ LIVE_PREFIX = ("gate.", "reconcile.")      # gate_config and the reconciler read
 TYPES = {"checkpoint_at": "number", "tools": "list", "plugins": "list", "verify": "string",
          "charter.dir": "path", "gate.ntfy_url": "string", "gate.ntfy_topic": "secret",
          "gate.wall": "integer", "gate.load_ceiling": "number", "gate.max_running": "integer",
-         "ceilings.context": "integer", "ceilings.turns": "integer"}
+         "ceilings.context": "integer", "ceilings.turns": "integer",
+         "launch.back": "number", "launch.narrow.points": "number",
+         "launch.narrow.alone": "number"}
 
 # R9: one sentence each, under 100 characters; a pattern's `*` is one segment or more.
 SUMMARIES = {
@@ -51,6 +53,11 @@ SUMMARIES = {
                        "session.",
     "posture": "What the budget guard does at a ceiling: off, signal, ask or deny.",
     "helpers.wait": "A helper's second wait on one job, or long sleep: allow, say or refuse.",
+    "launch.back": "The points of the context ceiling a helper's hand-back is counted to cost.",
+    "launch.narrow.points": "The room after a launch under which it is narrow and must fit a wait.",
+    "launch.narrow.alone": "The minutes a narrow launch may take when no helper is out, or every one out is overdue.",
+    "launch.kinds.*.median": "A kind's median minutes, until the ledger holds ten runs of it.",
+    "launch.kinds.*.p90": "A kind's ninth decile in minutes, until the ledger holds ten runs of it.",
     "lane": "Where the work runs: the seat, the local model for subagents, or the local model "
             "alone.",
     "ceilings.context": "The context, in tokens, this sitting is metered against.",
