@@ -2367,13 +2367,16 @@ def _backs(payload: dict, env, measure: bool = True) -> None:
     `<id>.json` is passed over and left. With at least one stamp the occupancy is read once
     and `admission.record_backs` appends the lines (R4); each regular file read is removed,
     whether or not a line was written. With `measure` false (a turn StopFailure ended, fix of
-    review 1 R1) the same files are removed and nothing is read or written. Never raises."""
+    review 1 R1) the same files are removed and nothing is read or written. `backs/` is read
+    only where it is a folder and no link (R4 of the fix). Never raises."""
     try:
         sdir = _session_dir(payload.get("session_id"), env, fallback=False)
         if sdir is None:
             return
         bdir = sdir / BACKS
         try:
+            if not stat.S_ISDIR(os.lstat(bdir).st_mode):
+                return
             names = sorted(os.listdir(bdir))
         except OSError:
             return

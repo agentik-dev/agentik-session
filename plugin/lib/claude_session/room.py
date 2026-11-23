@@ -323,7 +323,9 @@ def _reading(sid: str, env, now: datetime) -> dict | None:
     kind_of = _kind_of(spawns)
     all_runs = admission.runs(rows)
     tab = table(seeds, [(kind_of(r), r["minutes"]) for r in all_runs if r["minutes"] is not None])
-    costs = backs(back, back_pairs(rows, all_runs, spawns), (m.get("ceilings") or {}).get("context"))
+    ceil = m.get("ceilings")                # not an object: no ceiling (fix of review 1 R3)
+    costs = backs(back, back_pairs(rows, all_runs, spawns),
+                  ceil.get("context") if isinstance(ceil, dict) else None)
     minutes(tab, FALLBACK)                       # a table with no fallback is a fault
     own = admission.runs([r for r in rows if r.get("session") == sid or r.get("kind") == "done"])
     out = []

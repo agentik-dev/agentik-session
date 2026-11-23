@@ -174,7 +174,9 @@ def test_3_three_stamps_share_the_growth_from_the_least_before(main):
     lines = _backs()
     assert [x["agentId"] for x in lines] == ["a1", "a2", "a3"]
     assert [x["before"] for x in lines] == [1000, 6000, 7000]
-    assert {(x["after"], x["tokens"], x["shared"]) for x in lines} == {(6000, 1667, 3)}
+    # 5000 over three: whole shares that sum to it, the remainder to the earliest (R5 of the fix)
+    assert [(x["after"], x["tokens"], x["shared"]) for x in lines] == [
+        (6000, 1667, 3), (6000, 1667, 3), (6000, 1666, 3)]
     assert _stamps() == []
 
 
@@ -458,3 +460,54 @@ def test_r2_a_ledger_that_is_no_regular_file_is_never_written(main, alarm, tmp_p
     _stop()
     assert [(x["agentId"], x["tokens"]) for x in _backs()] == [("a2", 1100)]
     assert stat.S_ISREG(os.lstat(p).st_mode)
+
+
+@pytest.mark.parametrize("ceilings", ["400000", ["x"]])
+def test_r3_a_ceilings_that_is_no_object_reads_as_no_ceiling(clock, ceilings):
+    _session(62.0)
+    _ledger([_spawn(NOW - 5 * M, "o1")])
+    call = {"session_id": SID, "tool_name": "Agent", "tool_use_id": "tu-new",
+            "tool_input": {"prompt": "p", "description": "review 1 of row-a",
+                           "subagent_type": ADVERSARY}}
+    m = json.loads((_sdir() / "meter.json").read_text())
+    m.pop("ceilings")
+    (_sdir() / "meter.json").write_text(json.dumps(m))
+    told, status = room.told(call, os.environ, "signal"), room.status_for(SID, os.environ)
+    assert told is not None and status is not None
+    (_sdir() / "meter.json").write_text(json.dumps({**m, "ceilings": ceilings}))
+    assert room.told(call, os.environ, "signal") == told
+    assert room.status_for(SID, os.environ) == status
+    assert status.startswith("launch: room 15.5 to the line, 1 out: ")
+
+
+def test_r4_a_linked_backs_folder_is_left_alone(main, tmp_path):
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    for n in ("keep-me.json", "config.json"):
+        (other / n).write_text(json.dumps({"x": 1}))
+    (other / "a1.json").write_text(json.dumps({"at": 1.7e9, "before": 10}))
+    (_sdir() / "backs").symlink_to(other)
+    main.grow(3000)
+    _stop()
+    hooks.stop_failure({"session_id": SID, "error": "x"}, os.environ)
+    assert sorted(os.listdir(other)) == ["a1.json", "config.json", "keep-me.json"]
+    assert _backs() == []
+    (_sdir() / "backs").unlink()
+    (_sdir() / "backs").write_text("not a folder")
+    _stop()
+    assert (_sdir() / "backs").read_text() == "not a folder" and _backs() == []
+
+
+def _shares(growth, ats=(3.0, 1.0, 2.0)):
+    stamps = [(aid, 1.7e9 + at, 100) for aid, at in zip(("a", "b", "c"), ats)]
+    return [(x["agentId"], x["tokens"], x["shared"])
+            for x in admission.back_lines("s", stamps, 100 + growth, NOW)]
+
+
+def test_r5_the_shares_are_whole_tokens_whose_sum_is_the_growth():
+    assert _shares(1) == [("b", 1, 3)]                    # the earliest stamp; no line of 0
+    assert _shares(2) == [("b", 1, 3), ("c", 1, 3)]
+    assert _shares(1000) == [("a", 333, 3), ("b", 334, 3), ("c", 333, 3)]
+    assert sum(t for _, t, _ in _shares(1000)) == 1000
+    assert _shares(1000, (1.0, 1.0, 1.0)) == [("a", 334, 3), ("b", 333, 3), ("c", 333, 3)]
+    assert _shares(0) == [] and _shares(-5) == []

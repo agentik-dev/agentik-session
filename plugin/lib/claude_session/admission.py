@@ -454,16 +454,24 @@ BACK_KEYS = ("ts", "session", "kind", "agentId", "done", "before", "after", "tok
 
 def back_lines(sid: str, stamps: list, after: int, now: datetime) -> list:
     """R4: one `back` line a stamp ((agentId, at, before) triples) read at one turn's end:
-    `tokens` the turn's growth from the least `before`, over their count, rounded half up,
-    and `shared` their count. A growth of zero or less gives no line for any of them."""
+    the turn's growth from the least `before` split among them in whole tokens whose sum is
+    the growth, the remainder one token each to the earliest stamps (by `at`, then by order),
+    and `shared` their count. A share of 0 writes no line, and a growth of zero or less gives
+    no line for any of them (fix of review 1 R5)."""
     n = len(stamps)
     growth = after - min(b for _, _, b in stamps) if n else 0
     if growth <= 0:
         return []
-    tokens = (2 * growth + n) // (2 * n)
-    return [{"ts": _ts(now), "session": sid, "kind": "back", "agentId": aid,
-             "done": _ts(datetime.fromtimestamp(at, timezone.utc)), "before": before,
-             "after": after, "tokens": tokens, "shared": n} for aid, at, before in stamps]
+    base, extra = divmod(growth, n)
+    early = set(sorted(range(n), key=lambda i: (stamps[i][1], i))[:extra])
+    out = []
+    for i, (aid, at, before) in enumerate(stamps):
+        tokens = base + (i in early)
+        if tokens > 0:
+            out.append({"ts": _ts(now), "session": sid, "kind": "back", "agentId": aid,
+                        "done": _ts(datetime.fromtimestamp(at, timezone.utc)), "before": before,
+                        "after": after, "tokens": tokens, "shared": n})
+    return out
 
 
 def record_backs(sid: str, stamps: list, after: int, env, now: datetime | None = None) -> int:
