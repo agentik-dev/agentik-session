@@ -398,13 +398,16 @@ def _admission_facts(band) -> dict:
 
 
 def cmd_mod(args) -> int:
-    """`mod start`: the hooks module's one verb; mod.json written, the session dir printed."""
+    """`mod start`: the hooks module's one verb; mod.json written, the session dir printed,
+    and the API lane's live folder for this session (packet al5-band R2: the module has no
+    password database, so it is told the account's home here)."""
     try:
         sdir = mod.start(args.session, os.environ)
     except mod.ModError as e:
         print(f"agentik-session: {e}", file=sys.stderr)
         return e.code
-    print(json.dumps({"dir": str(sdir)}))
+    lane = admission.api_folder(args.session)
+    print(json.dumps({"dir": str(sdir), **({"api": str(lane)} if lane is not None else {})}))
     return 0
 
 

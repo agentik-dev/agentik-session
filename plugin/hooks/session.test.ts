@@ -711,3 +711,98 @@ test('the mod calls the tool under its root, never by name from PATH', async (t:
   expect(seen.length).toBeGreaterThan(0)
   expect(seen.filter(p => p !== BIN)).toEqual([])
 })
+
+// ---- Packet al5-band: the API lane's running agents of this session, on the owner's band ----
+// [entry, records, line] each at NOW, a record an object (its JSON text) or a string (the text as
+// it stands); API_NONE, record sets that count nothing, each drawing the pin's line. tests/test_band.py
+// reads these lines and asserts Python's band_line draws the same. A string record's quotes are
+// escaped as this literal needs (`\\"`); the test reads the literal as JavaScript does. Fix 1 R2:
+// the last six API_NONE rows are what the Mod refuses and Python once took (beats of fullwidth
+// and Arabic-Indic digits, NaN, Infinity, -Infinity).
+const API_REC = '{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}'
+const API_CASES = '[[{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 3 api (2 explore, 1 review) · 1 deferred · 7d 41%"], [{"window": "none", "running": 3}, [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:30Z", "ended": null}], "no 5h window · 3 helpers · 1 api (1 review)"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}, {"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:30Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 4 api (2 explore, 2 review) · 1 deferred · 7d 41%"], [{"window": "none", "slot": "Fri-1300Z", "P": null, "peak": null, "room": null, "P7": 62, "ceiling_7d": 97, "resetsAt": "2026-10-16T13:00:00+00:00", "until": "2026-10-16T13:00:00+00:00", "bound": "seven_day", "running": 3, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "no 5h window · 7d 62% · week resets Fri 13:00 (4d1h) · 3 helpers · 3 api (2 explore, 1 review)"], [{"window": "five_hour", "slot": "Mon-1500Z", "P": null, "peak": null, "room": null, "P7": 3, "ceiling_7d": 97, "resetsAt": "2026-10-19T15:00:00+00:00", "until": "2026-10-19T15:00:00+00:00", "bound": "seven_day", "running": 0, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:30Z", "ended": null}], "5h no reading · 7d 3% · week resets Mon 15:00 (7d3h) · 0 helpers · 1 api (1 review)"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · 3 api (2 explore, 1 review) · 1 deferred · 7d 41%"], [{"window": "none"}, [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:30Z", "ended": null}], "no 5h window · 1 api (1 review)"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}, {"run": "r2", "type": "explore"}, {"run": "r3", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}, {"schema": "agentik.api.live/1", "fanout": "f3", "running": [{"run": "x", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:29Z", "ended": null}, "{not json", {"schema": "agentik.api.live/2", "fanout": "f4", "running": [{"run": "y", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 3 api (2 explore, 1 review) · 1 deferred · 7d 41%"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f5", "running": [{"run": "a", "type": "plan"}], "queued": 1, "beat": "2026-10-12T11:59:59.5Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 1 api (1 plan) · 1 deferred · 7d 41%"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f6", "running": [{"run": "a"}, {"run": "b", "type": ""}, {"run": "c", "type": 7}, "d", {"run": "e", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 1 api (1 review) · 1 deferred · 7d 41%"], [{"window": "none", "running": 1, "at": "2026-10-12T11:57:00+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:30Z", "ended": null}], "no 5h window · 1 helper · 1 api (1 review) · 180s old"], [{"P": 72, "peak": 91.2, "ceiling": 97, "resetsAt": "2026-10-12T13:12:00+00:00", "running": 3, "room": 2, "deferred": 1, "P7": 41, "mode": "observe", "at": "2026-10-12T11:59:30+00:00"}, [{"schema": "agentik.api.live/1", "fanout": "f7", "running": [{"run": "a", "type": "review"}, {"run": "b", "type": "build"}, {"run": "c", "type": "explore"}, {"run": "d", "type": "explore"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], "5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 4 api (2 explore, 1 build, 1 review) · 1 deferred · 7d 41%"]]'
+const API_NONE = '[[], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": "2026-10-12T11:59:00Z"}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:29Z", "ended": null}], [{"schema": "agentik.api.live/2", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], [{"fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], ["{not json"], ["[1, 2]"], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z"}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": false}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": "r4", "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "soon", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T12:00:31Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4"}, {"run": "r5", "type": null}], "queued": 1, "beat": "2026-10-12T11:59:50Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "２０２６-１０-１２T１１:５９:５０Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "٢٠٢٦-١٠-١٢T١١:٥٩:٥٠Z", "ended": null}], [{"schema": "agentik.api.live/1", "fanout": "f2", "running": [{"run": "r4", "type": "review"}], "queued": 1, "beat": "2026-10-12T11:59:50.٥Z", "ended": null}], ["{\\"schema\\": \\"agentik.api.live/1\\", \\"fanout\\": \\"f2\\", \\"running\\": [{\\"run\\": \\"r4\\", \\"type\\": \\"review\\"}], \\"queued\\": NaN, \\"beat\\": \\"2026-10-12T11:59:50Z\\", \\"ended\\": null}"], ["{\\"schema\\": \\"agentik.api.live/1\\", \\"fanout\\": \\"f2\\", \\"running\\": [{\\"run\\": \\"r4\\", \\"type\\": \\"review\\"}], \\"queued\\": Infinity, \\"beat\\": \\"2026-10-12T11:59:50Z\\", \\"ended\\": null}"], ["{\\"schema\\": \\"agentik.api.live/1\\", \\"fanout\\": \\"f2\\", \\"running\\": [{\\"run\\": \\"r4\\", \\"type\\": \\"review\\"}], \\"queued\\": -Infinity, \\"beat\\": \\"2026-10-12T11:59:50Z\\", \\"ended\\": null}"]]'
+const API = '/u/.local/state/agentik-agents/api/live/sess-1'
+const apiTexts = (recs: any[]): string[] => recs.map(r => typeof r === 'string' ? r : JSON.stringify(r))
+
+test('al5: admissionLine draws each API case as Python does', () => {
+  const cases = JSON.parse(API_CASES)
+  expect(cases.length).toBeGreaterThanOrEqual(6)
+  for (const [entry, recs, line] of cases) expect(admissionLine(JSON.stringify(entry), NOW, '', apiTexts(recs))).toBe(line)
+})
+
+test('al5: a record set that counts nothing draws the pin line in all three forms', () => {
+  const forms: Array<[string, string]> = [[BAND, BAND_LINE], [BAND_NONE, BAND_NONE_LINE], [BAND_WEEK_ONLY, BAND_WEEK_ONLY_LINE]]
+  for (const [band, pin] of forms) {
+    expect(admissionLine(band, NOW, '')).toBe(pin)
+    for (const recs of JSON.parse(API_NONE)) expect(admissionLine(band, NOW, '', apiTexts(recs))).toBe(pin)
+  }
+})
+
+// The band with `mod start` printing the lane's folder; `entries` is what fs.list answers there.
+const apiBand = async (t: any, on: any, files: Record<string, string>, entries: any[] | null,
+                       columns = 120, reads: string[] = []) => {
+  on('session.start', ($: any, e: any) => e)
+  on('session.id', () => ({ value: 'sess-1' }))
+  on('process.run', () => ({ value: { code: 0, stdout: JSON.stringify({ dir: DIR, api: API }), stderr: '' } }))
+  on('fs.list', ($: any, e: any) => {
+    if (e.path !== API || entries === null) throw new Error(`ENOENT ${e.path}`)
+    return { value: entries }
+  })
+  on('fs.read', ($: any, e: any) => {
+    if (e.path.startsWith(`${API}/`)) reads.push(e.path)
+    if (!(e.path in files)) throw new Error(`ENOENT ${e.path}`)
+    return { value: files[e.path] }
+  })
+  on('clock.now', () => ({ value: NOW }))
+  on('clock.sleep', () => new Promise(() => {}))
+  on('ui.invalidate', () => ({ value: undefined }))
+  await t.session.start({ cwd: '/repo' })
+  return texts(await t.ui.render(PROPS(columns)))
+}
+const entry = (name: string, kind = 'file', size = 400, isLink = false) => ({ name, kind, size, mtimeMs: 0, isLink })
+const LINE3 = '5h 72% → 91% · resets 13:12 (1h12) · helpers 3/5 · 3 api (2 explore, 1 review) · 1 deferred · 7d 41%'
+
+test('al5: the owner band reads the lane folder mod start names and draws the part', async (t: any, on: any) => {
+  const rows = await apiBand(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND, [`${API}/f1.json`]: API_REC },
+                             [entry('f1.json')])
+  expect(rows).toEqual(['session: ctx 62% · turns 31% · notice', LINE3])
+})
+
+const API_FILES = { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND, [`${API}/f1.json`]: API_REC,
+                    [`${API}/p.json`]: API_REC, [`${API}/d.json`]: API_REC, [`${API}/l.json`]: API_REC,
+                    [`${API}/big.json`]: API_REC, [`${API}/f1.txt`]: API_REC }
+const noPart = async (t: any, on: any, entries: any[] | null) => {
+  const reads: string[] = []
+  expect((await apiBand(t, on, API_FILES, entries, 120, reads))[1]).toBe(BAND_LINE)
+  expect(reads).toEqual([])
+}
+
+test('al5: a lane folder that cannot be listed: the pin line', async (t: any, on: any) => {
+  await noPart(t, on, null)
+})
+
+test('al5: an empty lane folder: the pin line', async (t: any, on: any) => {
+  await noPart(t, on, [])
+})
+
+test('al5: a pipe, a folder, a link, a record past 64 KB and a name not .json are never read', async (t: any, on: any) => {
+  await noPart(t, on, [entry('p.json', 'other'), entry('d.json', 'dir'), entry('l.json', 'file', 400, true),
+                       entry('big.json', 'file', 65537), entry('f1.txt')])
+})
+
+test('al5: at most 16 records are read, by name', async (t: any, on: any) => {
+  const files: Record<string, string> = { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND }
+  const names = Array.from({ length: 20 }, (_, i) => `f${String(i).padStart(2, '0')}.json`)
+  for (const n of names) files[`${API}/${n}`] = API_REC
+  const reads: string[] = []
+  const rows = await apiBand(t, on, files, [...names].reverse().map(n => entry(n)), 120, reads)
+  expect(reads).toEqual(names.slice(0, 16).map(n => `${API}/${n}`))
+  expect(rows[1]).toContain(' · 48 api (32 explore, 16 review) · ')
+})
+
+test('al5: the line with the part is cut to bodyColumns: 80, as Python cuts it', async (t: any, on: any) => {
+  const rows = await apiBand(t, on, { [`${DIR}/meter.json`]: METER, [BAND_JSON]: BAND, [`${API}/f1.json`]: API_REC },
+                             [entry('f1.json')], 80)
+  expect(rows[1]).toBe(LINE3.slice(0, 79) + '…')
+})
