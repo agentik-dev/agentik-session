@@ -468,7 +468,9 @@ def back_lines(sid: str, stamps: list, after: int, now: datetime) -> list:
 
 def record_backs(sid: str, stamps: list, after: int, env, now: datetime | None = None) -> int:
     """R4: `back_lines`, appended under the ledger's lock after its rotation, as `admit`
-    appends its verdict; band.json is not rewritten. Returns the count written; raises
+    appends its verdict; band.json is not rewritten. The ledger is written only where it is
+    absent or, by lstat, a regular file: a FIFO, a folder or a link gets nothing and the
+    rotation is never reached (fix of review 1 R2). Returns the count written; raises
     AdmissionError on the lock, which the hook swallows."""
     now = now or datetime.now(timezone.utc)
     lines = back_lines(sid, stamps, after, now)
@@ -480,6 +482,11 @@ def record_backs(sid: str, stamps: list, after: int, env, now: datetime | None =
     fd = _lock(d)
     try:
         os.fchmod(fd, 0o600)
+        try:
+            if not stat.S_ISREG(os.lstat(d / LEDGER).st_mode):
+                return 0
+        except FileNotFoundError:
+            pass
         _rotate(d, now)
         _append(d, lines)
     finally:

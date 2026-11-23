@@ -8,6 +8,8 @@ import io
 import json
 import os
 import signal
+import stat
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 
@@ -398,3 +400,61 @@ def test_8_report_ends_with_a_hand_back_s_cost_by_kind():
 def test_8_no_counted_line_prints_no_section():
     _ledger([_spawn(NOW, "a1"), _back(NOW, "nobody", 9999)])
     assert "hand-back" not in admission.report(os.environ)
+
+
+# ---- the fix of review 1 ---------------------------------------------------------------------
+
+def test_r1_a_turn_ended_by_stop_failure_drops_its_stamps(main):
+    _end("a1")                                   # before 1000
+    main.grow(3000)                              # the hand-back's turn, which an API error ends
+    assert hooks.stop_failure({"session_id": SID, "error": "rate_limit"}, os.environ) == {}
+    assert (_sdir() / hooks.LIMITED).is_file()   # as at the pin
+    assert _stamps() == [] and _backs() == []
+    main.grow(20000)                             # an unrelated turn
+    _stop()
+    assert _backs() == [] and _stamps() == []
+
+
+def test_r1_a_helper_s_stop_failure_leaves_the_main_thread_s_stamps(main):
+    _end("a1")
+    main.grow(3000)
+    hooks.stop_failure({"session_id": SID, "agent_id": "a9", "error": "x"}, os.environ)
+    assert _stamps() == ["a1.json"]
+    _stop()
+    assert [(x["agentId"], x["tokens"]) for x in _backs()] == [("a1", 2000)]
+
+
+def _odd_ledger(kind, tmp_path):
+    d = admission.directory(os.environ)
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / admission.LEDGER
+    target = tmp_path / "elsewhere.jsonl"
+    target.write_text(json.dumps(_spawn(NOW, "z1")) + "\n")
+    if kind == "fifo":
+        os.mkfifo(p)
+    elif kind == "folder":
+        p.mkdir()
+    else:
+        p.symlink_to(target)
+    return p, target
+
+
+@pytest.mark.parametrize("kind", ["fifo", "folder", "symlink"])
+def test_r2_a_ledger_that_is_no_regular_file_is_never_written(main, alarm, tmp_path, kind):
+    p, target = _odd_ledger(kind, tmp_path)
+    was = target.read_bytes()
+    _end("a1")
+    main.grow(2900)
+    t0 = time.monotonic()
+    assert _stop() == {}
+    assert time.monotonic() - t0 < 1.0
+    assert _stamps() == []
+    assert target.read_bytes() == was            # a link's target is never appended to
+    assert (p.is_dir() if kind == "folder" else
+            stat.S_ISFIFO(os.lstat(p).st_mode) if kind == "fifo" else p.is_symlink())
+    p.rmdir() if kind == "folder" else p.unlink()
+    _end("a2")                                   # before 2900
+    main.grow(4000)
+    _stop()
+    assert [(x["agentId"], x["tokens"]) for x in _backs()] == [("a2", 1100)]
+    assert stat.S_ISREG(os.lstat(p).st_mode)

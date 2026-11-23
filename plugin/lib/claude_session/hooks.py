@@ -2361,12 +2361,13 @@ def _a_stamp(d: dict) -> tuple | None:
     return float(at), before
 
 
-def _backs(payload: dict, env) -> None:
+def _backs(payload: dict, env, measure: bool = True) -> None:
     """R3: at the main thread's turn end, every stamp under `backs/` is read from a regular file
     opened so that it never blocks (`_regular_json`); a FIFO, a folder or a name that is not
     `<id>.json` is passed over and left. With at least one stamp the occupancy is read once
     and `admission.record_backs` appends the lines (R4); each regular file read is removed,
-    whether or not a line was written. Never raises."""
+    whether or not a line was written. With `measure` false (a turn StopFailure ended, fix of
+    review 1 R1) the same files are removed and nothing is read or written. Never raises."""
     try:
         sdir = _session_dir(payload.get("session_id"), env, fallback=False)
         if sdir is None:
@@ -2386,7 +2387,7 @@ def _backs(payload: dict, env) -> None:
             except OSError:
                 continue
             read.append(p)
-            got = _a_stamp(_regular_json(p))
+            got = _a_stamp(_regular_json(p)) if measure else None
             if got is not None:
                 stamps.append((aid, *got))
         try:
@@ -2408,12 +2409,19 @@ def stop_failure(payload, env=None) -> dict:
     """A turn an API error ended (Claude Code's StopFailure, fired instead of Stop; packet
     S34 ruling 5): `limited.json` {at, error}, the payload's `error` a string cut to 64,
     else null, for the main thread only; a helper's (agent_id) writes nothing. It writes no
-    `turn-ended.json`, since no turn ended, and never raises; dispatch prints nothing."""
+    `turn-ended.json`, since no turn ended, and never raises; dispatch prints nothing. It drops
+    the main thread's stamps under `backs/` as a Stop that read them would, and writes no
+    `back` line, so the failed turn is never measured into a later one (nw4b, fix of review 1
+    R1)."""
     try:
         if isinstance(payload, dict) and not payload.get("agent_id"):
+            env = os.environ if env is None else env
             err = payload.get("error")
-            _stamp(payload, os.environ if env is None else env, LIMITED,
-                   {"at": time.time(), "error": err[:64] if isinstance(err, str) else None})
+            try:
+                _stamp(payload, env, LIMITED,
+                       {"at": time.time(), "error": err[:64] if isinstance(err, str) else None})
+            finally:
+                _backs(payload, env, measure=False)
     except Exception:                                   # noqa: BLE001
         pass
     return {}
