@@ -64,15 +64,60 @@ def _metered(tmp_path):
     return resolver.session_dir(resolver.state_dir(env), SID)
 
 
-def test_mod_start_writes_mod_json_and_prints_the_dir(state, tmp_path):
+class _Pw:
+    def __init__(self, home):
+        self.pw_dir = home
+
+
+def _lookup(monkeypatch, answer):
+    """The password database's answer for this account made `answer`: a home, or an
+    exception it raises (al5-band)."""
+    import pwd
+
+    def getpwuid(uid):
+        if isinstance(answer, BaseException):
+            raise answer
+        return _Pw(answer)
+    monkeypatch.setattr(pwd, "getpwuid", getpwuid)
+
+
+def test_mod_start_writes_mod_json_and_prints_the_dir(state, tmp_path, monkeypatch):
     sdir = _metered(tmp_path)
+    home = tmp_path / "stand-in-home"         # al5-band fix 1 R3: the folder built here, from it
+    _lookup(monkeypatch, str(home))
     rc, out, err = run("mod", "start", "--session", SID)
     assert (rc, err) == (0, "")
     assert json.loads(out) == {"dir": str(sdir.resolve()),             # al5-band: the lane's folder
-                               "api": str(admission.api_folder(SID))}
+                               "api": f"{home}/.local/state/agentik-agents/api/live/{SID}"}
     m = json.loads((sdir / "mod.json").read_text())
     assert set(m) == {"at", "version"} and m["version"] == __version__
     assert not list(sdir.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("answer", [KeyError("getpwuid(): uid not found"), OSError("no database"),
+                                    "relative/home", ""])
+def test_mod_start_prints_the_pin_s_shape_when_the_home_lookup_fails(state, tmp_path, monkeypatch,
+                                                                       answer):
+    """al5-band fix 1 R1: no password entry for the account, or a home that is not absolute,
+    leaves `api` out, and `mod start` prints what it printed at the pin; nothing raises."""
+    sdir = _metered(tmp_path)
+    _lookup(monkeypatch, answer)
+    rc, out, err = run("mod", "start", "--session", SID)
+    assert (rc, err) == (0, "")
+    assert json.loads(out) == {"dir": str(sdir.resolve())}
+    assert admission.api_folder(SID) is None
+
+
+@pytest.mark.parametrize("bad", ["../escape", "a b", "x/y", "", "a" * 129, "ok\n"])
+def test_mod_start_leaves_api_out_for_an_id_sid_refuses(state, tmp_path, monkeypatch, bad):
+    """al5-band fix 1 R3: `mod.start` refuses such an id first (exit 2, below), so it is
+    stood in for here, to reach cmd_mod's own branch: no `api` key, exit 0 as for a good id."""
+    sdir = tmp_path / "stand-in-dir"
+    _lookup(monkeypatch, str(tmp_path / "stand-in-home"))
+    monkeypatch.setattr(cli.mod, "start", lambda sid, env: sdir)
+    rc, out, err = run("mod", "start", "--session", bad)
+    assert (rc, err) == (0, "")
+    assert json.loads(out) == {"dir": str(sdir)}
 
 
 @pytest.mark.parametrize("bad", ["../escape", "a b", "x/y", "", "a" * 129, "ok\n"])

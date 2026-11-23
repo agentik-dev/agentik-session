@@ -1913,12 +1913,19 @@ _API_BEAT = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d
 def api_folder(sid, home=None) -> Path | None:
     """`<home>/.local/state/agentik-agents/api/live/<sid>`, the home the account's own from
     the password database (never HOME or XDG_STATE_HOME: the lane writes there by that
-    rule); None for an id `_SID` refuses."""
+    rule); None for an id `_SID` refuses, and None, never a raise, where the database has no
+    entry for the account or the home it names is not absolute (fix 1 R1: the band never
+    fails for the lane's sake)."""
     if not isinstance(sid, str) or not _SID.match(sid):
         return None
     if home is None:
-        import pwd
-        home = pwd.getpwuid(os.getuid()).pw_dir
+        try:
+            import pwd
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, OSError):
+            return None
+    if not isinstance(home, (str, os.PathLike)) or not os.path.isabs(home):
+        return None
     return Path(home, ".local", "state", "agentik-agents", "api", "live", sid)
 
 
