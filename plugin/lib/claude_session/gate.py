@@ -361,12 +361,26 @@ def land_branch(command) -> str | None:
     return None
 
 
+def _runner_argv(words) -> bool:
+    """Whether `words` are a runner's argv as `self_argv` writes it: an interpreter's absolute
+    path, `-I -X pycache_prefix=...`, and a path ending in this plugin's launcher. The paths
+    may differ between installs (packet nw5-check-proof, brief 3, R4)."""
+    head = self_argv()
+    if len(words) != len(head) or not all(isinstance(w, str) and w for w in words):
+        return False
+    return os.path.isabs(words[0]) and words[1:3] == head[1:3] \
+        and words[3].startswith("pycache_prefix=") \
+        and os.path.basename(words[4]) == os.path.basename(head[4])
+
+
 def check_worktree(command) -> str | None:
-    """The worktree of a kept check's job, a command closing with `gate run --check --in-job`
-    and one word (packet nw5-check-proof, brief 2, R4 and R5); else None."""
-    if not isinstance(command, list) or len(command) < len(CHECK_JOB) + 1:
+    """The worktree of a kept check's job, the whole command a runner's argv, then `gate run
+    --check --in-job` and one word (packet nw5-check-proof, brief 2, R4 and R5; brief 3, R4);
+    else None."""
+    n = len(self_argv())
+    if not isinstance(command, list) or len(command) != n + len(CHECK_JOB) + 1:
         return None
-    if tuple(command[-len(CHECK_JOB) - 1:-1]) != CHECK_JOB:
+    if not _runner_argv(command[:n]) or tuple(command[n:-1]) != CHECK_JOB:
         return None
     where = command[-1]
     return where if isinstance(where, str) and where else None

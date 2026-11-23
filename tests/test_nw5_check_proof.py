@@ -316,8 +316,12 @@ def test_5_a_record_with_no_exit(box):
 
 
 def test_5_a_cut_record(box):
+    # brief 3, R3: the start record is written before the dirt is read; a first check warms
+    # the job's bytecode under the test's fresh HOME, and the wall leaves a loaded machine
+    # room for the start, still well short of the check's 20 s
+    box.check()
     box.flag("slow")
-    gid = box.check(None, "--wall", "3")
+    gid = box.check(None, "--wall", "8")
     rec = box.record(gid)
     assert (rec["exit"], rec["cut"]) == (124, gate.CUT_WALL)
     box.flag("slow", False)
@@ -728,3 +732,123 @@ def test_b2_r7_the_no_stamp_dry_run_reads_the_sha(box):
     assert "check: would run its own (sha)" in out.splitlines(), out
     assert "would take" not in out
     assert box.land(sha=base)[:2] == (1, "land scratch: red sha exit 1\n")
+
+
+# ---- brief 3, the fix of review 2 ---------------------------------------------------------
+
+# R1 (F2): the job's form picks the record taken; any newer red of this worktree voids it.
+
+@pytest.mark.parametrize("lost", ["missing", "torn"])
+def test_b3_r1_a_newer_red_check_whose_result_is_lost_voids(box, lost):
+    g1 = box.check()
+    box.flag("red")
+    r2 = box.check()
+    assert box.record(r2)["exit"] == 2
+    res = gate.result_path(box.root, r2)
+    res.unlink() if lost == "missing" else res.write_text('{"id": "' + r2 + '", "comm')
+    box.flag("red", False)
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 3), err
+    assert "%s is red after %s" % (r2, g1) in err
+
+
+@pytest.mark.parametrize("record", ["kept", "absent"])
+def test_b3_r1_a_newer_red_of_a_wrapper_job_voids(box, record):
+    g1 = box.check()
+    box.flag("red")
+    rc, out, err = run("gate", "run", str(box.tree), "--", "/bin/sh", "-c",
+                       '"$0" "$1" gate run "$2" --check --in-job', sys.executable, str(RUNNER),
+                       str(box.tree))
+    r2 = out.split()[1]
+    assert box.record(r2)["exit"] == 2 and box.count() == 2
+    if record == "absent":
+        (gate.entry_dir(box.root, r2) / "check.json").unlink()
+    box.flag("red", False)
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 3), err
+    assert "%s is red after %s" % (r2, g1) in err
+
+
+def test_b3_r1_a_newer_record_with_no_exit_voids(box):
+    g1 = box.check()
+    r2 = box.check()
+    box.rewrite(r2, exit=None, ended=None, clean=None)
+    gate.result_path(box.root, r2).unlink()
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 3), err
+    assert "%s is red after %s" % (r2, g1) in err
+
+
+# R2 (F1): an fsmonitor that reports no change hides nothing from the dirt's reads.
+
+def fsmonitor_valid(box, text):
+    """A stand-in fsmonitor hook that reports no change, then an edit under its valid bit."""
+    hook = box.tmp / "fsmonitor-hook"
+    hook.write_text('#!/bin/sh\nprintf "tok\\0"\n')
+    hook.chmod(0o755)
+    git(box.tree, "config", "core.fsmonitor", str(hook))
+    git(box.tree, "status", "--porcelain")
+    (box.tree / "state.txt").write_text(text)
+    git(box.tree, "update-index", "--fsmonitor-valid", "state.txt")
+    assert git(box.tree, "status", "--porcelain") == ""      # git's own read is fooled
+
+
+def test_b3_r2_an_fsmonitor_valid_edit_is_refused_at_the_queue(box):
+    remake(box, "grep -q green state.txt", {"state.txt": "red\n"})
+    fsmonitor_valid(box, "green\n")
+    rc, out, err = run("gate", "run", str(box.tree), "--check")
+    assert rc == 2 and "is not clean" in err and "state.txt" in err, err
+    assert not gate.gate_dir(box.root).exists() or not gate.entries(box.root)
+    assert not list(land.check_records(box.root))
+
+
+def test_b3_r2_an_fsmonitor_valid_edit_after_the_queue_is_not_clean(box, monkeypatch):
+    remake(box, "grep -q green state.txt", {"state.txt": "red\n"})
+    serve = gate.spawn_serve
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    gid = box.check()
+    fsmonitor_valid(box, "green\n")
+    gate.serve(box.root, gate.Fx(idle=0, poll=0.05))
+    rec = box.record(gid)
+    assert (rec["exit"], rec["clean"]) == (0, False)
+    (box.tree / "state.txt").write_text("red\n")
+    monkeypatch.setattr(gate, "spawn_serve", serve)
+    rc, out, err = box.land()
+    assert (rc, out) == (2, "land scratch: red check exit 2\n"), err
+    assert box.count() == 2 and "%s is not clean" % gid in err
+
+
+# R4 (F4): the check job's form is the whole command, this plugin's runner first.
+
+def test_b3_r4_the_check_jobs_form_is_the_whole_command(box):
+    wt = str(box.tree)
+    head = gate.self_argv()
+    assert gate.check_worktree([*head, *gate.CHECK_JOB, wt]) == wt
+    assert gate.check_worktree(["/bin/sh", "-c", "x", *gate.CHECK_JOB, wt]) is None
+    assert gate.check_worktree([*head[:-1], "/x/other-tool", *gate.CHECK_JOB, wt]) is None
+    assert gate.check_worktree(["x", *head, *gate.CHECK_JOB, wt]) is None
+    box.flag("red")
+    rc, out, err = run("gate", "run", wt, "--", "/bin/sh", "-c",
+                       'rm -f %s/red; "$0" "$1" gate run "$2" --check --in-job; touch %s/red'
+                       % (box.out, box.out), sys.executable, str(RUNNER), wt,
+                       *gate.CHECK_JOB, wt)
+    gid = out.split()[1]
+    assert box.record(gid)["exit"] == 0 and box.count() == 1
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (2, "land scratch: red check exit 2\n", 2), err
+    assert "runs its own (no record of this tree)" in err
+
+
+# R5 (F5): a symlink named check.json is skipped, whatever it points to.
+
+def test_b3_r5_a_symlinked_record_is_skipped(box):
+    g1 = box.check()
+    path = gate.entry_dir(box.root, g1) / "check.json"
+    kept = box.tmp / "kept.json"
+    kept.write_text(path.read_text())
+    path.unlink()
+    path.symlink_to(kept)
+    assert not list(land.check_records(box.root))
+    rc, out, err = box.land()
+    assert (rc, out, box.count()) == (0, ok(box), 2), err
+    assert ran_own(err)

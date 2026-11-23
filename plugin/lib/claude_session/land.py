@@ -140,9 +140,10 @@ assume-unchanged index entry is dirt. Before it, after `require_no_overlap` has 
 `kept_check` reads the newest record of this repo's key for the head's tree under a job of the
 check's own form or a landing of the branch, and takes it when it is exit 0, clean and not cut,
 of the head (or of one the job's own trailed commits follow), in this worktree, with that main,
-the same links and the same environment, within `gate.check_age`, and no newer red `make check`
-of that tree, red check job of this worktree or red result naming the branch (this plugin's
-own landing aside) follows it. A kept record skips the run, says `check: kept
+the same links and the same environment, within `gate.check_age`, and no newer record or result
+of this worktree whose exit is not 0, whatever its job, newer red `make check` of that tree,
+red check job of this worktree or red result naming the branch (this plugin's own landing
+aside) follows it. The dirt is read with no fsmonitor. A kept record skips the run, says `check: kept
 <id>` and ends the land line, ok or red, with `, check <id>`, after every other ending. `gate
 land --fresh` (`CLAUDE_SESSION_LAND_FRESH=1` in the job's env) always runs; `--dry-run` prints
 `check: would take <id>[ if the stamp writes nothing]` or `check: would run its own (<why>)`.
@@ -160,6 +161,7 @@ IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", 
 MAIN = "refs/heads/main"
 CUT = 124    # gate.py's code for its wall: SIGTERM to the job's group, SIGKILL at 5 s
 STATUS = ("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+NO_FSMONITOR = ("-c", "core.fsmonitor=false")   # a dirt read trusts no hook (brief 3, R2)
 REACHED = "usage"   # the step this run is at, for an error that is no Red
 STANDS = ""         # once main has moved, what any red says beside its line
 LEFT = ""           # what the land line adds when a cut leaves staged paths alone
@@ -663,8 +665,9 @@ def merge(repo, full, message):
 
 
 def worktree_dirt(tree, env=None):
-    """The worktree's status lines, less an untracked `.venv` symlink at its top."""
-    code, status = read(tree, *STATUS, env=env)
+    """The worktree's status lines, less an untracked `.venv` symlink at its top, read with
+    no fsmonitor, so that a hook that reports no change hides no edit (brief 3, R2)."""
+    code, status = read(tree, *NO_FSMONITOR, *STATUS, env=env)
     if code != 0:
         raise Red("worktree", note="cannot read the status of " + tree)
     return [line for line in status.splitlines() if line != "?? .venv"]
@@ -1456,8 +1459,9 @@ def env_differs(was, now):
 
 def index_marks(tree):
     """The entries `git ls-files -v` marks skip-worktree (`S`) or assume-unchanged (a lower-
-    case tag), which status never shows (brief 2, R3); None where git cannot read them."""
-    code, out = read(tree, "ls-files", "-v", env=bare_env())
+    case tag), which status never shows (brief 2, R3); None where git cannot read them. Read
+    with no fsmonitor, as `worktree_dirt` reads (brief 3, R2)."""
+    code, out = read(tree, *NO_FSMONITOR, "ls-files", "-v", env=bare_env())
     if code != 0:
         return None
     return [ln for ln in out.splitlines() if ln[:1] == "S" or ln[:1].islower()]
@@ -1506,15 +1510,15 @@ def run_check(tree, root=None, gid=None, log=None):
     """R1, the one function: `make check` in `tree`, without the eight names `main` drops, the
     fresh mark, or a name of `gate.check_drop`; its output on stderr, as every step's. With a
     gate job's folder it writes `check.json` there at the start, `exit` null, and again at the
-    end (R2). A cut writes 124 and the cut, then goes on as a cut. (code, the log's size at
-    the start), the size for `refused`."""
+    end (R2); the start is written before the start's dirt is read, which a cut ends too
+    (brief 3, R3). A cut writes 124 and the cut, then goes on as a cut. (code, the log's size
+    at the start), the size for `refused`."""
     import time
     from . import gate
     drop, names, _ = check_config()
     env = check_env(tree, drop)
     path, rec, start_dirt = check_path(root, gid), None, None
     if path is not None:
-        start_dirt = _dirt(tree)
         rec = {"id": gid, "key": gate.repo_key(tree), "started": time.time(), "ended": None,
                "tree": _rev(tree, "HEAD^{tree}"), "head": _rev(tree, "HEAD"),
                "main": _rev(tree, MAIN + "^{commit}"), "worktree": os.path.realpath(tree),
@@ -1525,6 +1529,8 @@ def run_check(tree, root=None, gid=None, log=None):
     begin = log_size(log)
     code, cut = None, None
     try:
+        if rec is not None:
+            start_dirt = _dirt(tree)
         code = run(tree, "make", "check", env=env)
     except Red as red:
         if red.step == "cut":
@@ -1572,11 +1578,12 @@ def check_records(root):
 
 def _regular_record(path):
     """A record read only where it is a regular file, opened so that a FIFO cannot block
-    (brief 2, R6): its mapping, or None, as for a file that does not parse."""
+    (brief 2, R6), a symlink never followed (brief 3, R5): its mapping, or None, as for a
+    file that does not parse."""
     import json
     import stat
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     except (OSError, ValueError):
         return None
     try:
@@ -1624,19 +1631,32 @@ def _words(command):
         if isinstance(command, list) else []
 
 
+def _green(x):
+    return x == 0 and not isinstance(x, bool)
+
+
 def newer_red(root, gid, key, tree, want, branch):
-    """A red result newer than the record that voids it (R4), its id, or None: a `make check`
-    of today's form in that worktree on a head of that tree; a check job's own form for that
-    worktree, of this key, whatever its record (brief 2, R4); or a result of this key whose
-    command names the branch as a word, this plugin's own landing aside."""
+    """A red newer than the record that voids it (R4), its id, or None. Any record or result
+    of this key for this worktree whose exit is not 0, null counted, whatever its job's
+    command, read or not (brief 3, R1); a `make check` of today's form in that worktree on a
+    head of that tree; a check job's own form for that worktree, of this key, whatever its
+    record (brief 2, R4); or a result of this key whose command names the branch as a word,
+    this plugin's own landing aside."""
     from . import gate, publish
     real = os.path.realpath(tree)
+    for n, rec in check_records(root):
+        if not _newer(n, gid):
+            break
+        if rec.get("key") == key and gate.repo_path(rec.get("worktree")) == real \
+                and not _green(rec.get("exit")):
+            return n
     for n, doc in publish.results(root):
         if not _newer(n, gid):
             break
-        x = doc.get("exit")
-        if x == 0 and not isinstance(x, bool):
+        if _green(doc.get("exit")):
             continue
+        if doc.get("key") == key and gate.repo_path(doc.get("repo")) == real:
+            return n
         command, head = doc.get("command"), doc.get("head")
         if gate.repo_path(doc.get("repo")) == real and publish.is_check_command(command) \
                 and isinstance(head, str) and _rev(tree, head + "^{tree}") == want:
@@ -1652,7 +1672,8 @@ def newer_red(root, gid, key, tree, want, branch):
 
 def kept_check(root, repo, tree, branch, given, head, ours):
     """R4: (the kept record's id, "") or (None, the first test that failed). The newest record
-    of this key for the head's tree decides alone."""
+    of this key for the head's tree under its own job's form is the one taken; any newer red
+    of this worktree voids it, whatever its job (brief 3, R1)."""
     import time
     from . import gate
     drop, names, age = check_config()
