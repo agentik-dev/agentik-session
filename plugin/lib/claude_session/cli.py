@@ -1849,15 +1849,18 @@ def cmd_run(args) -> int:
 def cmd_line(args) -> int:
     """`agentik session line send|list|show|close` (packet in3-line): a pointer under the
     state root, never a file of a checkout. This checkout is `CLAUDE_PROJECT_DIR`'s, else
-    the shell's. A refusal is exit 2 with its reason."""
+    the shell's. `send --text` (packet in5t-line-text) reads neither: a text line names no
+    sender, so it is sent the same from any folder. A refusal is exit 2 with its reason."""
     from . import lines
     env = os.environ
     root = resolver.state_dir(env)
-    start = lines.here(env)
     verb = args.line_verb
+    text = getattr(args, "text", None) if verb == "send" else None
+    start = None if text is not None else lines.here(env)   # in5t R2: a text names no sender
     try:
         if verb == "send":
-            print(lines.send(root, args.checkout, args.file, start))
+            print(lines.send(root, args.checkout, args.file, start) if text is None
+                  else lines.send_text(root, args.checkout, text))
             return 0
         if verb == "show":
             got = lines.show(root, args.id)
@@ -1881,7 +1884,8 @@ def cmd_line(args) -> int:
             print(f"{'addressed to this checkout' if part == 'to' else 'sent'}: "
                   f"{len(got[part]) or 'none'}")
             for it in got[part]:
-                who = os.path.basename(it.get(word) or "") or "?"
+                who = (lines.NO_SENDER if word == "from" and word in it and it[word] is None
+                       else os.path.basename(it.get(word) or "") or "?")
                 print(f"  {it['id']}  {it['state']}  {word} {who}: {it.get('head') or ''}"
                       .rstrip(": "))
         return 0
@@ -2561,15 +2565,21 @@ def build_parser() -> argparse.ArgumentParser:
     gv.add_argument("--root", help=argparse.SUPPRESS)
     gt.set_defaults(func=cmd_gate)
 
-    ln = sub.add_parser("line", help="a line between sittings: send a file's pointer to a "
-                                      "checkout, list, show, close (packet in3-line)")
+    ln = sub.add_parser("line", help="a line between sittings: send a file's pointer, or one "
+                                      "line of text, to a checkout; list, show, close (packet "
+                                      "in3-line)")
     lsub = ln.add_subparsers(dest="line_verb", required=True, metavar="send|list|show|close")
-    ls_ = lsub.add_parser("send", help="send a file of this checkout to another checkout's "
-                                       "sitting; print the line's id")
+    ls_ = lsub.add_parser("send", help="send a file of this checkout, or one line of text, "
+                                       "to another checkout's sitting; print the line's id")
     ls_.add_argument("checkout", help="the checkout's top level the line is addressed to")
-    ls_.add_argument("--file", required=True, metavar="PATH",
+    lsg = ls_.add_mutually_exclusive_group(required=True)
+    lsg.add_argument("--file", metavar="PATH",
                      help="a file inside this checkout, or under its records folder where "
                           "its records live outside it, the line's whole text")
+    lsg.add_argument("--text", metavar="TEXT",
+                     help="one line of text, at most 120 bytes as a hook carries it, the "
+                          "line's whole text, sent from any folder; it names no sender, and "
+                          "its close sends no line back")
     ll = lsub.add_parser("list", help="the lines addressed to this checkout, and those it sent")
     ll.add_argument("--json", action="store_true")
     lw = lsub.add_parser("show", help="one line's pointer whole")
