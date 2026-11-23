@@ -28,9 +28,11 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 13. **A gate job's result follows the chain.** A job queued by a chain's sitting or by its helper, through any verb, is addressed to the chain. Its line is taken by a sitting of that chain that has not closed, so a result that lands at or after a close reaches the successor. A job queued outside a chain is addressed to the session that queued it. A respawn never waits for a gate job. (2026-11-22; the owner's answer to decision 13, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
 
-## Proposed
+### The helpers
 
-16. **A sitting is told its room at each launch.** Enter it: the rule is built and the three coordinator profiles show the line, and under `signal` and `ask` it only speaks, so the entry changes nothing a session does today. (proposed 2026-11-22; OPEN-QUESTIONS.md)
+16. **A sitting is told its room at each launch.** In a session whose profile asks the sitting discipline, before a helper starts, the plugin says how many points of context are left to the checkpoint once every helper out has handed back, and whether the new helper fits. It refuses only under the posture `deny`. (2026-11-22; the owner's answer to decision 16, the owner's word, given in the coordinating sitting's ask of 2026-11-22)
+
+## Proposed
 
 17. **One check proves a landing.** Enter it at landing: an entry written before the row lands would state a rule the product does not yet keep, and the six-hour bound is a value the code holds, which a later tuning can change without a question. (proposed 2026-11-22; OPEN-QUESTIONS.md)
 
