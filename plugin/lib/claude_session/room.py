@@ -94,6 +94,27 @@ def minutes(tab: dict, k: str) -> tuple:
     return tab[k] if k in tab else tab[FALLBACK]
 
 
+def backs(back: float, measured, ceiling) -> dict:
+    """Packet nw4b R6: kind -> a hand-back's cost in points, for each kind with LEDGER_RUNS
+    lines or more in `measured` ((kind, tokens) pairs): 100 times the nearest-rank median of
+    its tokens over the reading session's context ceiling, in tokens. A kind with fewer, and
+    every kind where the ceiling is not a positive number, takes `back` (`cost`), a fallback
+    and not a floor."""
+    try:
+        c = _positive(ceiling)
+    except ValueError:
+        return {}
+    by: dict = {}
+    for k, t in measured:
+        by.setdefault(k, []).append(float(t))
+    return {k: 100.0 * _nearest(xs, 0.5) / c for k, xs in by.items() if len(xs) >= LEDGER_RUNS}
+
+
+def cost(tab: dict, k: str, back: float) -> float:
+    """A kind's hand-back cost in points: its measured one, else the profile's `back`."""
+    return tab.get(k, back)
+
+
 def latest(out_ends: list, now: datetime) -> datetime | None:
     """The latest end among the helpers out, where it is after now; None with none out, and
     where every one out is past its ninth decile, so its end is now (brief 2 R2)."""
@@ -230,6 +251,51 @@ def _ledger(env) -> list:
     return _regular_rows(d / admission.ROTATED) + _regular_rows(d / admission.LEDGER)
 
 
+def _spawns(rows) -> dict:
+    """The spawn lines by `tool_use_id` and by `agentId`, the first of each."""
+    spawns: dict = {}
+    for r in rows:
+        if r.get("kind") == "spawn":
+            for key in (r.get("tool_use_id"), r.get("agentId")):
+                if isinstance(key, str) and key:
+                    spawns.setdefault(key, r)
+    return spawns
+
+
+def _kind_of(spawns: dict):
+    """A run's kind, by `kind` from its spawn line's description (R3)."""
+    def kind_of(run: dict) -> str:
+        sp = spawns.get(run.get("tool_use_id") or "") or spawns.get(run.get("agentId") or "")
+        return kind(run["type"] if run["type"] != "other" else None,
+                    sp.get("description") if sp else None)
+    return kind_of
+
+
+def back_pairs(rows, all_runs=None, spawns=None) -> list:
+    """Packet nw4b R5: (kind, tokens) for each `back` line of the ledger's rows, in order, its
+    kind its helper's run's (the run of `admission.runs` with its agentId, given its kind by
+    `kind` from its spawn line), so a resumed helper's hand-back counts to its spawn's kind. A
+    line whose agentId has no spawn line, or whose tokens are no positive number, is not
+    counted. Pure."""
+    spawns = _spawns(rows) if spawns is None else spawns
+    kind_of = _kind_of(spawns)
+    by_aid: dict = {}
+    for r in admission.runs(rows) if all_runs is None else all_runs:
+        if r["agentId"] and r["agentId"] in spawns:
+            by_aid.setdefault(r["agentId"], r)
+    out = []
+    for r in rows:
+        if r.get("kind") != "back":
+            continue
+        aid, t = r.get("agentId"), r.get("tokens")
+        if not isinstance(aid, str) or aid not in by_aid or spawns[aid].get("agentId") != aid:
+            continue
+        if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or t <= 0:
+            continue
+        out.append((kind_of(by_aid[aid]), float(t)))
+    return out
+
+
 def _reading(sid: str, env, now: datetime) -> dict | None:
     """The room and the helpers out for one session; None where the session's section is not
     read or waives the discipline. Raises on a fault, which the callers turn into no line."""
@@ -250,20 +316,11 @@ def _reading(sid: str, env, now: datetime) -> dict | None:
     if not math.isfinite(used):
         raise ValueError("no meter")
     rows = _ledger(env)
-    spawns: dict = {}
-    for r in rows:
-        if r.get("kind") == "spawn":
-            for key in (r.get("tool_use_id"), r.get("agentId")):
-                if isinstance(key, str) and key:
-                    spawns.setdefault(key, r)
-
-    def kind_of(run: dict) -> str:
-        sp = spawns.get(run.get("tool_use_id") or "") or spawns.get(run.get("agentId") or "")
-        return kind(run["type"] if run["type"] != "other" else None,
-                    sp.get("description") if sp else None)
-
-    tab = table(seeds, [(kind_of(r), r["minutes"]) for r in admission.runs(rows)
-                        if r["minutes"] is not None])
+    spawns = _spawns(rows)
+    kind_of = _kind_of(spawns)
+    all_runs = admission.runs(rows)
+    tab = table(seeds, [(kind_of(r), r["minutes"]) for r in all_runs if r["minutes"] is not None])
+    costs = backs(back, back_pairs(rows, all_runs, spawns), (m.get("ceilings") or {}).get("context"))
     minutes(tab, FALLBACK)                       # a table with no fallback is a fault
     own = admission.runs([r for r in rows if r.get("session") == sid or r.get("kind") == "done"])
     out = []
@@ -271,8 +328,9 @@ def _reading(sid: str, env, now: datetime) -> dict | None:
         if r["end"] is None:
             k = kind_of(r)
             out.append((k, ends(r["start"], now, *minutes(tab, k))))
-    return {"room": room(100.0 * hooks._checkpoint_k(m), used, [back] * len(out)), "out": out,
-            "table": tab, "back": back, "points": points, "alone": alone}
+    return {"room": room(100.0 * hooks._checkpoint_k(m), used, [cost(costs, k, back) for k, _ in out]),
+            "out": out, "table": tab, "back": back, "costs": costs, "points": points,
+            "alone": alone}
 
 
 def told(payload: dict, env, posture) -> tuple | None:
@@ -297,8 +355,9 @@ def told(payload: dict, env, posture) -> tuple | None:
         median = minutes(rd["table"], k)[0]
         end = now + timedelta(minutes=median)
         out_ends = [e for _, e in rd["out"]]
-        word = verdict(rd["room"], rd["back"], end, out_ends, now, rd["points"], rd["alone"])
-        text = line(word, rd["room"], len(out_ends), k, median, rd["back"], end,
+        c = cost(rd["costs"], k, rd["back"])
+        word = verdict(rd["room"], c, end, out_ends, now, rd["points"], rd["alone"])
+        text = line(word, rd["room"], len(out_ends), k, median, c, end,
                     latest(out_ends, now), now, rd["alone"], TZ)
         return text, word in HELD
     except Exception:                                   # noqa: BLE001  (a check, never a crash)

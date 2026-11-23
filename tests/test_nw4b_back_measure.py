@@ -363,8 +363,9 @@ def test_7_the_room_sums_each_kind_s_cost_and_the_line_shows_the_new_one_s(clock
             in ctx)
     text, held = room.told({"session_id": SID, "tool_name": "Agent", "tool_input": {
         "description": "build 1 of row-c", "subagent_type": BUILDER}}, os.environ, "deny")
-    assert text.startswith("launch: room 12.0 to the line, 3 out; this builder (about 29 min, "
-                           "1.8) fits, narrow") and not held
+    # the builder's own 1.75 leaves 10.25, wide, where the profile's 2.5 left 9.5, narrow
+    assert text == ("launch: room 12.0 to the line, 3 out; this builder (about 29 min, 1.8) "
+                    "fits, wide") and not held
     assert room.status_for(SID, os.environ).startswith("launch: room 12.0 to the line, 3 out: ")
 
 

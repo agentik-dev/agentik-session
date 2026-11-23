@@ -1953,16 +1953,39 @@ def windows(rows) -> list:
 
 
 def report(env, tz=None) -> str:
-    """`report`'s admission section: a row per window, or `admission: no ledger`."""
+    """`report`'s admission section: a row per window, or `admission: no ledger`; then, only
+    where the ledger holds a `back` line that counts (packet nw4b R8), a hand-back's cost by
+    kind (`back_report`)."""
     d = directory(env)
     if not any((d / name).exists() for name in (ROTATED, LEDGER)):
         return "admission: no ledger"
-    ws = windows([r for name in (ROTATED, LEDGER) for r in _rows(d / name)])
+    rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
+    ws = windows(rows)
     if not ws:
-        return "admission: no five-hour reading"
-    out = ["admission: five-hour windows"]
-    for w in ws:
-        row = (f"  {_local(w['resetsAt'], tz).strftime('%Y-%m-%d %H:%M')}  {_pct(w['last'])}%  "
-               + ("held" if w["held"] else "idle"))
-        out.append(row + ("  under 90" if w["last"] < FLOOR_PCT else ""))
-    return "\n".join(out)
+        out = ["admission: no five-hour reading"]
+    else:
+        out = ["admission: five-hour windows"]
+        for w in ws:
+            row = (f"  {_local(w['resetsAt'], tz).strftime('%Y-%m-%d %H:%M')}  {_pct(w['last'])}%  "
+                   + ("held" if w["held"] else "idle"))
+            out.append(row + ("  under 90" if w["last"] < FLOOR_PCT else ""))
+    return "\n".join(out + back_report(rows))
+
+
+def back_report(rows) -> list:
+    """Packet nw4b R8: `admission: a hand-back's cost, by kind`, then one row a kind, sorted by
+    its key: the count of counted `back` lines, their nearest-rank median in thousands of
+    tokens, and, under the room's ten, that the profile's `back` stands. No counted line: []."""
+    from . import room                          # room imports admission: no cycle
+    by: dict = {}
+    for k, t in room.back_pairs(rows):
+        by.setdefault(k, []).append(t)
+    if not by:
+        return []
+    out = ["admission: a hand-back's cost, by kind"]
+    for k in sorted(by):
+        xs = by[k]
+        row = f"  {k}  {len(xs)}  median {room._nearest(xs, 0.5) / 1000.0:.1f}k tokens"
+        out.append(row + ("  under 10: the profile's back stands" if len(xs) < room.LEDGER_RUNS
+                          else ""))
+    return out
