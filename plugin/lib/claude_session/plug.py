@@ -32,7 +32,8 @@ SCHEMAS = {"meter": "agentik.session.meter/1", "gate": "agentik.session.gate/1",
 LAYERS = ("default", "user-defaults", "profile", "user", "repo", "local", "launch", "session")
 NOT_SETTINGS = ("description", "subagents", "ceilings_1m", "tiers")
 MAPPINGS = ("admission", "reconcile")      # a row a leaf a layer sets, none when unset
-GATE_KEYS = ("ntfy_url", "ntfy_topic", "wall", "load_ceiling", "max_running")
+GATE_KEYS = ("ntfy_url", "ntfy_topic", "wall", "load_ceiling", "max_running",
+             "check_drop", "check_links", "check_age")      # nw5 R9: the kept check's three
 SECRETS = ("gate.ntfy_topic",)
 LIVE = ("posture",)                        # `set posture`: the next read holds it
 LIVE_PREFIX = ("gate.", "reconcile.")      # gate_config and the reconciler read files each run
@@ -52,7 +53,7 @@ SUMMARIES = {
                        "session.",
     "posture": "What the budget guard does at a ceiling: off, signal, ask or deny.",
     "helpers.wait": "A helper's second wait on one job, or long sleep: allow, say or refuse.",
-    "launch.back": "The points of the context ceiling a helper's hand-back is counted to cost.",
+    "launch.back": "The points of the context ceiling a hand-back costs, for a kind with under ten measured.",
     "launch.narrow.points": "The room after a launch under which it is narrow and must fit a wait.",
     "launch.narrow.alone": "The minutes a narrow launch may take when no helper is out, or every one out is overdue.",
     "launch.kinds.*.median": "A kind's median minutes, until the ledger holds ten runs of it.",

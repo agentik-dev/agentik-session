@@ -42,6 +42,13 @@ sitting whose respawn mark is confirmed (`sitting_closed`) is shown each chain l
 leaves the file for the successor; a chain line older than `OLD_LINE` is set aside into
 `inbox/old/` and counted. `wait_chain` is `gate wait --chain`. An estimate counts the greens of
 one command kind (`command_kind`).
+
+One check proves a landing (packet nw5-check-proof, design/31 items 21 to 24). `gate run
+<worktree> --check` queues `CHECK_JOB`, which runs `land.run_check` there: `make check` without
+the eight names `land.main` drops and `gate.check_drop`'s, writing `<state>/gate/<id>/check.json`
+(0600, written then renamed) at its start with a null `exit` and again at its end. Nothing else
+writes that file; `_prune` removes it with its folder. Its kind is `make check`; `gate publish`
+reads no such job as a proof, since its command is no `make check` of today's form.
 """
 
 from __future__ import annotations
@@ -81,6 +88,7 @@ CUT_CALLER, CALLER_EXIT = "caller cut", 130     # a cancel mark's cut (fw5 R4)
 MORE = "{n} more: agentik session gate status"
 MORE_REPO = "{n} more: agentik session gate status --repo {path} --json"
 LAND_JOB = ("gate", "land", "--in-job")     # a landing's job, then repo, branch, sha, merge
+CHECK_JOB = ("gate", "run", "--check", "--in-job")    # a kept check's job, then its worktree
 ENTRY_KEYS = ("id", "repo", "command", "env", "locks", "wall", "label", "caller", "queued",
               "key", "key_name", "chain")
 RESULT_KEYS = ("id", "repo", "command", "exit", "started", "ended", "seconds", "log",
@@ -351,6 +359,31 @@ def land_branch(command) -> str | None:
             words = command[i + 3:i + 7]
             return words[1] if all(isinstance(w, str) and w for w in words) else None
     return None
+
+
+def _runner_argv(words) -> bool:
+    """Whether `words` are a runner's argv as `self_argv` writes it: an interpreter's absolute
+    path, `-I -X pycache_prefix=...`, and a path ending in this plugin's launcher. The paths
+    may differ between installs (packet nw5-check-proof, brief 3, R4)."""
+    head = self_argv()
+    if len(words) != len(head) or not all(isinstance(w, str) and w for w in words):
+        return False
+    return os.path.isabs(words[0]) and words[1:3] == head[1:3] \
+        and words[3].startswith("pycache_prefix=") \
+        and os.path.basename(words[4]) == os.path.basename(head[4])
+
+
+def check_worktree(command) -> str | None:
+    """The worktree of a kept check's job, the whole command a runner's argv, then `gate run
+    --check --in-job` and one word (packet nw5-check-proof, brief 2, R4 and R5; brief 3, R4);
+    else None."""
+    n = len(self_argv())
+    if not isinstance(command, list) or len(command) != n + len(CHECK_JOB) + 1:
+        return None
+    if not _runner_argv(command[:n]) or tuple(command[n:-1]) != CHECK_JOB:
+        return None
+    where = command[-1]
+    return where if isinstance(where, str) and where else None
 
 
 def _dirty(repo: str) -> int | None:
@@ -1302,6 +1335,8 @@ def command_kind(command) -> str:
     argv = [str(c) for c in command]
     if any(tuple(argv[i:i + 3]) == LAND_JOB for i in range(len(argv) - 2)):
         return "gate land"
+    if any(tuple(argv[i:i + 4]) == CHECK_JOB for i in range(len(argv) - 3)):
+        return "make check"         # nw5 R3: it is that run, and shares its estimate
     for words in _simple_commands(argv) or ():
         while words and (_ASSIGN.match(words[0]) or words[0] in _PREFIXES):
             words = words[1:]

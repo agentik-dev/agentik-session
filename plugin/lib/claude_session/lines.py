@@ -16,6 +16,12 @@ a closed pointer after `KEEP`, an open one never. Nothing here writes outside th
 or reads the network. Packet rr5c R2: a file that is not under its checkout is asked of the
 resolver (`records.answer`, its bounded child, once a checkout a process): in `out` a file under
 the checkout's records folder passes; no other process is started.
+
+Packet in5t-line-text: `send_text` writes a line of one line of text, with no file and no
+sender, from any folder: `{"id", "to", "head", "sent", "form": "text"}`. The take prints it
+under the label every line carries, its sender's name `no checkout`, and its close records
+the close and sends no line back. A pointer with no `form` is read as before; one whose
+`form` is anything but `text` is no pointer.
 """
 from __future__ import annotations
 
@@ -52,6 +58,9 @@ ID = re.compile(r"^[0-9a-f]{12}\Z")
 _SID = re.compile(r"^[A-Za-z0-9_-]{1,128}\Z")
 _FOLDER = re.compile(r"[^A-Za-z0-9._-]")
 REQUIRED = {"id": str, "from": str, "to": str, "file": str, "head": str, "sent": (int, float)}
+TEXT = "text"                               # a text line's `form` (in5t R4)
+TEXT_REQUIRED = {"id": str, "to": str, "head": str, "sent": (int, float), "form": str}
+NO_SENDER = "no checkout"                   # the name a text line prints as its sender's (R5)
 _READ = 65536                               # the bytes of a file `send` reads for its head
 _SIDE = 4096                                # the read bound: a pointer past it is no pointer
 
@@ -245,7 +254,8 @@ def _first_line(path: str) -> str:
 def send(root, target: str, file: str, start: str, now=None) -> str:
     """R1: the pointer's id. Refused: the target no checkout's top or a worktree, the sender
     in no checkout or in a worktree, the file no file inside the sender's checkout, a path
-    that holds a character no printed line may hold."""
+    that holds a character no printed line may hold. The file form; the text form, which
+    names no sender, is `send_text`."""
     to = top(target)
     if to is None:
         why = ("is a worktree, not a checkout's top"
@@ -272,6 +282,77 @@ def send(root, target: str, file: str, start: str, now=None) -> str:
     return _new(root, _pointer(to, frm, real, _first_line(real), now=now), "line send")
 
 
+def _target(target: str) -> str:
+    """in5t R2: the target's real path, checked as `send` checks it, in its words."""
+    to = top(target)
+    if to is None:
+        why = ("is a worktree, not a checkout's top"
+               if os.path.isfile(os.path.join(os.path.realpath(target), ".git"))
+               else "is no checkout's top level")
+        raise Refused(f"line send: {target} {why}")
+    return to
+
+
+def _text_why(text: str) -> str | None:
+    """in5t R3: why `text` is no text line's, else None: the raw text holding a character
+    `_breaks` names; then, stripped of every white space at both ends as `head_of` strips
+    when it prints (`str.strip()`), nothing left, more than HEAD bytes as a hook carries it."""
+    if _bad(text):
+        return "--text holds a line break, a control or format character, or a lone surrogate"
+    text = text.strip()
+    if not text:
+        return "--text is empty"
+    n = _enc(text)
+    if n > HEAD:
+        return f"--text is {n} bytes as a hook carries it, over {HEAD}"
+    return None
+
+
+def send_text(root, target: str, text: str, now=None) -> str:
+    """in5t R1 to R4: a line of one line of text, with no file and no sender; its id. The
+    target is checked first, as `send` checks it; no folder the verb runs from is read or
+    refused. Refused: a text R3 refuses, a target path that holds a character no printed
+    line may hold."""
+    to = _target(target)
+    why = _text_why(text)
+    if why is not None:
+        raise Refused(f"line send: {why}")
+    if _bad(to):
+        raise Refused("line send: a path holds a line break, a control or format character, "
+                      "or a lone surrogate")
+    ptr = {"id": "0" * 12, "to": to, "head": text.strip(),
+           "sent": time.time() if now is None else now, "form": TEXT}
+    return _new(root, ptr, "line send")
+
+
+def _closed_ok(c) -> bool:
+    return c is None or (isinstance(c, dict) and set(c) <= {"as", "note", "at"}
+                         and c.get("as") in HOWS and isinstance(c.get("at"), (int, float))
+                         and (c.get("note") is None or isinstance(c["note"], str)))
+
+
+def _valid_text(ptr: dict, name: str, to: str | None) -> dict | None:
+    """in5t R4: a pointer that holds `form`: a text line's when `form` is TEXT, it holds no
+    `from`, `file` or `closes`, its head passes R3 and is its own `str.strip()`, so the head
+    printed is the head stored, and its `to` is the taker's; else None."""
+    if ptr.get("form") != TEXT or {"from", "file", "closes"} & set(ptr) \
+            or not set(TEXT_REQUIRED) <= set(ptr):
+        return None
+    for k, t in TEXT_REQUIRED.items():
+        if not isinstance(ptr[k], t) or isinstance(ptr[k], bool):
+            return None
+    if not ID.match(ptr["id"]) or ptr["id"] != name:
+        return None
+    if _bad(ptr["to"]) or not os.path.isabs(ptr["to"]) or os.path.normpath(ptr["to"]) != ptr["to"]:
+        return None
+    if to is not None and not same(ptr["to"], to):
+        return None
+    if _text_why(ptr["head"]) is not None or ptr["head"] != ptr["head"].strip() \
+            or not _closed_ok(ptr.get("closed")):
+        return None
+    return ptr
+
+
 def valid(ptr, name: str, to: str | None, from_checkout: bool = True) -> dict | None:
     """The pointer when its fields are a pointer's (R5), else None: each known key of its
     type (an unknown one is ignored, as every reader here ignores one, and never printed),
@@ -279,6 +360,8 @@ def valid(ptr, name: str, to: str | None, from_checkout: bool = True) -> dict | 
     top and no worktree (unless `from_checkout` is False: a close), `to` the taker's checkout
     by the box's key, `file` under `from` (under `to` for a close's line back), or, rr5c R2,
     under that checkout's records folder where the resolver answers `out` for it."""
+    if isinstance(ptr, dict) and "form" in ptr:          # in5t R4: a text line, or none
+        return _valid_text(ptr, name, to)
     if not isinstance(ptr, dict) or not set(REQUIRED) <= set(ptr):
         return None
     for k, t in REQUIRED.items():
@@ -297,10 +380,7 @@ def valid(ptr, name: str, to: str | None, from_checkout: bool = True) -> dict | 
         return None
     if not _held(ptr["file"], ptr["to"] if "closes" in ptr else ptr["from"]):
         return None
-    c = ptr.get("closed")
-    if c is not None and not (isinstance(c, dict) and set(c) <= {"as", "note", "at"}
-                              and c.get("as") in HOWS and isinstance(c.get("at"), (int, float))
-                              and (c.get("note") is None or isinstance(c["note"], str))):
+    if not _closed_ok(ptr.get("closed")):
         return None
     return ptr
 
@@ -333,7 +413,7 @@ def render(ptr: dict) -> str | None:
     `_breaks` names, within SHARE bytes encoded with its separator; else None."""
     lid = _clean(ptr["id"])
     frame = f"line {lid} from  ({LABEL}): ; whole: {SHOW} {lid}"
-    name = _cut(_clean(spelling(ptr["from"])), NAME)
+    name = NO_SENDER if ptr.get("form") == TEXT else _cut(_clean(spelling(ptr["from"])), NAME)
     room = SHARE - 4 - _enc(frame) - _enc(name)
     head = _cut(_clean(head_of(ptr)), room)
     line = f"line {lid} from {name} ({LABEL}): {head}; whole: {SHOW} {lid}"
@@ -435,8 +515,8 @@ def _item(f: str, p: Path, ptr) -> dict:
     if ok is None:
         return {"id": _cut(_clean(p.stem), 64), "state": "set aside"}
     c = ok.get("closed")
-    return {"id": ok["id"], "state": _state(f, ok), "from": ok["from"], "to": ok["to"],
-            "file": ok["file"], "head": head_of(ok), "sent": ok["sent"],
+    return {"id": ok["id"], "state": _state(f, ok), "from": ok.get("from"), "to": ok["to"],
+            "file": ok.get("file"), "head": head_of(ok), "sent": ok["sent"],
             "closes": ok.get("closes"),
             "closed": None if c is None else {"as": c["as"], "note": c.get("note"),
                                               "at": c["at"]}}
@@ -493,7 +573,8 @@ def close(root, t: str, lid: str, how: str, note=None, now=None) -> tuple:
         ok = valid(_load(src), lid, t, from_checkout=False)
         if ok is not None and "closed" not in ok:
             data = _pack(dict(ok, closed={"as": how, "note": note, "at": now}), verb)
-            gone = top(ok["from"]) is None or not same(top(ok["from"]), ok["from"])
+            text = ok.get("form") == TEXT                   # in5t R6: no sender, no line back
+            gone = text or top(ok["from"]) is None or not same(top(ok["from"]), ok["from"])
             back = None if gone else _pointer(
                 ok["from"], t, ok["file"], f"line {lid} closed as {how}"
                 + (f": {note}" if note else ""), closes=lid, now=now)
@@ -513,7 +594,8 @@ def close(root, t: str, lid: str, how: str, note=None, now=None) -> tuple:
         os.rename(tmp, b / CLOSED / f"{lid}.json")
         os.unlink(got)
         if back is None:
-            return None, f"{ok['from']} is no checkout's top"
+            return None, ("a text line names no sender" if ok.get("form") == TEXT
+                          else f"{ok['from']} is no checkout's top")
         return _new(root, back, verb), None
     if (b / CLOSED / f"{lid}.json").exists() or (b / CLOSING / f"{lid}.json").exists():
         raise Refused(f"{verb}: {lid} is already closed")

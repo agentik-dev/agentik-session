@@ -564,7 +564,7 @@ findings}`, or `{due, last, next}` when not due.
 
 The band above the prompt (`session: <model> · <window> · ctx <c>% · turns <t>% · <zone>`, e.g. `session: opus 5.5 · 1M · ctx 64% · turns 6% · notice`; the zone's word is left out while it is `clear`, and `status` keeps `zone clear`, packet pl1) is the plugin's hooks module. The model is `meter.json`'s, shortened; the window is the one the ceilings apply; `1M (engine 200k)` means the meter has not caught up with the engine's latest reading (`measure.json`), and its next tool closes it (a session whose `resolved.json` has no `windows` block, written before they existed, stays so until a SessionStart); `status` prints the same in its `model:` line with the id and the window's source. A part it cannot read is left out. At session start the module runs `agentik session mod start --session <id>`, and `status` and `doctor` print `mod: seen` or `mod: not seen` (a `-p` child or a refused module is not an error).
 
-The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `agentik session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent.
+The same module keeps the admission ledger, in `observe`: it records and never refuses. Six hooks (start, a rate-limit reading, a helper's spawn, a SendMessage resume, a helper's turn, the end) each run `agentik session admission record --session <id>` with one JSON object on stdin; the verb appends one line to `${XDG_STATE_HOME:-~/.local/state}/agentik-session/admission/ledger.jsonl` (dir 0700, file 0600) under a lock waited for at most 2 s, exits 2 on a refused kind, key, id or JSON and 3 on the lock, writing nothing then. An `end` adds a `done` with `swept: true` for each of that session's spawns left open; past 29 hours the ledger is renamed `ledger.1.jsonl`. A failed record is one `admission: record <kind>: …` line in the debug log, never an error; a spawn's prompt and a message's text are never sent. One kind no hook of the module writes: `back`, a hand-back's cost, which the plugin's Stop hook appends itself under the same lock (see the launch room below), and which `record` refuses on stdin, as it refuses `verdict` and `spend`.
 
 Before each spawn, and each SendMessage resume, the module asks `agentik session admission admit --session <id>` for a verdict (one JSON object on stdin: the spawn's type, model, parent model, background, fork, its `tool_use_id`, the window readings and `resume`). Inside the same lock the verb reads the ledger, projects the five-hour window's peak at its reset (the burn of each active main thread, each running helper's life left and the new spawn's, fit from the ledger once it holds 20 ten-minute intervals, seeded before), appends one `verdict` line and prints `{verdict, mode, text, peak, window, resume_at}`: `admitted`, `unread` (no five-hour reading, and the week under its ceiling), `stale` or `wait` (the reading's reset has passed), `denied` (the seven-day window at its ceiling), `deferred` (interactive) or `not-started` (`-p`), the last three with the text the Agent tool will show once refusals are built. `resume_at` is the reset a holder waits for: the five-hour one, the week's on a weekly denial, null with nothing to name. `session.admission` sets `ceiling` (97), `margin` (3), `ceiling_7d` (97), the `seeds` and the window override below; `mode` is `observe` only, so nothing is refused yet: each answer is one `admission: admit …` line in the debug log, and the spawn goes ahead whatever it says.
 
@@ -767,7 +767,7 @@ prompt cache's lifetime.
   name) takes the ledger's minutes from ten runs, else the profile's `launch.kinds`. A
   helper's own spawn is never counted or told, and a fault in a read gives no line.
   `agentik session status` prints the same room last, `launch: room 21.5 to the line, 2 out:
-  a builder about 14:52, a review about 14:20`, or `..., none out`.
+  a builder about 14:52, a review about 14:20`, or `..., none out`. A hand-back's cost is measured (packet nw4b): at a helper's end SubagentStop stamps the coordinator's context occupancy in `backs/<agent_id>.json` under the session's folder, and the main thread's next Stop appends one `back` line a stamp to the admission ledger (`ts`, `session`, `kind`, `agentId`, `done`, `before`, `after`, `tokens`, `shared`: the turn's growth from the least `before`, shared evenly among the stamps it read) and removes them; a kind with ten such lines, by its spawn's kind, counts its median in points of the session's context ceiling in place of `launch.back`, which stands for a kind with under ten. Nothing is said.
 - Upgrade the CLI first (`/session:install-cli`): it prints the block. The plugin's
   skill names the verb. A 2.0.0-alpha.4 CLI prints no block.
 
@@ -952,6 +952,24 @@ agentik session gate status                       # running, queued, the last fi
   <branch>: <text>` or line 2 is not blank; and `red merge-file` with
   hygiene's code when `scripts/hygiene --commits` refuses the merge commit's
   message, made as a dangling commit and scanned as `<sha>..<commit>`.
+- One check proves a landing (packet nw5-check-proof). `agentik session gate run
+  <worktree> --check` queues the landing's own check in a clean worktree, untracked
+  files and skip-worktree or assume-unchanged entries counted (exit 2 and nothing
+  queued for a dirty one, or a command after it): `make check` without `GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `MAKEFLAGS`, `MFLAGS`, `GNUMAKEFLAGS`, `MAKEFILES`,
+  `MAKELEVEL` or a name a pattern of `gate.check_drop` matches (by default the names
+  that differ by session or by process), its record `<state>/gate/<id>/check.json`,
+  which digests each name that reached the check and holds no value. A landing then
+  takes the newest record of the readied head's tree, of a `--check` job or a landing,
+  where it is green, clean, not cut, of that head (or one the landing's own commits
+  follow), in the branch's own worktree, with main where the landing reads it, the same
+  `gate.check_links` and environment, within `gate.check_age` (six hours), and no newer
+  red `make check` of that tree, red `--check` job of that worktree or red job naming
+  the branch: its note
+  says `check: kept <id>`, and the land line ends `, check <id>`. Else it runs its own
+  through the same function, which keeps its record too. `gate land --fresh` always
+  runs its own; `--dry-run` says `check: would take <id> ...` or `check: would run its
+  own (<why>)`. `gate publish` is unchanged: a `--check` job proves no push.
 - The Bash tool's background tasks die when their session respawns: list each
   open gate id in the state file's `## Gates` section, and the successor
   re-arms `gate wait <id>` from there.

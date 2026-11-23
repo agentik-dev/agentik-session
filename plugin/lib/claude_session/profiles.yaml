@@ -92,7 +92,7 @@ defaults:
   helpers: {wait: allow}
   # `launch` (packet nw4-launch-room) is what the PreToolUse hook counts at a main thread's
   # Agent or Task call in a session that keeps the discipline: `back`, the points of the context
-  # ceiling one hand-back costs (the same for every kind until it is measured); `narrow.points`,
+  # ceiling one hand-back costs, for a kind with under ten measured in the ledger; `narrow.points`,
   # the room after the launch under which it is narrow; `narrow.alone`, the minutes a narrow
   # launch may take with none out or all overdue; and `kinds`, each kind's median and ninth decile in
   # minutes, seeded from the measured runs (hq design/29), which the ledger's own replace for a
