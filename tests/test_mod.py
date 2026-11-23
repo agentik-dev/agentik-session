@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_session import __version__, cli, doctor, hooks, resolver
+from claude_session import __version__, admission, cli, doctor, hooks, resolver
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOKS_DIR = ROOT / "plugin" / "hooks"
@@ -68,7 +68,8 @@ def test_mod_start_writes_mod_json_and_prints_the_dir(state, tmp_path):
     sdir = _metered(tmp_path)
     rc, out, err = run("mod", "start", "--session", SID)
     assert (rc, err) == (0, "")
-    assert json.loads(out) == {"dir": str(sdir.resolve())}
+    assert json.loads(out) == {"dir": str(sdir.resolve()),             # al5-band: the lane's folder
+                               "api": str(admission.api_folder(SID))}
     m = json.loads((sdir / "mod.json").read_text())
     assert set(m) == {"at", "version"} and m["version"] == __version__
     assert not list(sdir.glob("*.tmp"))

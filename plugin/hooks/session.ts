@@ -227,7 +227,7 @@ const weekPart = (v: unknown, nowMs: number): string | null => {
 // `resetsAt`, both the week's, with the time left (pl2 R3); the band's word is `status`'s
 // since pl1. No countdown, ceiling, room or deferred.
 // `head` is `5h no reading` on a five-hour login's week (packet S51).
-const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
+const lineNone = (b: any, nowMs: number, head = 'no 5h window', lane: string | null = null): string[] => {
   const parts = [head]
   const p7 = fig(b.P7), running = fig(b.running)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
@@ -240,17 +240,79 @@ const lineNone = (b: any, nowMs: number, head = 'no 5h window'): string[] => {
     }
   }
   if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
+  if (lane) parts.push(lane)                    // packet al5-band: after the helpers
   return [...parts, ...lineEnd(b, nowMs)]
 }
 
-export const admissionLine = (band: string | null, nowMs: number, id = ''): string | null => {
+// ---- The API lane's running agents of this session (packet al5-band) ----
+// The other plugin's live records, read as files under the folder `mod start` names (the
+// account's home from the password database): no process, no import. Only the owner's band
+// shows them; the prompt hook's line is the model's and leaves them out (R6). The twins of
+// Python's api_records and api_part.
+const API_SCHEMA = 'agentik.api.live/1'
+const API_BEAT_MS = 30000
+const API_FILES = 16
+const API_MAX = 64 * 1024
+const API_TYPE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const API_BEAT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/
+const MONTH_LEN = (y: number, m: number): number =>
+  m === 2 ? (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28) : [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+const apiBeatMs = (v: unknown): number | null => {
+  const m = typeof v === 'string' ? API_BEAT.exec(v) : null
+  if (!m) return null
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number)
+  if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > MONTH_LEN(y, mo) || h > 23 || mi > 59 || s > 59) return null
+  const t = new Date(0)
+  t.setUTCFullYear(y, mo - 1, d)
+  t.setUTCHours(h, mi, s, Number((m[7] ?? '0').slice(0, 3).padEnd(3, '0')))
+  return t.getTime()
+}
+export const apiPart = (texts: string[], nowMs: number): string | null => {
+  const by = new Map<string, number>()
+  for (const text of texts) {
+    let r: any = null
+    try { r = JSON.parse(text) } catch { continue }
+    if (!isMap(r) || own(r, 'schema') !== API_SCHEMA || own(r, 'ended') !== null) continue
+    const running = own(r, 'running'), beat = apiBeatMs(own(r, 'beat'))
+    if (!Array.isArray(running) || beat === null || Math.abs(nowMs - beat) > API_BEAT_MS) continue
+    for (const a of running) {
+      const typ = isMap(a) ? own(a, 'type') : undefined
+      if (typeof typ === 'string' && API_TYPE.test(typ)) by.set(typ, (by.get(typ) ?? 0) + 1)
+    }
+  }
+  if (by.size === 0) return null
+  const kinds = [...by.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))
+  return `${kinds.reduce((n, k) => n + k[1], 0)} api (${kinds.map(([k, n]) => `${n} ${k}`).join(', ')})`
+}
+// The first API_FILES `.json` regular files of at most API_MAX bytes, by name, each read as a
+// range, which the host refuses for a pipe, socket or device: a FIFO never hangs the band.
+// fs.list's kind is the entry's own, so a link is `other`, never followed.
+async function apiRecords($: EngineInterface, folder: string): Promise<string[]> {
+  let entries: any[] = []
+  try { entries = list(await $.fs.list(folder)) } catch { return [] }
+  const names = entries.filter((e: any) => isMap(e) && typeof e.name === 'string' && e.name.endsWith('.json')
+    && e.kind === 'file' && e.isLink !== true && typeof e.size === 'number' && e.size <= API_MAX)
+    .map((e: any) => String(e.name)).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).slice(0, API_FILES)
+  const out: string[] = []
+  for (const name of names) {
+    try {
+      const text = String(await $.fs.read(`${folder}/${name}`, { length: API_MAX + 1 }))
+      if (text.length <= API_MAX) out.push(text)
+    } catch { /* a record that cannot be read counts nothing */ }
+  }
+  return out
+}
+
+export const admissionLine = (band: string | null, nowMs: number, id = '',
+                              api: string[] = []): string | null => {
   let b: any = null
   try { b = band === null ? null : JSON.parse(band) } catch { b = null }
   if (!b || typeof b !== 'object' || Array.isArray(b)) return null
   b = sessionBand(b, id)
-  if (b.window === 'none') return lineNone(b, nowMs).join(' · ')
+  const lane = api.length ? apiPart(api, nowMs) : null      // packet al5-band
+  if (b.window === 'none') return lineNone(b, nowMs, 'no 5h window', lane).join(' · ')
   const P = fig(b.P), peak = fig(b.peak), c = fig(b.ceiling)
-  if (b.window === 'five_hour' && P === null && c === null) return lineNone(b, nowMs, '5h no reading').join(' · ')
+  if (b.window === 'five_hour' && P === null && c === null) return lineNone(b, nowMs, '5h no reading', lane).join(' · ')
   const parts = [P === null ? '5h no reading' : `5h ${whole(P)}%` + (peak !== null ? ` → ${whole(peak)}%` : '')]
   const w = wall(b.resetsAt), u = wall(b.until)
   const left = (x: [string, string, number]): string => {
@@ -264,6 +326,7 @@ export const admissionLine = (band: string | null, nowMs: number, id = ''): stri
   const running = fig(b.running), room = fig(b.room)
   if (running !== null && room !== null) parts.push(`helpers ${whole(running)}/${String(Math.round(running) + Math.round(room))}`)
   else if (running !== null) parts.push(`${whole(running)} ${whole(running) === '1' ? 'helper' : 'helpers'}`)
+  if (lane) parts.push(lane)
   const d = fig(b.deferred), p7 = fig(b.P7)
   if (d !== null && Math.round(d) >= 1) parts.push(`${whole(d)} deferred`)
   if (p7 !== null) parts.push(`7d ${whole(p7)}%`)
@@ -424,12 +487,14 @@ async function measured($: EngineInterface, e: unknown): Promise<void> {
 // session.start sets them afresh, at a session's start and at every reload of the module.
 let sid = ''
 let dir = ''
+let lanes = ''           // the API lane's live folder for this session, as `mod start` prints it
 let tries = 0
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
     dir = ''
+    lanes = ''
     tries = 0
     try {
       try { sid = String(await $.session.id()) } catch { sid = '' }
@@ -441,8 +506,10 @@ export const register: Register = on => {
         try {
           const p: any = await runTool($, [TOOL, 'mod', 'start', '--session', sid],
             { timeoutMs: EVERY_MS })
-          dir = String(JSON.parse(String(p?.stdout ?? '')).dir ?? '')
-        } catch { dir = '' }
+          const out = JSON.parse(String(p?.stdout ?? ''))
+          dir = String(out.dir ?? '')
+          lanes = typeof out.api === 'string' && out.api.startsWith('/') ? out.api : ''
+        } catch { dir = ''; lanes = '' }
       }
       await start()
       await $.ui.invalidate('ui.render')
@@ -466,8 +533,10 @@ export const register: Register = on => {
         try {
           const p: any = await runTool($, [TOOL, 'mod', 'start', '--session', sid],
             { timeoutMs: EVERY_MS })
-          dir = String(JSON.parse(String(p?.stdout ?? '')).dir ?? '')
-        } catch { dir = '' }
+          const out = JSON.parse(String(p?.stdout ?? ''))
+          dir = String(out.dir ?? '')
+          lanes = typeof out.api === 'string' && out.api.startsWith('/') ? out.api : ''
+        } catch { dir = ''; lanes = '' }
       }
       await $.ui.invalidate('ui.render')
     } catch { /* the band's failure skips neither admission's part nor the answer */ }
@@ -510,7 +579,8 @@ export const register: Register = on => {
       if (at) { try { band = String(await $.fs.read(at)) } catch { band = null } }
       const now = Number(await $.clock.now())
       rows.push(bandLine(meter, respawn, now, limited, ended, measure))
-      const line = admissionLine(band, now, /\/sessions\/([^/]+)\/?$/.exec(dir)?.[1] ?? '')
+      const api = lanes ? await apiRecords($, lanes) : []
+      const line = admissionLine(band, now, /\/sessions\/([^/]+)\/?$/.exec(dir)?.[1] ?? '', api)
       if (line !== null) rows.push(line)
     }
     const kids: any[] = rows.map(l => ({ type: 'Text', props: {}, children: [clip(l, columns)] }))

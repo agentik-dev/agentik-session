@@ -631,7 +631,8 @@ NOT_STATE = {("__init__", "_pin"), ("admission", "decode"), ("chain", "_checks")
              ("doctor", "_missed_call"),            # ss5 R1: a transcript's tail, no state
              ("doctor", "_suite_sources"),          # fk3 R1: the suite's answer, no state
              ("hooks", "_with_changed"),            # gc1 R3: a copy of the output, no state
-             ("records", "_read")}                  # rr5a R2: the resolver child's answer, no state
+             ("records", "_read"),                  # rr5a R2: the resolver child's answer, no state
+             ("admission", "api_part")}             # al5-band: the API lane's record, not this tool's
 
 
 def test_the_table_names_every_reader():

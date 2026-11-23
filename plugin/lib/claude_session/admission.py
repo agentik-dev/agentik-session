@@ -1874,7 +1874,7 @@ def _week_part(v, now: datetime):
     return None if w is None else f"week resets {_weekday(v)} {w[0]}:{w[1]} {week_left(w[2], now)}"
 
 
-def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
+def _line_none(b: dict, now: datetime, head: str = "no 5h window", lane=None) -> list:
     """A `none` entry's parts (packet S43): `no 5h window · 7d P7% · resets N · week resets
     Ddd HH:MM (NdHh) · n helpers`, each left out with no figure (the time left, packet pl2
     R3); `until` first, else `resetsAt`,
@@ -1893,10 +1893,110 @@ def _line_none(b: dict, now: datetime, head: str = "no 5h window") -> list:
             break
     if running is not None:                     # the band's word left (pl1 R1): `status`
         parts.append(_count(running, "helper", "helpers"))
+    if lane:                                    # packet al5-band: after the helpers
+        parts.append(lane)
     return parts + _line_end(b, now)
 
 
-def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
+# ---- The API lane's running agents of this session (packet al5-band) ----
+# The other plugin's live records, read as files: no process, no import. The owner's band
+# shows them; the prompt hook's line is the model's and leaves them out (R6), since the
+# lane's own hook tells the model. The Mod's apiPart and apiRecords are the twins.
+API_SCHEMA = "agentik.api.live/1"
+API_BEAT_S = 30                     # a record counts while its beat is this near now
+API_FILES = 16                      # the records read, by name
+API_MAX = 64 * 1024                 # bytes a record may hold
+_API_TYPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_API_BEAT = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z\Z")
+
+
+def api_folder(sid, home=None) -> Path | None:
+    """`<home>/.local/state/agentik-agents/api/live/<sid>`, the home the account's own from
+    the password database (never HOME or XDG_STATE_HOME: the lane writes there by that
+    rule); None for an id `_SID` refuses."""
+    if not isinstance(sid, str) or not _SID.match(sid):
+        return None
+    if home is None:
+        import pwd
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    return Path(home, ".local", "state", "agentik-agents", "api", "live", sid)
+
+
+def api_records(folder) -> list:
+    """The texts of the first API_FILES `.json` regular files of at most API_MAX bytes in
+    `folder`, by name, opened non-blocking and never through a link, so a FIFO or a link
+    there is no record and never hangs; [] for a folder that cannot be read."""
+    try:
+        with os.scandir(folder) as it:
+            names = sorted(e.name for e in it
+                           if e.name.endswith(".json") and e.is_file(follow_symlinks=False)
+                           and e.stat(follow_symlinks=False).st_size <= API_MAX)
+    except (OSError, TypeError, ValueError):
+        return []
+    out = []
+    for name in names[:API_FILES]:
+        try:
+            fd = os.open(os.path.join(folder, name), os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size > API_MAX:
+                    continue
+                data = os.read(fd, API_MAX + 1)
+            finally:
+                os.close(fd)
+            if len(data) <= API_MAX:
+                out.append(data.decode("utf-8"))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def _api_beat_ms(v):
+    """A beat, UTC with `Z`, as whole milliseconds since the epoch; None otherwise."""
+    m = _API_BEAT.match(v) if isinstance(v, str) else None
+    if m is None:
+        return None
+    try:
+        t = datetime(*(int(x) for x in m.groups()[:6]), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    frac = (m.group(7) or "0")[:3].ljust(3, "0")
+    return (t - _EPOCH) // timedelta(milliseconds=1) + int(frac)
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def api_part(texts, now: datetime) -> str | None:
+    """`3 api (2 explore, 1 review)` from the live records' texts: a record counts when its
+    schema is API_SCHEMA, its `ended` is present and null and its beat is within API_BEAT_S of
+    now; its agents are the entries of `running` with a type; records are summed; the types
+    by count, most first, then name. None when nothing counts."""
+    now_ms = (now - _EPOCH) // timedelta(milliseconds=1)
+    by: dict = {}
+    for text in texts or []:
+        try:
+            r = json.loads(text)
+        except (ValueError, RecursionError, TypeError):
+            continue
+        if not isinstance(r, dict) or r.get("schema") != API_SCHEMA or "ended" not in r \
+                or r["ended"] is not None or not isinstance(r.get("running"), list):
+            continue
+        beat = _api_beat_ms(r.get("beat"))
+        if beat is None or abs(now_ms - beat) > API_BEAT_S * 1000:
+            continue
+        for a in r["running"]:
+            typ = a.get("type") if isinstance(a, dict) else None
+            if isinstance(typ, str) and _API_TYPE.match(typ):
+                by[typ] = by.get(typ, 0) + 1
+    if not by:
+        return None
+    kinds = ", ".join(f"{n} {k}" for k, n in sorted(by.items(), key=lambda kv: (-kv[1], kv[0])))
+    return f"{sum(by.values())} api ({kinds})"
+
+
+def band_line(b: dict, now: datetime | None = None, columns: int = 0,
+              api=None) -> str:
     """§3.5's line from band.json: `5h P% → peak% · resets HH:MM (h:mm) · helpers n/m ·
     d deferred · 7d P7%`, the mix's parts, `week resets Ddd HH:MM (NdHh)` from
     `week_resets`, then the age past 120 s (no mode's word since pl1). A part with no
@@ -1905,13 +2005,16 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
     Packet pl2: no ceiling (`status` says it); `helpers n/m`, n running of n plus the room,
     `n helpers` with no room; a deferred or resets count drawn under 1 is left out. An entry whose `window` is the
     string `none` draws `_line_none` instead, as does a `five_hour` one with no five-hour
-    figure and no ceiling, under `5h no reading` (packet S51). admissionLine is its twin."""
+    figure and no ceiling, under `5h no reading` (packet S51). Packet al5-band: `api`, the
+    lane's live records' texts, draws `api_part` after the helpers part, or where it would
+    stand; with none counting the line is as before. admissionLine is its twin."""
     now = now or datetime.now(timezone.utc)
+    lane = api_part(api, now) if api else None
     if b.get("window") == "none":
-        return clip(" · ".join(_line_none(b, now)), columns)
+        return clip(" · ".join(_line_none(b, now, lane=lane)), columns)
     P, peak, c = _real(b.get("P")), _real(b.get("peak")), _real(b.get("ceiling"))
     if b.get("window") == "five_hour" and P is None and c is None:
-        return clip(" · ".join(_line_none(b, now, "5h no reading")), columns)
+        return clip(" · ".join(_line_none(b, now, "5h no reading", lane)), columns)
     parts = ["5h no reading" if P is None
              else f"5h {_pct(P)}%" + (f" → {_pct(peak)}%" if peak is not None else "")]
     w, u = _wall(b.get("resetsAt")), _wall(b.get("until"))
@@ -1930,6 +2033,8 @@ def band_line(b: dict, now: datetime | None = None, columns: int = 0) -> str:
         parts.append(f"helpers {_pct(running)}/{int(_pct(running)) + int(_pct(room))}")
     elif running is not None:
         parts.append(_count(running, "helper", "helpers"))
+    if lane:
+        parts.append(lane)
     d, p7 = _real(b.get("deferred")), _real(b.get("P7"))
     if d is not None and int(_pct(d)) >= 1:
         parts.append(f"{_pct(d)} deferred")
