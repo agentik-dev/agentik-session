@@ -8,8 +8,11 @@ prints the same room with each helper out and its expected end.
 `room`, `ends`, `kind`, `table`, `minutes`, `latest`, `verdict`, `line` and `status_line` are pure. `told`
 and `status_for` read the session's resolved `session` section (its `launch` keys), its
 `meter.json` and the admission ledger's two files; they write nothing and never raise: a fault
-in any read gives no line. A hand-back's cost, `back`, is the profile's, the same for every kind,
-until a later row measures it. `admission.ends`, a different function, is left as it is.
+in any read gives no line. A hand-back's cost, `back`, is each kind's own (packet nw4b R6): a kind
+with ten `back` lines in the ledger takes their median in points of the session's context
+ceiling, and a kind with fewer, or a meter with no ceiling, the profile's `launch.back`.
+`backs` and `cost` are pure; `back_pairs` reads the ledger's rows it is given.
+`admission.ends`, a different function, is left as it is.
 """
 from __future__ import annotations
 

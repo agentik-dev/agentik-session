@@ -10,7 +10,9 @@ open spawns (a `done` with `swept: true` each). The ledger rotates when its firs
 line is older than 24 hours plus one window. Every value is checked by type and bound as
 well as its key (M2's fix round, F4): a nested key, an object where a scalar belongs, a
 non-finite number or a string that is not UTF-8 is refused, and the file never holds one.
-Nothing here decides: S26's `admit` reads it.
+Nothing here decides: S26's `admit` reads it. Three kinds come from no stdin, so `record`
+refuses them: `verdict` (`admit`), `spend` (after a reading) and `back`, which the Stop hook
+writes, a hand-back's cost to the coordinator (packet nw4b R4, `record_backs`).
 """
 from __future__ import annotations
 
