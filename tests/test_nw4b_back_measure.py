@@ -57,12 +57,10 @@ class Transcript:
 
 @pytest.fixture
 def main(tmp_path):
-    """A session folder whose meter.json names a fixture transcript, at an occupancy of 1000;
-    the rotated ledger holds a1 to a3's spawn lines (nw4c: a stamp only for a spawn)."""
+    """A session folder whose meter.json names a fixture transcript, at an occupancy of 1000."""
     _sdir().mkdir(parents=True, exist_ok=True)
-    (d := admission.directory(os.environ)).mkdir(parents=True, exist_ok=True)
-    (d / admission.ROTATED).write_text("".join(json.dumps(_spawn(NOW, a)) + "\n"
-                                               for a in ("a1", "a2", "a3")))
+    (d := admission.directory(os.environ)).mkdir(parents=True, exist_ok=True)   # nw4c: a1 to a3
+    (d / admission.ROTATED).write_text("\n".join(json.dumps(_spawn(NOW, f"a{i}")) for i in "123"))
     t = Transcript(tmp_path / "main.jsonl")
     t.grow(1000)
     hooks.post_tool_use({"session_id": SID, "transcript_path": str(t.path), "tool_name": "Read"},
@@ -517,30 +515,25 @@ def test_r5_the_shares_are_whole_tokens_whose_sum_is_the_growth():
     assert _shares(0) == [] and _shares(-5) == []
 
 
-# ---- nw4c: a stamp only for an agent this session spawned ------------------------------------
 
 def test_nw4c_an_agent_with_no_spawn_line_gets_no_stamp_and_no_line(main):
     _end("x9")
     assert _stamps() == []
     main.grow(3000)
-    _stop()
-    assert _backs() == []
+    assert _stop() == {} and _backs() == []
 
 
 def test_nw4c_a_spawned_helper_keeps_the_turn_s_whole_growth(main):
-    now = datetime.now(timezone.utc)                 # the ledger's own file, never rotated here
-    _ledger([_spawn(now, "h1"), _spawn(now, "x9", sid=OTHER)])
+    _ledger([_spawn(NOW, "h1"), _spawn(NOW, "x9", sid=OTHER)])   # x9: another session's alone
     _end("h1")
-    _end("x9")                                   # spawned by another session alone
+    _end("x9")
     main.grow(3000)
     _stop()
     assert [(x["agentId"], x["tokens"], x["shared"]) for x in _backs()] == [("h1", 2000, 1)]
 
 
 def test_nw4c_with_the_mark_unreadable_no_stamp(main, alarm):
-    d = admission.directory(os.environ)
-    (d / admission.ROTATED).unlink()
-    os.mkfifo(d / admission.ROTATED)
-    (d / admission.LEDGER).mkdir()
+    (p := admission.directory(os.environ) / admission.ROTATED).unlink()
+    os.mkfifo(p)                                 # and no ledger: no file the mark is read from
     _end("a1")
     assert _stamps() == []
