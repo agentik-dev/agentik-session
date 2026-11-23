@@ -294,11 +294,12 @@ def _target(target: str) -> str:
 
 
 def _text_why(text: str) -> str | None:
-    """in5t R3: why `text`, its outer spaces stripped, is no text line's, else None: a
-    character `_breaks` names, nothing left, more than HEAD bytes as a hook carries it."""
-    text = text.strip(" ")
+    """in5t R3: why `text` is no text line's, else None: the raw text holding a character
+    `_breaks` names; then, stripped of every white space at both ends as `head_of` strips
+    when it prints (`str.strip()`), nothing left, more than HEAD bytes as a hook carries it."""
     if _bad(text):
         return "--text holds a line break, a control or format character, or a lone surrogate"
+    text = text.strip()
     if not text:
         return "--text is empty"
     n = _enc(text)
@@ -319,7 +320,7 @@ def send_text(root, target: str, text: str, now=None) -> str:
     if _bad(to):
         raise Refused("line send: a path holds a line break, a control or format character, "
                       "or a lone surrogate")
-    ptr = {"id": "0" * 12, "to": to, "head": text.strip(" "),
+    ptr = {"id": "0" * 12, "to": to, "head": text.strip(),
            "sent": time.time() if now is None else now, "form": TEXT}
     return _new(root, ptr, "line send")
 
@@ -332,7 +333,8 @@ def _closed_ok(c) -> bool:
 
 def _valid_text(ptr: dict, name: str, to: str | None) -> dict | None:
     """in5t R4: a pointer that holds `form`: a text line's when `form` is TEXT, it holds no
-    `from`, `file` or `closes`, its head passes R3, and its `to` is the taker's; else None."""
+    `from`, `file` or `closes`, its head passes R3 and is its own `str.strip()`, so the head
+    printed is the head stored, and its `to` is the taker's; else None."""
     if ptr.get("form") != TEXT or {"from", "file", "closes"} & set(ptr) \
             or not set(TEXT_REQUIRED) <= set(ptr):
         return None
@@ -345,7 +347,8 @@ def _valid_text(ptr: dict, name: str, to: str | None) -> dict | None:
         return None
     if to is not None and not same(ptr["to"], to):
         return None
-    if _text_why(ptr["head"]) is not None or not _closed_ok(ptr.get("closed")):
+    if _text_why(ptr["head"]) is not None or ptr["head"] != ptr["head"].strip() \
+            or not _closed_ok(ptr.get("closed")):
         return None
     return ptr
 
