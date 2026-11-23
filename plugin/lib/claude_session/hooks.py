@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import codecs
+import copy
 import hashlib
 import json
 import math
@@ -2299,11 +2300,108 @@ def _measured(read) -> object:
 
 
 def stop(payload: dict, env=None) -> dict:
-    """The main thread's turn end (respawn-r1 §3.3): `turn-ended.json` {at}. A helper's
-    payload (agent_id) writes nothing. It never blocks: dispatch prints nothing for it."""
+    """The main thread's turn end (respawn-r1 §3.3): `turn-ended.json` {at}; then (packet
+    nw4b R3, R4) each helper's stamp under `backs/` is read, and with at least one the
+    coordinator's occupancy is read once, one `back` line a stamp is appended to the admission
+    ledger and each stamp read is removed. A helper's payload (agent_id) writes nothing and
+    reads no stamp. It never blocks and never raises: dispatch prints nothing for it."""
     if not payload.get("agent_id"):
-        _stamp(payload, os.environ if env is None else env, TURN_ENDED, {"at": time.time()})
+        env = os.environ if env is None else env
+        _stamp(payload, env, TURN_ENDED, {"at": time.time()})
+        _backs(payload, env)
     return {}
+
+
+# ---- a hand-back's cost (packet nw4b-back-measure; hq design/31 item 19) --------------------
+
+BACKS = "backs"     # `backs/<agent_id>.json` {at, before}: a helper's end, until the turn's end
+
+
+def _occupancy(sdir: Path, env) -> int | None:
+    """R1: the main thread's context occupancy now, in tokens: the meter's own reader over a
+    copy of the saved `own` state, on the transcript `meter.json` names, and its
+    `last_context`. It saves nothing, so `meter.json` and `meter-state.json` keep their bytes.
+    None where it cannot be read (no meter, no transcript, a fault); never raises."""
+    try:
+        tp = ((meter.load(sdir) or {}).get("transcript") or {}).get("path")
+        if not isinstance(tp, str) or not tp:
+            return None
+        own = meter.load_state(sdir).get("own")
+        st = copy.deepcopy(own) if isinstance(own, dict) else meter._fresh()
+        got = meter._scan(Path(tp), st, meter.limits_for(sdir, env).get("models"))
+        ctx = got.get("last_context") if isinstance(got, dict) else None
+        if isinstance(ctx, bool) or not isinstance(ctx, int) or ctx < 0:
+            return None
+        return ctx
+    except Exception:                                   # noqa: BLE001 - a measure, never a crash
+        return None
+
+
+def _back_stamp(sdir: Path, aid: str, env) -> None:
+    """R2: `backs/<aid>.json` {at, before} at a helper's end; one already there is kept, and
+    with no reading no stamp is written. Never raises."""
+    try:
+        p = sdir / BACKS / f"{aid}.json"
+        if os.path.lexists(p):
+            return
+        before = _occupancy(sdir, env)
+        if before is not None:
+            store._write_private(p, json.dumps({"at": time.time(), "before": before}))
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _a_stamp(d: dict) -> tuple | None:
+    at, before = d.get("at"), d.get("before")
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at) \
+            or not 0 < at < 1e11:
+        return None
+    if isinstance(before, bool) or not isinstance(before, int) or before < 0:
+        return None
+    return float(at), before
+
+
+def _backs(payload: dict, env) -> None:
+    """R3: at the main thread's turn end, every stamp under `backs/` is read from a regular file
+    opened so that it never blocks (`_regular_json`); a FIFO, a folder or a name that is not
+    `<id>.json` is passed over and left. With at least one stamp the occupancy is read once
+    and `admission.record_backs` appends the lines (R4); each regular file read is removed,
+    whether or not a line was written. Never raises."""
+    try:
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None:
+            return
+        bdir = sdir / BACKS
+        try:
+            names = sorted(os.listdir(bdir))
+        except OSError:
+            return
+        stamps, read = [], []
+        for name in names:
+            aid = name[:-5] if name.endswith(".json") else ""
+            p = bdir / name
+            try:
+                if not _SID.match(aid) or not stat.S_ISREG(os.lstat(p).st_mode):
+                    continue
+            except OSError:
+                continue
+            read.append(p)
+            got = _a_stamp(_regular_json(p))
+            if got is not None:
+                stamps.append((aid, *got))
+        try:
+            after = _occupancy(sdir, env) if stamps else None
+            if after is not None:
+                from . import admission                 # admission imports hooks: no cycle
+                admission.record_backs(sdir.name, stamps, after, env)
+        finally:
+            for p in read:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def stop_failure(payload, env=None) -> dict:
@@ -2353,8 +2451,10 @@ def subagent_stop(payload: dict, env=None) -> dict:
     id-shaped and whose session's folder exists (the payload's id alone, never the
     fallback), each regular file under `calls/` whose JSON object's `agent_id` is that id is
     removed. Another helper's file, one with no `agent_id` (an older plugin's), one that does
-    not parse and a directory are left to the launcher's stale bound. It writes no stamp,
-    never raises, and says nothing: dispatch prints nothing for it (SILENT)."""
+    not parse and a directory are left to the launcher's stale bound. Then (packet nw4b R2) it
+    stamps the coordinator's occupancy at the helper's end, `backs/<agent_id>.json`, for the
+    main thread's next Stop to read; with no reading it writes no stamp. It never raises and
+    says nothing: dispatch prints nothing for it (SILENT)."""
     try:
         aid = payload.get("agent_id")
         if not isinstance(aid, str) or not _SID.match(aid):
@@ -2373,6 +2473,7 @@ def subagent_stop(payload: dict, env=None) -> dict:
                     p.unlink()
             except Exception:                           # noqa: BLE001 - one file, never the rest
                 continue
+        _back_stamp(sdir, aid, os.environ if env is None else env)
     except Exception:                                   # noqa: BLE001
         pass
     return {}

@@ -444,6 +444,47 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
     return d / LEDGER
 
 
+# ---- A hand-back's cost (packet nw4b-back-measure R4): the hook's own line kind ----
+# `back` is written by the Stop hook alone, as `verdict` and `spend` are by the verbs alone, so
+# it is no kind of INPUT_KEYS and `record` refuses it on stdin.
+BACK_KEYS = ("ts", "session", "kind", "agentId", "done", "before", "after", "tokens", "shared")
+
+
+def back_lines(sid: str, stamps: list, after: int, now: datetime) -> list:
+    """R4: one `back` line a stamp ((agentId, at, before) triples) read at one turn's end:
+    `tokens` the turn's growth from the least `before`, over their count, rounded half up,
+    and `shared` their count. A growth of zero or less gives no line for any of them."""
+    n = len(stamps)
+    growth = after - min(b for _, _, b in stamps) if n else 0
+    if growth <= 0:
+        return []
+    tokens = (2 * growth + n) // (2 * n)
+    return [{"ts": _ts(now), "session": sid, "kind": "back", "agentId": aid,
+             "done": _ts(datetime.fromtimestamp(at, timezone.utc)), "before": before,
+             "after": after, "tokens": tokens, "shared": n} for aid, at, before in stamps]
+
+
+def record_backs(sid: str, stamps: list, after: int, env, now: datetime | None = None) -> int:
+    """R4: `back_lines`, appended under the ledger's lock after its rotation, as `admit`
+    appends its verdict; band.json is not rewritten. Returns the count written; raises
+    AdmissionError on the lock, which the hook swallows."""
+    now = now or datetime.now(timezone.utc)
+    lines = back_lines(sid, stamps, after, now)
+    if not lines:
+        return 0
+    d = directory(env)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(d, 0o700)
+    fd = _lock(d)
+    try:
+        os.fchmod(fd, 0o600)
+        _rotate(d, now)
+        _append(d, lines)
+    finally:
+        os.close(fd)
+    return len(lines)
+
+
 # ---- The fit and the peak (design/admission-r1.md §3.2; packet S26 ruling 2): pure. ----
 # Every function below reads the ledger's rows and a `now` passed in; nothing here writes.
 FAMILIES = ("opus", "sonnet", "haiku", "fable")
