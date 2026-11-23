@@ -163,6 +163,45 @@ def test_3_a_text_is_stored_stripped(two, capsys):
     assert stored(alpha, lid)["head"] == "question 7"
 
 
+# Review 1's F1: one rule for what a text is, at the send and at the take: the raw text is
+# checked for a character `_breaks` names, then stripped of every white space at both ends
+# as `str.strip()` strips and as `head_of` strips when it prints.
+
+@pytest.mark.parametrize("text", [" ", "　　", " ", "   　   "],
+                         ids=["no-break-space", "two-ideographic", "en-quad", "mixed"])
+def test_3_a_text_of_any_white_space_is_empty(two, text, capsys):
+    alpha, beta = two
+    err = refused(capsys, ["line", "send", str(alpha), "--text", text])
+    assert err == f"{ERR}--text is empty\n"
+    assert pointers() == []
+    assert ": ; whole:" not in ctx(call("UserPromptSubmit", alpha))
+
+
+@pytest.mark.parametrize("event", EVENTS)
+def test_3_outer_white_space_of_any_kind_is_stripped_and_printed_as_stored(two, event, capsys):
+    alpha, beta = two
+    lid = text_send(capsys, alpha, "　question 7 holds text ")
+    head = stored(alpha, lid)["head"]
+    assert head == "question 7 holds text"
+    out = ctx(call(event, alpha))
+    assert out.split("\n").count(said(lid, NO, head)) == 1
+    assert ": ; whole:" not in out
+
+
+def test_3_an_outer_break_is_refused_before_the_strip(two, capsys):
+    alpha, beta = two
+    for text in ("question 7\t", "\nquestion 7", "question 7 ", "\u0085question 7"):
+        err = refused(capsys, ["line", "send", str(alpha), "--text", text])
+        assert err == f"{ERR}{BREAK}\n", repr(text)
+    assert pointers() == []
+
+
+def test_3_the_bound_is_counted_on_the_stripped_text(two, capsys):
+    alpha, beta = two
+    lid = text_send(capsys, alpha, "　" + "x" * 120 + " ")
+    assert stored(alpha, lid)["head"] == "x" * 120
+
+
 # Acceptance 4, R1, R8: the form, the help, describe.
 
 def test_4_both_or_neither_flag_is_argparses_error(two, capsys):
@@ -282,6 +321,17 @@ def test_8_a_pointer_that_is_no_text_pointer_is_set_aside(two, case):
               "121": {"head": "x" * 121}, "empty": {"head": ""}, "note": {"form": "note"},
               "elsewhere": {"to": b}}.get(case)
     p = forge(alpha, beta, form="x") if case == "x" else text_forge(alpha, beta, **fields)
+    assert ctx(call("UserPromptSubmit", alpha)) == ""
+    assert not p.exists() and (p.parent / "aside" / p.name).exists()
+
+
+@pytest.mark.parametrize("head", [" ", " ", "　　", "   ", " " + TEXT,
+                                  TEXT + "　", " " + TEXT],
+                         ids=["space", "no-break-space", "two-ideographic", "mixed",
+                              "outer-nbsp", "outer-ideographic", "outer-space"])
+def test_8_a_head_of_white_space_or_with_an_outer_one_is_set_aside(two, head):
+    alpha, beta = two
+    p = text_forge(alpha, beta, head=head)
     assert ctx(call("UserPromptSubmit", alpha)) == ""
     assert not p.exists() and (p.parent / "aside" / p.name).exists()
 
