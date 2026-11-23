@@ -532,3 +532,155 @@ def test_python_draws_the_module_s_week_fixture_line():
     band = re.search(r"^const BAND_WEEK = '(.*)'$", text, re.M).group(1)
     line = re.search(r"^const BAND_WEEK_LINE = '(.*)'$", text, re.M).group(1)
     assert "week resets" in line and admission.band_line(json.loads(band), now) == line
+
+
+# ---- Packet al5-band: the API lane's running agents of this session, on the owner's band ----
+
+def _api_fixture() -> tuple:
+    """`API_CASES` and `API_NONE` from the module's test: [entry, records, line] each, and the
+    record sets that count nothing; a record is an object (its JSON text) or a string."""
+    text = (HOOKS_DIR / ("session.test." + "ts")).read_text()
+    get = lambda name: json.loads(re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1))
+    return get("API_CASES"), get("API_NONE"), [
+        (json.loads(re.search(rf"^const {b} = '(.*)'$", text, re.M).group(1)),
+         re.search(rf"^const {b}_LINE = '(.*)'$", text, re.M).group(1))
+        for b in ("BAND", "BAND_NONE", "BAND_WEEK_ONLY")]
+
+
+def _texts(recs: list) -> list:
+    return [r if isinstance(r, str) else json.dumps(r) for r in recs]
+
+
+def test_api_part_draws_the_module_s_cases():
+    cases, _, _ = _api_fixture()
+    _, _, now = _fixture()
+    assert len(cases) >= 6
+    for entry, recs, line in cases:
+        assert admission.band_line(entry, now, api=_texts(recs)) == line, line
+    lines = [c[2] for c in cases]
+    assert any(" · 3 api (2 explore, 1 review) · " in x for x in lines)
+    assert any(x.endswith(" · 1 api (1 review)") for x in lines)
+    assert any("4 api (2 explore, 2 review)" in x for x in lines)        # two records summed
+
+
+def test_api_part_stands_after_the_helpers_part_in_each_form():
+    cases, _, forms = _api_fixture()
+    _, _, now = _fixture()
+    for entry, pin in forms:
+        rec = {"schema": "agentik.api.live/1", "fanout": "f1", "running": [{"run": "r1", "type": "review"}],
+               "beat": "2026-10-12T11:59:50Z", "ended": None}
+        line = admission.band_line(entry, now, api=[json.dumps(rec)])
+        helpers = re.search(r"helpers \d+/\d+|\d+ helpers?", pin).group(0)
+        assert line == pin.replace(helpers, helpers + " · 1 api (1 review)", 1)
+
+
+def test_api_none_draws_the_pin_s_line_in_all_three_forms():
+    _, none, forms = _api_fixture()
+    _, _, now = _fixture()
+    assert len(none) >= 6
+    for entry, pin in forms:
+        assert admission.band_line(entry, now) == pin
+        for recs in none:
+            assert admission.band_line(entry, now, api=_texts(recs)) == pin, recs
+            assert admission.band_line(entry, now, 80, api=_texts(recs)) == admission.band_line(entry, now, 80)
+
+
+LIVE = {"schema": "agentik.api.live/1", "fanout": "f1", "pid": 4242, "session": SID,
+        "running": [{"run": "r1", "type": "explore"}, {"run": "r2", "type": "explore"},
+                    {"run": "r3", "type": "review"}], "queued": 2, "ended": None}
+
+
+def _live(beat_age_s: float = 2, **kw) -> str:
+    beat = (datetime.now(UTC) - timedelta(seconds=beat_age_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return json.dumps({**LIVE, "beat": beat, **kw})
+
+
+def test_api_part_counts_and_sums_records_read_from_a_folder(tmp_path):
+    d = tmp_path / "live" / SID
+    d.mkdir(parents=True)
+    (d / "f1.json").write_text(_live())
+    texts = admission.api_records(d)
+    assert admission.api_part(texts, datetime.now(UTC)) == "3 api (2 explore, 1 review)"
+    (d / "f2.json").write_text(_live(running=[{"run": "r9", "type": "review"}]))
+    texts = admission.api_records(d)
+    assert admission.api_part(texts, datetime.now(UTC)) == "4 api (2 explore, 2 review)"
+
+
+def test_api_part_folder_is_the_account_s_home_never_home_or_xdg(tmp_path):
+    import pwd
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    assert admission.api_folder(SID) == Path(home, ".local/state/agentik-agents/api/live", SID)
+    assert str(admission.api_folder(SID)).startswith(home) and os.environ["HOME"] != home
+    assert admission.api_folder(SID, tmp_path) == tmp_path / ".local/state/agentik-agents/api/live" / SID
+    for bad in (None, "", "../x", "a/b", "x" * 129, "a\n", 7):
+        assert admission.api_folder(bad, tmp_path) is None
+
+
+def test_api_none_from_a_folder_ended_stale_foreign_torn_or_a_fifo(tmp_path):
+    import time
+    d = tmp_path / "live" / SID
+    d.mkdir(parents=True)
+    now = datetime.now(UTC)
+    assert admission.api_part(admission.api_records(tmp_path / "absent"), now) is None
+    assert admission.api_part(admission.api_records(d), now) is None
+    (d / "a.json").write_text(_live(ended="2026-10-12T11:59:00Z"))
+    (d / "b.json").write_text(_live(beat_age_s=31))
+    (d / "c.json").write_text(_live(schema="agentik.api.live/2"))
+    (d / "d.json").write_text("{not json")
+    (d / "e.json").mkdir()
+    os.symlink(d / "a.json", d / "f.json")
+    os.mkfifo(d / "g.json")
+    t0 = time.monotonic()
+    texts = admission.api_records(d)
+    assert time.monotonic() - t0 < 1.0                       # the FIFO never hangs the read
+    assert admission.api_part(texts, datetime.now(UTC)) is None
+    assert len(texts) == 4                                   # a, b, c, d: no folder, link or pipe
+    band = {"window": "none", "P7": 62, "running": 3}
+    assert admission.band_line(band, now, api=texts) == admission.band_line(band, now)
+
+
+def test_api_none_bounds_the_read_at_16_files_and_64_kb(tmp_path):
+    d = tmp_path / "live" / SID
+    d.mkdir(parents=True)
+    (d / "big.json").write_text(_live(pad="x" * (64 * 1024)))
+    assert admission.api_records(d) == []
+    for i in range(20):
+        (d / f"f{i:02d}.json").write_text(_live(running=[{"run": f"r{i}", "type": "review"}]))
+    (d / "notes.txt").write_text(_live())
+    texts = admission.api_records(d)
+    assert len(texts) == 16
+    assert admission.api_part(texts, datetime.now(UTC)) == "16 api (16 review)"
+
+
+def test_api_none_from_a_folder_that_cannot_be_read(tmp_path):
+    d = tmp_path / "live" / SID
+    d.mkdir(parents=True)
+    (d / "f1.json").write_text(_live())
+    d.chmod(0)
+    try:
+        assert admission.api_records(d) == [] or os.geteuid() == 0
+    finally:
+        d.chmod(0o700)
+
+
+def test_api_none_the_prompt_hook_s_line_is_the_model_s_and_leaves_the_part_out(monkeypatch, tmp_path):
+    """R6: the model's line and the owner's band are told apart at the call; the lane's own hook
+    tells the model, so the prompt hook never reads the lane's folder."""
+    d = tmp_path / "live" / SID
+    d.mkdir(parents=True)
+    (d / "f1.json").write_text(_live())
+    monkeypatch.setattr(admission, "api_folder", lambda sid, home=None: d)
+    monkeypatch.setattr(hooks, "used_pct", lambda *a, **k: 97.0)
+    now = datetime.now(UTC)
+    record({"kind": "reading", "rateLimits": lim(72, now + timedelta(hours=2))}, now)
+    out = hooks.user_prompt_submit({"session_id": SID})["hookSpecificOutput"]["additionalContext"]
+    assert "5h 72% → " in out and " api (" not in out
+
+
+def test_api_clip_cuts_the_line_at_80_columns_as_the_others_are():
+    cases, _, _ = _api_fixture()
+    _, _, now = _fixture()
+    entry, recs, line = next(c for c in cases if len(c[2]) > 80)
+    clipped = admission.band_line(entry, now, 80, api=_texts(recs))
+    assert len(clipped) == 80 and clipped == line[:79] + "…"
+    assert admission.band_line(entry, now, 200, api=_texts(recs)) == line
