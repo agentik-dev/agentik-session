@@ -1907,7 +1907,8 @@ API_BEAT_S = 30                     # a record counts while its beat is this nea
 API_FILES = 16                      # the records read, by name
 API_MAX = 64 * 1024                 # bytes a record may hold
 _API_TYPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_API_BEAT = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z\Z")
+_API_BEAT = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z\Z",
+                       re.ASCII)       # fix 1 R2: ASCII digits alone, as the Mod's \d
 
 
 def api_folder(sid, home=None) -> Path | None:
@@ -1974,6 +1975,12 @@ def _api_beat_ms(v):
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
+def _api_no_constant(name):
+    """fix 1 R2: `NaN`, `Infinity` and `-Infinity` are no JSON, and the Mod's JSON.parse
+    refuses them, so a record that holds one counts nothing here too."""
+    raise ValueError(f"not JSON: {name}")
+
+
 def api_part(texts, now: datetime) -> str | None:
     """`3 api (2 explore, 1 review)` from the live records' texts: a record counts when its
     schema is API_SCHEMA, its `ended` is present and null and its beat is within API_BEAT_S of
@@ -1983,7 +1990,7 @@ def api_part(texts, now: datetime) -> str | None:
     by: dict = {}
     for text in texts or []:
         try:
-            r = json.loads(text)
+            r = json.loads(text, parse_constant=_api_no_constant)
         except (ValueError, RecursionError, TypeError):
             continue
         if not isinstance(r, dict) or r.get("schema") != API_SCHEMA or "ended" not in r \

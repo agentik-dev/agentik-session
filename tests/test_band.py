@@ -538,9 +538,12 @@ def test_python_draws_the_module_s_week_fixture_line():
 
 def _api_fixture() -> tuple:
     """`API_CASES` and `API_NONE` from the module's test: [entry, records, line] each, and the
-    record sets that count nothing; a record is an object (its JSON text) or a string."""
-    text = (HOOKS_DIR / ("session.test." + "ts")).read_text()
-    get = lambda name: json.loads(re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1))
+    record sets that count nothing; a record is an object (its JSON text) or a string. A
+    string's quotes are escaped as the module's literal needs them (`\\"`), so the literal is
+    read as JavaScript reads it: `\\\\`, `\\'` and `\\"` each stand for their second character."""
+    text = (HOOKS_DIR / ("session.test." + "ts")).read_text(encoding="utf-8")
+    js = lambda lit: re.sub(r"\\(['\"\\])", r"\1", lit)
+    get = lambda name: json.loads(js(re.search(rf"^const {name} = '(.*)'$", text, re.M).group(1)))
     return get("API_CASES"), get("API_NONE"), [
         (json.loads(re.search(rf"^const {b} = '(.*)'$", text, re.M).group(1)),
          re.search(rf"^const {b}_LINE = '(.*)'$", text, re.M).group(1))
@@ -583,6 +586,28 @@ def test_api_none_draws_the_pin_s_line_in_all_three_forms():
         for recs in none:
             assert admission.band_line(entry, now, api=_texts(recs)) == pin, recs
             assert admission.band_line(entry, now, 80, api=_texts(recs)) == admission.band_line(entry, now, 80)
+
+
+def test_api_none_holds_what_the_mod_refuses_beats_of_other_digits_and_json_s_constants():
+    """al5-band fix 1 R2: a beat of fullwidth or Arabic-Indic digits, and a record that holds
+    `NaN`, `Infinity` or `-Infinity`, count nothing in Python as in the Mod (whose regex and
+    JSON.parse refuse them); each row of the fixture both twins read draws the pin's line."""
+    _, none, forms = _api_fixture()
+    _, _, now = _fixture()
+    texts = [t for recs in none for t in _texts(recs)]
+    beats = [json.loads(t).get("beat") for t in texts if t.startswith("{\"schema\"") and "NaN" not in t
+             and "Infinity" not in t]
+    assert "\uff12\uff10\uff12\uff16-\uff11\uff10-\uff11\uff12T\uff11\uff11:\uff15\uff19:\uff15\uff10Z" in beats
+    assert "\u0662\u0660\u0662\u0666-\u0661\u0660-\u0661\u0662T\u0661\u0661:\u0665\u0669:\u0665\u0660Z" in beats
+    assert "2026-10-12T11:59:50.\u0665Z" in beats
+    for const in ("NaN", "Infinity", "-Infinity"):
+        rows = [t for t in texts if f'"queued": {const},' in t]
+        assert len(rows) == 1, const
+        assert admission.api_part(rows, now) is None
+        assert admission.api_part([rows[0].replace(const, "1")], now) == "1 api (1 review)"
+    for entry, pin in forms:
+        for recs in none[-6:]:
+            assert admission.band_line(entry, now, api=_texts(recs)) == pin, recs
 
 
 LIVE = {"schema": "agentik.api.live/1", "fanout": "f1", "pid": 4242, "session": SID,
