@@ -10,7 +10,9 @@ open spawns (a `done` with `swept: true` each). The ledger rotates when its firs
 line is older than 24 hours plus one window. Every value is checked by type and bound as
 well as its key (M2's fix round, F4): a nested key, an object where a scalar belongs, a
 non-finite number or a string that is not UTF-8 is refused, and the file never holds one.
-Nothing here decides: S26's `admit` reads it.
+Nothing here decides: S26's `admit` reads it. Three kinds come from no stdin, so `record`
+refuses them: `verdict` (`admit`), `spend` (after a reading) and `back`, which the Stop hook
+writes, a hand-back's cost to the coordinator (packet nw4b R4, `record_backs`).
 """
 from __future__ import annotations
 
@@ -442,6 +444,62 @@ def record(sid, text: str, env, now: datetime | None = None) -> Path:
     _write_band(d, now, {**rules.admission(_session_config(env, sid)), "demand": _demand_once(env)},
                 env)
     return d / LEDGER
+
+
+# ---- A hand-back's cost (packet nw4b-back-measure R4): the hook's own line kind ----
+# `back` is written by the Stop hook alone, as `verdict` and `spend` are by the verbs alone, so
+# it is no kind of INPUT_KEYS and `record` refuses it on stdin.
+BACK_KEYS = ("ts", "session", "kind", "agentId", "done", "before", "after", "tokens", "shared")
+
+
+def back_lines(sid: str, stamps: list, after: int, now: datetime) -> list:
+    """R4: one `back` line a stamp ((agentId, at, before) triples) read at one turn's end:
+    the turn's growth from the least `before` split among them in whole tokens whose sum is
+    the growth, the remainder one token each to the earliest stamps (by `at`, then by order),
+    and `shared` their count. A share of 0 writes no line, and a growth of zero or less gives
+    no line for any of them (fix of review 1 R5)."""
+    n = len(stamps)
+    growth = after - min(b for _, _, b in stamps) if n else 0
+    if growth <= 0:
+        return []
+    base, extra = divmod(growth, n)
+    early = set(sorted(range(n), key=lambda i: (stamps[i][1], i))[:extra])
+    out = []
+    for i, (aid, at, before) in enumerate(stamps):
+        tokens = base + (i in early)
+        if tokens > 0:
+            out.append({"ts": _ts(now), "session": sid, "kind": "back", "agentId": aid,
+                        "done": _ts(datetime.fromtimestamp(at, timezone.utc)), "before": before,
+                        "after": after, "tokens": tokens, "shared": n})
+    return out
+
+
+def record_backs(sid: str, stamps: list, after: int, env, now: datetime | None = None) -> int:
+    """R4: `back_lines`, appended under the ledger's lock after its rotation, as `admit`
+    appends its verdict; band.json is not rewritten. The ledger is written only where it is
+    absent or, by lstat, a regular file: a FIFO, a folder or a link gets nothing and the
+    rotation is never reached (fix of review 1 R2). Returns the count written; raises
+    AdmissionError on the lock, which the hook swallows."""
+    now = now or datetime.now(timezone.utc)
+    lines = back_lines(sid, stamps, after, now)
+    if not lines:
+        return 0
+    d = directory(env)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(d, 0o700)
+    fd = _lock(d)
+    try:
+        os.fchmod(fd, 0o600)
+        try:
+            if not stat.S_ISREG(os.lstat(d / LEDGER).st_mode):
+                return 0
+        except FileNotFoundError:
+            pass
+        _rotate(d, now)
+        _append(d, lines)
+    finally:
+        os.close(fd)
+    return len(lines)
 
 
 # ---- The fit and the peak (design/admission-r1.md §3.2; packet S26 ruling 2): pure. ----
@@ -1912,16 +1970,39 @@ def windows(rows) -> list:
 
 
 def report(env, tz=None) -> str:
-    """`report`'s admission section: a row per window, or `admission: no ledger`."""
+    """`report`'s admission section: a row per window, or `admission: no ledger`; then, only
+    where the ledger holds a `back` line that counts (packet nw4b R8), a hand-back's cost by
+    kind (`back_report`)."""
     d = directory(env)
     if not any((d / name).exists() for name in (ROTATED, LEDGER)):
         return "admission: no ledger"
-    ws = windows([r for name in (ROTATED, LEDGER) for r in _rows(d / name)])
+    rows = [r for name in (ROTATED, LEDGER) for r in _rows(d / name)]
+    ws = windows(rows)
     if not ws:
-        return "admission: no five-hour reading"
-    out = ["admission: five-hour windows"]
-    for w in ws:
-        row = (f"  {_local(w['resetsAt'], tz).strftime('%Y-%m-%d %H:%M')}  {_pct(w['last'])}%  "
-               + ("held" if w["held"] else "idle"))
-        out.append(row + ("  under 90" if w["last"] < FLOOR_PCT else ""))
-    return "\n".join(out)
+        out = ["admission: no five-hour reading"]
+    else:
+        out = ["admission: five-hour windows"]
+        for w in ws:
+            row = (f"  {_local(w['resetsAt'], tz).strftime('%Y-%m-%d %H:%M')}  {_pct(w['last'])}%  "
+                   + ("held" if w["held"] else "idle"))
+            out.append(row + ("  under 90" if w["last"] < FLOOR_PCT else ""))
+    return "\n".join(out + back_report(rows))
+
+
+def back_report(rows) -> list:
+    """Packet nw4b R8: `admission: a hand-back's cost, by kind`, then one row a kind, sorted by
+    its key: the count of counted `back` lines, their nearest-rank median in thousands of
+    tokens, and, under the room's ten, that the profile's `back` stands. No counted line: []."""
+    from . import room                          # room imports admission: no cycle
+    by: dict = {}
+    for k, t in room.back_pairs(rows):
+        by.setdefault(k, []).append(t)
+    if not by:
+        return []
+    out = ["admission: a hand-back's cost, by kind"]
+    for k in sorted(by):
+        xs = by[k]
+        row = f"  {k}  {len(xs)}  median {room._nearest(xs, 0.5) / 1000.0:.1f}k tokens"
+        out.append(row + ("  under 10: the profile's back stands" if len(xs) < room.LEDGER_RUNS
+                          else ""))
+    return out
