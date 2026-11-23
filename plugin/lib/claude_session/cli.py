@@ -1948,6 +1948,11 @@ def cmd_gate(args) -> int:
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
+    if args.check or args.in_job:
+        checked = _gate_check(root, args, env, command)
+        if isinstance(checked, int):
+            return checked
+        command = checked
     own = _own_entry(root, env) if args.wait else None
     if own and os.path.isdir(args.repo) \
             and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
@@ -1972,6 +1977,42 @@ def cmd_gate(args) -> int:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _gate_check(root, args, env, command):
+    """`gate run <worktree> --check` (packet nw5-check-proof R3): the job's command, the
+    in-job form, or a refusal, exit 2 and nothing queued: a command after it, a folder that is
+    not there, a tree whose status is not empty, untracked files counted, read as the landing
+    reads its worktree. `--in-job` is the job: the one function there, only inside a job."""
+    from . import gate, land
+    if args.in_job and not args.check:
+        _die("gate run: --in-job is the --check job's own form", 2)
+    if command:
+        _die("gate run --check runs make check itself: no command after it", 2)
+    if args.in_job:
+        mark = env.get(gate.JOB_MARK) or ""
+        if not gate.ID.match(mark):
+            _die("gate run --check --in-job runs only inside a gate job, which sets "
+                 f"{gate.JOB_MARK}; queue it: agentik session gate run <worktree> --check", 2)
+        return land.check_main([args.repo], root, mark)
+    if not os.path.isdir(args.repo):
+        _die(f"gate run --check: no such directory: {args.repo}", 2)
+    real = os.path.realpath(args.repo)
+    try:
+        dirt = land.worktree_dirt(real, env=land.bare_env())
+    except land.Red as red:
+        _die(f"gate run --check: {red.note}", 2)
+    if dirt:
+        _die(f"gate run --check: {real} is not clean, so its check proves no tree "
+             f"({len(dirt)} status lines; the first: {dirt[0][:80]})", 2)
+    marks = land.index_marks(real)      # brief 2, R3: what status never shows
+    if marks is None:
+        _die(f"gate run --check: cannot read the index of {real}", 2)
+    if marks:
+        _die(f"gate run --check: {real} is not clean, so its check proves no tree "
+             f"({len(marks)} index entries marked skip-worktree or assume-unchanged; "
+             f"the first: {marks[0][:80]})", 2)
+    return [*gate.self_argv(), *gate.CHECK_JOB, real]
 
 
 def _own_entry(root, env) -> dict | None:
@@ -2067,7 +2108,7 @@ def _gate_land(root, args, env) -> int:
             return 1
     if args.dry_run:
         # land4 R11: the reads alone, here, in a job or not; nothing queued, nothing written.
-        code = land.main(list(args.args), None, dry=True)
+        code = land.main(list(args.args), None, dry=True, root=root, fresh=args.fresh)
         if code != 0 or not (args.push or args.install):
             return code
         if args.push:
@@ -2081,7 +2122,7 @@ def _gate_land(root, args, env) -> int:
         # gl1 R5: the job's own log, where a red check's stop line is read (land.log_size
         # trusts it only when it is the job's stderr).
         log = str(gate.entry_dir(root, mark) / "log") if gate.ID.match(mark) else None
-        return land.main(list(args.args), log)
+        return land.main(list(args.args), log, root=root, gid=mark)
     if mark:
         _die(f"gate land: this is gate job {mark[:40]}; a landing queued here waits on its "
              "own repo until the wall cuts it: run gate land --in-job", 2)
@@ -2106,7 +2147,11 @@ def _gate_land(root, args, env) -> int:
     try:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
-        e = gate.enqueue(root, repo, command, dict(env), [], wall, f"land {branch}", caller,
+        # nw5 R6: --fresh travels in the entry's env, never as a word of the job's command.
+        job_env = {k: v for k, v in env.items() if k != land.FRESH}
+        if args.fresh:
+            job_env[land.FRESH] = "1"
+        e = gate.enqueue(root, repo, command, job_env, [], wall, f"land {branch}", caller,
                          time.time(), named=args.session is not None)
     except gate.GateError as err:
         _die(f"gate land: {err}", 2)
@@ -2458,6 +2503,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="cut the command after SECONDS (default: gate.wall, 5400)")
     gr.add_argument("--label", metavar="TEXT", help="a label for status")
     gr.add_argument("--wait", action="store_true", help="then wait for the result")
+    gr.add_argument("--check", action="store_true",
+                    help="queue make check in this clean worktree, run as a landing runs it, "
+                         "and keep its record, so a landing of the same tree may take it; no "
+                         "command after it")
+    gr.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gr.add_argument("command", nargs="*", help="the command after --, run as argv")
     gw = gsub.add_parser("wait", help="wait for a gate's result and print its line")
     gw.add_argument("id", nargs="?")
@@ -2489,6 +2539,9 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("--install", action="store_true",
                     help="then, where main is pushed and no relay run, unattended run or gate "
                          "job of the repo is live, install its plugin and its make install")
+    gl.add_argument("--fresh", action="store_true",
+                    help="run the landing's own make check even where a kept check of the "
+                         "same tree would prove it")
     gl.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
     gp = gsub.add_parser("publish", help="prove main's head checked green by a gate result, run "
                                           "the repo's hygiene on it and its range, and push that "
