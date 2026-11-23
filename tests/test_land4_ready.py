@@ -421,13 +421,19 @@ def test_land4_8_dry_run_in_each_state(tmp_path, in_job):
     plain = Crate(tmp_path / "a", stamp=False)
     sha = plain.work({"f": "x\n"})
     plain.on_main({"g": "y\n"})
+    # nw5 R6: the dry run says which check the landing would take, before its own line.
+    none = "check: would run its own (no record of this tree)\n"
+    merged = "check: would run its own (main merged)\n"
     assert dry(plain, sha, in_job)[:2] == (0, "ready: no stamp target; a branch behind main is "
-                                              "red sha\nland crate: dry run, nothing queued\n")
-    tail = "ready: would run make stamp and commit its lines\nland crate: dry run, nothing queued\n"
+                                              "red sha\n" + none
+                                           + "land crate: dry run, nothing queued\n")
+    ran = "ready: would run make stamp and commit its lines\n"
+    tail = ran + merged + "land crate: dry run, nothing queued\n"
     (tmp_path / "b").mkdir()
     holds = Crate(tmp_path / "b")
     sha = holds.work({"f": "x\n"})
-    assert dry(holds, sha, in_job)[:2] == (0, "ready: p1-crate holds main\n" + tail)
+    assert dry(holds, sha, in_job)[:2] == (0, "ready: p1-crate holds main\n" + ran + none
+                                           + "land crate: dry run, nothing queued\n")
     (tmp_path / "c").mkdir()
     behind = Crate(tmp_path / "c")
     sha = behind.work({"f": "x\n"})
@@ -679,7 +685,8 @@ def test_land4_f8_the_dry_run_of_a_head_past_the_sha(c, trailer):
     if trailer:
         assert (rc, out) == (0, "ready: p1-crate is past %s by its trailers; the rerun is not "
                              "run dry\nready: p1-crate holds main\nready: would run make stamp "
-                             "and commit its lines\nland crate: dry run, nothing queued\n"
+                             "and commit its lines\ncheck: would run its own (no record of this "
+                             "tree)\nland crate: dry run, nothing queued\n"
                              % sha[:7]), err
     else:
         assert (rc, out) == (1, "land crate: red sha exit 1\n"), err

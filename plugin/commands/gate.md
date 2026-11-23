@@ -14,11 +14,11 @@ ends `; est <m> min` when its repo has three greens or more of the same command
 its last five. Exit 124 is the wall's cut, 125 a runner that died, 126 a lock held
 past the wall. A result keeps the repo's `head` and `key`.
 
-Queue a gate through Bash, not here: `agentik-session gate run <repo> -- <command>`,
-then wake on `agentik-session gate wait <id>` in a background Bash with a
-timeout past the gate's length, or on the hook's line at the next prompt.
-`wait` exits 0 whatever the job's code; `agentik-session gate wait <id> --strict`
-exits the job's code, and a line on stdout marks the code as the job's.
+Queue a gate through Bash, not here: `agentik-session gate run <repo> -- <command>`, or a
+check a landing of that tree takes, `gate run <worktree> --check` (`gate land --fresh` runs
+its own); then wake on `agentik-session gate wait <id>` in a background Bash with a timeout
+past the gate's length, or on the hook's line. `wait` exits 0 whatever the job's code; `gate
+wait <id> --strict` exits the job's code, and a line on stdout marks the code as the job's.
 
 Under a chain the result follows the chain: a job queued by the chain's sitting or its
 helper, by any verb, lands in the chain's inbox, and the chain's live sitting takes it,

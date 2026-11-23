@@ -578,6 +578,9 @@ READERS = {
     ("instructionguard", "_entry"): ("x.said", {"paths": ["/w/CLAUDE.md"]},   # gc1 brief 3 H2
                                      lambda m, d: m["instructionguard"]._entry(
                                          d / "x.said", {"session_id": S}, _state_env(d))),
+    ("land", "_regular_record"): ("check.json", {"id": "1", "exit": 0},   # nw5 brief 2 R6
+                                  lambda m, d: importlib.import_module(
+                                      "claude_session.land")._regular_record(d / "check.json")),
     ("ledger", "read"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},
                          lambda m, d: m["ledger"].read(d)),
     ("ledger", "lines"): ("ledger.jsonl", {"session": S, "ended": NOW_TS},   # packet S54 R4
