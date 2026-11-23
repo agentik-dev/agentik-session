@@ -2337,12 +2337,30 @@ def _occupancy(sdir: Path, env) -> int | None:
         return None
 
 
+def _spawned(sid: str, aid: str, env) -> bool:
+    """nw4c R1: a `spawn` line of session `sid` names `aid`, in the ledger or its rotated file,
+    each a regular file read once from its last 8 MiB, never blocking, on the keys as `_append`
+    writes them. The engine's own agents have none; a file not read is no mark. It may raise."""
+    from . import admission
+    keys = (f'"session": "{sid}"'.encode(), b'"kind": "spawn"', f'"agentId": "{aid}"'.encode())
+    for p in (admission.directory(env) / n for n in (admission.LEDGER, admission.ROTATED)):
+        if os.path.isfile(p):                           # a FIFO, a folder or none: no read
+            fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                tail = os.pread(fd, 1 << 23, max(0, os.fstat(fd).st_size - (1 << 23)))
+            finally:
+                os.close(fd)
+            if any(all(k in ln for k in keys) for ln in tail.splitlines()):
+                return True
+    return False
+
+
 def _back_stamp(sdir: Path, aid: str, env) -> None:
     """R2: `backs/<aid>.json` {at, before} at a helper's end; one already there is kept, and
     with no reading no stamp is written. Never raises."""
     try:
         p = sdir / BACKS / f"{aid}.json"
-        if os.path.lexists(p):
+        if os.path.lexists(p) or not _spawned(sdir.name, aid, env):
             return
         before = _occupancy(sdir, env)
         if before is not None:
