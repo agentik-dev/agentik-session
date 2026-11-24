@@ -1190,6 +1190,7 @@ def user_prompt_submit(payload: dict) -> dict:
     bits: list[str] = [unconfirmed] if unconfirmed else []
 
     m = _meter(sid)
+    shown = False
     if m and m.get("turns") != 0:      # ss1 review 1 F1: SessionStart's zero meter says nothing
         sdir = _session_dir(sid, os.environ)
         now = _now()
@@ -1197,6 +1198,12 @@ def user_prompt_submit(payload: dict) -> dict:
                 or _meter_due(sdir, _meter_minutes(sdir), now, prompt=True)):
             bits.append(_meter_words(m))
             _meter_stamp(sdir, now, True)
+            shown = True
+    held = _held_clause(sid, os.environ)    # nw6 R2: on the meter's line, else alone
+    if held and shown:
+        bits[-1] += f"; {held}"
+    elif held:
+        bits.append(held)
 
     plain = not discipline(_session_section(sid))          # st1 C2: plain words, no cadence
     if plain:
@@ -1229,6 +1236,20 @@ def user_prompt_submit(payload: dict) -> dict:
         return _gate_ups(payload, {})
     return _gate_ups(payload, {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                                       "additionalContext": "\n\n".join(bits)}})
+
+
+def _held_clause(sid, env) -> str | None:
+    """nw6 R2: while the helpers hold this sitting's marked respawn, the clause the launcher's
+    held.json gives (chain.held_by); None otherwise and on any fault."""
+    try:
+        name = env.get(CHAIN_VAR) or ""
+        if not (CHAIN_RE.match(name) and isinstance(sid, str) and _SID.match(sid)):
+            return None
+        from . import chain
+        d = chain.held_by(resolver.state_dir(env), name, sid, _now())
+        return chain.held_words(d) if d else None
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def _gate_ups(payload: dict, out: dict) -> dict:
