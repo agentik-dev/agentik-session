@@ -13,6 +13,10 @@ with ten `back` lines in the ledger takes their median in points of the session'
 ceiling, and a kind with fewer, or a meter with no ceiling, the profile's `launch.back`.
 `backs` and `cost` are pure; `back_pairs` reads the ledger's rows it is given.
 `admission.ends`, a different function, is left as it is.
+
+Packet nw6-held-respawn: `labels` names helpers by their spawn lines, for the launcher's
+held.json and the respawn mark's line; `waits_line` is that line; `printable` is what of a label
+prints. Readers; never raise.
 """
 from __future__ import annotations
 
@@ -376,3 +380,51 @@ def status_for(sid, env) -> str | None:
         return status_line(rd["room"], rd["out"], TZ) if rd else None
     except Exception:                                   # noqa: BLE001  (a read, never a crash)
         return None
+
+
+# ---- nw6-held-respawn: the helpers by label ---------------------------------------------------
+
+ANY = "a helper"             # a helper whose spawn line names nothing, or has none
+LABEL_CAP = 60
+_SPACE = re.compile(r"[\t\n\v\f\r]")
+
+
+def printable(text: str) -> str:
+    """nw6 Z4: what of a label prints: printable ASCII; ASCII whitespace folded to one space,
+    a double quote made a single one, and any other character `?`."""
+    text = "".join(c if " " <= c <= "~" else "?" for c in _SPACE.sub(" ", str(text)))
+    return " ".join(text.replace('"', "'").split()) or "?"
+
+
+def label(spawn: dict | None) -> str:
+    """A helper's label: its spawn line's description, else its type, else ANY, in printable
+    ASCII (Z4) and cut at LABEL_CAP with `...`; ` (background)` for a helper spawned in the
+    background."""
+    spawn = spawn if isinstance(spawn, dict) else {}
+    text = next((v for v in (spawn.get("description"), spawn.get("subagentType"))
+                 if isinstance(v, str) and v.strip()), ANY)
+    text = printable(text)
+    if len(text) > LABEL_CAP:
+        text = text[:LABEL_CAP - 3] + "..."
+    return text + (" (background)" if spawn.get("background") is True else "")
+
+
+def _rows_in(adir) -> list:
+    return _regular_rows(adir / admission.ROTATED) + _regular_rows(adir / admission.LEDGER)
+
+
+def labels(adir, ids) -> dict:
+    """agent id -> label for each of `ids` with a spawn line in the ledger under `adir`."""
+    try:
+        sp = _spawns(_rows_in(adir))
+        return {i: label(sp[i]) for i in ids if i in sp}
+    except Exception:                                   # noqa: BLE001  (a read, never a crash)
+        return {}
+
+
+def waits_line(out: list) -> str:
+    """R1: the respawn mark's line with helpers out, in place of the unconditional one."""
+    n = len(out)
+    return (f"respawn marked; the restart waits on {n} helper{'' if n == 1 else 's'} out: "
+            + ", ".join(f'"{x}"' for x in out)
+            + "; the launcher restarts this sitting once they are quiet and this turn has ended")
