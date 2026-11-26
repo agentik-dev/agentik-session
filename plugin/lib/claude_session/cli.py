@@ -1811,7 +1811,7 @@ def cmd_run(args) -> int:
     from . import chain
     env = dict(os.environ)
     flags = {k: _respawn_flag(k, getattr(args, k)) for k in resolver.RESPAWN_KEYS
-             if getattr(args, k) is not None}
+             if getattr(args, k, None) is not None}       # nw6b: hold_max has no flag
     dry = getattr(args, "dry_run", False)
     cwd = os.getcwd()
     given, defaulted, swallow = run_defaults(cwd, env, args.claude_args)
@@ -1853,7 +1853,7 @@ def cmd_run(args) -> int:
               + shlex.join([program, "--session-id", chain.Effects().uuid(), *claude_args]))
         return 0
     return chain.Chain(name, claude_args, resolver.state_dir(env),
-                       chain.Effects(), lambda: chain.guards(cwd, env, flags),
+                       chain.Effects(), lambda: chain.run_guards(cwd, env, flags),
                        argv=["agentik", "session", *args.raw_argv], warnings=warnings).run()
 
 

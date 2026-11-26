@@ -57,6 +57,7 @@ _BARE = frozenset({"--strict-mcp-config", "--verbose"})
 _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 20, "floor": 600, "settle": 60}
+HOLD_MAX = "hold_max"                # nw6b H1: the held respawn's ceiling, run_guards' fourth key
 HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
 HELPERS = "helpers"                  # nw6 R3: held.json's reason while the helpers hold it
 # u1 R1: a helper call open this long, and no helper stamp as recent, is stale: a rejected
@@ -136,17 +137,24 @@ def default_name(cwd, env) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:64] or "chain"
 
 
-def guards(cwd, env, flags) -> dict:
+def run_guards(cwd, env, flags) -> dict:
     """The resolved `respawn` (§4: the profiles, the repo's config.yaml, then
-    config.local.yaml) with `run`'s flags over it. Raises resolver.ResolveError."""
+    config.local.yaml) with `run`'s flags over it, `hold_max` included (nw6b H1; 0 where
+    no layer names it, main's rule): what the launcher reads. Raises
+    resolver.ResolveError."""
     r = resolver.resolve(cwd, _GUARD_SESSION, env,
                          profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
-    out = {**DEFAULTS, **(r.sections["session"].get("respawn") or {})}
+    out = {**DEFAULTS, HOLD_MAX: 0, **(r.sections["session"].get("respawn") or {})}
     for k, v in flags.items():
-        if k not in DEFAULTS or not isinstance(v, int) or isinstance(v, bool) or v < 0:
+        if k not in out or not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise resolver.ResolveError(f"respawn.{k} must be a non-negative integer")
         out[k] = v
     return out
+
+
+def guards(cwd, env, flags) -> dict:
+    """run_guards' three guards of respawn-r1 §4, `cap`, `floor` and `settle`."""
+    return {k: v for k, v in run_guards(cwd, env, flags).items() if k != HOLD_MAX}
 
 
 def model_table(cwd, env) -> dict:
@@ -381,6 +389,22 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
     stale = [] if holding else [{"id": cid, "age": int(age) if timed else None}
                                 for cid, age, timed, _ in calls]
     return holding, h is not None and h > now - settle, stale
+
+
+def first_mark(sdir: Path) -> float | None:
+    """nw6b H2: the moment the held respawn's ceiling counts from, the `written` of the
+    sitting's first confirmed mark, from `respawn-first.json` (hooks._confirm writes it
+    once); else the marker's own `written`, for a confirm older than that file; None for
+    neither. A time below AT_FLOOR or past the year 5000 is none. A read; never raises."""
+    try:
+        for name, key in ((hooks.FIRST_MARK, "at"), (hooks.MARKER, "written")):
+            d = _json(sdir / name) or {}
+            at = d.get(key)
+            if d.get("session") == sdir.name and _num(at) and AT_FLOOR <= at <= 1e11:
+                return at
+    except Exception:                                   # noqa: BLE001 - no moment
+        pass
+    return None
 
 
 def labelled(adir, ids: list) -> list:
@@ -914,7 +938,8 @@ class Chain:
     def _ready(self, sdir: Path, now: float, mono: float | None = None) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,
         the end has stood `settle`, the helpers are quiet `settle` and none has a call open,
-        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since. A True
+        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since; the
+        helpers no longer hold past the first mark plus `hold_max` (nw6b H2). A True
         keeps the stale calls in `_stale`, `[{"id", "age"}]`, the age in whole seconds.
         A call whose `at` is no time (`_opened`) is aged from the launcher's first sight of
         its name on `mono`, `fx.monotonic()` by default, and its age is None (u1's fold)."""
@@ -932,10 +957,24 @@ class Chain:
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):
             return False
         held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call)
-        if held or stamp:                    # a call open, or the stamp under `settle`
-            return False
+        if (held or stamp) and not self._past_ceiling(sdir, now):
+            return False                     # a call open, or the stamp under `settle`
         self._stale = stale
         return True
+
+    def _until(self, sdir: Path):
+        """nw6b H2: the first confirmed mark plus `hold_max`, a wall-clock time; None with
+        no ceiling (0, or a guards mapping that names none) or no moment."""
+        hm = self.g.get(HOLD_MAX, 0)
+        if not (_num(hm) and hm > 0):
+            return None
+        first = first_mark(sdir)
+        return None if first is None else first + hm
+
+    def _past_ceiling(self, sdir: Path, now: float) -> bool:
+        """nw6b H2: past the ceiling the helper clause of `_ready` no longer holds."""
+        until = self._until(sdir)
+        return until is not None and now >= until
 
     # ---- the checks (§3.4, §3.5) --------------------------------------------------------
 

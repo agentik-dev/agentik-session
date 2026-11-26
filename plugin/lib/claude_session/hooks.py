@@ -124,6 +124,7 @@ CHAIN_VAR = resolver.CHAIN_VAR                  # one spelling, which the resolv
 CHAIN_RE = resolver.CHAIN_RE                    # a file name: never . or ..
 MARKER = "respawn.json"
 CONFIRMED = "respawn-main.json"
+FIRST_MARK = "respawn-first.json"   # nw6b H2: the sitting's first confirmed mark, written once
 ACTIVITY = "activity.json"
 TURN_ENDED = "turn-ended.json"
 LIMITED = "limited.json"     # a turn an API error ended (S34 ruling 5); the band reads it
@@ -1909,7 +1910,9 @@ def _confirm(payload: dict, sdir: Path) -> None:
     """respawn-r1 §3.2 step 5: a main-thread Bash call that ran `agentik-session checkpoint
     --respawn` (or `agentik session checkpoint`, or the pre-rename spelling: RESPAWN_CMDS)
     writes `respawn-main.json` {at, marker_sha256} when the marker was written at
-    or after this call's own PreToolUse stamp; none without `activity.json`. Never raises."""
+    or after this call's own PreToolUse stamp; none without `activity.json`. The first
+    confirm of a sitting writes `respawn-first.json` {session, at: the marker's `written`}
+    before it, once (nw6b H2). Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
         if payload.get("tool_name") != "Bash" or not _respawn_close(cmd):
@@ -1919,6 +1922,9 @@ def _confirm(payload: dict, sdir: Path) -> None:
         written = json.loads(raw).get("written")
         if not (_num(at) and _num(written)) or written < at:
             return
+        if not (sdir / FIRST_MARK).exists():    # nw6b H2: the ceiling's moment, never moved
+            store._write_private(sdir / FIRST_MARK, json.dumps(
+                {"session": sdir.name, "at": written}))
         store._write_private(sdir / CONFIRMED, json.dumps(
             {"at": time.time(), "marker_sha256": hashlib.sha256(raw).hexdigest()}))
     except Exception:                                   # noqa: BLE001
