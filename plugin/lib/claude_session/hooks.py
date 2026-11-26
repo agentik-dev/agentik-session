@@ -373,11 +373,15 @@ def _stamp(payload: dict, env, name: str, body: dict) -> None:
 def _tool_stamp(payload: dict, env, event: str) -> None:
     """A tool call's stamp: the main thread's `activity.json`, or a helper's (agent_id)
     `helper-activity.json` only (respawn-r1 ruling 6). PreToolUse writes either; a
-    helper's PostToolUse writes its stamp and nothing else."""
+    helper's PostToolUse writes its stamp and nothing else; a helper's stamp carries its
+    id-shaped `agent_id` (nw6b H5)."""
     tool = payload.get("tool_name")
-    name = HELPER_ACTIVITY if payload.get("agent_id") else ACTIVITY
-    _stamp(payload, env, name, {"event": event, "tool": _token(tool) if tool else None,
-                                "at": time.time()})
+    aid = payload.get("agent_id")
+    name = HELPER_ACTIVITY if aid else ACTIVITY
+    body = {"event": event, "tool": _token(tool) if tool else None, "at": time.time()}
+    if aid and isinstance(aid, str) and _SID.match(aid):
+        body["agent_id"] = aid              # nw6b H5: whose stamp, where the hook has it
+    _stamp(payload, env, name, body)
 
 
 def _call(payload: dict, env) -> Path | None:
