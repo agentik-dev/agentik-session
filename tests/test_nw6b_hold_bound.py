@@ -16,7 +16,8 @@ from test_chain import (G, RESPAWN_TEXT, T0, TERM, _frun, _fx, _held, _peek, _st
                         fake, hook, respawn_seq, write)
 from test_nw6_r4_signals import _call, _spawn_line
 from test_nw6_held_respawn import (LAUNCHER, MARKED, METER, SID, _ledger, _mark, _marked,  # noqa: F401
-                                   _open, _prompt, _record, _run, _session, _spawn, _stamp,
+                                   _open, _prompt, _prompt_seen, _record, _run, _session, _spawn,
+                                   _stamp,
                                    cli_env)
 
 AT174 = os.path.join(os.path.dirname(__file__), "fixtures", "nw6b", "at-174.json")
@@ -328,3 +329,49 @@ def test_h5_the_stamp_carries_the_agent_id(fake, monkeypatch):
                                .read_text()))
     _run_held(fake, monkeypatch, [(20, _call("PostToolUse", "a1", "toolu_01")), (21, look)], 0)
     assert seen["agent_id"] == "a1" and set(seen) == {"event", "tool", "at", "agent_id"}
+
+
+# ---- fix round 1 of review 1 (Y1 to Y5) ---------------------------------------------------------
+
+def _stop(aid):
+    """The helper's SubagentStop, as the hook gets it."""
+    def act(fx, p):
+        hooks.subagent_stop({"session_id": p.sid, "agent_id": aid})
+    return act
+
+
+ENDED = [(11, _spawn_line("a1", "build x")), (12, _call("PreToolUse", "a1", "toolu_01")),
+         (1100, _call("PostToolUse", "a1", "toolu_01")), (1101, _stop("a1"))]
+
+
+def test_y1_the_prompt_never_names_an_ended_helper(fake, monkeypatch):
+    """Review 1's test_pa2: `a1` ends at 1101, its stamp of 1100 under `settle`; the
+    prompt at 1103 names a helper, never the one that ended."""
+    seen = []
+    fx = _run_held(fake, monkeypatch, ENDED + [(1103, _prompt_seen(seen)), (1110, hook("Stop"))], 0)
+    ((_, _, words),) = seen
+    assert len(words) == 1 and words[0].endswith('by 1 helper: "a helper"'), words
+    calls = resolver.session_dir(_state(), fx.procs[0].sid) / hooks.CALLS
+    assert not list(calls.iterdir())
+
+
+def test_y1_the_record_never_names_an_ended_helper(fake, monkeypatch):
+    """Review 1's test_pa: held.json at 1104 and 1130 names `a helper`; the signal is the
+    head's, `settle` after the stamp of 1100."""
+    seen = []
+    fx = _run_held(fake, monkeypatch, ENDED + [(1104, _peek(seen)), (1130, _peek(seen))], 0)
+    assert [r["by"] for r in seen] == [["a helper"]] * 2
+    assert 1160 <= _signal(fx) <= 1162
+
+
+def test_y1_two_helpers_out_the_stamp_names_no_ended_one(fake, monkeypatch):
+    """`a2` is out between calls when `a1`, whose stamp is the last, ends: the record names
+    a helper; `a2`'s next stamp names it again. The signal is `settle` after that stamp."""
+    seen = []
+    seq = ([(10, _spawn_line("a2", "build y")), (13, _call("PreToolUse", "a2", "toolu_02")),
+            (900, _call("PostToolUse", "a2", "toolu_02"))] + ENDED
+           + [(1104, _peek(seen)), (1150, _call("PostToolUse", "a2", "toolu_03")),
+              (1155, _peek(seen))])
+    fx = _run_held(fake, monkeypatch, seq, 0)
+    assert [r["by"] for r in seen] == [["a helper"], ["build y"]]
+    assert 1210 <= _signal(fx) <= 1212

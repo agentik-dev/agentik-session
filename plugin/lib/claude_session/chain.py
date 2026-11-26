@@ -450,6 +450,23 @@ def labelled(adir, ids: list) -> list:
     return list(dict.fromkeys(out))
 
 
+def _stamp_helper(sdir: Path) -> str | None:
+    """nw6b H5, Y1: the id-shaped agent id the helpers' stamp names, None where it names
+    none, or names a helper whose end (hooks.ENDED, its SubagentStop) is recorded at or
+    after the stamp: an ended helper is never named. A read; never raises."""
+    try:
+        d = _json(sdir / hooks.HELPER_ACTIVITY) or {}
+        aid, at = d.get("agent_id"), d.get("at")
+        if not (isinstance(aid, str) and hooks._SID.match(aid)):
+            return None
+        end = _json(sdir / hooks.ENDED / f"{aid}.json")
+        if end is not None and not (_num(end.get("at")) and _num(at) and at > end["at"]):
+            return None                  # ended after its stamp, or a record unread as time
+        return aid
+    except Exception:                                   # noqa: BLE001 - name none
+        return None
+
+
 def launcher_guards(state, name: str, sid: str) -> dict | None:
     """nw6b H4: the `settle` and `hold_max` the launcher of the chain `name` resolved for
     the sitting `sid`, from guards.json beside sitting.json; None where it names another
@@ -961,9 +978,9 @@ class Chain:
         try:
             ids, stamp, _ = helper_hold(sdir, now, self.fx.monotonic(), dict(self._first),
                                         self.g["settle"], self.stale_call)
-            aid = (_json(sdir / hooks.HELPER_ACTIVITY) or {}).get("agent_id") if stamp else None
-            if not ids and isinstance(aid, str) and hooks._SID.match(aid):
-                ids = [aid]                  # nw6b H5: the stamp names its helper
+            aid = _stamp_helper(sdir) if stamp and not ids else None
+            if aid is not None:
+                ids = [aid]                  # nw6b H5: the stamp names its helper, Y1: a live one
             if not ids:
                 self._want = None
                 return [room.ANY] if stamp else []

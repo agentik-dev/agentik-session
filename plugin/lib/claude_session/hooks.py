@@ -2347,6 +2347,7 @@ def stop(payload: dict, env=None) -> dict:
 # ---- a hand-back's cost (packet nw4b-back-measure; hq design/31 item 19) --------------------
 
 BACKS = "backs"     # `backs/<agent_id>.json` {at, before}: a helper's end, until the turn's end
+ENDED = "ended"     # nw6b Y1: `ended/<agent_id>.json` {at}: a helper's end, kept for the sitting
 
 
 def _occupancy(sdir: Path, env) -> int | None:
@@ -2512,7 +2513,9 @@ def subagent_stop(payload: dict, env=None) -> dict:
     id-shaped and whose session's folder exists (the payload's id alone, never the
     fallback), each regular file under `calls/` whose JSON object's `agent_id` is that id is
     removed. Another helper's file, one with no `agent_id` (an older plugin's), one that does
-    not parse and a directory are left to the launcher's stale bound. Then (packet nw4b R2) it
+    not parse and a directory are left to the launcher's stale bound. Before them (nw6b Y1)
+    it records the end, `ended/<agent_id>.json` {at}, so the launcher names no ended helper
+    from the helpers' stamp. Then (packet nw4b R2) it
     stamps the coordinator's occupancy at the helper's end, `backs/<agent_id>.json`, for the
     main thread's next Stop to read; with no reading it writes no stamp. It never raises and
     says nothing: dispatch prints nothing for it (SILENT)."""
@@ -2524,6 +2527,10 @@ def subagent_stop(payload: dict, env=None) -> dict:
                             os.environ if env is None else env, fallback=False)
         if sdir is None or not sdir.is_dir():
             return {}
+        try:                                            # nw6b Y1: before the calls go
+            store._write_private(sdir / ENDED / f"{aid}.json", json.dumps({"at": time.time()}))
+        except OSError:
+            pass
         cdir = sdir / CALLS
         for name in os.listdir(cdir) if cdir.is_dir() else ():
             if name.startswith("."):                    # a write in flight, as `_ready` skips
