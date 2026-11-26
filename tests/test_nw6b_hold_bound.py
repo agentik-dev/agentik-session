@@ -436,3 +436,34 @@ def test_y2_the_prompts_line_and_status_past_the_ceiling(cli_env, monkeypatch):
     assert json.loads(out)["respawn_held"] == {
         "marked": MARKED, "since": MARKED + 70, "held_minutes": held, "by": ["build nw6"],
         "until": until, "line": line}
+
+
+def _ledger_rows():
+    from claude_session import ledger
+    return [json.loads(l) for l in ledger.path(_state()).read_text().splitlines()]
+
+
+def test_y3_a_signal_the_ceiling_brings_names_the_calls_it_went_past(fake, monkeypatch):
+    """Review 1's test_pc: a call open from 12, stamps each 100 s, the ceiling 600: one line
+    names the call and how long it stood open, and the restart line keeps it."""
+    seq = ([(11, _spawn_line("a1", "build x")), (12, _call("PreToolUse", "a1", "toolu_01"))]
+           + [(100 * k, _call("PostToolUse", "a1", f"toolu_1{k}")) for k in range(1, 30)])
+    fx = _run_held(fake, monkeypatch, seq, 600)
+    assert 612 <= _signal(fx) <= 614
+    lines = [s for s in fx.said if "went on past" in s]
+    assert lines == ["c1: went on past a helper call at the ceiling: toolu_01 open 10 min"]
+    assert fx.said.index(lines[0]) < next(i for i, l in enumerate(fx.said) if "ended on RESPAWN" in l)
+    (r,) = [r for r in _ledger_rows() if r.get("kind") == "restart"]
+    (s,) = r["stale_calls"]
+    assert s["id"] == "toolu_01" and s["ceiling"] is True and 600 <= s["age"] <= 602
+
+
+@pytest.mark.parametrize("hold_max", [600, 0])
+def test_y3_a_signal_the_ceiling_did_not_bring_says_no_such_line(hold_max, fake, monkeypatch):
+    seq = [(11, _spawn_line("a1", "build x")), (12, _call("PreToolUse", "a1", "toolu_01")),
+           (100, _call("PostToolUse", "a1", "toolu_01"))]
+    fx = _run_held(fake, monkeypatch, seq, hold_max)
+    assert 160 <= _signal(fx) <= 162
+    assert not [s for s in fx.said if "went on past" in s]
+    (r,) = [r for r in _ledger_rows() if r.get("kind") == "restart"]
+    assert r["stale_calls"] is None

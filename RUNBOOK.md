@@ -799,7 +799,13 @@ and the turn has ended and stood
 minutes with no helper activity since reads as stale (a rejected call
 never closes its file): the launcher goes on past it, says so in one line
 once the terminal is back, and names it in the restart line's
-`stale_calls`. The launcher then ends the sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
+`stale_calls`. The helpers hold the restart no longer than the ceiling,
+`hold_max` seconds after the sitting's first confirmed mark (shipped
+1800; 0 is none); the sitting's own turn and `settle` after it still
+hold. Past it the launcher goes on past a helper call still open, says
+`<chain>: went on past a helper call at the ceiling: <id> open <n> min`
+once the terminal is back, and names each such call in `stale_calls`
+with `"ceiling": true`. The launcher then ends the sitting, waits 10 s (Ctrl-C there ends the chain), writes a restart line to
 the ledger and starts the next. A sitting that exits without a confirmed
 RESPAWN stops the chain, and a crash (a nonzero exit) is never restarted.
 Every stop but a hang-up prints a start line that runs as printed (after a
@@ -857,9 +863,10 @@ hang-up the launcher writes nothing more to the terminal).
   orients from the charter alone` and clears an older copy (a helper, a relay
   row or a started session clears nothing); with no chain the copy stays in
   the session's own directory, where no successor looks.
-- The guards are `session: {respawn: {cap, floor, settle}}` in the config
-  layers (defaults 20 restarts in any 24 h, 600 s, 60 s); `--cap`,
-  `--floor` and `--settle` override them for one chain.
+- The guards are `session: {respawn: {cap, floor, settle, hold_max}}` in
+  the config layers (defaults 20 restarts in any 24 h, 600 s, 60 s, and
+  the ceiling 1800 s, 0 for none); `--cap`, `--floor` and `--settle`
+  override the first three for one chain, and `hold_max` has no flag.
 - When the repo sets `session.reconcile` (section 3), each restart runs
   `agentik session reconcile` once, after the restart line and before the
   successor starts, and the terminal shows one line, `<chain>: reconcile exit

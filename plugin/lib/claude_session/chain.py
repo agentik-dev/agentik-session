@@ -389,7 +389,8 @@ def past_half(state, sid: str, d: dict, now: float) -> bool:
         return False
 
 
-def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call):
+def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call,
+                held_calls: list | None = None):
     """§3.3 step 3's helper clause (ruling 2, u1 R1), the one reading of what the launcher
     waits on, for `_ready`, for held.json and for the respawn mark (nw6 Z1, Z2): (open,
     stamp, stale). `open` holds the agent id (None where the file names none) of each call
@@ -397,7 +398,8 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
     that recent. `stamp` is True while the helpers' stamp holds: malformed, or under
     `settle` seconds old. `stale` holds the calls an end would pass, `{"id", "age"}`.
     A call whose `at` is no time (`_opened`) is aged from its first sight, `first[path]` on
-    `mono`, which this sets; its age is then None (u1's fold)."""
+    `mono`, which this sets; its age is then None (u1's fold). `held_calls`, where given,
+    gains `{"id", "age"}` for each call that holds (nw6b Y3: what a ceiling goes past)."""
     # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
     # close between the two reads leaves a fresh stamp, never a gap.
     try:
@@ -420,15 +422,18 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
             seen = first.setdefault(str(p), mono)
             calls.append((p.name, mono - seen, False, aid))
     helper = _json(sdir / hooks.HELPER_ACTIVITY)
-    if helper is not None and not _num(helper.get("at")):
-        return ([aid if isinstance(aid, str) else None
-                 for _, age, _, aid in calls if age < stale_call], True, [])  # it holds
+    bad = helper is not None and not _num(helper.get("at"))     # a malformed stamp holds
     # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
     # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
-    h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+    h = helper["at"] if helper is not None and not bad and _opened(helper["at"], now) else None
     recent = h is not None and h > now - stale_call
-    holding = [aid if isinstance(aid, str) else None
-               for _, age, _, aid in calls if recent or age < stale_call]
+    holds = [c for c in calls if c[1] < stale_call or (recent and not bad)]
+    if held_calls is not None:
+        held_calls.extend({"id": cid, "age": int(age) if timed else None}
+                          for cid, age, timed, _ in holds)
+    holding = [aid if isinstance(aid, str) else None for _, _, _, aid in holds]
+    if bad:
+        return holding, True, []
     stale = [] if holding else [{"id": cid, "age": int(age) if timed else None}
                                 for cid, age, timed, _ in calls]
     return holding, h is not None and h > now - settle, stale
@@ -797,10 +802,14 @@ class Chain:
             rc, ended_by, held = self._watch(proc, sid, start)
             cut = len(self.got)                  # the signals taken while the child ran
             self.fx.tty_restore(attrs)                     # §3.7: before anything prints
-            if self.went_past:                   # u1 R1's word, before the grace line
-                self.fx.say(f"{self.name}: went on past a stale helper call: " + "; ".join(
-                    f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
-                    for s in self.went_past))
+            for what, past in (("a stale helper call", [s for s in self.went_past
+                                                        if not s.get("ceiling")]),
+                               ("a helper call at the ceiling",      # nw6b Y3
+                                [s for s in self.went_past if s.get("ceiling")])):
+                if past:                         # u1 R1's word, before the grace line
+                    self.fx.say(f"{self.name}: went on past {what}: " + "; ".join(
+                        f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
+                        for s in past))
             seconds = round(self.fx.now() - start)
             reason, code, marker, count = self._decide(sid, start, rc, ended_by, held)
             if reason is None:
@@ -1082,9 +1091,13 @@ class Chain:
         act = _json(sdir / hooks.ACTIVITY)
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):
             return False
-        held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call)
-        if (held or stamp) and not self._past_ceiling(sdir, now):
-            return False                     # a call open, or the stamp under `settle`
+        cut: list = []
+        held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call,
+                                         cut)
+        if held or stamp:                    # a call open, or the stamp under `settle`
+            if not self._past_ceiling(sdir, now):
+                return False
+            stale = stale + [{**c, "ceiling": True} for c in cut]   # nw6b Y3: what it cut
         self._stale = stale
         return True
 
