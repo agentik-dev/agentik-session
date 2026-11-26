@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from claude_session import admission, cli, config, hooks, resolver
+from claude_session import admission, chain, cli, config, hooks, resolver, room
 from test_chain import (G, T0, TERM, _frun, _fx, _held, _peek, _state, end, fake,  # noqa: F401
                         hook, respawn_seq)
 
@@ -52,6 +52,19 @@ def _spawn(sid, aid, desc, at, background=None, tid=None):
     return {"ts": _iso(at), "session": sid, "kind": "spawn", "subagentType": "general-purpose",
             "description": desc, "background": background, "agentId": aid,
             "tool_use_id": tid or f"toolu_{aid}"}
+
+
+def _open(aid, tid, at, sid=SID):
+    """A helper's open call, as its PreToolUse leaves it: `calls/<tool_use_id>`."""
+    calls = resolver.session_dir(resolver.state_dir(os.environ), sid) / hooks.CALLS
+    calls.mkdir(parents=True, exist_ok=True)
+    (calls / tid).write_text(json.dumps({"at": at, "agent_id": aid}))
+
+
+def _stamp(at, sid=SID):
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), sid)
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / hooks.HELPER_ACTIVITY).write_text(json.dumps({"event": "PostToolUse", "at": at}))
 
 
 def _done(aid, at):
@@ -93,6 +106,7 @@ def test_r1_no_ledger_is_the_pins_line(cli_env, monkeypatch):
 def test_r1_one_helper_out_is_named(cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
     _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
+    _open("a1", "toolu_01", time.time() - 50)              # Z2: the launcher waits on its call
     line = _mark()
     assert line == ('respawn marked; the restart waits on 1 helper out: "build nw6"; the '
                     "launcher restarts this sitting once they are quiet and this turn has ended")
@@ -105,10 +119,41 @@ def test_r1_each_out_by_label_and_background(cli_env, monkeypatch):
     _ledger(_spawn(SID, "a1", "build\tnw6\n part A", now - 90, background=True),
             _spawn(SID, "a2", "x" * 80, now - 60),
             {**_spawn(SID, "a3", None, now - 30), "subagentType": "relay:reviewer"})
+    for i in (1, 2, 3):
+        _open(f"a{i}", f"toolu_0{i}", now - 20)
     line = _mark()
     assert line.startswith('respawn marked; the restart waits on 3 helpers out: '
                            f'"build nw6 part A (background)", "{"x" * 57}...", "relay:reviewer"; ')
     assert "after this turn ends" not in line
+
+
+# ---- Z2: the mark names what the launcher's rule waits on, the ledger for labels alone ------
+
+def test_z2_a_run_with_no_done_and_no_open_call_is_not_named(cli_env, monkeypatch):
+    """Review 1's F2, the crashed helper: a spawn line an hour old, no `done`, no call open."""
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _ledger(_spawn(SID, "a1", "crashed helper", time.time() - 3600))
+    assert _mark() == LAUNCHER
+
+
+def test_z2_a_stale_call_is_not_named_and_a_fresh_stamp_is(cli_env, monkeypatch):
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    now = time.time()
+    _ledger(_spawn(SID, "a1", "build nw6", now - 3600))
+    _open("a1", "toolu_01", now - 1300)                   # past STALE_CALL, no stamp since
+    _stamp(now - 1300)
+    assert _mark() == LAUNCHER
+    _stamp(now - 10)                                      # the helpers' stamp under `settle`
+    assert _mark().startswith('respawn marked; the restart waits on 1 helper out: "build nw6"')
+    (resolver.session_dir(resolver.state_dir(os.environ), SID) / hooks.CALLS / "toolu_01").unlink()
+    assert _mark().startswith('respawn marked; the restart waits on 1 helper out: "a helper"')
+
+
+def test_z2_an_open_call_with_no_spawn_line_is_a_helper(cli_env, monkeypatch):
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _open("a7", "toolu_07", time.time() - 5)
+    _open("a8", "toolu_08", time.time() - 5, sid="another-sess-0000")
+    assert _mark().startswith('respawn marked; the restart waits on 1 helper out: "a helper"; ')
 
 
 def test_r1_no_launcher_line_is_unchanged(cli_env):
@@ -137,13 +182,15 @@ def _marked(marked):
         {"at": marked + 1, "marker_sha256": hashlib.sha256(raw).hexdigest()}))
 
 
-def _record(marked, since, by=("build nw6",), pid=None, session=SID, reason="helpers"):
+def _record(marked, since, by=("build nw6",), pid=None, session=SID, reason="helpers",
+            started=None):
     _marked(marked)
     home = resolver.state_dir(os.environ) / "respawn" / "c1"
     home.mkdir(parents=True, exist_ok=True)
+    pid = os.getpid() if pid is None else pid
     (home / "held.json").write_text(json.dumps(
-        {"reason": reason, "since": since, "session": session, "by": list(by),
-         "pid": os.getpid() if pid is None else pid}))
+        {"reason": reason, "since": since, "session": session, "by": list(by), "pid": pid,
+         "started": chain.proc_started(pid) if started is None else started}))
 
 
 def _prompt():
@@ -251,18 +298,58 @@ def test_r3_the_launcher_writes_the_record_and_removes_it_at_the_signal(fake, mo
     sid = fx.procs[0].sid
     ((t, sig),) = fx.procs[0].signals             # R4: the signal as at the pin
     assert sig == TERM and 1160 <= t - T0 <= 1162, t - T0
-    assert seen[0] is None                        # the turn has not yet stood `settle`
-    rec = seen[1]
+    rec = seen[0]                                 # Z1: said from the first poll that holds
     assert rec == {"reason": "helpers", "since": rec["since"], "session": sid,
-                   "by": ["build nw6 (background)"], "pid": os.getpid()}, rec
-    assert 74 <= rec["since"] - T0 <= 76
-    assert seen[2] == rec                         # the sitting's own turn: the record stands
-    assert seen[3] == rec                         # the stamp alone: the labels already said
+                   "by": ["build nw6 (background)"], "pid": os.getpid(),
+                   "started": chain.proc_started(os.getpid())}, rec
+    assert 12 <= rec["since"] - T0 <= 16 and rec["started"]
+    assert seen[1] == seen[2] == rec              # its call open, the sitting's turn or not
+    assert seen[3] == {**rec, "by": ["a helper"]}   # the stamp alone: no ended helper named
     assert seen[4] is None and _held() is None    # removed when it signalled
 
 
+def _prompt_seen(box):
+    """The sitting's prompt at this moment: held.json and the hook's words of the hold."""
+    def act(fx, p):
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv(hooks.CHAIN_VAR, "c1")
+            out = hooks.user_prompt_submit({"session_id": p.sid, "prompt": "go"})
+        text = out.get("hookSpecificOutput", {}).get("additionalContext", "")
+        box.append((fx.t - T0, _held(), [b for b in text.split("; ") if "respawn marked" in b]))
+    return act
+
+
+def test_z1_the_record_never_names_a_helper_that_has_ended(fake, monkeypatch):
+    """Review 1's F1 (test_probe_c): `build nw6` opens a call at 12 and closes it at 1100;
+    the sitting is woken at 1105 and stops at 1800; a peer's prompt comes at 1830."""
+    helper = {"agent_id": "a1", "tool_name": "Bash"}
+    seen = []
+
+    def spawn_line(fx, p):
+        d = _state() / admission.DIR
+        d.mkdir(parents=True, exist_ok=True)
+        (d / admission.LEDGER).write_text(json.dumps(_spawn(p.sid, "a1", "build nw6", fx.t)) + "\n")
+
+    seq = (respawn_seq(fake.charter)
+           + [(11, spawn_line), (12, hook("PreToolUse", tool_use_id="toolu_01", **helper)),
+              (600, _prompt_seen(seen)), (650, hook("Stop")),
+              (1100, hook("PostToolUse", tool_use_id="toolu_01", **helper)),
+              (1105, _prompt_seen(seen)), (1800, hook("Stop")), (1830, _prompt_seen(seen)),
+              (1840, hook("Stop")), end(7200)])
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    _frun(fx, G)
+    ((t, sig),) = fx.procs[0].signals
+    assert sig == TERM and 1900 <= t - T0 <= 1902, t - T0      # R4: as at the pin
+    (_, rec, words), (_, rec2, words2), (_, rec3, words3) = seen
+    assert rec3 is None and words3 == [], (rec3, words3)   # the own turn: no helper holds
+    assert rec2["by"] == ["a helper"] and "build nw6" not in str(words2)   # the stamp alone
+    assert rec["by"] == ["build nw6"] and words == [
+        f'respawn marked at {time.strftime("%H:%M", time.localtime(T0 + 12))}, held 9 min by '
+        '1 helper: "build nw6"'], words
+
+
+
 def test_r3_a_record_whose_launcher_is_gone_prints_nothing(cli_env, monkeypatch):
-    from claude_session import chain
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
     _record(MARKED, MARKED + 70, pid=_dead_pid())
     st = resolver.state_dir(os.environ)

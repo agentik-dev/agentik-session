@@ -273,11 +273,37 @@ def held_line(state, name: str, sid: str) -> str | None:
     return f"respawn held: {reason} since {at}"
 
 
+def proc_started(pid) -> float | None:
+    """nw6 Z3: the process `pid`'s start time in whole seconds since the epoch, as `ps -o
+    lstart=` says it; None for no process, or when ps cannot say. Never raises."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True,
+                           text=True, timeout=5, env={**os.environ, "LC_ALL": "C"})
+        text = " ".join(r.stdout.split())
+        if r.returncode != 0 or not text:
+            return None
+        return time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y"))
+    except (OSError, ValueError, OverflowError, subprocess.SubprocessError):
+        return None
+
+
+def launcher_alive(pid, started) -> bool:
+    """nw6 Z3: the launcher that wrote a record is alive: its `pid` is a live process
+    (gate._alive) whose start time is the record's `started`. A pid reused by another
+    process, or a record with no start time, is stale."""
+    return bool(_num(started) and gate._alive(pid) and proc_started(pid) == started)
+
+
 def held_by(state, name: str, sid: str, now: float, alive=None) -> dict | None:
     """nw6 R2, R3: the helpers' hold of `sid`'s marked respawn, from the chain home's
     held.json as the launcher wrote it, `{marked, since, held_minutes, by}`: None when the
-    record is no helpers' hold naming `sid`, its launcher's `pid` is not alive (a stale
-    record), or `sid` has no marker. A read; never raises."""
+    record is no helpers' hold naming `sid`, its launcher is not alive under the record's
+    start time (`alive(pid, started)`, launcher_alive by default: a stale record), or
+    `sid` has no marker. The hold counts from the later of the mark and the record's
+    `since` (Z3); each label prints in printable ASCII (Z4). A read; never raises."""
+    from . import room
     try:
         where = home(state, name)
         if not (sid and where):
@@ -288,14 +314,15 @@ def held_by(state, name: str, sid: str, now: float, alive=None) -> dict | None:
                 or not isinstance(by, list) or not by
                 or not all(isinstance(b, str) and b for b in by)):
             return None
-        if not (alive or gate._alive)(d.get("pid")):
+        if not (alive or launcher_alive)(d.get("pid"), d.get("started")):
             return None
         mk = _json(resolver.session_dir(state, sid) / hooks.MARKER) or {}
         marked = mk.get("written")
         if mk.get("session") != sid or not _num(marked):
             return None
         return {"marked": marked, "since": since,
-                "held_minutes": max(0, int((now - since) // 60)), "by": by}
+                "held_minutes": max(0, int((now - max(since, marked)) // 60)),
+                "by": [room.printable(b) for b in by]}
     except Exception:                                   # noqa: BLE001 - a read, no line
         return None
 
@@ -309,6 +336,82 @@ def held_words(d: dict) -> str:
     n = len(d["by"])
     return (f"respawn marked at {at}, held {d['held_minutes']} min by {n} "
             f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
+
+
+def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call):
+    """§3.3 step 3's helper clause (ruling 2, u1 R1), the one reading of what the launcher
+    waits on, for `_ready`, for held.json and for the respawn mark (nw6 Z1, Z2): (open,
+    stamp, stale). `open` holds the agent id (None where the file names none) of each call
+    that holds: open under `stale_call` seconds, or any open call while a helper stamp is
+    that recent. `stamp` is True while the helpers' stamp holds: malformed, or under
+    `settle` seconds old. `stale` holds the calls an end would pass, `{"id", "age"}`.
+    A call whose `at` is no time (`_opened`) is aged from its first sight, `first[path]` on
+    `mono`, which this sets; its age is then None (u1's fold)."""
+    # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
+    # close between the two reads leaves a fresh stamp, never a gap.
+    try:
+        paths = sorted(p for p in (sdir / hooks.CALLS).iterdir() if not p.name.startswith("."))
+    except FileNotFoundError:
+        paths = []
+    except OSError:
+        paths = [sdir / hooks.CALLS]     # calls/ will not list: aged from first sight
+    calls = []                           # (id, age in seconds, from `at` or not, agent)
+    for p in paths:
+        try:
+            doc = _json(p) or {}
+            at, aid = doc.get("at"), doc.get("agent_id")
+        except Exception:                # one file's error holds a poll at most (fold)
+            at = aid = None
+        seen = first.get(str(p))
+        if _opened(at, now) and (seen is None or now - at >= mono - seen):
+            calls.append((p.name, now - at, True, aid))
+        else:                            # the older of `at` and first sight counts
+            seen = first.setdefault(str(p), mono)
+            calls.append((p.name, mono - seen, False, aid))
+    helper = _json(sdir / hooks.HELPER_ACTIVITY)
+    if helper is not None and not _num(helper.get("at")):
+        return ([aid if isinstance(aid, str) else None
+                 for _, age, _, aid in calls if age < stale_call], True, [])  # it holds
+    # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
+    # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
+    h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+    recent = h is not None and h > now - stale_call
+    holding = [aid if isinstance(aid, str) else None
+               for _, age, _, aid in calls if recent or age < stale_call]
+    stale = [] if holding else [{"id": cid, "age": int(age) if timed else None}
+                                for cid, age, timed, _ in calls]
+    return holding, h is not None and h > now - settle, stale
+
+
+def labelled(adir, ids: list) -> list:
+    """nw6 R1, R3: the labels of the helpers whose agent ids hold (helper_hold's `open`),
+    each read from its spawn line in the ledger under `adir` (room.labels), room.ANY for a
+    miss or a call that names no agent; in agent id order, each label once."""
+    from . import room
+    want = sorted({i for i in ids if isinstance(i, str)})
+    got = room.labels(adir, want) if want else {}
+    out = [got.get(i, room.ANY) for i in want] + ([room.ANY] if None in ids else [])
+    return list(dict.fromkeys(out))
+
+
+def mark_holders(state, sid: str, env, cwd=None) -> list:
+    """nw6 Z2: at the respawn mark, the labels of what the launcher's rule would wait on now
+    (helper_hold, under the guards' `settle` and STALE_CALL): the session's open helper
+    calls by agent id, labelled from the ledger, else [room.ANY] for a fresh helper stamp
+    alone; [] with nothing, or on a fault. A call with no `at` counts as just seen."""
+    from . import admission, room
+    try:
+        try:
+            settle = guards(Path.cwd() if cwd is None else cwd, env, {})["settle"]
+        except Exception:                               # noqa: BLE001 - the default
+            settle = DEFAULTS["settle"]
+        ids, stamp, _ = helper_hold(resolver.session_dir(state, sid), time.time(),
+                                    time.monotonic(), {}, settle, STALE_CALL)
+        if ids:
+            return labelled(admission.directory(env), ids)
+        return [room.ANY] if stamp else []
+    except Exception:                                   # noqa: BLE001 - the mark is written
+        return []
 
 
 def _json(path: Path):
@@ -461,10 +564,11 @@ class Chain:
         self.started = 0.0
         self.config_error: str | None = None   # a resolve that failed while a child ran
         self._said: str | None = None   # the reason held.json names; "" before a watch (S37)
-        self._holding = None            # nw6 R3: the poll's helpers' hold, as `_ready` found it
-        self._by: list = []             # the labels held.json names for the helpers
+        self._by: list = []             # nw6 R3: the labels held.json names for the helpers
         self._since = None              # and since when they hold
-        self._labels: dict = {}         # each helper's label, read once from its spawn line
+        self._ids = None                # the ids those labels were last read for (Z4)
+        self._want = None               # and the ids of this poll's read
+        self._pid_started = None        # this launcher's start time, beside its pid (Z3)
 
     # ---- the run -----------------------------------------------------------------------
 
@@ -676,12 +780,12 @@ class Chain:
                         self._say_held("not-main" if self._unconfirmed(sdir, sid, now)
                                        else None, sid, now)
                     continue
-                self._holding = None
                 held, seen, end = self._step(sdir, sid, start, now, conf, seen, held)
-                if held is None and not end and isinstance(self._holding, list):
-                    self._say_held(HELPERS, sid, now, self._held_by(self._holding))
-                elif not (held is None and not end and self._holding is None
-                          and self._said == HELPERS):    # nw6: the sitting's own turn
+                if held is None and not end:     # nw6 Z1: who holds, read at every poll
+                    by = self._holders(sdir, now)
+                    if by is not None:
+                        self._say_held(HELPERS if by else None, sid, now, by)
+                else:
                     self._say_held(held, sid, now)
                 if end:
                     self.fx.send(proc, signal.SIGTERM)
@@ -736,28 +840,35 @@ class Chain:
         self.config_error = None
         return True
 
-    def _held_by(self, ids: list) -> list:
-        """nw6 R3: the labels of the helpers whose open calls hold, each read once from its
-        spawn line (room.labels); with none open (the helpers' stamp alone) the labels
-        already said, else room.ANY."""
+    def _holders(self, sdir, now) -> list | None:
+        """nw6 Z1: what holds the respawn on this poll, by label, read as `_ready`'s helper
+        clause reads it (helper_hold, on a copy of the first sights, so the ready condition
+        ages no call earlier than at the pin): the open calls' helpers, else [room.ANY] for
+        the helpers' stamp alone, else []; None on a fault, which leaves the record as it
+        is. Z4: the labels are read again whenever the ids change or one is a miss, so each
+        write names what the ledger says at that write."""
         from . import admission, room
-        if not ids:
-            return self._by if self._said == HELPERS else [room.ANY]
-        want = sorted({i for i in ids if isinstance(i, str)})
-        new = [i for i in want if i not in self._labels]
-        if new:
-            got = room.labels(self.state / admission.DIR, new)
-            self._labels.update({i: got.get(i, room.ANY) for i in new})
-        out = [self._labels[i] for i in want] + ([room.ANY] if None in ids else [])
-        return list(dict.fromkeys(out))
+        try:
+            ids, stamp, _ = helper_hold(sdir, now, self.fx.monotonic(), dict(self._first),
+                                        self.g["settle"], self.stale_call)
+            if not ids:
+                self._want = None
+                return [room.ANY] if stamp else []
+            self._want = (sorted({i for i in ids if isinstance(i, str)}), None in ids)
+            if self._said != HELPERS or self._want != self._ids or room.ANY in self._by:
+                return labelled(self.state / admission.DIR, ids)
+            return self._by
+        except Exception:                                   # noqa: BLE001 - said next poll
+            return None
 
     def _say_held(self, reason, sid, now, by=None):
         """S37 ruling 2: a hold is said through the state, never the terminal (§3.7). The
         chain home's held.json, `{reason, since, session}`, is written when a hold begins
         or its reason changes and removed when it clears or the child ends. A write that
         fails is tried again at the next poll; the hold holds either way. nw6 R3: the
-        helpers' hold adds `by` and the launcher's `pid`, rewritten when `by` changes with
-        its first `since` kept."""
+        helpers' hold adds `by`, the launcher's `pid` and its start time `started` (Z3),
+        rewritten when `by` changes with its first `since` kept; a write or a removal that
+        fails changes nothing but the file."""
         if reason == self._said and (reason != HELPERS or by == self._by):
             return
         if reason == HELPERS and self._said == HELPERS:
@@ -772,7 +883,9 @@ class Chain:
                     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                     doc = {"reason": reason, "since": now, "session": sid}
                     if reason == HELPERS:
-                        doc.update(by=by, pid=os.getpid())
+                        if self._pid_started is None:
+                            self._pid_started = proc_started(os.getpid()) or 0
+                        doc.update(by=by, pid=os.getpid(), started=self._pid_started or None)
                     with os.fdopen(fd, "w", encoding="utf-8") as f:
                         json.dump(doc, f)
                     os.replace(tmp, path)
@@ -782,7 +895,7 @@ class Chain:
             return
         self._said = reason
         if reason == HELPERS:
-            self._by, self._since = by, now
+            self._by, self._since, self._ids = by, now, self._want
 
     def _sitting(self, sid: str) -> None:
         """nw2 R2, R4: `sitting.json` names the sitting about to start, then the runner's
@@ -818,44 +931,9 @@ class Chain:
         act = _json(sdir / hooks.ACTIVITY)
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):
             return False
-        # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
-        # close between the two reads leaves a fresh stamp, never a gap.
-        try:
-            paths = sorted(p for p in (sdir / hooks.CALLS).iterdir() if not p.name.startswith("."))
-        except FileNotFoundError:
-            paths = []
-        except OSError:
-            paths = [sdir / hooks.CALLS]     # calls/ will not list: aged from first sight
-        calls = []                           # (id, age in seconds, from `at` or not, agent)
-        for p in paths:
-            try:
-                doc = _json(p) or {}
-                at, aid = doc.get("at"), doc.get("agent_id")
-            except Exception:                # one file's error holds a poll at most (fold)
-                at = aid = None
-            seen = self._first.get(str(p))
-            if _opened(at, now) and (seen is None or now - at >= mono - seen):
-                calls.append((p.name, now - at, True, aid))
-            else:                            # the older of `at` and first sight counts
-                seen = self._first.setdefault(str(p), mono)
-                calls.append((p.name, mono - seen, False, aid))
-        helper = _json(sdir / hooks.HELPER_ACTIVITY)
-        if helper is not None and not _num(helper.get("at")):
-            return False                     # a malformed stamp holds
-        # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
-        # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
-        h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
-        recent = h is not None and h > now - self.stale_call
-        holding = [aid if isinstance(aid, str) else None
-                   for _, age, _, aid in calls if recent or age < self.stale_call]
-        if holding:                          # nw6 R3: who holds, for held.json
-            self._holding = holding
+        held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call)
+        if held or stamp:                    # a call open, or the stamp under `settle`
             return False
-        stale = [{"id": cid, "age": int(age) if timed else None} for cid, age, timed, _ in calls]
-        if h is not None and h > now - settle:
-            self._holding = []
-            return False
-        self._holding = False
         self._stale = stale
         return True
 

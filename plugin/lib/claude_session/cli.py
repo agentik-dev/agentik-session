@@ -1501,8 +1501,9 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
             n = len(gate.open_jobs(resolver.state_dir(os.environ), chain))
         except Exception:                               # noqa: BLE001 - the mark is written
             n = 0
-        from . import admission, room
-        out = room.out_labels(sid, admission.directory(os.environ))   # nw6 R1: who holds it
+        from . import chain as chain_mod, room
+        out = chain_mod.mark_holders(resolver.state_dir(os.environ), sid,   # nw6 Z2: what the
+                                     os.environ)                  # launcher's rule waits on
         return ((room.waits_line(out) if out else
                  "respawn marked; the launcher restarts this sitting after this turn ends")
                 + (f"; {gate.gate_words(n)}" if n else ""))     # nw2 R6

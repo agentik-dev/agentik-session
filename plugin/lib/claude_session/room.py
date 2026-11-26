@@ -14,8 +14,9 @@ ceiling, and a kind with fewer, or a meter with no ceiling, the profile's `launc
 `backs` and `cost` are pure; `back_pairs` reads the ledger's rows it is given.
 `admission.ends`, a different function, is left as it is.
 
-Packet nw6-held-respawn: `labels` and `out_labels` name helpers by their spawn lines, for the
-launcher's held.json and the respawn mark's line; `waits_line` is that line. Readers; never raise.
+Packet nw6-held-respawn: `labels` names helpers by their spawn lines, for the launcher's
+held.json and the respawn mark's line; `waits_line` is that line; `printable` is what of a label
+prints. Readers; never raise.
 """
 from __future__ import annotations
 
@@ -385,17 +386,24 @@ def status_for(sid, env) -> str | None:
 
 ANY = "a helper"             # a helper whose spawn line names nothing, or has none
 LABEL_CAP = 60
-_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+_SPACE = re.compile(r"[\t\n\v\f\r]")
+
+
+def printable(text: str) -> str:
+    """nw6 Z4: what of a label prints: printable ASCII; ASCII whitespace folded to one space,
+    a double quote made a single one, and any other character `?`."""
+    text = "".join(c if " " <= c <= "~" else "?" for c in _SPACE.sub(" ", str(text)))
+    return " ".join(text.replace('"', "'").split()) or "?"
 
 
 def label(spawn: dict | None) -> str:
-    """A helper's label: its spawn line's description, else its type, else ANY, folded and cut
-    at LABEL_CAP with `...`, a double quote made a single one; ` (background)` for a helper
-    spawned in the background."""
+    """A helper's label: its spawn line's description, else its type, else ANY, in printable
+    ASCII (Z4) and cut at LABEL_CAP with `...`; ` (background)` for a helper spawned in the
+    background."""
     spawn = spawn if isinstance(spawn, dict) else {}
     text = next((v for v in (spawn.get("description"), spawn.get("subagentType"))
                  if isinstance(v, str) and v.strip()), ANY)
-    text = " ".join(_CTRL.sub(" ", text).replace('"', "'").split())
+    text = printable(text)
     if len(text) > LABEL_CAP:
         text = text[:LABEL_CAP - 3] + "..."
     return text + (" (background)" if spawn.get("background") is True else "")
@@ -412,19 +420,6 @@ def labels(adir, ids) -> dict:
         return {i: label(sp[i]) for i in ids if i in sp}
     except Exception:                                   # noqa: BLE001  (a read, never a crash)
         return {}
-
-
-def out_labels(sid, adir) -> list:
-    """The label of each of `sid`'s helpers out (its runs with no end, as `_reading` counts
-    them), oldest first; [] with none, no ledger or a fault."""
-    try:
-        rows = _rows_in(adir)
-        sp = _spawns(rows)
-        own = admission.runs([r for r in rows if r.get("session") == sid or r.get("kind") == "done"])
-        return [label(sp.get(r.get("tool_use_id") or "") or sp.get(r.get("agentId") or ""))
-                for r in own if r["end"] is None]
-    except Exception:                                   # noqa: BLE001
-        return []
 
 
 def waits_line(out: list) -> str:
