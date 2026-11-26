@@ -499,29 +499,17 @@ def launcher_guards(state, name: str, sid: str) -> dict | None:
         return None
 
 
-def _mark_guards(state, sid: str, env, cwd) -> dict:
-    """nw6b H4: the mark reads the launcher's own values, the config's only where it wrote
-    none; the defaults (no ceiling) where the config does not resolve."""
-    got = launcher_guards(state, env.get(hooks.CHAIN_VAR) or "", sid)
-    if got is not None:
-        return got
-    try:
-        return run_guards(Path.cwd() if cwd is None else cwd, env, {})
-    except Exception:                                   # noqa: BLE001 - the default
-        return {**DEFAULTS, HOLD_MAX: 0}
-
-
 def mark_holders(state, sid: str, env, cwd=None) -> list:
     """nw6 Z2: at the respawn mark, the labels of what the launcher's rule would wait on now
-    (helper_hold, under the launcher's `settle`, nw6b H4, and STALE_CALL): the session's
-    open helper calls by agent id, labelled from the ledger; [] with none, a helper stamp
-    alone included (nw6b H5: it lapses inside the turn's own `settle`), or on a fault. A
-    call with no `at` counts as just seen."""
+    (helper_hold under STALE_CALL): the session's open helper calls by agent id, labelled
+    from the ledger; [] with none, a helper stamp alone included (nw6b H5: it lapses inside
+    the turn's own `settle`), or on a fault. No guard is read (nw6b Y5): `settle` decides
+    only the stamp's flag, which the mark does not use. A call with no `at` counts as just
+    seen."""
     from . import admission
     try:
-        settle = _mark_guards(state, sid, env, cwd)["settle"]
         ids, _, _ = helper_hold(resolver.session_dir(state, sid), time.time(),
-                                time.monotonic(), {}, settle, STALE_CALL)
+                                time.monotonic(), {}, 0, STALE_CALL)
         return labelled(admission.directory(env), ids) if ids else []
     except Exception:                                   # noqa: BLE001 - the mark is written
         return []
@@ -530,10 +518,11 @@ def mark_holders(state, sid: str, env, cwd=None) -> list:
 def mark_until(state, sid: str, env, cwd=None):
     """nw6b H3: at the respawn mark, when the ceiling ends the hold: the sitting's first
     confirmed mark (this one where none was confirmed before) plus `hold_max`, the
-    launcher's (H4), else as run_guards resolves it; None with no ceiling, no moment, or on
-    a fault."""
+    launcher's alone (H4, Y4: guards.json naming this sitting; a launcher that wrote none
+    acts on no ceiling); None with no ceiling, no moment, or on a fault."""
     try:
-        hm = _mark_guards(state, sid, env, cwd)[HOLD_MAX]
+        got = launcher_guards(state, env.get(hooks.CHAIN_VAR) or "", sid)
+        hm = got[HOLD_MAX] if got is not None else 0
         first = first_mark(resolver.session_dir(state, sid))
         return first + hm if _num(hm) and hm > 0 and first is not None else None
     except Exception:                                   # noqa: BLE001 - the mark is written

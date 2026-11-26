@@ -161,6 +161,7 @@ def test_h3_no_until_and_mains_record_at_zero(fake, monkeypatch):
 
 def test_h3_the_marks_line_says_when(cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _launcher_guards(1800)                           # nw6b Y4: a launcher's ceiling
     _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
     _open("a1", "toolu_01", time.time() - 50)
     t = time.time()
@@ -268,10 +269,10 @@ def _mark_at(path, box):
     return act
 
 
-def test_h4_the_mark_reads_the_launchers_settle(fake, monkeypatch):
+def test_h4_the_launcher_writes_its_settle_and_the_mark_names_no_lone_stamp(fake, monkeypatch):
     """Review 2's test_probe_mark.py: a helper's stamp at 1, the mark at 29, `run --settle
-    10`. The launcher waits on nothing, so the mark names nothing; the mark's ceiling is the
-    launcher's too."""
+    10`. The mark names no lone stamp (H5) and reads no `settle` (Y5); the launcher signals
+    `settle` after the turn's end and writes its resolved `settle` to guards.json (H4)."""
     box = []
     bash = {"tool_name": "Bash",
             "tool_input": {"command": f"agentik-session checkpoint --respawn --charter {fake.charter}"}}
@@ -467,3 +468,45 @@ def test_y3_a_signal_the_ceiling_did_not_bring_says_no_such_line(hold_max, fake,
     assert not [s for s in fx.said if "went on past" in s]
     (r,) = [r for r in _ledger_rows() if r.get("kind") == "restart"]
     assert r["stale_calls"] is None
+
+
+def _launcher_guards(hold_max, session=SID):
+    home = resolver.state_dir(os.environ) / "respawn" / "c1"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / chain.LAUNCHER_GUARDS).write_text(json.dumps(
+        {"session": session, "settle": 60, "hold_max": hold_max}))
+
+
+AT174_MARK = ('respawn marked; the restart waits on 1 helper out: "build nw6"; the launcher '
+              "restarts this sitting once they are quiet and this turn has ended")
+
+
+def test_y4_the_mark_says_when_only_under_the_launchers_guards(cli_env, monkeypatch):
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _hold(cli_env, 1800)
+    _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
+    _open("a1", "toolu_01", time.time() - 50)
+    assert _mark() == AT174_MARK                    # no guards.json: alpha.174's line
+    _launcher_guards(1800, session="another-sess-0000-1111")
+    assert _mark() == AT174_MARK                    # one that names another sitting
+    _launcher_guards(0)
+    assert _mark() == AT174_MARK                    # a launcher with no ceiling
+    _launcher_guards(1800)
+    sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
+    first = json.loads((sdir / hooks.MARKER).read_text())["written"]
+    (sdir / hooks.FIRST_MARK).write_text(json.dumps({"session": SID, "at": first}))
+    assert _mark() == f"{AT174_MARK}, or at {_hm(first + 1800)} whatever is out"
+
+
+def test_y5_the_marks_holders_read_no_guards(cli_env, monkeypatch):
+    """The mark's read of what holds takes no `settle`: with every guards read broken it
+    names the open call's helper all the same."""
+    def broken(*a, **k):
+        raise AssertionError("the mark read a guard")
+    monkeypatch.setattr(chain, "run_guards", broken)
+    monkeypatch.setattr(chain, "launcher_guards", broken)
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
+    _open("a1", "toolu_01", time.time() - 50)
+    _stamp(time.time() - 5)
+    assert chain.mark_holders(resolver.state_dir(os.environ), SID, os.environ) == ["build nw6"]
