@@ -57,6 +57,8 @@ _BARE = frozenset({"--strict-mcp-config", "--verbose"})
 _LISTS = frozenset({"--tools", "--allowedTools", "--allowed-tools", "--disallowedTools",
                     "--disallowed-tools", "--add-dir", "--mcp-config"})
 DEFAULTS = {"cap": 20, "floor": 600, "settle": 60}
+HOLD_MAX = "hold_max"                # nw6b H1: the held respawn's ceiling, run_guards' fourth key
+LAUNCHER_GUARDS = "guards.json"      # nw6b H4: the launcher's resolved settle and hold_max
 HELD = "held.json"                   # the chain home's word on a hold (S37 ruling 2)
 HELPERS = "helpers"                  # nw6 R3: held.json's reason while the helpers hold it
 # u1 R1: a helper call open this long, and no helper stamp as recent, is stale: a rejected
@@ -136,17 +138,24 @@ def default_name(cwd, env) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:64] or "chain"
 
 
-def guards(cwd, env, flags) -> dict:
+def run_guards(cwd, env, flags) -> dict:
     """The resolved `respawn` (§4: the profiles, the repo's config.yaml, then
-    config.local.yaml) with `run`'s flags over it. Raises resolver.ResolveError."""
+    config.local.yaml) with `run`'s flags over it, `hold_max` included (nw6b H1; 0 where
+    no layer names it, main's rule): what the launcher reads. Raises
+    resolver.ResolveError."""
     r = resolver.resolve(cwd, _GUARD_SESSION, env,
                          profile=env.get("CLAUDE_SESSION_PROFILE") or None, overlay={})
-    out = {**DEFAULTS, **(r.sections["session"].get("respawn") or {})}
+    out = {**DEFAULTS, HOLD_MAX: 0, **(r.sections["session"].get("respawn") or {})}
     for k, v in flags.items():
-        if k not in DEFAULTS or not isinstance(v, int) or isinstance(v, bool) or v < 0:
+        if k not in out or not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise resolver.ResolveError(f"respawn.{k} must be a non-negative integer")
         out[k] = v
     return out
+
+
+def guards(cwd, env, flags) -> dict:
+    """run_guards' three guards of respawn-r1 §4, `cap`, `floor` and `settle`."""
+    return {k: v for k, v in run_guards(cwd, env, flags).items() if k != HOLD_MAX}
 
 
 def model_table(cwd, env) -> dict:
@@ -320,25 +329,68 @@ def held_by(state, name: str, sid: str, now: float, alive=None) -> dict | None:
         marked = mk.get("written")
         if mk.get("session") != sid or not _num(marked):
             return None
-        return {"marked": marked, "since": since,
-                "held_minutes": max(0, int((now - max(since, marked)) // 60)),
-                "by": [room.printable(b) for b in by]}
+        out = {"marked": marked, "since": since,
+               "held_minutes": max(0, int((now - max(since, marked)) // 60)),
+               "by": [room.printable(b) for b in by]}
+        if _num(d.get("until")):                        # nw6b H3: only under a ceiling
+            out["until"] = d["until"]
+        return out
     except Exception:                                   # noqa: BLE001 - a read, no line
         return None
 
 
-def held_words(d: dict) -> str:
-    """nw6 R2: the clause the prompt's line and `status` say while the helpers hold."""
+TELL = "tell them to commit and hand back, or stop them"   # nw6b H3, from half the ceiling
+
+
+def _hhmm(t) -> str:
     try:
-        at = time.strftime("%H:%M", time.localtime(d["marked"]))
-    except (OverflowError, OSError, ValueError):
-        at = "?"
+        return time.strftime("%H:%M", time.localtime(t))
+    except (OverflowError, OSError, ValueError, TypeError):
+        return "?"
+
+
+PAST_CEILING = "the restart comes once this turn has ended"   # nw6b Y2: `until` is past
+
+
+def when_words(until) -> str:
+    """nw6b H3: how the lines that say a hold end while a ceiling is set."""
+    return f"or at {_hhmm(until)} whatever is out"
+
+
+def past_until(until, now) -> bool:
+    """nw6b Y2: the ceiling's moment has come, so no line names it."""
+    return bool(_num(until) and _num(now) and now >= until)
+
+
+def held_words(d: dict, tell: bool = False, now=None) -> str:
+    """nw6 R2: the clause the prompt's line and `status` say while the helpers hold; under
+    a ceiling (nw6b H3) it ends with when_words, and `tell` (the prompt's line, from half
+    the ceiling on) puts TELL before that. Once `now` is at or past `until` (Y2) it ends
+    PAST_CEILING instead, with no TELL."""
     n = len(d["by"])
-    return (f"respawn marked at {at}, held {d['held_minutes']} min by {n} "
-            f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
+    out = (f"respawn marked at {_hhmm(d['marked'])}, held {d['held_minutes']} min by {n} "
+           f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
+    if "until" not in d:
+        return out
+    if past_until(d["until"], now):
+        return f"{out}; {PAST_CEILING}"
+    return (out + (f"; {TELL}" if tell else "")
+            + f"; the restart comes once they are quiet, {when_words(d['until'])}")
 
 
-def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call):
+def past_half(state, sid: str, d: dict, now: float) -> bool:
+    """nw6b H3: `now` is at or past half the ceiling, counted from the sitting's first
+    confirmed mark (first_mark) to held.json's `until`. A read; never raises."""
+    try:
+        until = d.get("until")
+        first = first_mark(resolver.session_dir(state, sid))
+        return _num(until) and first is not None and 2 * now >= first + until
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call,
+                held_calls: list | None = None):
     """§3.3 step 3's helper clause (ruling 2, u1 R1), the one reading of what the launcher
     waits on, for `_ready`, for held.json and for the respawn mark (nw6 Z1, Z2): (open,
     stamp, stale). `open` holds the agent id (None where the file names none) of each call
@@ -346,7 +398,8 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
     that recent. `stamp` is True while the helpers' stamp holds: malformed, or under
     `settle` seconds old. `stale` holds the calls an end would pass, `{"id", "age"}`.
     A call whose `at` is no time (`_opened`) is aged from its first sight, `first[path]` on
-    `mono`, which this sets; its age is then None (u1's fold)."""
+    `mono`, which this sets; its age is then None (u1's fold). `held_calls`, where given,
+    gains `{"id", "age"}` for each call that holds (nw6b Y3: what a ceiling goes past)."""
     # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
     # close between the two reads leaves a fresh stamp, never a gap.
     try:
@@ -369,18 +422,37 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
             seen = first.setdefault(str(p), mono)
             calls.append((p.name, mono - seen, False, aid))
     helper = _json(sdir / hooks.HELPER_ACTIVITY)
-    if helper is not None and not _num(helper.get("at")):
-        return ([aid if isinstance(aid, str) else None
-                 for _, age, _, aid in calls if age < stale_call], True, [])  # it holds
+    bad = helper is not None and not _num(helper.get("at"))     # a malformed stamp holds
     # u1 R1: a call is stale once it and every helper stamp are `stale_call` old.
     # A stamp that is no time (`_opened`) counts for neither bound, as NaN always read.
-    h = helper["at"] if helper is not None and _opened(helper["at"], now) else None
+    h = helper["at"] if helper is not None and not bad and _opened(helper["at"], now) else None
     recent = h is not None and h > now - stale_call
-    holding = [aid if isinstance(aid, str) else None
-               for _, age, _, aid in calls if recent or age < stale_call]
+    holds = [c for c in calls if c[1] < stale_call or (recent and not bad)]
+    if held_calls is not None:
+        held_calls.extend({"id": cid, "age": int(age) if timed else None}
+                          for cid, age, timed, _ in holds)
+    holding = [aid if isinstance(aid, str) else None for _, _, _, aid in holds]
+    if bad:
+        return holding, True, []
     stale = [] if holding else [{"id": cid, "age": int(age) if timed else None}
                                 for cid, age, timed, _ in calls]
     return holding, h is not None and h > now - settle, stale
+
+
+def first_mark(sdir: Path) -> float | None:
+    """nw6b H2: the moment the held respawn's ceiling counts from, the `written` of the
+    sitting's first confirmed mark, from `respawn-first.json` (hooks._confirm writes it
+    once); else the marker's own `written`, for a confirm older than that file; None for
+    neither. A time below AT_FLOOR or past the year 5000 is none. A read; never raises."""
+    try:
+        for name, key in ((hooks.FIRST_MARK, "at"), (hooks.MARKER, "written")):
+            d = _json(sdir / name) or {}
+            at = d.get(key)
+            if d.get("session") == sdir.name and _num(at) and AT_FLOOR <= at <= 1e11:
+                return at
+    except Exception:                                   # noqa: BLE001 - no moment
+        pass
+    return None
 
 
 def labelled(adir, ids: list) -> list:
@@ -394,24 +466,67 @@ def labelled(adir, ids: list) -> list:
     return list(dict.fromkeys(out))
 
 
+def _stamp_helper(sdir: Path) -> str | None:
+    """nw6b H5, Y1: the id-shaped agent id the helpers' stamp names, None where it names
+    none, or names a helper whose end (hooks.ENDED, its SubagentStop) is recorded at or
+    after the stamp: an ended helper is never named. A read; never raises."""
+    try:
+        d = _json(sdir / hooks.HELPER_ACTIVITY) or {}
+        aid, at = d.get("agent_id"), d.get("at")
+        if not (isinstance(aid, str) and hooks._SID.match(aid)):
+            return None
+        end = _json(sdir / hooks.ENDED / f"{aid}.json")
+        if end is not None and not (_num(end.get("at")) and _num(at) and at > end["at"]):
+            return None                  # ended after its stamp, or a record unread as time
+        return aid
+    except Exception:                                   # noqa: BLE001 - name none
+        return None
+
+
+def launcher_guards(state, name: str, sid: str) -> dict | None:
+    """nw6b H4: the `settle` and `hold_max` the launcher of the chain `name` resolved for
+    the sitting `sid`, from guards.json beside sitting.json; None where it names another
+    sitting, or holds no whole number of 0 or more for either. A read; never raises."""
+    try:
+        where = home(state, name)
+        d = (_json(where / LAUNCHER_GUARDS) or {}) if where and sid else {}
+        if d.get("session") != sid or not all(
+                isinstance(d.get(k), int) and not isinstance(d.get(k), bool) and d[k] >= 0
+                for k in ("settle", HOLD_MAX)):
+            return None
+        return {"settle": d["settle"], HOLD_MAX: d[HOLD_MAX]}
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
 def mark_holders(state, sid: str, env, cwd=None) -> list:
     """nw6 Z2: at the respawn mark, the labels of what the launcher's rule would wait on now
-    (helper_hold, under the guards' `settle` and STALE_CALL): the session's open helper
-    calls by agent id, labelled from the ledger, else [room.ANY] for a fresh helper stamp
-    alone; [] with nothing, or on a fault. A call with no `at` counts as just seen."""
-    from . import admission, room
+    (helper_hold under STALE_CALL): the session's open helper calls by agent id, labelled
+    from the ledger; [] with none, a helper stamp alone included (nw6b H5: it lapses inside
+    the turn's own `settle`), or on a fault. No guard is read (nw6b Y5): `settle` decides
+    only the stamp's flag, which the mark does not use. A call with no `at` counts as just
+    seen."""
+    from . import admission
     try:
-        try:
-            settle = guards(Path.cwd() if cwd is None else cwd, env, {})["settle"]
-        except Exception:                               # noqa: BLE001 - the default
-            settle = DEFAULTS["settle"]
-        ids, stamp, _ = helper_hold(resolver.session_dir(state, sid), time.time(),
-                                    time.monotonic(), {}, settle, STALE_CALL)
-        if ids:
-            return labelled(admission.directory(env), ids)
-        return [room.ANY] if stamp else []
+        ids, _, _ = helper_hold(resolver.session_dir(state, sid), time.time(),
+                                time.monotonic(), {}, 0, STALE_CALL)
+        return labelled(admission.directory(env), ids) if ids else []
     except Exception:                                   # noqa: BLE001 - the mark is written
         return []
+
+
+def mark_until(state, sid: str, env, cwd=None):
+    """nw6b H3: at the respawn mark, when the ceiling ends the hold: the sitting's first
+    confirmed mark (this one where none was confirmed before) plus `hold_max`, the
+    launcher's alone (H4, Y4: guards.json naming this sitting; a launcher that wrote none
+    acts on no ceiling); None with no ceiling, no moment, or on a fault."""
+    try:
+        got = launcher_guards(state, env.get(hooks.CHAIN_VAR) or "", sid)
+        hm = got[HOLD_MAX] if got is not None else 0
+        first = first_mark(resolver.session_dir(state, sid))
+        return first + hm if _num(hm) and hm > 0 and first is not None else None
+    except Exception:                                   # noqa: BLE001 - the mark is written
+        return None
 
 
 def _json(path: Path):
@@ -566,6 +681,8 @@ class Chain:
         self._said: str | None = None   # the reason held.json names; "" before a watch (S37)
         self._by: list = []             # nw6 R3: the labels held.json names for the helpers
         self._since = None              # and since when they hold
+        self._until_said = None         # nw6b H3: and the `until` it said
+        self._sid = self._guards_said = None    # nw6b H4: the sitting, and guards.json's doc
         self._ids = None                # the ids those labels were last read for (Z4)
         self._want = None               # and the ids of this poll's read
         self._pid_started = None        # this launcher's start time, beside its pid (Z3)
@@ -674,10 +791,14 @@ class Chain:
             rc, ended_by, held = self._watch(proc, sid, start)
             cut = len(self.got)                  # the signals taken while the child ran
             self.fx.tty_restore(attrs)                     # §3.7: before anything prints
-            if self.went_past:                   # u1 R1's word, before the grace line
-                self.fx.say(f"{self.name}: went on past a stale helper call: " + "; ".join(
-                    f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
-                    for s in self.went_past))
+            for what, past in (("a stale helper call", [s for s in self.went_past
+                                                        if not s.get("ceiling")]),
+                               ("a helper call at the ceiling",      # nw6b Y3
+                                [s for s in self.went_past if s.get("ceiling")])):
+                if past:                         # u1 R1's word, before the grace line
+                    self.fx.say(f"{self.name}: went on past {what}: " + "; ".join(
+                        f"{s['id']} open {'?' if s['age'] is None else s['age'] // 60} min"
+                        for s in past))
             seconds = round(self.fx.now() - start)
             reason, code, marker, count = self._decide(sid, start, rc, ended_by, held)
             if reason is None:
@@ -827,6 +948,20 @@ class Chain:
             self.went_past = list(self._stale)       # u1 R1: said once the terminal is back
         return held, seen, held is None
 
+    def _say_guards(self) -> None:
+        """nw6b H4: guards.json beside sitting.json, `{session, settle, hold_max}`, the
+        values this launcher resolved, for the mark to read; written at each sitting's start
+        and when a resolve changes them. A failed write is tried at the next change."""
+        sid = self._sid
+        doc = {"session": sid, "settle": self.g.get("settle"), HOLD_MAX: self.g.get(HOLD_MAX, 0)}
+        if sid is None or doc == self._guards_said:
+            return
+        try:
+            gate._write_private(self.home / LAUNCHER_GUARDS, json.dumps(doc) + "\n")
+        except OSError:
+            return
+        self._guards_said = doc
+
     def _resolve(self) -> bool:
         """The guards resolved again (§4); False on a ResolveError. Its text is kept when
         it first appears and cleared once the config resolves again (Amendment 1, F4);
@@ -838,6 +973,7 @@ class Chain:
                 self.config_error = str(e)
             return False
         self.config_error = None
+        self._say_guards()
         return True
 
     def _holders(self, sdir, now) -> list | None:
@@ -851,6 +987,9 @@ class Chain:
         try:
             ids, stamp, _ = helper_hold(sdir, now, self.fx.monotonic(), dict(self._first),
                                         self.g["settle"], self.stale_call)
+            aid = _stamp_helper(sdir) if stamp and not ids else None
+            if aid is not None:
+                ids = [aid]                  # nw6b H5: the stamp names its helper, Y1: a live one
             if not ids:
                 self._want = None
                 return [room.ANY] if stamp else []
@@ -868,8 +1007,12 @@ class Chain:
         fails is tried again at the next poll; the hold holds either way. nw6 R3: the
         helpers' hold adds `by`, the launcher's `pid` and its start time `started` (Z3),
         rewritten when `by` changes with its first `since` kept; a write or a removal that
-        fails changes nothing but the file."""
-        if reason == self._said and (reason != HELPERS or by == self._by):
+        fails changes nothing but the file. nw6b H3: under a ceiling it adds `until`, the
+        first mark plus `hold_max`, wall-clock."""
+        until = (self._until(resolver.session_dir(self.state, sid))
+                 if reason == HELPERS else None)        # nw6b H3: the ceiling's moment
+        if reason == self._said and (reason != HELPERS or (by == self._by
+                                                           and until == self._until_said)):
             return
         if reason == HELPERS and self._said == HELPERS:
             now = self._since
@@ -886,6 +1029,8 @@ class Chain:
                         if self._pid_started is None:
                             self._pid_started = proc_started(os.getpid()) or 0
                         doc.update(by=by, pid=os.getpid(), started=self._pid_started or None)
+                        if until is not None:
+                            doc["until"] = until
                     with os.fdopen(fd, "w", encoding="utf-8") as f:
                         json.dump(doc, f)
                     os.replace(tmp, path)
@@ -896,6 +1041,7 @@ class Chain:
         self._said = reason
         if reason == HELPERS:
             self._by, self._since, self._ids = by, now, self._want
+            self._until_said = until
 
     def _sitting(self, sid: str) -> None:
         """nw2 R2, R4: `sitting.json` names the sitting about to start, then the runner's
@@ -904,6 +1050,8 @@ class Chain:
             gate.write_sitting(self.state, self.name, sid, self.fx.now())
         except OSError as e:
             self.fx.say(f"{self.name}: sitting.json was not written ({e})")
+        self._sid, self._guards_said = sid, None
+        self._say_guards()
         start = getattr(self.fx, "gate_start", None)
         try:
             if start is not None:
@@ -914,7 +1062,8 @@ class Chain:
     def _ready(self, sdir: Path, now: float, mono: float | None = None) -> bool:
         """§3.3 step 3 and ruling 2: the turn ended after the marker, nothing ran since,
         the end has stood `settle`, the helpers are quiet `settle` and none has a call open,
-        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since. A True
+        but a stale one (u1 R1): open `stale_call` seconds with no helper stamp since; the
+        helpers no longer hold past the first mark plus `hold_max` (nw6b H2). A True
         keeps the stale calls in `_stale`, `[{"id", "age"}]`, the age in whole seconds.
         A call whose `at` is no time (`_opened`) is aged from the launcher's first sight of
         its name on `mono`, `fx.monotonic()` by default, and its age is None (u1's fold)."""
@@ -931,11 +1080,29 @@ class Chain:
         act = _json(sdir / hooks.ACTIVITY)
         if act is not None and not (_num(act.get("at")) and act["at"] <= ended):
             return False
-        held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call)
+        cut: list = []
+        held, stamp, stale = helper_hold(sdir, now, mono, self._first, settle, self.stale_call,
+                                         cut)
         if held or stamp:                    # a call open, or the stamp under `settle`
-            return False
+            if not self._past_ceiling(sdir, now):
+                return False
+            stale = stale + [{**c, "ceiling": True} for c in cut]   # nw6b Y3: what it cut
         self._stale = stale
         return True
+
+    def _until(self, sdir: Path):
+        """nw6b H2: the first confirmed mark plus `hold_max`, a wall-clock time; None with
+        no ceiling (0, or a guards mapping that names none) or no moment."""
+        hm = self.g.get(HOLD_MAX, 0)
+        if not (_num(hm) and hm > 0):
+            return None
+        first = first_mark(sdir)
+        return None if first is None else first + hm
+
+    def _past_ceiling(self, sdir: Path, now: float) -> bool:
+        """nw6b H2: past the ceiling the helper clause of `_ready` no longer holds."""
+        until = self._until(sdir)
+        return until is not None and now >= until
 
     # ---- the checks (§3.4, §3.5) --------------------------------------------------------
 

@@ -106,6 +106,8 @@ def test_r1_no_ledger_is_the_pins_line(cli_env, monkeypatch):
 
 def test_r1_one_helper_out_is_named(cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    (cli_env / resolver.REPO_DIR).mkdir(parents=True)          # nw6b: alpha.174's line, at 0
+    (cli_env / resolver.REPO_DIR / "config.yaml").write_text("session:\n  respawn: {hold_max: 0}\n")
     _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
     _open("a1", "toolu_01", time.time() - 50)              # Z2: the launcher waits on its call
     line = _mark()
@@ -137,7 +139,7 @@ def test_z2_a_run_with_no_done_and_no_open_call_is_not_named(cli_env, monkeypatc
     assert _mark() == LAUNCHER
 
 
-def test_z2_a_stale_call_is_not_named_and_a_fresh_stamp_is(cli_env, monkeypatch):
+def test_z2_a_stale_call_is_not_named_and_a_fresh_stamp_holds_its_call(cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
     now = time.time()
     _ledger(_spawn(SID, "a1", "build nw6", now - 3600))
@@ -147,7 +149,7 @@ def test_z2_a_stale_call_is_not_named_and_a_fresh_stamp_is(cli_env, monkeypatch)
     _stamp(now - 10)                                      # the helpers' stamp under `settle`
     assert _mark().startswith('respawn marked; the restart waits on 1 helper out: "build nw6"')
     (resolver.session_dir(resolver.state_dir(os.environ), SID) / hooks.CALLS / "toolu_01").unlink()
-    assert _mark().startswith('respawn marked; the restart waits on 1 helper out: "a helper"')
+    assert _mark() == LAUNCHER                            # nw6b H5: a lone stamp is not named
 
 
 def test_z2_an_open_call_with_no_spawn_line_is_a_helper(cli_env, monkeypatch):
@@ -305,7 +307,7 @@ def test_r3_the_launcher_writes_the_record_and_removes_it_at_the_signal(fake, mo
                    "started": chain.proc_started(os.getpid())}, rec
     assert 12 <= rec["since"] - T0 <= 16 and rec["started"]
     assert seen[1] == seen[2] == rec              # its call open, the sitting's turn or not
-    assert seen[3] == {**rec, "by": ["a helper"]}   # the stamp alone: no ended helper named
+    assert seen[3] == rec                         # nw6b H5: the stamp alone names its helper
     assert seen[4] is None and _held() is None    # removed when it signalled
 
 
@@ -343,7 +345,7 @@ def test_z1_the_record_never_names_a_helper_that_has_ended(fake, monkeypatch):
     assert sig == TERM and 1900 <= t - T0 <= 1902, t - T0      # R4: as at the pin
     (_, rec, words), (_, rec2, words2), (_, rec3, words3) = seen
     assert rec3 is None and words3 == [], (rec3, words3)   # the own turn: no helper holds
-    assert rec2["by"] == ["a helper"] and "build nw6" not in str(words2)   # the stamp alone
+    assert rec2["by"] == ["build nw6"] and "build nw6" in str(words2)   # nw6b H5: the stamp's id
     assert rec["by"] == ["build nw6"] and words == [
         f'respawn marked at {time.strftime("%H:%M", time.localtime(T0 + 12))}, held 9 min by '
         '1 helper: "build nw6"'], words

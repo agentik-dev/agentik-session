@@ -95,7 +95,7 @@ SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools
 # `reconcile` (packet R2) is resolved as `respawn` is and never validated here: its checks
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
-RESPAWN_KEYS = ("cap", "floor", "settle")
+RESPAWN_KEYS = ("cap", "floor", "settle", "hold_max")   # hold_max: nw6b H1
 # Packet akt-run R1: what a bare `run` (and `akt`) sends: its first prompt and its `--model`.
 RUN_KEYS = ("prompt", "model")
 POSTURES = ("off", "signal", "ask", "deny")

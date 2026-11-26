@@ -207,9 +207,9 @@ def test_save_over_a_file_not_utf8_is_that_file_error(tmp_path, where):
 KEY_SHAPES = {"user-models": ("user", f"models:\n  {TOPIC}: 1x\n", "models",
                               "a key (withheld) must be a positive integer (a window in tokens)"),
               "user-respawn": ("user", f"defaults:\n  respawn:\n    {TOPIC}: 1\n", "respawn",
-                               "a key (withheld) is not a respawn key (cap, floor, settle)"),
+                               "a key (withheld) is not a respawn key (cap, floor, settle, hold_max)"),
               "repo-respawn": ("repo", f"session:\n  respawn:\n    {TOPIC}: 1\n", "respawn",
-                               "a key (withheld) is not a respawn key (cap, floor, settle)"),
+                               "a key (withheld) is not a respawn key (cap, floor, settle, hold_max)"),
               "repo-models": ("repo", f"models:\n  {TOPIC}: 1x\n", None, None)}
 
 

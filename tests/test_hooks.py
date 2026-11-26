@@ -324,7 +324,8 @@ def test_s19_helper_activity_stamp():
     use("signal")
     hooks.pre_tool_use({"session_id": SID, "agent_id": "a1", "tool_name": "Grep"})
     d = _stamp("helper-activity.json")
-    assert sorted(d) == ["at", "event", "tool"] and (d["event"], d["tool"]) == ("PreToolUse", "Grep")
+    assert sorted(d) == ["agent_id", "at", "event", "tool"] and d["agent_id"] == "a1"  # nw6b H5
+    assert (d["event"], d["tool"]) == ("PreToolUse", "Grep")
     assert [p.name for p in _sdir().iterdir()] == ["helper-activity.json"]
     # A helper's PostToolUse rewrites only its stamp: no meter, no main-thread stamp.
     hooks.post_tool_use({"session_id": SID, "agent_id": "a1", "tool_name": "Grep",

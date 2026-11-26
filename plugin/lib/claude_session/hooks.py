@@ -124,6 +124,7 @@ CHAIN_VAR = resolver.CHAIN_VAR                  # one spelling, which the resolv
 CHAIN_RE = resolver.CHAIN_RE                    # a file name: never . or ..
 MARKER = "respawn.json"
 CONFIRMED = "respawn-main.json"
+FIRST_MARK = "respawn-first.json"   # nw6b H2: the sitting's first confirmed mark, written once
 ACTIVITY = "activity.json"
 TURN_ENDED = "turn-ended.json"
 LIMITED = "limited.json"     # a turn an API error ended (S34 ruling 5); the band reads it
@@ -372,11 +373,15 @@ def _stamp(payload: dict, env, name: str, body: dict) -> None:
 def _tool_stamp(payload: dict, env, event: str) -> None:
     """A tool call's stamp: the main thread's `activity.json`, or a helper's (agent_id)
     `helper-activity.json` only (respawn-r1 ruling 6). PreToolUse writes either; a
-    helper's PostToolUse writes its stamp and nothing else."""
+    helper's PostToolUse writes its stamp and nothing else; a helper's stamp carries its
+    id-shaped `agent_id` (nw6b H5)."""
     tool = payload.get("tool_name")
-    name = HELPER_ACTIVITY if payload.get("agent_id") else ACTIVITY
-    _stamp(payload, env, name, {"event": event, "tool": _token(tool) if tool else None,
-                                "at": time.time()})
+    aid = payload.get("agent_id")
+    name = HELPER_ACTIVITY if aid else ACTIVITY
+    body = {"event": event, "tool": _token(tool) if tool else None, "at": time.time()}
+    if aid and isinstance(aid, str) and _SID.match(aid):
+        body["agent_id"] = aid              # nw6b H5: whose stamp, where the hook has it
+    _stamp(payload, env, name, body)
 
 
 def _call(payload: dict, env) -> Path | None:
@@ -1246,8 +1251,9 @@ def _held_clause(sid, env) -> str | None:
         if not (CHAIN_RE.match(name) and isinstance(sid, str) and _SID.match(sid)):
             return None
         from . import chain
-        d = chain.held_by(resolver.state_dir(env), name, sid, _now())
-        return chain.held_words(d) if d else None
+        state, now = resolver.state_dir(env), _now()
+        d = chain.held_by(state, name, sid, now)
+        return chain.held_words(d, chain.past_half(state, sid, d, now), now) if d else None
     except Exception:                                   # noqa: BLE001
         return None
 
@@ -1909,7 +1915,9 @@ def _confirm(payload: dict, sdir: Path) -> None:
     """respawn-r1 §3.2 step 5: a main-thread Bash call that ran `agentik-session checkpoint
     --respawn` (or `agentik session checkpoint`, or the pre-rename spelling: RESPAWN_CMDS)
     writes `respawn-main.json` {at, marker_sha256} when the marker was written at
-    or after this call's own PreToolUse stamp; none without `activity.json`. Never raises."""
+    or after this call's own PreToolUse stamp; none without `activity.json`. The first
+    confirm of a sitting writes `respawn-first.json` {session, at: the marker's `written`}
+    before it, once (nw6b H2). Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
         if payload.get("tool_name") != "Bash" or not _respawn_close(cmd):
@@ -1919,6 +1927,9 @@ def _confirm(payload: dict, sdir: Path) -> None:
         written = json.loads(raw).get("written")
         if not (_num(at) and _num(written)) or written < at:
             return
+        if not (sdir / FIRST_MARK).exists():    # nw6b H2: the ceiling's moment, never moved
+            store._write_private(sdir / FIRST_MARK, json.dumps(
+                {"session": sdir.name, "at": written}))
         store._write_private(sdir / CONFIRMED, json.dumps(
             {"at": time.time(), "marker_sha256": hashlib.sha256(raw).hexdigest()}))
     except Exception:                                   # noqa: BLE001
@@ -2336,6 +2347,7 @@ def stop(payload: dict, env=None) -> dict:
 # ---- a hand-back's cost (packet nw4b-back-measure; hq design/31 item 19) --------------------
 
 BACKS = "backs"     # `backs/<agent_id>.json` {at, before}: a helper's end, until the turn's end
+ENDED = "ended"     # nw6b Y1: `ended/<agent_id>.json` {at}: a helper's end, kept for the sitting
 
 
 def _occupancy(sdir: Path, env) -> int | None:
@@ -2501,7 +2513,9 @@ def subagent_stop(payload: dict, env=None) -> dict:
     id-shaped and whose session's folder exists (the payload's id alone, never the
     fallback), each regular file under `calls/` whose JSON object's `agent_id` is that id is
     removed. Another helper's file, one with no `agent_id` (an older plugin's), one that does
-    not parse and a directory are left to the launcher's stale bound. Then (packet nw4b R2) it
+    not parse and a directory are left to the launcher's stale bound. Before them (nw6b Y1)
+    it records the end, `ended/<agent_id>.json` {at}, so the launcher names no ended helper
+    from the helpers' stamp. Then (packet nw4b R2) it
     stamps the coordinator's occupancy at the helper's end, `backs/<agent_id>.json`, for the
     main thread's next Stop to read; with no reading it writes no stamp. It never raises and
     says nothing: dispatch prints nothing for it (SILENT)."""
@@ -2513,6 +2527,10 @@ def subagent_stop(payload: dict, env=None) -> dict:
                             os.environ if env is None else env, fallback=False)
         if sdir is None or not sdir.is_dir():
             return {}
+        try:                                            # nw6b Y1: before the calls go
+            store._write_private(sdir / ENDED / f"{aid}.json", json.dumps({"at": time.time()}))
+        except OSError:
+            pass
         cdir = sdir / CALLS
         for name in os.listdir(cdir) if cdir.is_dir() else ():
             if name.startswith("."):                    # a write in flight, as `_ready` skips

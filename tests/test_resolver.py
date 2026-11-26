@@ -231,16 +231,18 @@ def test_newest_session(world):
 
 def test_s19_respawn_defaults(world):
     from claude_session import sessionconfig
-    assert run(world).sections["session"]["respawn"] == {"cap": 20, "floor": 600, "settle": 60}
+    assert run(world).sections["session"]["respawn"] == {"cap": 20, "floor": 600, "settle": 60,
+                                                         "hold_max": 1800}
     assert "respawn" in resolver.SESSION_KEYS and "respawn" not in sessionconfig.SETTABLE
 
 
 S19_LAYERS = [
-    ({"user": "defaults:\n  respawn: {cap: 3}\n"}, {"cap": 3, "floor": 600, "settle": 60}),
+    ({"user": "defaults:\n  respawn: {cap: 3}\n"}, {"cap": 3, "floor": 600, "settle": 60, "hold_max": 1800}),
     ({"user": "defaults:\n  respawn: {cap: 3}\n", "repo": "session:\n  respawn: {floor: 30}\n"},
-     {"cap": 3, "floor": 30, "settle": 60}),
+     {"cap": 3, "floor": 30, "settle": 60, "hold_max": 1800}),
     ({"repo": "session:\n  respawn: {settle: 5, cap: 1}\n",
-      "local": "session:\n  respawn: {settle: 0}\n"}, {"cap": 1, "floor": 600, "settle": 0}),
+      "local": "session:\n  respawn: {settle: 0}\n"}, {"cap": 1, "floor": 600, "settle": 0,
+                                                         "hold_max": 1800}),
 ]
 
 

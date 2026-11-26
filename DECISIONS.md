@@ -26,13 +26,15 @@ This file holds the decisions that bind agentik-session and no other repo. A dec
 
 ### The gate
 
-13. **A gate job's result follows the chain.** A job queued by a chain's sitting or by its helper, through any verb, is addressed to the chain. Its line is taken by a sitting of that chain that has not closed, so a result that lands at or after a close reaches the successor. A job queued outside a chain is addressed to the session that queued it. A respawn never waits for a gate job. (2026-11-22; the owner's answer to decision 13, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
+13. **A gate job's result follows the chain.** A job queued by a chain's sitting or by its helper, through any verb, is addressed to the chain. Its line is taken by a sitting of that chain that has not closed, so a result that lands at or after a close reaches the successor. A job queued outside a chain is addressed to the session that queued it. A respawn never waits for a gate job. A helper's own wait on one holds a restart no longer than the ceiling. (2026-11-22; amended 2026-11-26, the owner's answer to decision 19, the owner's answer to hq question 83, given in hq sitting 2026-11-25-1's one batch)
 
 17. **One check proves a landing.** A landing is proved by one green `make check` of the tree that lands, run by the gate's check function in that branch's worktree with main where the landing reads it: the landing's own run, or one kept for the same tree with no commit since but the landing's own. (2026-11-23; the owner's answer to decision 17, the owner's answer on 2026-11-22, given in the hq sitting's one batch)
 
 ### The helpers
 
 16. **A sitting is told its room at each launch.** In a session whose profile asks the sitting discipline, before a helper starts, the plugin says how many points of context are left to the checkpoint once every helper out has handed back, and whether the new helper fits. It refuses only under the posture `deny`. (2026-11-22; the owner's answer to decision 16, the owner's word, given in the coordinating sitting's ask of 2026-11-22)
+
+18. **A held respawn has a ceiling.** The launcher restarts a marked sitting once its helpers are quiet, and thirty minutes after the sitting's first confirmed mark whatever helper is still out (respawn.hold_max, 1800 seconds; 0 means none). A helper still working then loses the item it had not committed, and the successor reads its branch. (2026-11-26; the owner's answer to decision 18, the owner's answer to hq question 83, given in hq sitting 2026-11-25-1's one batch)
 
 ## Proposed
 

@@ -70,7 +70,7 @@ defaults:
   device: never
   charter: {dir: history/sittings, required: true}
   verify: null
-  respawn: {cap: 20, floor: 600, settle: 60}
+  respawn: {cap: 20, floor: 600, settle: 60, hold_max: 1800}
   # What a bare `run`, and `akt`, sends (packet akt-run R1): the first prompt, and the
   # --model where the line names none (null adds none, and the profile's model applies).
   run:
