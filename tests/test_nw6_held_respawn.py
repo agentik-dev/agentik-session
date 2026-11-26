@@ -6,6 +6,7 @@ made-up session and helpers; no launcher of this machine is read or signalled.""
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -356,3 +357,138 @@ def test_r3_a_record_whose_launcher_is_gone_prints_nothing(cli_env, monkeypatch)
     assert chain.held_by(st, "c1", SID, MARKED + 600) is None
     _record(MARKED, MARKED + 70)
     assert chain.held_by(st, "c1", SID, MARKED + 600)["by"] == ["build nw6"]
+
+
+# ---- Z3: the record's start time beside its pid; the hold from the later of mark and since ---
+
+def test_z3_a_live_pid_under_another_start_time_is_stale(cli_env, monkeypatch):
+    """Review 1's N1: a pid reused by another process makes no line."""
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    st, mine = resolver.state_dir(os.environ), chain.proc_started(os.getpid())
+    assert mine and chain.proc_started(_dead_pid()) is None
+    for pid, started in ((os.getpid(), mine + 1), (1, mine), (os.getpid(), "x")):
+        _record(MARKED, MARKED + 70, pid=pid, started=started)
+        assert chain.held_by(st, "c1", SID, MARKED + 600) is None, (pid, started)
+    _record(MARKED, MARKED + 70)
+    home = st / "respawn" / "c1"
+    d = json.loads((home / "held.json").read_text())
+    del d["started"]
+    (home / "held.json").write_text(json.dumps(d))
+    assert chain.held_by(st, "c1", SID, MARKED + 600) is None      # no start time: stale
+    _record(MARKED, MARKED + 70)
+    assert chain.held_by(st, "c1", SID, MARKED + 600)["by"] == ["build nw6"]
+
+
+def test_z3_the_hold_counts_from_the_later_of_the_mark_and_since(cli_env, monkeypatch):
+    """Review 1's N2: a re-mark an hour into a hold; status read 5 minutes after it."""
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _session(cli_env)
+    _record(MARKED + 3600, MARKED)
+    monkeypatch.setattr(time, "time", lambda: MARKED + 3600 + 300)
+    rc, out, _ = _run("status")
+    assert rc == 0 and 'respawn marked at 12:06, held 5 min by 1 helper: "build nw6"' in out, out
+
+
+# ---- Z4: a label is read again at each write; only printable ASCII of it prints -------------
+
+def test_z4_only_printable_ascii_of_a_label_prints():
+    """Review 1's N4: bidi, C1, zero-width and surrogate characters are `?`."""
+    got = [room.label({"description": d}) for d in
+           ("a\tb", "a\x00b", "x‮evil", "a\u009bb", "z​​", "\ud800bad",
+            "build\nrespawn held: none", 'say "hi"', "café")]
+    assert got == ["a b", "a?b", "x?evil", "a?b", "z??", "?bad", "build respawn held: none",
+                   "say 'hi'", "caf?"]
+    assert all(s.isascii() and s.isprintable() for s in got)
+
+
+def test_z4_a_foreign_record_prints_in_ascii_and_never_crashes_status(cli_env, monkeypatch):
+    """Review 1's N5: a lone surrogate in a foreign record's `by`."""
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _session(cli_env)
+    _record(MARKED, MARKED + 70, by=("ok\udc80x", "b‮c"))
+    monkeypatch.setattr(time, "time", lambda: MARKED + 70 + 60)
+    rc, out, err = _run("status")
+    assert rc == 0, err
+    assert 'held 1 min by 2 helpers: "ok?x", "b?c"' in out, out
+    rc, out, _ = _run("status", "--json")
+    assert rc == 0 and json.loads(out)["respawn_held"]["by"] == ["ok?x", "b?c"]
+    assert '"ok?x", "b?c"' in _prompt()
+
+
+def test_z4_a_label_is_read_again_at_each_write(fake, monkeypatch):
+    """Review 1's N3 (test_probe_d): the spawn line lands at 200, the call is open from 12."""
+    helper = {"agent_id": "a1", "tool_name": "Bash"}
+    seen = []
+
+    def spawn_line(fx, p):
+        d = _state() / admission.DIR
+        d.mkdir(parents=True, exist_ok=True)
+        (d / admission.LEDGER).write_text(json.dumps(_spawn(p.sid, "a1", "build nw6", fx.t)) + "\n")
+
+    seq = (respawn_seq(fake.charter)
+           + [(12, hook("PreToolUse", tool_use_id="toolu_01", **helper)), (100, _peek(seen)),
+              (200, spawn_line), (300, _peek(seen)), (900, _peek(seen)),
+              (1100, hook("PostToolUse", tool_use_id="toolu_01", **helper)), end(7200)])
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    _frun(fx, G)
+    assert [r["by"] for r in seen] == [["a helper"], ["build nw6"], ["build nw6"]]
+    assert seen[0]["since"] == seen[1]["since"] == seen[2]["since"]   # one hold
+    ((t, _),) = fx.procs[0].signals
+    assert 1160 <= t - T0 <= 1162                                     # R4: as at the pin
+
+
+# ---- Z5: the silent case, byte for byte with the outputs captured at main (c218b5b7) --------
+
+SILENT = os.path.join(os.path.dirname(__file__), "fixtures", "nw6", "silent-at-main.json")
+NOW = MARKED + 30 * 60
+CASES = ["none", "stale", "other-session", "no-chain", "no-marker", "pid-reused", "other-start"]
+
+
+def _silent(case, env, monkeypatch, record):
+    """The prompt's line, `status` and `status --json` in `case`, with no live helpers' hold;
+    with `record` False the state holds no held.json, as main's launcher never wrote one for
+    the helpers. What varies by run and not by code is named: the temp roots `<home>`,
+    `<state>` and `<cwd>`, this checkout `<repo>`, the meter's wall-clock `ts` and the
+    transcript's inode."""
+    monkeypatch.setattr(time, "time", lambda: NOW)
+    if case != "no-chain":
+        monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _session(env)
+    if case not in ("none", "no-marker"):
+        _marked(MARKED)
+    if record and case != "none":
+        _record(MARKED, MARKED + 70,
+                pid={"stale": _dead_pid(), "pid-reused": 1}.get(case),
+                session="another-sess-0000" if case == "other-session" else SID,
+                started={"other-start": chain.proc_started(os.getpid()) + 1,      # pid 1 under
+                         "pid-reused": chain.proc_started(os.getpid())}.get(case))  # ours
+        if case == "no-marker":
+            sdir = resolver.session_dir(resolver.state_dir(os.environ), SID)
+            (sdir / hooks.MARKER).unlink()
+            (sdir / hooks.CONFIRMED).unlink()
+    out = {"prompt": _prompt(), "status": _run("status")[1], "json": _run("status", "--json")[1]}
+    names = sorted(((os.environ["XDG_STATE_HOME"], "<state>"), (os.environ["HOME"], "<home>"),
+                    (str(env), "<cwd>"), (os.path.dirname(os.path.dirname(METER)), "<repo>")),
+                   key=lambda p: -len(p[0]))
+    for k, v in out.items():
+        for path, name in names:
+            v = v.replace(path, name)
+        v = re.sub(r'"ts": "[^"]*"', '"ts": "<ts>"', v)
+        out[k] = re.sub(r'"inode": \d+', '"inode": 0', v)
+    return out
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_z5_the_silent_case_is_mains_output_byte_for_byte(case, cli_env, monkeypatch):
+    """At main the fixture was captured by this test with NW6_CAPTURE naming it."""
+    if os.environ.get("NW6_CAPTURE"):
+        got = _silent(case, cli_env, monkeypatch, record=False)
+        path = os.environ["NW6_CAPTURE"]
+        doc = json.load(open(path)) if os.path.exists(path) else {}
+        doc[case] = got
+        with open(path, "w") as f:
+            json.dump(doc, f, indent=1, sort_keys=True)
+        return
+    with open(SILENT) as f:
+        want = json.load(f)[case]
+    assert _silent(case, cli_env, monkeypatch, record=True) == want
