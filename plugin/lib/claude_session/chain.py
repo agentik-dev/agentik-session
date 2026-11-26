@@ -328,22 +328,53 @@ def held_by(state, name: str, sid: str, now: float, alive=None) -> dict | None:
         marked = mk.get("written")
         if mk.get("session") != sid or not _num(marked):
             return None
-        return {"marked": marked, "since": since,
-                "held_minutes": max(0, int((now - max(since, marked)) // 60)),
-                "by": [room.printable(b) for b in by]}
+        out = {"marked": marked, "since": since,
+               "held_minutes": max(0, int((now - max(since, marked)) // 60)),
+               "by": [room.printable(b) for b in by]}
+        if _num(d.get("until")):                        # nw6b H3: only under a ceiling
+            out["until"] = d["until"]
+        return out
     except Exception:                                   # noqa: BLE001 - a read, no line
         return None
 
 
-def held_words(d: dict) -> str:
-    """nw6 R2: the clause the prompt's line and `status` say while the helpers hold."""
+TELL = "tell them to commit and hand back, or stop them"   # nw6b H3, from half the ceiling
+
+
+def _hhmm(t) -> str:
     try:
-        at = time.strftime("%H:%M", time.localtime(d["marked"]))
-    except (OverflowError, OSError, ValueError):
-        at = "?"
+        return time.strftime("%H:%M", time.localtime(t))
+    except (OverflowError, OSError, ValueError, TypeError):
+        return "?"
+
+
+def when_words(until) -> str:
+    """nw6b H3: how the lines that say a hold end while a ceiling is set."""
+    return f"or at {_hhmm(until)} whatever is out"
+
+
+def held_words(d: dict, tell: bool = False) -> str:
+    """nw6 R2: the clause the prompt's line and `status` say while the helpers hold; under
+    a ceiling (nw6b H3) it ends with when_words, and `tell` (the prompt's line, from half
+    the ceiling on) puts TELL before that."""
     n = len(d["by"])
-    return (f"respawn marked at {at}, held {d['held_minutes']} min by {n} "
-            f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
+    out = (f"respawn marked at {_hhmm(d['marked'])}, held {d['held_minutes']} min by {n} "
+           f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
+    if "until" not in d:
+        return out
+    return (out + (f"; {TELL}" if tell else "")
+            + f"; the restart comes once they are quiet, {when_words(d['until'])}")
+
+
+def past_half(state, sid: str, d: dict, now: float) -> bool:
+    """nw6b H3: `now` is at or past half the ceiling, counted from the sitting's first
+    confirmed mark (first_mark) to held.json's `until`. A read; never raises."""
+    try:
+        until = d.get("until")
+        first = first_mark(resolver.session_dir(state, sid))
+        return _num(until) and first is not None and 2 * now >= first + until
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_call):
@@ -436,6 +467,18 @@ def mark_holders(state, sid: str, env, cwd=None) -> list:
         return [room.ANY] if stamp else []
     except Exception:                                   # noqa: BLE001 - the mark is written
         return []
+
+
+def mark_until(state, sid: str, env, cwd=None):
+    """nw6b H3: at the respawn mark, when the ceiling ends the hold: the sitting's first
+    confirmed mark (this one where none was confirmed before) plus `hold_max`, as
+    run_guards resolves it; None with no ceiling, no moment, or on a fault."""
+    try:
+        hm = run_guards(Path.cwd() if cwd is None else cwd, env, {})[HOLD_MAX]
+        first = first_mark(resolver.session_dir(state, sid))
+        return first + hm if _num(hm) and hm > 0 and first is not None else None
+    except Exception:                                   # noqa: BLE001 - the mark is written
+        return None
 
 
 def _json(path: Path):
@@ -590,6 +633,7 @@ class Chain:
         self._said: str | None = None   # the reason held.json names; "" before a watch (S37)
         self._by: list = []             # nw6 R3: the labels held.json names for the helpers
         self._since = None              # and since when they hold
+        self._until_said = None         # nw6b H3: and the `until` it said
         self._ids = None                # the ids those labels were last read for (Z4)
         self._want = None               # and the ids of this poll's read
         self._pid_started = None        # this launcher's start time, beside its pid (Z3)
@@ -892,8 +936,12 @@ class Chain:
         fails is tried again at the next poll; the hold holds either way. nw6 R3: the
         helpers' hold adds `by`, the launcher's `pid` and its start time `started` (Z3),
         rewritten when `by` changes with its first `since` kept; a write or a removal that
-        fails changes nothing but the file."""
-        if reason == self._said and (reason != HELPERS or by == self._by):
+        fails changes nothing but the file. nw6b H3: under a ceiling it adds `until`, the
+        first mark plus `hold_max`, wall-clock."""
+        until = (self._until(resolver.session_dir(self.state, sid))
+                 if reason == HELPERS else None)        # nw6b H3: the ceiling's moment
+        if reason == self._said and (reason != HELPERS or (by == self._by
+                                                           and until == self._until_said)):
             return
         if reason == HELPERS and self._said == HELPERS:
             now = self._since
@@ -910,6 +958,8 @@ class Chain:
                         if self._pid_started is None:
                             self._pid_started = proc_started(os.getpid()) or 0
                         doc.update(by=by, pid=os.getpid(), started=self._pid_started or None)
+                        if until is not None:
+                            doc["until"] = until
                     with os.fdopen(fd, "w", encoding="utf-8") as f:
                         json.dump(doc, f)
                     os.replace(tmp, path)
@@ -920,6 +970,7 @@ class Chain:
         self._said = reason
         if reason == HELPERS:
             self._by, self._since, self._ids = by, now, self._want
+            self._until_said = until
 
     def _sitting(self, sid: str) -> None:
         """nw2 R2, R4: `sitting.json` names the sitting about to start, then the runner's

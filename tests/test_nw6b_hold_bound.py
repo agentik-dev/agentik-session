@@ -20,6 +20,7 @@ from test_nw6_held_respawn import (LAUNCHER, MARKED, METER, SID, _ledger, _mark,
                                    cli_env)
 
 AT174 = os.path.join(os.path.dirname(__file__), "fixtures", "nw6b", "at-174.json")
+ABOUT = re.compile(r"(?m)^(launch: .* about )\d\d:\d\d")
 KEYED = "hold_max" in resolver.RESPAWN_KEYS          # False at the pin (alpha.174)
 
 
@@ -238,7 +239,8 @@ def _outputs(env, monkeypatch):
         for path, name in names:
             v = v.replace(path, name)
         v = re.sub(r'"ts": "[^"]*"', '"ts": "<ts>"', v)
-        out[k] = re.sub(r'"inode": \d+', '"inode": 0', v)
+        v = re.sub(r'"inode": \d+', '"inode": 0', v)
+        out[k] = ABOUT.sub(r"\1<hh:mm>", v)     # a helper's expected end, from the real clock
     return out
 
 

@@ -1247,8 +1247,9 @@ def _held_clause(sid, env) -> str | None:
         if not (CHAIN_RE.match(name) and isinstance(sid, str) and _SID.match(sid)):
             return None
         from . import chain
-        d = chain.held_by(resolver.state_dir(env), name, sid, _now())
-        return chain.held_words(d) if d else None
+        state, now = resolver.state_dir(env), _now()
+        d = chain.held_by(state, name, sid, now)
+        return chain.held_words(d, chain.past_half(state, sid, d, now)) if d else None
     except Exception:                                   # noqa: BLE001
         return None
 

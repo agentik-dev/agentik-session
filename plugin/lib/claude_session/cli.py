@@ -1504,7 +1504,9 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
         from . import chain as chain_mod, room
         out = chain_mod.mark_holders(resolver.state_dir(os.environ), sid,   # nw6 Z2: what the
                                      os.environ)                  # launcher's rule waits on
-        return ((room.waits_line(out) if out else
+        until = chain_mod.mark_until(resolver.state_dir(os.environ), sid, os.environ) if out else None
+        return ((room.waits_line(out) + (f", {chain_mod.when_words(until)}" if until else "")
+                 if out else
                  "respawn marked; the launcher restarts this sitting after this turn ends")
                 + (f"; {gate.gate_words(n)}" if n else ""))     # nw2 R6
     return "respawn marked; no launcher runs this sitting: print your start line and stop"

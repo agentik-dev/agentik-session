@@ -106,6 +106,8 @@ def test_r1_no_ledger_is_the_pins_line(cli_env, monkeypatch):
 
 def test_r1_one_helper_out_is_named(cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    (cli_env / resolver.REPO_DIR).mkdir(parents=True)          # nw6b: alpha.174's line, at 0
+    (cli_env / resolver.REPO_DIR / "config.yaml").write_text("session:\n  respawn: {hold_max: 0}\n")
     _ledger(_spawn(SID, "a1", "build nw6", time.time() - 60))
     _open("a1", "toolu_01", time.time() - 50)              # Z2: the launcher waits on its call
     line = _mark()
