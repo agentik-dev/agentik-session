@@ -170,8 +170,8 @@ def test_h3_the_marks_line_says_when(cli_env, monkeypatch):
     assert line == ('respawn marked; the restart waits on 1 helper out: "build nw6"; the '
                     "launcher restarts this sitting once they are quiet and this turn has "
                     f"ended, or at {_hm(written + 1800)} whatever is out"), (line, t)
-    (sdir / hooks.FIRST_MARK).write_text(json.dumps({"session": SID, "at": written - 3600}))
-    assert _mark().endswith(f"or at {_hm(written - 1800)} whatever is out")   # a second mark
+    (sdir / hooks.FIRST_MARK).write_text(json.dumps({"session": SID, "at": written - 600}))
+    assert _mark().endswith(f"or at {_hm(written + 1200)} whatever is out")   # a second mark
 
 
 def test_h3_no_helper_at_the_mark_is_the_pins_line(cli_env, monkeypatch):
@@ -188,7 +188,7 @@ def _until_record(until):
 TELL = "; tell them to commit and hand back, or stop them"
 
 
-@pytest.mark.parametrize("minutes,tell", [(10, False), (15, True), (40, True)])
+@pytest.mark.parametrize("minutes,tell", [(10, False), (15, True), (29, True)])
 def test_h3_the_prompts_line_and_status_say_when(minutes, tell, cli_env, monkeypatch):
     monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
     _session(cli_env)
@@ -375,3 +375,64 @@ def test_y1_two_helpers_out_the_stamp_names_no_ended_one(fake, monkeypatch):
     fx = _run_held(fake, monkeypatch, seq, 0)
     assert [r["by"] for r in seen] == [["a helper"], ["build y"]]
     assert 1210 <= _signal(fx) <= 1212
+
+
+PAST = "; the restart comes once this turn has ended"
+
+
+def test_y2_a_second_mark_past_the_ceiling_names_no_past_time(fake, monkeypatch):
+    """Review 1's test_pe: the ceiling is 300 from the mark at 29; the second mark, at 501,
+    says the restart comes once this turn has ended, and names no time."""
+    box = []
+    bash = {"tool_name": "Bash",
+            "tool_input": {"command": f"agentik-session checkpoint --respawn --charter {fake.charter}"}}
+    seq = [(11, _spawn_line("a1", "build x")), (12, _call("PreToolUse", "a1", "toolu_01")),
+           (27, write(fake.charter, RESPAWN_TEXT)), (28, hook("PreToolUse", **bash)),
+           (29, _mark_at(fake.charter, box)), (30, hook("PostToolUse", **bash)),
+           (31, hook("Stop")), (200, hook("UserPromptSubmit", prompt="go")),
+           (500, hook("PreToolUse", **bash)), (501, _mark_at(fake.charter, box)),
+           (502, hook("PostToolUse", **bash)), (503, hook("Stop")),
+           (4000, _call("PostToolUse", "a1", "toolu_01")), end(9000)]
+    fx = _fx(monkeypatch, [seq, [end(1)]])
+    _frun(fx, {**G, "hold_max": 300, "settle": 60})
+    out = 'respawn marked; the restart waits on 1 helper out: "build x"; '
+    assert box == [[out + "the launcher restarts this sitting once they are quiet and this turn "
+                     f"has ended, or at {_hm(T0 + 329)} whatever is out"],
+                   [out + "the restart comes once this turn has ended"]]
+    assert 563 <= _signal(fx) <= 565
+
+
+def test_y2_the_sittings_own_turn_past_the_ceiling_names_no_past_time(fake, monkeypatch):
+    """Review 1's test_pb: the ceiling is 600 from 12; in the sitting's own turn, at 700,
+    the prompt's line names no time and asks nothing, and the record's `until` stays 612."""
+    seen = []
+
+    def prompt(fx, p):
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv(hooks.CHAIN_VAR, "c1")
+            out = hooks.user_prompt_submit({"session_id": p.sid, "prompt": "go"})
+        seen.append((_held(), out.get("hookSpecificOutput", {}).get("additionalContext", "")))
+    seq = OPEN + [(500, hook("UserPromptSubmit", prompt="go")), (700, prompt), (900, hook("Stop"))]
+    fx = _run_held(fake, monkeypatch, seq, 600)
+    ((rec, text),) = seen
+    assert rec["until"] - T0 == 612
+    assert text.endswith('held 11 min by 1 helper: "build x"' + PAST), text
+    assert 960 <= _signal(fx) <= 962
+
+
+def test_y2_the_prompts_line_and_status_past_the_ceiling(cli_env, monkeypatch):
+    monkeypatch.setenv(hooks.CHAIN_VAR, "c1")
+    _session(cli_env)
+    until = MARKED + 1800
+    _until_record(until)
+    monkeypatch.setattr(time, "time", lambda: MARKED + 31 * 60)
+    held = (31 * 60 - 70) // 60
+    line = f'respawn marked at {_hm(MARKED)}, held {held} min by 1 helper: "build nw6"{PAST}'
+    got = _prompt()
+    assert f"; {line}" in got and _hm(until) not in got and TELL not in got, got
+    rc, out, _ = _run("status")
+    assert rc == 0 and line in out.splitlines(), out
+    rc, out, _ = _run("status", "--json")
+    assert json.loads(out)["respawn_held"] == {
+        "marked": MARKED, "since": MARKED + 70, "held_minutes": held, "by": ["build nw6"],
+        "until": until, "line": line}

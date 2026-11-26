@@ -349,20 +349,31 @@ def _hhmm(t) -> str:
         return "?"
 
 
+PAST_CEILING = "the restart comes once this turn has ended"   # nw6b Y2: `until` is past
+
+
 def when_words(until) -> str:
     """nw6b H3: how the lines that say a hold end while a ceiling is set."""
     return f"or at {_hhmm(until)} whatever is out"
 
 
-def held_words(d: dict, tell: bool = False) -> str:
+def past_until(until, now) -> bool:
+    """nw6b Y2: the ceiling's moment has come, so no line names it."""
+    return bool(_num(until) and _num(now) and now >= until)
+
+
+def held_words(d: dict, tell: bool = False, now=None) -> str:
     """nw6 R2: the clause the prompt's line and `status` say while the helpers hold; under
     a ceiling (nw6b H3) it ends with when_words, and `tell` (the prompt's line, from half
-    the ceiling on) puts TELL before that."""
+    the ceiling on) puts TELL before that. Once `now` is at or past `until` (Y2) it ends
+    PAST_CEILING instead, with no TELL."""
     n = len(d["by"])
     out = (f"respawn marked at {_hhmm(d['marked'])}, held {d['held_minutes']} min by {n} "
            f"helper{'' if n == 1 else 's'}: " + ", ".join(f'"{b}"' for b in d["by"]))
     if "until" not in d:
         return out
+    if past_until(d["until"], now):
+        return f"{out}; {PAST_CEILING}"
     return (out + (f"; {TELL}" if tell else "")
             + f"; the restart comes once they are quiet, {when_words(d['until'])}")
 

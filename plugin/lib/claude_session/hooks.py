@@ -1253,7 +1253,7 @@ def _held_clause(sid, env) -> str | None:
         from . import chain
         state, now = resolver.state_dir(env), _now()
         d = chain.held_by(state, name, sid, now)
-        return chain.held_words(d, chain.past_half(state, sid, d, now)) if d else None
+        return chain.held_words(d, chain.past_half(state, sid, d, now), now) if d else None
     except Exception:                                   # noqa: BLE001
         return None
 

@@ -336,15 +336,16 @@ def cmd_status(args) -> int:
         if args.json and facts:
             d = {**d, "admission": facts}
         from . import chain
-        hb = chain.held_by(state, env.get(hooks.CHAIN_VAR) or "", sid, time.time())
+        now = time.time()
+        hb = chain.held_by(state, env.get(hooks.CHAIN_VAR) or "", sid, now)
         if args.json and hb:                    # nw6 R2: the helpers' hold, as fields
-            d = {**d, "respawn_held": {**hb, "line": chain.held_words(hb)}}
+            d = {**d, "respawn_held": {**hb, "line": chain.held_words(hb, now=now)}}
         if not args.json:
             print(_role_line(d))
             print(f"measure: {measure.line(sdir)}")   # the engine's figure beside it (mod-r1 S2)
             print(f"model: {mod.model_line(d, measure.load(sdir))}")   # S41: the band's facts
             print(f"mod: {mod.line(sdir)}")     # the band's module, seen or not (mod-r1 §4)
-            held = (chain.held_words(hb) if hb    # nw6 R2: the helpers' hold
+            held = (chain.held_words(hb, now=now) if hb    # nw6 R2: the helpers' hold
                     else chain.held_line(state, env.get(hooks.CHAIN_VAR) or "", sid))
             if held:                            # S37: a respawn hold, said while it stands
                 print(held)
@@ -1505,8 +1506,11 @@ def _respawn_mark(sid: str, path: str, sha: str) -> str:
         out = chain_mod.mark_holders(resolver.state_dir(os.environ), sid,   # nw6 Z2: what the
                                      os.environ)                  # launcher's rule waits on
         until = chain_mod.mark_until(resolver.state_dir(os.environ), sid, os.environ) if out else None
-        return ((room.waits_line(out) + (f", {chain_mod.when_words(until)}" if until else "")
-                 if out else
+        if until is not None and chain_mod.past_until(until, time.time()):     # nw6b Y2
+            words = room.waits_line(out, chain_mod.PAST_CEILING)
+        else:
+            words = room.waits_line(out) + (f", {chain_mod.when_words(until)}" if until else "")
+        return ((words if out else
                  "respawn marked; the launcher restarts this sitting after this turn ends")
                 + (f"; {gate.gate_words(n)}" if n else ""))     # nw2 R6
     return "respawn marked; no launcher runs this sitting: print your start line and stop"

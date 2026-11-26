@@ -422,9 +422,12 @@ def labels(adir, ids) -> dict:
         return {}
 
 
-def waits_line(out: list) -> str:
-    """R1: the respawn mark's line with helpers out, in place of the unconditional one."""
+WAITS_TAIL = "the launcher restarts this sitting once they are quiet and this turn has ended"
+
+
+def waits_line(out: list, tail: str = WAITS_TAIL) -> str:
+    """R1: the respawn mark's line with helpers out, in place of the unconditional one;
+    `tail` its last clause (nw6b Y2 gives its own once the ceiling is past)."""
     n = len(out)
     return (f"respawn marked; the restart waits on {n} helper{'' if n == 1 else 's'} out: "
-            + ", ".join(f'"{x}"' for x in out)
-            + "; the launcher restarts this sitting once they are quiet and this turn has ended")
+            + ", ".join(f'"{x}"' for x in out) + f"; {tail}")
