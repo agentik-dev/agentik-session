@@ -189,3 +189,88 @@ def test_g2_a_last_confirm_later_than_the_mark_is_not_taken(tmp_path):
     (sdir / hooks.FIRST_MARK).write_text("{")
     _mark(sdir, 1795000393.0)
     assert _first(sdir) == {"session": SID, "at": 1795000393.0}
+
+
+# ---- fix round 1 (review 1's F2, F1 and N1) -------------------------------------------------
+
+def test_k1_a_first_mark_path_that_is_a_folder_still_gets_the_confirm(tmp_path):
+    """F2's probe: the first-mark path a folder, so its write fails; the confirm is written
+    as on main."""
+    sdir = _sdir(tmp_path)
+    (sdir / hooks.FIRST_MARK).mkdir()
+    _mark(sdir, 1795000012.0)
+    assert json.loads((sdir / hooks.CONFIRMED).read_text())["at"] == 1795000013.0
+    assert (sdir / hooks.FIRST_MARK).is_dir()
+
+
+def test_k1_a_first_mark_write_that_raises_changes_nothing_else(tmp_path, monkeypatch):
+    sdir = _sdir(tmp_path)
+    real = hooks.store._write_private
+
+    def write(path, text):
+        if path.name == hooks.FIRST_MARK:
+            raise OSError("no room")
+        return real(path, text)
+    monkeypatch.setattr(hooks.store, "_write_private", write)
+    _mark(sdir, 1795000012.0)
+    assert not (sdir / hooks.FIRST_MARK).exists()
+    assert json.loads((sdir / hooks.CONFIRMED).read_text())["at"] == 1795000013.0
+
+
+@pytest.mark.parametrize("raw, want", [("0" * 5000, 0), ("0" * 4400 + str(TOP), TOP),
+                                       ("0" * 4300 + "5", 5), ("0", 0), ("007", 7)],
+                         ids=["zeros5000", "zeros4400-top", "zeros4300-5", "zero", "007"])
+def test_k2_leading_zeros_of_any_count_never_raise(raw, want):
+    assert cli._respawn_flag("settle", raw) == want
+
+
+@pytest.mark.parametrize("raw", ["0" * 5000, "0" * 4400 + str(TOP)],
+                         ids=["zeros5000", "zeros4400-top"])
+def test_k2_run_settle_with_zeros_past_the_digit_limit_is_taken(raw, fake, monkeypatch):
+    monkeypatch.setattr(chain, "on_tty", lambda: True)
+    rc, _, err = _cli("run", "--chain", "c1", "--settle", raw, "--", "--model", "m", "go")
+    assert "respawn.settle" not in err and rc != 2, err
+
+
+def test_k2_zeros_before_a_value_above_the_bound_still_exit_2():
+    with pytest.raises(SystemExit) as e:
+        cli._respawn_flag("settle", "0" * 4400 + str(TOP + 1))
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("bad", [{"at": "x"}, {}, {"at": 5}, {"at": 2e11}, {"at": None}],
+                         ids=["text", "missing", "five", "past-range", "null"])
+def test_k3_a_file_naming_this_session_with_no_good_moment_is_written_again(bad, tmp_path):
+    """N1's probe: the file names this session but its `at` is no moment first_mark reads;
+    it is written again at the next mark, and that moment holds across a third."""
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0)
+    (sdir / hooks.FIRST_MARK).write_text(json.dumps({"session": SID, **bad}))
+    _mark(sdir, 1795000393.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000013.0}
+    held = (sdir / hooks.FIRST_MARK).read_bytes(), (sdir / hooks.FIRST_MARK).stat().st_mtime_ns
+    _mark(sdir, 1795000700.0)
+    assert chain.first_mark(sdir) == 1795000013.0
+    assert ((sdir / hooks.FIRST_MARK).read_bytes(),
+            (sdir / hooks.FIRST_MARK).stat().st_mtime_ns) == held
+
+
+@pytest.mark.parametrize("text", ['{"session": "%s", "at": Infinity}' % SID,
+                                  '{"session": "%s", "at": 1e400}' % SID], ids=["inf", "1e400"])
+def test_k3_an_infinite_moment_is_written_again(text, tmp_path):
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0)
+    (sdir / hooks.FIRST_MARK).write_text(text)
+    _mark(sdir, 1795000393.0)
+    assert chain.first_mark(sdir) == 1795000013.0
+
+
+def test_k3_one_test_for_the_hook_and_the_reader():
+    ok = chain.first_mark_holds
+    assert ok({"session": SID, "at": 1795000012.0}, SID)
+    assert ok({"session": SID, "at": chain.AT_FLOOR}, SID) and ok({"session": SID, "at": 1e11}, SID)
+    for d in ({"session": SID, "at": chain.AT_FLOOR - 1}, {"session": SID, "at": 1e11 + 1},
+              {"session": SID, "at": True}, {"session": "other", "at": 1795000012.0},
+              {"session": SID, "written": 1795000012.0}, {}):
+        assert not ok(d, SID), d
+    assert ok({"session": SID, "written": 1795000012.0}, SID, "written")

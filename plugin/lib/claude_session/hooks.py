@@ -1920,7 +1920,8 @@ def _confirm(payload: dict, sdir: Path) -> None:
     before it, once (nw6b H2), and again where that file does not parse or names another
     session (nw6c G2): then at the earlier of that `written` and the last confirm's own
     `at` (respawn-main.json, read before this confirm writes it), so a second mark keeps
-    the first mark's moment when the first confirm is the last. Never raises."""
+    the first mark's moment when the first confirm is the last; a failed first-mark read or
+    write never stops the confirm (nw6c K1). Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
         if payload.get("tool_name") != "Bash" or not _respawn_close(cmd):
@@ -1931,15 +1932,20 @@ def _confirm(payload: dict, sdir: Path) -> None:
         if not (_num(at) and _num(written)) or written < at:
             return
         # nw6b H2: the ceiling's moment, never moved; nw6c G2: a file that does not parse
-        # or names another session is no moment and is written again at this mark.
-        first = sdir / FIRST_MARK
-        if _load_json(first).get("session") != sdir.name:
-            moment = written
-            if first.exists():                          # spoilt: the last confirm's moment
-                last = _load_json(sdir / CONFIRMED).get("at")
-                if _num(last) and 0 < last < written:
-                    moment = last
-            store._write_private(first, json.dumps({"session": sdir.name, "at": moment}))
+        # or names another session is no moment and is written again at this mark. Its read
+        # and write have their own guard (nw6c K1): whatever befalls them, the confirm below
+        # is written as on main.
+        try:
+            first = sdir / FIRST_MARK
+            if _load_json(first).get("session") != sdir.name:
+                moment = written
+                if first.exists():                      # spoilt: the last confirm's moment
+                    last = _load_json(sdir / CONFIRMED).get("at")
+                    if _num(last) and 0 < last < written:
+                        moment = last
+                store._write_private(first, json.dumps({"session": sdir.name, "at": moment}))
+        except Exception:                               # noqa: BLE001 - the confirm still
+            pass
         store._write_private(sdir / CONFIRMED, json.dumps(
             {"at": time.time(), "marker_sha256": hashlib.sha256(raw).hexdigest()}))
     except Exception:                                   # noqa: BLE001
