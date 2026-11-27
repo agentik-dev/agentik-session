@@ -96,6 +96,9 @@ SESSION_KEYS = ("profile", "description", "model", "effort", "subagents", "tools
 # are the `reconcile` verb's (exit 2), so a bad key never refuses a session.
 # The respawn chain's guards (respawn-r1 §4): a mapping of these, each a non-negative int.
 RESPAWN_KEYS = ("cap", "floor", "settle", "hold_max")   # hold_max: nw6b H1
+# nw6c G1: each respawn key's one upper bound, in seconds or sittings: no float overflows on
+# it and no sane profile reaches it. A value above it is refused where a negative is.
+RESPAWN_MAX = 10_000_000
 # Packet akt-run R1: what a bare `run` (and `akt`) sends: its first prompt and its `--model`.
 RUN_KEYS = ("prompt", "model")
 POSTURES = ("off", "signal", "ask", "deny")
@@ -622,6 +625,9 @@ def _validate(s: dict) -> None:
                                f"({', '.join(RESPAWN_KEYS)})")
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise ResolveError(f"respawn.{k} must be a non-negative integer")
+        if v > RESPAWN_MAX:                                              # nw6c G1
+            raise ResolveError(f"respawn.{k} must be a non-negative integer "
+                               f"at most {RESPAWN_MAX}")
     rn = s.get("run")                     # packet akt-run R1
     if not isinstance(rn, dict) or any(k not in RUN_KEYS for k in rn):
         raise ResolveError("run must be a mapping of " + ", ".join(RUN_KEYS)

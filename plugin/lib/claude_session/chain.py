@@ -149,6 +149,9 @@ def run_guards(cwd, env, flags) -> dict:
     for k, v in flags.items():
         if k not in out or not isinstance(v, int) or isinstance(v, bool) or v < 0:
             raise resolver.ResolveError(f"respawn.{k} must be a non-negative integer")
+        if v > resolver.RESPAWN_MAX:                                     # nw6c G1
+            raise resolver.ResolveError(f"respawn.{k} must be a non-negative integer "
+                                        f"at most {resolver.RESPAWN_MAX}")
         out[k] = v
     return out
 
