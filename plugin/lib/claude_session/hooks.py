@@ -1917,8 +1917,8 @@ def _confirm(payload: dict, sdir: Path) -> None:
     writes `respawn-main.json` {at, marker_sha256} when the marker was written at
     or after this call's own PreToolUse stamp; none without `activity.json`. The first
     confirm of a sitting writes `respawn-first.json` {session, at: the marker's `written`}
-    before it, once (nw6b H2), and again where that file does not parse or names another
-    session (nw6c G2): then at the earlier of that `written` and the last confirm's own
+    before it, once (nw6b H2), and again where that file fails chain.first_mark_holds,
+    the reader's own test (nw6c G2, K3): then at the earlier of that `written` and the last confirm's own
     `at` (respawn-main.json, read before this confirm writes it), so a second mark keeps
     the first mark's moment when the first confirm is the last; a failed first-mark read or
     write never stops the confirm (nw6c K1). Never raises."""
@@ -1931,13 +1931,14 @@ def _confirm(payload: dict, sdir: Path) -> None:
         written = json.loads(raw).get("written")
         if not (_num(at) and _num(written)) or written < at:
             return
-        # nw6b H2: the ceiling's moment, never moved; nw6c G2: a file that does not parse
-        # or names another session is no moment and is written again at this mark. Its read
-        # and write have their own guard (nw6c K1): whatever befalls them, the confirm below
-        # is written as on main.
+        # nw6b H2: the ceiling's moment, never moved; nw6c G2 and K3: a file that fails
+        # the reader's own test (chain.first_mark_holds) is no moment and is written again
+        # at this mark. Its read and write have their own guard (nw6c K1): whatever befalls
+        # them, the confirm below is written as on main.
         try:
+            from . import chain                         # here: chain imports this module
             first = sdir / FIRST_MARK
-            if _load_json(first).get("session") != sdir.name:
+            if not chain.first_mark_holds(_load_json(first), sdir.name):
                 moment = written
                 if first.exists():                      # spoilt: the last confirm's moment
                     last = _load_json(sdir / CONFIRMED).get("at")

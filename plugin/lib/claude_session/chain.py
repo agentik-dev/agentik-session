@@ -442,17 +442,26 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
     return holding, h is not None and h > now - settle, stale
 
 
+def first_mark_holds(d, sid: str, key: str = "at") -> bool:
+    """nw6c K3: the one test of a moment file, for first_mark and hooks._confirm alike: a
+    mapping naming session `sid` whose `key` is a number from AT_FLOOR to the year 5000.
+    A first-mark file that fails it is spoilt, and the hook writes it again."""
+    if not isinstance(d, dict) or d.get("session") != sid:
+        return False
+    at = d.get(key)
+    return _num(at) and AT_FLOOR <= at <= 1e11
+
+
 def first_mark(sdir: Path) -> float | None:
     """nw6b H2: the moment the held respawn's ceiling counts from, the `written` of the
     sitting's first confirmed mark, from `respawn-first.json` (hooks._confirm writes it
     once); else the marker's own `written`, for a confirm older than that file; None for
-    neither. A time below AT_FLOOR or past the year 5000 is none. A read; never raises."""
+    neither. A file that fails first_mark_holds is none. A read; never raises."""
     try:
         for name, key in ((hooks.FIRST_MARK, "at"), (hooks.MARKER, "written")):
             d = _json(sdir / name) or {}
-            at = d.get(key)
-            if d.get("session") == sdir.name and _num(at) and AT_FLOOR <= at <= 1e11:
-                return at
+            if first_mark_holds(d, sdir.name, key):
+                return d[key]
     except Exception:                                   # noqa: BLE001 - no moment
         pass
     return None
