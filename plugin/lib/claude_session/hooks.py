@@ -124,7 +124,7 @@ CHAIN_VAR = resolver.CHAIN_VAR                  # one spelling, which the resolv
 CHAIN_RE = resolver.CHAIN_RE                    # a file name: never . or ..
 MARKER = "respawn.json"
 CONFIRMED = "respawn-main.json"
-FIRST_MARK = "respawn-first.json"   # nw6b H2: the sitting's first confirmed mark, written once
+FIRST_MARK = "respawn-first.json"   # nw6b H2: the first confirmed mark; nw6c G2: rewritten if spoilt
 ACTIVITY = "activity.json"
 TURN_ENDED = "turn-ended.json"
 LIMITED = "limited.json"     # a turn an API error ended (S34 ruling 5); the band reads it
@@ -1917,7 +1917,10 @@ def _confirm(payload: dict, sdir: Path) -> None:
     writes `respawn-main.json` {at, marker_sha256} when the marker was written at
     or after this call's own PreToolUse stamp; none without `activity.json`. The first
     confirm of a sitting writes `respawn-first.json` {session, at: the marker's `written`}
-    before it, once (nw6b H2). Never raises."""
+    before it, once (nw6b H2), and again where that file does not parse or names another
+    session (nw6c G2): then at the earlier of that `written` and the last confirm's own
+    `at` (respawn-main.json, read before this confirm writes it), so a second mark keeps
+    the first mark's moment when the first confirm is the last. Never raises."""
     try:
         cmd = (payload.get("tool_input") or {}).get("command")
         if payload.get("tool_name") != "Bash" or not _respawn_close(cmd):
@@ -1927,9 +1930,16 @@ def _confirm(payload: dict, sdir: Path) -> None:
         written = json.loads(raw).get("written")
         if not (_num(at) and _num(written)) or written < at:
             return
-        if not (sdir / FIRST_MARK).exists():    # nw6b H2: the ceiling's moment, never moved
-            store._write_private(sdir / FIRST_MARK, json.dumps(
-                {"session": sdir.name, "at": written}))
+        # nw6b H2: the ceiling's moment, never moved; nw6c G2: a file that does not parse
+        # or names another session is no moment and is written again at this mark.
+        first = sdir / FIRST_MARK
+        if _load_json(first).get("session") != sdir.name:
+            moment = written
+            if first.exists():                          # spoilt: the last confirm's moment
+                last = _load_json(sdir / CONFIRMED).get("at")
+                if _num(last) and 0 < last < written:
+                    moment = last
+            store._write_private(first, json.dumps({"session": sdir.name, "at": moment}))
         store._write_private(sdir / CONFIRMED, json.dumps(
             {"at": time.time(), "marker_sha256": hashlib.sha256(raw).hexdigest()}))
     except Exception:                                   # noqa: BLE001

@@ -95,3 +95,97 @@ def test_g1_the_probes_case_through_the_guards_never_overflows(fake, monkeypatch
             chain.run_guards(fake.work, dict(os.environ), {key: HUGE})
     _frun(fx, {**G, "hold_max": TOP, "settle": 60})            # the bound itself runs
     assert len(fx.procs) == 2
+
+
+# ---- G2: a spoilt first-mark file is written again at the next confirmed mark ------------
+
+SID = "00000000-0000-4000-8000-00000000c0de"          # a made-up session
+BASH = {"tool_name": "Bash",
+        "tool_input": {"command": "agentik-session checkpoint --respawn --charter c.md"}}
+
+
+def _sdir(tmp_path):
+    d = tmp_path / "state" / SID
+    d.mkdir(parents=True)
+    return d
+
+
+def _mark(sdir, written, confirm_at=None):
+    """A mark's files as the verb and the call's PreToolUse leave them, then its confirm,
+    with the clock at `confirm_at` (default written + 1)."""
+    (sdir / hooks.ACTIVITY).write_text(json.dumps({"at": written - 1}))
+    (sdir / hooks.MARKER).write_text(json.dumps({"session": SID, "written": written}))
+    t = written + 1 if confirm_at is None else confirm_at
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(hooks.time, "time", lambda: t)
+        hooks._confirm(BASH, sdir)
+
+
+def _first(sdir):
+    return json.loads((sdir / hooks.FIRST_MARK).read_text())
+
+
+def test_g2_the_reviews_case_signals_at_the_first_mark_plus_the_ceiling(fake, monkeypatch):
+    """N5's probe: the file spoilt at 100 after the first mark (written at 12), a second
+    mark at 391, ceiling 600: the signal at 612 to 614, where the pin gives 994."""
+    def spoil(fx, p):
+        (resolver.session_dir(_state(), p.sid) / hooks.FIRST_MARK).write_text("{")
+    seq = ([(11, _spawn_line("a1", "build x")), (12, _call("PreToolUse", "a1", "toolu_01")),
+            (4000, _call("PostToolUse", "a1", "toolu_01"))]
+           + [(600 * k, _call("PostToolUse", "a1", f"toolu_1{k}")) for k in range(1, 7)]
+           + [(100, spoil), (390, hook("UserPromptSubmit", prompt="go"))]
+           + respawn_seq(fake.charter, at=391))
+    fx = _fx(monkeypatch, [respawn_seq(fake.charter) + seq + [end(9000)], [end(1)]])
+    _frun(fx, {**G, "hold_max": 600})
+    ((t, _),) = fx.procs[0].signals
+    assert 612 <= t - T0 <= 614 and len(fx.procs) == 2
+
+
+@pytest.mark.parametrize("spoilt", ["{", "", "[]", '"x"', "null", '{"at": 1795000000}'])
+def test_g2_a_file_that_does_not_parse_is_written_at_the_next_mark(spoilt, tmp_path):
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0)
+    (sdir / hooks.FIRST_MARK).write_text(spoilt)
+    _mark(sdir, 1795000393.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000013.0}     # the first confirm's moment
+    assert chain.first_mark(sdir) == 1795000013.0
+
+
+def test_g2_a_file_naming_another_session_is_replaced(tmp_path):
+    sdir = _sdir(tmp_path)
+    other = {"session": "00000000-0000-4000-8000-0000000000ff", "at": 1795000005.0}
+    (sdir / hooks.FIRST_MARK).write_text(json.dumps(other))
+    _mark(sdir, 1795000012.0)                       # no confirm before it: the marker's own
+    assert _first(sdir) == {"session": SID, "at": 1795000012.0}
+    (sdir / hooks.FIRST_MARK).write_text(json.dumps(other))
+    _mark(sdir, 1795000393.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000013.0}
+
+
+def test_g2_a_good_file_is_never_written_again(tmp_path):
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0)
+    good = json.dumps({"session": SID, "at": 1795000012.0, "kept": True})
+    (sdir / hooks.FIRST_MARK).write_text(good)
+    before = (sdir / hooks.FIRST_MARK).stat().st_mtime_ns
+    for w in (1795000393.0, 1795000700.0):
+        _mark(sdir, w)
+        assert (sdir / hooks.FIRST_MARK).read_text() == good
+    assert (sdir / hooks.FIRST_MARK).stat().st_mtime_ns == before
+
+
+def test_g2_an_absent_file_is_written_at_the_marks_own_moment_as_on_main(tmp_path):
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000012.0}
+    (sdir / hooks.FIRST_MARK).unlink()
+    _mark(sdir, 1795000393.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000393.0}
+
+
+def test_g2_a_last_confirm_later_than_the_mark_is_not_taken(tmp_path):
+    sdir = _sdir(tmp_path)
+    _mark(sdir, 1795000012.0, confirm_at=1795009999.0)
+    (sdir / hooks.FIRST_MARK).write_text("{")
+    _mark(sdir, 1795000393.0)
+    assert _first(sdir) == {"session": SID, "at": 1795000393.0}
