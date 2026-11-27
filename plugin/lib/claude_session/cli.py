@@ -1744,14 +1744,15 @@ def cmd_checkpoint(args) -> int:
 def _respawn_flag(key: str, raw: str) -> int:
     """A `run --cap/--floor/--settle` value: a non-negative integer, else exit 2 naming
     the key (packet S20 ruling 8); above resolver.RESPAWN_MAX, exit 2 naming the bound
-    (nw6c G1), read by its digits before int() so no length of them raises."""
+    (nw6c G1). The number is read from its digits with the leading zeros off, so no length
+    or count of zeros raises Python's limit on digits (nw6c K2)."""
     if not (raw.isascii() and raw.isdigit()):          # A-F7: ASCII digits only
         _die(f"respawn.{key} must be a non-negative integer (--{key} {raw!r})", 2)
-    top = resolver.RESPAWN_MAX
-    if len(raw.lstrip("0")) > len(str(top)) or int(raw) > top:
+    top, digits = resolver.RESPAWN_MAX, raw.lstrip("0") or "0"
+    if len(digits) > len(str(top)) or int(digits) > top:
         _die(f"respawn.{key} must be a non-negative integer at most {top} "
              f"(--{key} {raw[:20]!r}{'...' if len(raw) > 20 else ''})", 2)
-    return int(raw)
+    return int(digits)
 
 
 # Packet akt-run R4a: the prefix of `run`'s lines, respoken; one whether `akt` or `run` was typed.

@@ -229,7 +229,7 @@ def test_k2_leading_zeros_of_any_count_never_raise(raw, want):
 def test_k2_run_settle_with_zeros_past_the_digit_limit_is_taken(raw, fake, monkeypatch):
     monkeypatch.setattr(chain, "on_tty", lambda: True)
     rc, _, err = _cli("run", "--chain", "c1", "--settle", raw, "--", "--model", "m", "go")
-    assert "respawn.settle" not in err and rc != 2, err
+    assert "respawn.settle" not in err and rc != 2 and fake.starts(), err
 
 
 def test_k2_zeros_before_a_value_above_the_bound_still_exit_2():
