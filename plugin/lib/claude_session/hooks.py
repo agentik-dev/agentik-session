@@ -2406,8 +2406,9 @@ def _spawned(sid: str, aid: str, env) -> bool:
 
 
 def _back_stamp(sdir: Path, aid: str, env) -> None:
-    """R2: `backs/<aid>.json` {at, before} at a helper's end; one already there is kept, and
-    with no reading no stamp is written. Never raises."""
+    """R2: `backs/<aid>.json` {at, before} at the end of a helper whose spawn line `_spawned`
+    finds (nw4c R1), so an engine's own agent gets none; one already there is kept, and with
+    no reading no stamp is written. Never raises."""
     try:
         p = sdir / BACKS / f"{aid}.json"
         if os.path.lexists(p) or not _spawned(sdir.name, aid, env):
@@ -2534,8 +2535,9 @@ def subagent_stop(payload: dict, env=None) -> dict:
     it records the end, `ended/<agent_id>.json` {at}, so the launcher names no ended helper
     from the helpers' stamp. Then (packet nw4b R2) it
     stamps the coordinator's occupancy at the helper's end, `backs/<agent_id>.json`, for the
-    main thread's next Stop to read; with no reading it writes no stamp. It never raises and
-    says nothing: dispatch prints nothing for it (SILENT)."""
+    main thread's next Stop to read, only at the end of a helper whose spawn line `_spawned`
+    finds (nw4c R1), so an engine's own agent gets none; with no reading it writes no stamp.
+    It never raises and says nothing: dispatch prints nothing for it (SILENT)."""
     try:
         aid = payload.get("agent_id")
         if not isinstance(aid, str) or not _SID.match(aid):
