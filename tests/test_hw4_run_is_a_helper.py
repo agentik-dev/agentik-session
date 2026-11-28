@@ -629,3 +629,18 @@ def test_t2_the_whole_output_with_parks_stays_inside_640_bytes(posture, used, id
     if posture != "off" and not (posture == "deny" and "reserved" in whole):
         assert "; parked on" in whole                             # the parks are still said
     assert sdir.is_dir()
+
+
+def test_t3_a_parked_helper_s_stop_with_no_list_leaves_the_park_and_writes_no_end():
+    _park()
+    before = parked()
+    _stop(tasks=None)                                           # no `background_tasks` key
+    assert parked() == before and not ended()
+    _stop(tasks=[])                                             # the list: the park ends
+    assert parked() is None and ended()
+
+
+def test_t3_a_stop_with_no_list_of_a_helper_with_no_park_is_the_pin_s():
+    _session()
+    _stop(tasks=None)
+    assert parked() is None and ended()

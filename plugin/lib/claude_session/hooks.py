@@ -2969,7 +2969,8 @@ def subagent_stop(payload: dict, env=None) -> dict:
     finds (nw4c R1), so an engine's own agent gets none; with no reading it writes no stamp.
     Packet hw4 P3, P4: first each other park whose shells the payload no longer lists as
     running ends; then a stop whose `background_tasks` holds a running shell of this helper's
-    P2 records is a park, `parked/<agent_id>.json`, and writes no `ended/` record.
+    P2 records is a park, `parked/<agent_id>.json`, and writes no `ended/` record. Build 2
+    T3: a parked helper's stop with no such list leaves its park and writes no `ended/` record.
     It never raises and says nothing: dispatch prints nothing for it (SILENT)."""
     try:
         aid = payload.get("agent_id")
@@ -2980,7 +2981,10 @@ def subagent_stop(payload: dict, env=None) -> dict:
         if sdir is None or not sdir.is_dir():
             return {}
         _parks_seen(payload, sdir, skip=aid)            # hw4 P4: never raises
-        if not _park(payload, sdir, aid):               # hw4 P3: a park writes no end
+        if _running_shells(payload) is None and _park_tasks(
+                _state_json(sdir / PARKED / f"{aid}.json")):
+            pass                                        # build 2 T3: no list, the park stands
+        elif not _park(payload, sdir, aid):             # hw4 P3: a park writes no end
             try:                                        # nw6b Y1: before the calls go
                 store._write_private(sdir / ENDED / f"{aid}.json",
                                      json.dumps({"at": time.time()}))
