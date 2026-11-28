@@ -533,41 +533,96 @@ def _run_waits(args: list) -> bool:
 
 def _wait_unbounded(args: list) -> bool:
     """hw2 H1: a `gate wait` the CLI would run (its parser takes the words, no help, an id or
-    `--chain`) with no `--timeout` or one over WAIT_BOUND; a timeout not read as a number is
-    the parser's refusal, so no wait."""
+    `--chain`) with no `--timeout` or one over WAIT_BOUND. Build 2, R2: a timeout not read as a
+    plain finite number (a variable, a substitution, an expansion, any other word) is no bound."""
     try:
-        ns, extras = _wait_parser().parse_known_intermixed_args(args)
+        ns, extras = _wait_parser(str).parse_known_intermixed_args(args)
     except (ValueError, TypeError):
         return False
     if extras or ns.help or not (ns.chain or isinstance(ns.id, str)):
         return False
-    return ns.timeout is None or not ns.timeout <= WAIT_BOUND
+    if ns.timeout is None:
+        return True
+    try:
+        t = float(ns.timeout)
+    except ValueError:
+        return True
+    return not (math.isfinite(t) and t <= WAIT_BOUND)
+
+
+_PAREN_OPEN = ("(", shellreader._MASK["("])     # a paren as written, and as the mask hides it
+_PAREN_SHUT = (")", shellreader._MASK[")"])
+_TICKS = ("`", shellreader._MASK["`"])
+
+
+def _masked(text: str) -> str:
+    """The reader's own mask of a line: its heredoc bodies out, its comments dropped."""
+    return shellreader._mask(shellreader._here_scan(text)[0])
 
 
 def _unquoted(text: str) -> str:
-    """The reader's masked text (its heredoc bodies out, its comments dropped) with each quoted
-    span and each backslashed character turned into one `_`, so no word in quotes is read."""
-    masked = shellreader._mask(shellreader._here_scan(text)[0])
-    out, i, n, quote = [], 0, len(masked), None
+    """The reader's masked text with each quoted span and each backslashed character turned
+    into one `_`, so no word in quotes is read. Build 2, R1: the text of a `$(...)` or of
+    backticks inside double quotes is kept and read afresh, its own quotes blanked in turn."""
+    masked = _masked(text)
+    out, i, n = [], 0, len(masked)
+    stack = []      # the open frames: a quote, or inside double quotes "`" or [depth] for `$(`
     while i < n:
         c = masked[i]
-        if quote is None:
+        top = stack[-1] if stack else None
+        if top == "'":
+            if c == "'":
+                stack.pop()
+            i += 1
+            continue
+        if top == '"':
             if c == "\\":
-                out.append("_")
                 i += 2
                 continue
-            if c in "'\"":
-                quote = c
-                out.append("_")
-            else:
-                out.append(c)
-        elif c == "\\" and quote == '"':
+            if c == '"':
+                stack.pop()
+            elif c == "$" and masked[i + 1:i + 2] in _PAREN_OPEN:
+                stack.append([0])
+                out.append(" ")
+                i += 1
+            elif c in _TICKS:
+                stack.append("`")
+                out.append(" ")
+            i += 1
+            continue
+        if c == "\\":                   # a line's own text, or a substitution's in quotes
+            out.append("_")
             i += 2
             continue
-        elif c == quote:
-            quote = None
+        if c in "'\"":
+            stack.append(c)
+            out.append("_")
+        elif top == "`" and c in _TICKS:
+            stack.pop()
+            out.append(" ")
+        elif isinstance(top, list) and (c in _PAREN_OPEN or c in _PAREN_SHUT):
+            if c in _PAREN_SHUT and not top[0]:
+                stack.pop()
+            else:
+                top[0] += 1 if c in _PAREN_OPEN else -1
+            out.append(" ")
+        else:
+            out.append(c)
         i += 1
     return "".join(out)
+
+
+def _heavy_forms(c, tokens: list) -> set:
+    """Build 2, R3: a command's words joined by one space, as typed and with the path dropped
+    from its name. The typed name is a word of the line holding a `/` whose base name is the
+    command's and that its first argument follows."""
+    forms = {" ".join([c.name, *c.args])}
+    first = c.args[0].split()[:1] if c.args else []
+    for k, t in enumerate(tokens):
+        if (t != c.name and "/" in t and os.path.basename(t) == c.name
+                and tokens[k + 1:k + 1 + len(first)] == first):
+            forms.add(" ".join([t, *c.args]))
+    return forms
 
 
 def _loops(command: str, cmds) -> bool:
@@ -608,14 +663,14 @@ class _WaitWords(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def _wait_parser() -> argparse.ArgumentParser:
+def _wait_parser(timeout=float) -> argparse.ArgumentParser:
     """The options `cli`'s `gate wait` parser takes (a test holds the two alike), `--help` a
-    flag here so that it prints nothing."""
+    flag here so that it prints nothing; `timeout` the type `--timeout`'s value is read as."""
     p = _WaitWords(prog="gate wait", add_help=False)
     p.add_argument("-h", "--help", action="store_true")
     p.add_argument("id", nargs="?")
     p.add_argument("--chain", action="store_true")
-    p.add_argument("--timeout", type=float, metavar="SECONDS")
+    p.add_argument("--timeout", type=timeout, metavar="SECONDS")
     p.add_argument("--json", action="store_true")
     p.add_argument("--strict", action="store_true")
     return p
@@ -678,8 +733,10 @@ def _helper_wait(payload: dict, env) -> dict | None:
         slept, run_wait, unbounded = 0.0, False, False      # hw2 H1: judged after nw3's two
         sleeps = heavy = False
         patterns = _helper_heavy(payload, env)
+        tokens = [t.strip("'\"" + "".join(_TICKS[1:] + _PAREN_OPEN[1:] + _PAREN_SHUT[1:]))
+                  for t in _WORD.findall(_masked(command))] if patterns else []
         for c in cmds:
-            if patterns and any(fnmatch.fnmatchcase(" ".join([c.name, *c.args]), p)
+            if patterns and any(fnmatch.fnmatchcase(f, p) for f in _heavy_forms(c, tokens)
                                 for p in patterns):
                 heavy = True                                 # hw2 H4: told, never refused
             if c.name == "sleep":

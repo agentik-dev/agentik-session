@@ -123,6 +123,21 @@ REFUSED = [
     ("until test -f /tmp/done; do sleep 1; done", None, LOOP),
     ("while :; do agentik session gate status; sleep $N; done", None, LOOP),
     ("bash -c 'while :; do sleep 5; done'", None, LOOP),
+    # build 2, R1 (review 1, F1): a loop in a substitution inside double quotes
+    ('echo "$(while :; do sleep 5; done)"', None, LOOP),
+    ('x="$(until false; do sleep 5; done)"', None, LOOP),
+    ('echo "`while :; do sleep 5; done`"', None, LOOP),
+    (': "$(for i in 1 2 3 4 5 6 7 8 9 10; do sleep 9; done)"', None, LOOP),
+    ('out="$(until agentik session gate status | grep -q done; do sleep 5; done)"', None, LOOP),
+    ('echo "a $(echo "b $(while :; do sleep 5; done)")"', None, LOOP),
+    # build 2, R2 (review 1, F2): a timeout no one can read as a number of 100 or less
+    ('T=540; agentik session gate wait 20261127-000000-0001 --timeout "$T"', None, UNBOUND),
+    ('agentik session gate wait 20261127-000000-0001 --timeout "$(echo 540)"', None, UNBOUND),
+    ("agentik session gate wait 20261127-000000-0001 --timeout ${T:-540}", None, UNBOUND),
+    ("agentik session gate wait J1 --timeout=$T", None, UNBOUND),
+    ("agentik session gate wait J1 --timeout `echo 540`", None, UNBOUND),
+    ("agentik session gate wait J1 --timeout soon", None, UNBOUND),
+    ("agentik session gate wait J1 --timeout nan", None, UNBOUND),
 ]
 
 
@@ -163,6 +178,15 @@ NO_WAIT = [
     "agentik session gate status",
     "echo agentik session gate wait J3",
     "make test",
+    # build 2, R1: a loop word in a plain quoted string, in single quotes or a heredoc's body
+    'echo "while you wait"; sleep 5',
+    "git commit -m 'loop: $(while :; do sleep 5; done)' && sleep 5",
+    'echo "$(date) while"; sleep 5',
+    "echo \"$(echo 'for now')\"; sleep 5",
+    "git commit -m \"$(cat <<'EOF'\nwhile waiting\nEOF\n)\" && sleep 5",
+    # build 2, R2: a plain finite number of 100 or less
+    "agentik session gate wait J1 --timeout=60",
+    "agentik session gate wait J1 --timeout 99.5",
 ]
 
 
@@ -361,6 +385,31 @@ def test_1_heavy_beside_a_wait():
                    "systemMessage": SAY_NOTE} and opened(p)
     _session("refuse", heavy=["make *"])
     assert call("make check; sleep 90")[1] == denied("a sleep of 90 s")
+
+
+# build 2, R3 (review 1, F3): a pattern is matched on the words as typed and on the same words
+# with the path dropped from the command's name
+@pytest.mark.parametrize("value", ["say", "refuse"])
+@pytest.mark.parametrize("pattern, cmd", [
+    ("./scripts/check*", "./scripts/check --fast"),
+    ("check*", "./scripts/check --fast"),
+    ("./scripts/check", "./scripts/check"),
+    ("./scripts/e2e *", "cd /tmp && ./scripts/e2e run all"),
+    ("/usr/bin/make *", "env A=1 /usr/bin/make test"),
+    ("./scripts/check*", "bash -c './scripts/check --fast'"),
+])
+def test_1_a_heavy_pattern_with_a_path_is_told(value, pattern, cmd):
+    _session(value, heavy=[pattern])
+    p, out = call(cmd)
+    assert out == {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                          "additionalContext": HEAVY}} and opened(p)
+
+
+@pytest.mark.parametrize("cmd", ["/other/check --fast", "cat ./scripts/check",
+                                 "cat ./scripts/check; check --fast", "echo ./scripts/check x"])
+def test_1_a_heavy_pattern_with_a_path_matches_that_path_alone(cmd):
+    _session("refuse", heavy=["./scripts/check*"])
+    assert call(cmd)[1] == {}
 
 
 def test_1_heavy_not_a_list_or_the_main_thread_is_nothing():
