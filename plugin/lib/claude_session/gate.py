@@ -60,6 +60,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import statistics
 import subprocess
 import sys
@@ -116,6 +117,14 @@ SHOWN = "gate-shown.json"           # a closed sitting's chain lines already sho
 OLD_LINE = 86400.0                  # a chain line older than this is set aside (nw2 R2)
 LABEL_MOST = 48                     # a chain line's label, in bytes (nw2 R3)
 CHAIN_KEYS = ("chain", "label")     # a chain's result's keys after RESULT_KEYS
+MEASURE_KEYS = ("waited", "cpu_seconds", "tree")    # last in a result, each null if unknown (hw1 W2)
+FAIL_MOST = 80                      # a red line's failing text, in bytes (hw1 W5)
+FAIL_LINE = re.compile(r"^(?:--- FAIL|FAIL|ERROR|make(?:\[\d+\])?: \*\*\*)"
+                       r"|AssertionError|^(?:E\s+)?(?:[A-Za-z_][\w.]*)?Error:")
+MAKE_FAIL = re.compile(r"^make(?:\[\d+\])?: \*\*\*")     # make's own; another is said first (R3)
+WITHIN_MOST = 100                   # `gate run --within`'s bound, in seconds (hw1 W1)
+QUEUED = 75                         # `--within`'s exit when the job is still open
+TAIL = 20                           # a red's log lines `--within` prints
 CHAIN_INBOX_KEYS = ("chain", "head", "dirty", "label")
 CLOSED_WORDS = "this sitting has closed: the line stays for the successor"
 OPEN_NAMED = 3                      # the open jobs a start line names, then `and N more`
@@ -320,6 +329,26 @@ def _head(repo: str) -> str | None:
         return None
     out = p.stdout.strip() if p.returncode == 0 else ""
     return out if _HEAD.match(out) else None
+
+
+def _tree(repo: str) -> str | None:
+    """`git -C <repo> rev-parse HEAD^{tree}`, run as `_head` runs git: the head's tree, else
+    None (hw1 W2). Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{tree}"],
+                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    out = p.stdout.strip() if p.returncode == 0 else ""
+    return out if _HEAD.match(out) else None
+
+
+def clean_tree(repo: str) -> str | None:
+    """The head's tree where the folder is a work tree with no status line, untracked files
+    counted; None for a dirty tree or one git cannot read, which is never matched (hw1 W4)."""
+    return _tree(repo) if _dirty(repo) == 0 else None
 
 
 def _branch(repo: str) -> str | None:
@@ -568,13 +597,13 @@ def chain_count(root, name: str) -> int:
     return len(_waiting(chain_inbox(root, name)))
 
 
-def _label(text) -> str:
+def _label(text, most: int = LABEL_MOST) -> str:
     """A label as a line holds it: one line, each control character and `;` a space (brief
-    2, R6: a label adds no field), cut to `LABEL_MOST` bytes on a character."""
+    2, R6: a label adds no field), cut to `most` bytes on a character."""
     t = "".join(" " if c == ";" or unicodedata.category(c) == "Cc" else c
                 for c in str(text or ""))
     t = " ".join(t.split())
-    return t.encode()[:LABEL_MOST].decode("utf-8", "ignore")
+    return t.encode()[:most].decode("utf-8", "ignore")
 
 
 def open_line(root, name: str, now, alive=_alive) -> str | None:
@@ -624,10 +653,12 @@ def chain_status_lines(root, name: str, now, alive=_alive) -> list[str]:
 
 
 def enqueue(root, repo, command, env, locks, wall, label, caller, now,
-            named: bool = False) -> dict:
+            named: bool = False, tree: str | None = None) -> dict:
     """Write one entry (mode 0600, written then renamed) and return it. The id is
     `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
-    `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave."""
+    `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave. `tree`, the
+    head's tree of a clean folder at the queue, is written last and only where given (hw1
+    W4), so an entry queued without one keeps the pin's keys."""
     real = os.path.realpath(str(repo))
     if not os.path.isdir(real):
         raise GateError(f"no such repo directory: {repo}")
@@ -653,8 +684,33 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
                  "label": label or "", "caller": caller, "queued": now, "key": key,
                  "key_name": os.path.basename(real),
                  "chain": chain_for(root, env, caller, named)}
+        if _clean_head(tree):
+            entry["tree"] = tree
         _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
     return entry
+
+
+def open_entry(root, repo, command, tree, alive=_alive) -> tuple[dict, str] | None:
+    """hw1 W4: (the oldest open entry of this folder, its state) whose head's tree at its queue
+    is `tree` and whose command is `command`, a check job's matched by its worktree alone, since
+    the runner's own argv may differ between installs; None for no tree (a dirty folder) or no
+    such entry. The state is `running` or `queued position <n>`."""
+    if not _clean_head(tree):
+        return None
+    real = repo_path(repo)
+    where = check_worktree(command)
+    running = _running_ids(root, alive)
+    for e in entries(root):
+        if e.get("tree") != tree or repo_path(e.get("repo")) != real \
+                or result_path(root, e["id"]).exists():
+            continue
+        same = repo_path(check_worktree(e.get("command"))) == repo_path(where) \
+            if where is not None else e.get("command") == list(command)
+        if same:
+            state = "running" if e["id"] in running \
+                else f"queued position {position(root, e['id'], alive)}"
+            return e, state
+    return None
 
 
 def entries(root) -> list[dict]:
@@ -837,6 +893,22 @@ def _load_avg() -> float:
     return os.getloadavg()[0]
 
 
+def _reap_child(proc) -> tuple[int | None, float | None]:
+    """One look at a child that never waits (hw1 W2): (its code, as `Popen.poll` gives it, or
+    None while it runs; its user plus system seconds from `wait4`, its waited-for descendants
+    counted, or None). A child that is no `Popen` of this process, or that something else
+    reaped, is polled as before and has no seconds."""
+    if not isinstance(proc, subprocess.Popen) or proc.returncode is not None:
+        return proc.poll(), None
+    try:
+        pid, status, usage = os.wait4(proc.pid, os.WNOHANG)
+    except ChildProcessError:
+        return proc.poll(), None
+    if pid == 0:
+        return None, None
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    return proc.returncode, round(usage.ru_utime + usage.ru_stime, 2)
+
 @dataclass
 class Fx:
     """The runner's effects, each faked in tests."""
@@ -857,6 +929,9 @@ class Fx:
     head: Callable[[str], str | None] = _head
     loads: Callable[[], tuple] = os.getloadavg          # the three, for the result (gl1 R3)
     dirty: Callable[[str], int | None] = _dirty
+    tree: Callable[[str], str | None] = _tree           # the head's tree at a clean start (hw1)
+    reap: Callable = _reap_child                        # (code, cpu seconds) of one look (hw1)
+
 
 
 def _take(fh, fx: Fx) -> bool:
@@ -985,6 +1060,27 @@ def _count(n) -> int | None:
     return n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None
 
 
+def _number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x < float("inf")
+
+
+def _tree_read(fx: Fx, gid: str, repo) -> str | None:
+    """The head's tree; None for a read that raised (one line in the runner's log)."""
+    try:
+        return _clean_head(fx.tree(repo))
+    except Exception as err:                            # noqa: BLE001 (a null, never a job's)
+        fx.log(f"gate {gid}: the tree at its start was not read: {err}")
+        return None
+
+
+def _measures(e: dict) -> dict:
+    """hw1 W2: the result's `waited`, `cpu_seconds` and `tree`, from what the runner kept on
+    the entry in its memory, each null where it was not read."""
+    return {"waited": e.get("waited") if _number(e.get("waited")) else None,
+            "cpu_seconds": e.get("cpu") if _number(e.get("cpu")) else None,
+            "tree": _clean_head(e.get("start_tree"))}
+
+
 def _machine(e: dict) -> dict:
     """The result's `load`, `beside` and `dirty` from what the runner read into the entry in
     its memory: each side null where it was not read, `beside` null when it was not."""
@@ -1020,6 +1116,7 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     chain = e.get("chain")
     if isinstance(chain, str) and CHAIN_RE.match(chain):     # nw2 R1: kept, the pin's keys first
         result.update({"chain": chain, "label": e.get("label") or ""})
+    result.update(_measures(e))                               # hw1 W2: after every pin's key
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
     caller = e.get("caller")
     if "chain" in result:
@@ -1068,7 +1165,11 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     e["beside"] = [c.e["id"] for c in s.running]
     e["dirty"] = {"start": _dirty_read(fx, gid, e["repo"], "start"), "end": None}
     e["load"] = {"start": _loads_read(fx, gid, "start"), "end": None}
+    # hw1 W2: the head's tree where the folder was clean at the start, read after its dirt.
+    e["start_tree"] = _tree_read(fx, gid, e["repo"]) if e["dirty"]["start"] == 0 else None
     started = fx.now()
+    q = e.get("queued")
+    e["waited"] = round(max(0.0, started - q), 1) if _number(q) and _number(started) else None
     with _open_log(d / "log") as log:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
         log.flush()
@@ -1102,6 +1203,14 @@ def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set,
     _runner_write(root, fx, s)
 
 
+def _cut_reaped(c: _Child, fx: Fx) -> bool:
+    """Whether a child the cut signalled is gone, its seconds kept where `wait4` gave them."""
+    code, cpu = fx.reap(c.proc)
+    if code is not None:
+        c.e["cpu"] = cpu
+    return code is not None
+
+
 def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     """One look at each child, never waiting on any: a finish kills what its group left
     running, since the key frees here and the next of that key would overlap it, and closes
@@ -1112,7 +1221,7 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     for c in list(s.running):
         now, code, cut = fx.now(), None, None
         if c.term_at is None:
-            code = c.proc.poll()
+            code, c.e["cpu"] = fx.reap(c.proc)
             if code is not None:
                 code = code if code >= 0 else 128 - code
                 _signal_group(c.proc.pid, signal.SIGKILL, fx)
@@ -1126,7 +1235,7 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             if now - c.term_at >= fx.grace:
                 _signal_group(c.proc.pid, signal.SIGKILL, fx)
                 c.kill_at = now
-        elif c.proc.poll() is not None or now - c.kill_at >= fx.grace:
+        elif _cut_reaped(c, fx) or now - c.kill_at >= fx.grace:
             cut = c.cut or CUT_WALL
             code = CALLER_EXIT if cut == CUT_CALLER else 124
         if code is not None:
@@ -1261,7 +1370,64 @@ def wait_line(result: dict) -> str:
         head += f"head {h[:7] if h else '?'}; "
         head += f"dirty {dirt}; " if dirt else ""
         head += f"{lab}; " if lab else ""
+    x = result.get("exit")
+    fail = fail_text(result.get("log"), result.get("id")) if x != 0 or isinstance(x, bool) \
+        else None
+    head += f"fail {fail}; " if fail else ""                  # hw1 W5
     return head + f"log {result.get('log')}"
+
+
+def log_lines(path) -> list[str]:
+    """The lines of a job log's last 64 KiB, the first, maybe cut, dropped where the read did
+    not start at the top; [] where it is no regular file or cannot be read. Opened so that a
+    FIFO cannot block and a link is not followed, since a hook reads it (hw1 W5)."""
+    if not isinstance(path, str) or not path:
+        return []
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except (OSError, ValueError):
+        return []
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return []
+        start = max(0, st.st_size - 65536)
+        os.lseek(fd, start, os.SEEK_SET)
+        data = os.read(fd, 65536)
+    except OSError:
+        return []
+    finally:
+        os.close(fd)
+    lines = data.decode("utf-8", "replace").splitlines()
+    return lines[1:] if start and lines else lines
+
+
+def fail_text(path, gid) -> str | None:
+    """hw1 W5: the log's last line that reads as a failure (`FAIL`, `--- FAIL`, `ERROR`, `make:
+    ***`, an `AssertionError` or an `Error:` line), the gate's own lines aside, as a label is
+    held and cut to `FAIL_MOST` bytes; None where there is none. A line that is not make's own
+    is taken before make's, and make's only where there is no other (hw1 review 1, R3)."""
+    skip = f"gate {gid}: "
+    made = None
+    for ln in reversed(log_lines(path)):
+        t = ln.strip()
+        if t and not t.startswith(skip) and FAIL_LINE.search(t):
+            if not MAKE_FAIL.match(t):
+                return _json_cut(_label(t, FAIL_MOST), FAIL_MOST) or None
+            made = made or t
+    return _json_cut(_label(made, FAIL_MOST), FAIL_MOST) or None if made else None
+
+
+def _json_cut(text: str, most: int) -> str:
+    """`text` cut on a character so that its JSON form, the hook's output, adds at most `most`
+    bytes: a character JSON escapes counts as its escape (hw1 W5)."""
+    out, n = [], 0
+    for c in text:
+        n += len(json.dumps(c)) - 2
+        if n > most:
+            break
+        out.append(c)
+    return "".join(out).rstrip()
 
 
 MAKES = ("make", "gmake")

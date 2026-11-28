@@ -385,7 +385,9 @@ def test_fw5_a8_no_wait_another_repo_or_no_entry_queue_as_today(repo, job, monke
     assert run("gate", "run", str(repo.path), "--", "/bin/echo", "inner")[0] == 0
     assert run("gate", "run", "--wait", str(other), "--", "/bin/echo", "inner")[0] == 0
     monkeypatch.setenv(gate.JOB_MARK, "20200101-000000-999")
-    assert run("gate", "run", "--wait", str(repo.path), "--", "/bin/echo", "inner")[0] == 0
+    # hw1 W4: the first line's entry is open on this clean tree, so a second is queued fresh
+    assert run("gate", "run", "--wait", "--fresh", str(repo.path), "--", "/bin/echo",
+               "inner")[0] == 0
     assert len(gate.entries(root)) == 4
 
 

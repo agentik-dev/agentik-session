@@ -81,7 +81,7 @@ def test_fw2_result_gains_head_and_key(w, tmp_path):
     a, b = w.put("a"), w.put("b")
     assert gate.serve(w.root, w.fx(head=lambda repo: seen.append(repo) or SHA)) == 0
     ra, rb = w.result(a["id"]), w.result(b["id"])
-    assert list(ra) == list(gate.RESULT_KEYS) == list(rb)
+    assert list(ra) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS] == list(rb)
     assert (ra["head"], ra["key"]) == (SHA, a["key"]) and a["key"] == gate.repo_key(str(w.repo))
     assert (rb["exit"], rb["head"]) == (127, SHA)               # read before the spawn
     assert seen == [os.path.realpath(w.repo)] * 2
