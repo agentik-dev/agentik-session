@@ -171,6 +171,16 @@ def test_the_roots_name_the_repos_the_gate_names(tmp_path, monkeypatch):
     assert roots["gate"] == str(root / "gate")
 
 
+
+def test_the_roots_skip_a_result_that_is_no_dict_or_does_not_parse(tmp_path, monkeypatch):
+    root = tmp_path / "xdg" / "example-tool"
+    (root / "gate" / "queue").mkdir(parents=True)
+    for gid, text in (("20260101-000000-3", "[1, 2]"), ("20260101-000000-4", "{not json")):
+        (root / "gate" / gid).mkdir()
+        (root / "gate" / gid / "result.json").write_text(text)
+    monkeypatch.chdir(tmp_path)
+    assert cli._machine_roots({"HOME": str(tmp_path / "home")}, root)["repos"] == []
+
 # ---- M7: the skill --------------------------------------------------------------------------
 
 def test_the_skill_is_short_and_says_the_rules():

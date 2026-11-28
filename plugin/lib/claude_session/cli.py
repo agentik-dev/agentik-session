@@ -2707,10 +2707,7 @@ def _machine_roots(env, root) -> dict:
         names = []
     for name in names:
         if gate.ID.match(name):
-            try:
-                paths.append(json.loads(gate.result_path(root, name).read_text()).get("repo"))
-            except (OSError, ValueError, AttributeError):
-                pass
+            paths.append((gate._load(gate.result_path(root, name)) or {}).get("repo"))
     scratch = MACHINE_SCRATCH.format(uid=os.getuid())
     inside = os.path.realpath(scratch).rstrip("/") + "/"
     repos: list[str] = []
