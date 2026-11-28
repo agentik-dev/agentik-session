@@ -271,6 +271,9 @@ agentik-session budget          # the zone and checkpoint cadence
 agentik-session checkpoint      # mark a handoff-ready point (`-m`; `--commit <paths...>` commits the named paths alone, no sweep)
 agentik-session checkpoint --respawn --charter <file>   # mark a RESPAWN close, through Bash
 agentik-session gate run <repo> [--lock PATH] -- <command>   # queue a gate; prints queued <id>, est on stderr
+agentik-session gate run <repo> --priority -- <command>   # picked before its repo's unmarked entries (a landing is marked); an entry queued an hour ago still goes first
+agentik-session gate run <worktree> --light -- <command>   # a stamp or a lint, walled at 120 s: runs beside its repo's job of another worktree, never under its own worktree's; refused with --check or a --wall over 120
+agentik-session gate drop <id>   # a queued job out: its result exit 130, its line `dropped`; a running one is not touched (exit 1); a done one prints its line; an unknown id exits 2
 agentik-session gate wait <id> --timeout <s>   # its result line; run it in a background Bash
 agentik-session gate wait <id> --strict        # the same, exiting the job's code
 agentik-session gate wait --chain [--timeout <s>]   # under a chain: wake on the chain's next result line (0), 2 with none open, 1 past the timeout; a job of the chain reaches its live sitting, the successor after a close
@@ -287,7 +290,12 @@ Its result reaches the caller two ways:
 UserPromptSubmit and PostToolUse hooks' line at the next prompt or tool call. A respawn
 kills background tasks: list each open gate id in the state file's `## Gates`, and the
 successor re-arms `gate wait <id>`. `wait` exits 0 whatever the gate's code; 124 is the
-wall's cut, 125 a runner that died, 126 a lock held past the wall. `gate wait <id> --strict`
+wall's cut, 125 a runner that died, 126 a lock held past the wall. A red cut by its own time
+bound (a stop line in its log, no failed assertion) while the load was over the ceiling or
+another job ran beside it is a load flake: its line is held, it runs once more alone, and that
+run's line says `rerun of <id>`; `gate wait` on the first id waits on the rerun, and `--within`
+says `queued <the rerun's id>`. A rerun not started in 30 minutes is taken out and the first
+line is sent, `flake: load, not rerun`. `gate wait <id> --strict`
 exits the job's code (0 to 255, else 1); `wait`'s own 2 (no such id) and 1 (the timeout)
 print nothing on stdout, so a line there marks the code as the job's. A result keeps the
 repo's `head` (its commit before the start, or null) and `key` (a repo and its worktrees
