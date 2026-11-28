@@ -274,9 +274,9 @@ def _snap(load=3.5, pressure="normal", free_gb=132.8, cores=16, total_mb=131072)
 
 def test_the_budget_is_what_the_grants_leave():
     b = machine.budget(_snap(), [machine.DEFAULT_CLASS, machine.DEFAULT_CLASS], {})
-    assert b["cores"] == 16 and b["mem_mb"] == 131072 - 16384
+    assert b["cores"] == 16 and b["mem_mb"] == 131072 - 32768          # hw6 R2: a quarter
     assert b["granted"] == {"count": 2, "cpu": 8, "mem_mb": 4096}
-    assert b["free"] == {"cpu": 8, "mem_mb": 131072 - 16384 - 4096}
+    assert b["free"] == {"cpu": 8, "mem_mb": 131072 - 32768 - 4096}
     assert b["load_ceiling"] == 12.0 and b["disk_floor_gb"] == 25.0
     assert b["disk_free_gb"] == 132.8
     assert "fit" not in b
@@ -308,7 +308,7 @@ def test_a_request_over_the_whole_budget_is_clamped_and_runs_alone():
     alone = machine.budget(_snap(), [], {}, big)["fit"]
     assert alone["ok"] is True and "16 of 16 cores" in alone["why"]
     held = machine.budget(_snap(), [{"cpu": 1, "mem_mb": 1}], {}, big)["fit"]
-    assert held["ok"] is False and "clamped to 16 cores and 114688 MB" in held["why"]
+    assert held["ok"] is False and "clamped to 16 cores and 98304 MB" in held["why"]
 
 
 def test_the_budget_is_pure_and_takes_an_unknown_snapshot():

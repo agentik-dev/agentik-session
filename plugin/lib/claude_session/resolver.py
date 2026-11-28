@@ -581,7 +581,50 @@ def gate_config(env, log=None) -> dict:
     elif "max_running" in g and log:
         log("gate: max_running is no positive whole number; the default stands")
     _check_keys(g, out, log)
+    _budget_keys(g, out, log)
     return out
+
+
+GATE_BUDGETS = ("hold", "observe")      # hw6 B7: `gate.budget`; the gate holds the default
+GATE_HOLD_KEYS = ("load_hold_max", "pressure_hold_max", "disk_hold_max")    # hw6 B4, seconds
+GATE_CLASS_KEYS = ("repo", "command", "cpu", "mem_mb")                       # hw6 B1, R1
+
+
+def _budget_keys(g: dict, out: dict, log) -> None:
+    """hw6 B1, B3, B4, B7: `budget` (`hold` or `observe`), `classes` (a list of {repo,
+    command, cpu, mem_mb}, two patterns and two positive whole numbers), `mem_reserve_mb` and
+    `disk_floor_gb` (numbers of 0 or more) and the three hold bounds (positive whole seconds).
+    Each appears only where set well; a bad one reads as its default, one line through `log`."""
+    def say(text):
+        if log:
+            log(f"gate: {text}; the default stands")
+
+    def whole(x):
+        return isinstance(x, int) and not isinstance(x, bool) and x > 0
+    b = g.get("budget")
+    if b in GATE_BUDGETS:
+        out["budget"] = b
+    elif "budget" in g:
+        say("budget is neither " + " nor ".join(GATE_BUDGETS))
+    cs = g.get("classes")
+    if isinstance(cs, list) and all(
+            isinstance(c, dict) and set(c) == set(GATE_CLASS_KEYS)
+            and all(isinstance(c[k], str) and c[k].strip() for k in ("repo", "command"))
+            and whole(c["cpu"]) and whole(c["mem_mb"]) for c in cs):
+        out["classes"] = [dict(c) for c in cs]
+    elif "classes" in g:
+        say("classes is no list of {repo, command, cpu, mem_mb}")
+    for k in ("mem_reserve_mb", "disk_floor_gb"):
+        v = g.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < float("inf"):
+            out[k] = v
+        elif k in g:
+            say(f"{k} is no number of 0 or more")
+    for k in GATE_HOLD_KEYS:
+        if whole(g.get(k)):
+            out[k] = g[k]
+        elif k in g:
+            say(f"{k} is no positive whole number of seconds")
 
 
 def _check_keys(g: dict, out: dict, log) -> None:
