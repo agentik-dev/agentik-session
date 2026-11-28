@@ -466,3 +466,20 @@ def test_s2_a_rerun_taken_out_leaves_its_id_readable(tmp_path, monkeypatch, caps
     assert capsys.readouterr().out.strip() == line
     assert gate.drop(w.root, rid, fx=w.fx()) == (0, line)                # done
     assert lines(w) == []                                                # nothing sent twice
+
+
+def test_s3_a_light_job_reads_its_folders_worktree(box):
+    for name in ("sub", "two"):
+        (box.tree / name).mkdir()
+    root = box.root
+    c = gate.enqueue(root, str(box.tree), ["make", "check"], ENV, [], 600, "", None, 1.0)
+    li = gate.enqueue(root, str(box.tree / "sub"), ["make", "stamp"], ENV, [], 120, "", None,
+                      2.0, light=True)
+    li2 = gate.enqueue(root, str(box.tree / "two"), ["make", "x"], ENV, [], 120, "", None,
+                       3.0, light=True)
+    assert "top" not in c and li["top"] == li2["top"] == c["repo"] == gate.worktree(li)
+    assert [why is None for _, why in gate._holds([li], [c])] == [False]    # beside its check
+    assert [why is None for _, why in gate._holds([c, li], [])] == [True, False]
+    assert [why is None for _, why in gate._holds([li, li2], [])] == [True, False]
+    assert [why is None for _, why in gate._holds([li2], [li])] == [False]  # one at a time
+    assert gate.top_level(str(box.root)) == gate._real(str(box.root))       # in no checkout

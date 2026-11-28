@@ -377,6 +377,27 @@ def _branch(repo: str) -> str | None:
     return out or None
 
 
+def top_level(repo: str) -> str:
+    """Build 2, S3: a folder's worktree, `git -C <repo> rev-parse --show-toplevel` resolved;
+    the resolved folder where it is in no checkout or git fails. Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "--show-toplevel"], env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+        out = p.stdout.rstrip("\n") if p.returncode == 0 else ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        out = ""
+    return _real(out) if out else _real(repo)
+
+
+def worktree(e: dict):
+    """Build 2, S3: the worktree an entry's light-class tests read, its `top` where the entry
+    holds one (its folder was below its worktree's top), else its `repo`."""
+    t = e.get("top")
+    return t if isinstance(t, str) and t else e.get("repo")
+
+
 def repo_path(path) -> str | None:
     """A folder as `status --repo` compares it (packet rw3, R2): the real path of its absolute
     form, which for a path that does not exist is its absolute, normal form, any parent that
@@ -702,6 +723,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
     if caller is not None and not _SID.match(str(caller)):
         raise GateError(f"the caller is not a session id: {str(caller)[:40]!r}")
     key = repo_key(real)                # outside the queue's lock: git may take its time
+    top = top_level(real)               # build 2, S3: kept only where it is not `real`
 
     def build(gid):
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
@@ -711,6 +733,8 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
                  "chain": chain_for(root, env, caller, named)}
         if _clean_head(tree):
             entry["tree"] = tree
+        if top != real:
+            entry["top"] = top
         entry.update({k: True for k, on in (("priority", priority), ("light", light),
                                             ("may_rerun", rerun)) if on})
         return entry
@@ -723,7 +747,7 @@ def _requeue(root, e: dict, now) -> dict:
     def build(gid):
         entry = {k: e.get(k) for k in ENTRY_KEYS}
         entry.update({"id": gid, "queued": now})
-        entry.update({k: e[k] for k in ("tree", "priority", "light") if k in e})
+        entry.update({k: e[k] for k in ("tree", "top", "priority", "light") if k in e})
         entry.update({"rerun_of": e["id"], "flaked": now})
         return entry
     return _write_entry(root, now, build)
@@ -859,15 +883,16 @@ def _holds(es: list[dict], running: list[dict]):
     key names the repo of the entry that holds it. Locks compare by `lock_key`, read here
     and not trusted from the entry, so an older entry's spelling compares too.
     hw5 F2: a light entry is held only by an open entry of its key in its own worktree, and
-    holds only that worktree of its key against the entries after it."""
+    holds only that worktree of its key against the entries after it. Build 2, S3: a worktree
+    is `worktree(e)`, its folder's top, whatever folder the entry named."""
     keys, trees = {}, {}
     for x in running:
         keys.setdefault(entry_key(x), key_name(x))
-        trees.setdefault((entry_key(x), x.get("repo")), key_name(x))
+        trees.setdefault((entry_key(x), worktree(x)), key_name(x))
     named = _named(running)
     for e in es:
         k = entry_key(e)
-        t = (k, e.get("repo"))
+        t = (k, worktree(e))
         path = _locked(e) or next((p for p in _locks(e) if _is_named(p, named)), None)
         if path:
             yield e, ("lock", path)
