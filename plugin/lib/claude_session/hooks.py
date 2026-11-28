@@ -2746,6 +2746,18 @@ TASK_TEXT = 1000             # P3: the characters of a command the engine keeps 
 PARK_TEXT = 200              # P3: the bytes of the command a park keeps
 
 
+def _state_json(path: Path) -> dict:
+    """Build 2 T1: this row's reader of a state file (a P2 record, a park, a capture's mark):
+    a path that is not a regular file is {} at once and never opened; else `_regular_json`,
+    which never blocks either. Never raises."""
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return {}
+    except (OSError, ValueError):
+        return {}
+    return _regular_json(path)
+
+
 def _helper_job(payload: dict, env) -> None:
     """P2: a helper's Bash call whose `tool_response.backgroundTaskId` is a non-empty string
     (the engine moved it), or whose `tool_input.run_in_background` is true, writes
@@ -2795,7 +2807,7 @@ def _helper_records(sdir: Path, aid: str) -> list:
         names = sorted(n for n in os.listdir(d) if not n.startswith("."))
     except OSError:
         return []
-    return [_load_json(d / n) for n in names]
+    return [_state_json(d / n) for n in names]
 
 
 def _park_tasks(rec: dict) -> list:
@@ -2812,7 +2824,7 @@ def parks(sdir) -> dict:
         for name in sorted(os.listdir(d)) if d.is_dir() else ():
             if name.startswith(".") or not name.endswith(".json"):
                 continue
-            tasks = _park_tasks(_load_json(d / name))
+            tasks = _park_tasks(_state_json(d / name))
             if tasks and _SID.match(name[:-5]):
                 out[name[:-5]] = tasks[0]
     except Exception:                                   # noqa: BLE001
@@ -2861,7 +2873,8 @@ def _parks_seen(payload: dict, sdir: Path, skip: str | None = None) -> None:
             if name.startswith(".") or not name.endswith(".json") or aid == skip \
                     or not _SID.match(aid):
                 continue
-            if not any(t in running for t in _park_tasks(_load_json(d / name))):
+            tasks = _park_tasks(_state_json(d / name))      # T1: none read, no park
+            if tasks and not any(t in running for t in tasks):
                 _park_end(sdir, aid)
     except Exception:                                   # noqa: BLE001
         pass
@@ -2895,7 +2908,7 @@ def _park_stopped(payload: dict, sdir: Path) -> None:
         for name in sorted(os.listdir(d)):
             aid = name[:-5]
             if (not name.startswith(".") and name.endswith(".json") and _SID.match(aid)
-                    and task in _park_tasks(_load_json(d / name))):
+                    and task in _park_tasks(_state_json(d / name))):
                 _park_end(sdir, aid)
     except Exception:                                   # noqa: BLE001
         pass
@@ -3064,7 +3077,7 @@ def captures(sdir: Path) -> tuple:
     kept = sorted((m.group(1), int(m.group(2)), n) for n in names if (m := _CAPTURED.match(n)))
     marks = {}
     for event in ("SubagentStop", "PostToolUse"):
-        left = _load_json(d / f"{event}.mark.json").get("left")
+        left = _state_json(d / f"{event}.mark.json").get("left")
         if isinstance(left, int) and not isinstance(left, bool) and left > 0:
             marks[event] = left
     return [n for _, _, n in kept], marks
@@ -3083,7 +3096,7 @@ def _capture(event: str, raw: str, payload: dict, env) -> None:
         if sdir is None:
             return
         mark = sdir / CAPTURES / f"{name}.mark.json"
-        left = _load_json(mark).get("left")
+        left = _state_json(mark).get("left")
         if not isinstance(left, int) or isinstance(left, bool) or left < 1:
             return
         left = min(left, CAPTURE_MAX)
@@ -3093,7 +3106,7 @@ def _capture(event: str, raw: str, payload: dict, env) -> None:
         if left <= 1:
             mark.unlink()
         else:
-            store._write_private(mark, json.dumps({**_load_json(mark), "left": left - 1}))
+            store._write_private(mark, json.dumps({**_state_json(mark), "left": left - 1}))
     except Exception:                                   # noqa: BLE001 - never fails a hook
         pass
 

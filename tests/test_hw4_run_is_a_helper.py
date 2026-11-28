@@ -546,3 +546,62 @@ def test_p6_a_fault_in_the_capture_is_swallowed(monkeypatch, capsys):
 def test_p6_the_help_says_the_verb():
     rc, out, _ = _cli("hook", "--help")
     assert rc == 0 and "capture" in out and "--show" in out
+
+
+# ---- build 2, the fix of review 1: rulings T1 to T7 -------------------------------------------
+
+def _bounded(fn, fifos, secs=5.0):
+    """T1: `fn()` in a thread, under a bound this test enforces: past `secs` the FIFOs are
+    opened for writing, which frees a reader blocked on one, and the test fails."""
+    import threading
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    t.start()
+    t.join(secs)
+    if not t.is_alive():
+        return box
+    for f in fifos:
+        try:
+            os.close(os.open(f, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    t.join(secs)
+    pytest.fail(f"the hook was still reading after {secs} s: {[str(f) for f in fifos]}")
+
+
+def _fifo(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.mkfifo(path)
+    return path
+
+
+def _bash_post(**extra):
+    return {"session_id": SID, "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_use_id": "toolu_hw4_main", "tool_input": {"command": "true"},
+            "tool_response": {"stdout": ""}, **extra}
+
+
+@pytest.mark.parametrize("where", ["captures/PostToolUse.mark.json",
+                                   "captures/SubagentStop.mark.json",
+                                   f"parked/{BID}.json", f"helper-jobs/{AID}/toolu_hw4_fifo"])
+def test_t1_a_fifo_at_a_state_file_is_read_as_absent_and_the_hook_returns(where, monkeypatch,
+                                                                          capsys):
+    sdir = _session()
+    _ledger([_spawn(NOW - 10 * M, AID)])
+    f = _fifo(sdir / where)
+    post = json.dumps(_bash_post(background_tasks=[]))
+    stop = json.dumps(_stop_payload(tasks=[_task()]))
+    stopped = json.dumps(_bash_post(tool_name="TaskStop", tool_input={"task_id": "bg-001"}))
+
+    def run():
+        for event, raw in (("PostToolUse", post), ("SubagentStop", stop),
+                           ("PostToolUse", stopped)):
+            monkeypatch.setattr(sys, "stdin", io.StringIO(raw))
+            hooks.dispatch(event)
+        _launch()
+        return hooks.parks(sdir), hooks.captures(sdir)
+
+    got_parks, (_, marks) = _bounded(run, [f])[0]
+    capsys.readouterr()
+    assert got_parks == {} and marks == {}                        # read as absent
+    assert not (sdir / hooks.ENDED / f"{BID}.json").exists()      # an absent park never ends
