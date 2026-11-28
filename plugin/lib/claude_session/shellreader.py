@@ -720,7 +720,6 @@ def _sub_end(text: str, i: int, bash3: bool, depth: int) -> int:
     if depth > _NEST:
         raise _Bound(text[:80])
     n, par, cases, quote, word, cmd = len(text), 0, 0, None, True, True
-    fn = 0                                # nw9: 1 after `function`, 2 after its NAME
     while i < n:
         c = text[i]
         if quote in ("'", "$'"):
@@ -754,11 +753,10 @@ def _sub_end(text: str, i: int, bash3: bool, depth: int) -> int:
             i = n if j < 0 else j
             continue
         if word and c not in " \t\n;&|()<>":
-            m = _KEY.match(text, i) if (cmd or fn == 2) and not bash3 else None
+            m = _KEY.match(text, i) if cmd and not bash3 else None
             w = m.group() if m else ""
-            cases += cmd and (w == "case") - (w == "esac" and cases > 0)
-            fn = 1 if cmd and w == "function" else 2 if fn == 1 else 0
-            cmd = w in _LEAD if cmd else w == "{"    # nw9: the body after `function NAME {`
+            cases += (w == "case") - (w == "esac" and cases > 0)
+            cmd = w in _LEAD
         if c in "'\"":
             quote = c
         elif c == "$" and text[i + 1:i + 2] == "'":

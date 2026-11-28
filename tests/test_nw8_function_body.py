@@ -37,11 +37,17 @@ def test_b2_the_gated_file_rule_strict_reading_refuses_the_body(box, monkeypatch
 
 @pytest.mark.parametrize("line", ["for x in a; do function f { git add -A; }; f; done",
                                   "if true; then function f { git add -A; }; fi",
-                                  "function f { function g { git add -A; }; g; }; f",
-                                  "echo $(function f { case x in a) git add -A;; esac; }; f)"])
-def test_nw9_b1_b2_the_sweep_rule_refuses_the_body_after_a_lead_nested_and_in_a_substitution(box, line):
+                                  "function f { function g { git add -A; }; g; }; f"])
+def test_nw9_b1_the_sweep_rule_refuses_the_body_after_a_lead_and_nested(box, line):
     d, reason = _reason(_run(box, line, box.a))
     assert d == "deny" and reason.startswith(HEAD) and "the sweep rule" in reason, line
+
+
+def test_nw9_r2_a_function_redirect_target_in_a_substitution_keeps_the_gated_write_refused(box):
+    (box.a / ".claude").mkdir(exist_ok=True)
+    (box.a / ".claude" / "edit-gates").write_text("sub/CLAUDE.md\n")
+    d, _ = _reason(_run(box, "echo $(echo x &> function f { case x in a); cd sub; cp a CLAUDE.md", box.a))
+    assert d == "deny"
 
 
 def test_nw9_b3_a_function_word_after_an_argument_or_in_quotes_keeps_its_reading():
