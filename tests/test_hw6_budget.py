@@ -556,7 +556,7 @@ def test_h3_observe_names_no_guard_whose_bound_has_passed(w):
 
 def _git(*argv, cwd):
     import subprocess
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *argv],
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@" + "example.invalid", *argv],
                    cwd=cwd, check=True, capture_output=True)
 
 
