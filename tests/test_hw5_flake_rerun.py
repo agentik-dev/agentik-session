@@ -75,7 +75,8 @@ def test_f1_the_runner_picks_the_marked_one_and_position_says_so(tmp_path):
     a = w.put(first="a")
     b = gate.enqueue(w.root, str(w.repo), ["b", "x"], ENV, [], 5400, "", None, w.t,
                      priority=True)
-    assert b["priority"] is True and "priority" not in a and list(a) == list(gate.ENTRY_KEYS)
+    assert b["priority"] is True and "priority" not in a
+    assert list(a) == [*gate.ENTRY_KEYS, *gate.CLASS_KEYS]                  # hw6 B1
     alive = lambda pid: False                                       # noqa: E731
     assert (gate.position(w.root, b["id"], alive, now=w.t),
             gate.position(w.root, a["id"], alive, now=w.t)) == (1, 2)

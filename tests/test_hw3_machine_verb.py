@@ -46,6 +46,9 @@ def verb(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_machine_roots", lambda env, root: dict(roots))
     monkeypatch.setattr(cli, "_machine_gate", lambda root, now: (
         (None, None, state["unread"]) if state["unread"] else (state["running"], 2, None)))
+    from claude_session import gate                    # hw6 fix 1, A5: the gate's own grants
+    monkeypatch.setattr(gate, "running_grants", lambda root, **kw: [
+        state.get("grant", dict(machine.DEFAULT_CLASS))] * (state["running"] or 0))
     return state
 
 
@@ -55,8 +58,8 @@ def test_status_reads_the_snapshot_the_budget_the_gate_and_the_largest(verb):
     lines = out.splitlines()
     assert lines[0] == "cores: 16 (12 performance, 4 efficiency); load 3.50 2.00 1.00"
     assert lines[1].startswith("memory: 131072 MB, ") and lines[1].endswith("pressure normal")
-    assert "budget: 16 cores, 114688 MB; granted 1 jobs (4 cores, 2048 MB); free 12 cores, " \
-           "112640 MB" in lines
+    assert "budget: 16 cores, 98304 MB; granted 1 jobs (4 cores, 2048 MB); free 12 cores, " \
+           "96256 MB" in lines
     assert "gate: 1 running, 2 queued" in lines
     assert "a 4-core 2048 MB job: fits now" in lines
     largest = [x for x in lines if x.startswith("largest: ")]
@@ -98,15 +101,16 @@ def test_reclaim_is_a_dry_run_alone(verb):
 
 def test_the_gate_s_jobs_are_read_by_the_verb(tmp_path, monkeypatch):
     from claude_session import gate
-    monkeypatch.setattr(gate, "status", lambda root, now: {"running": [{}, {}], "queued": [{}]})
+    monkeypatch.setattr(gate, "status",
+                        lambda root, now, **kw: {"running": [{}, {}], "queued": [{}]})
     assert cli._machine_gate(tmp_path, 0) == (2, 1, None)
 
-    def broken(root, now):
+    def broken(root, now, **kw):
         raise OSError("no gate")
     monkeypatch.setattr(gate, "status", broken)
     assert cli._machine_gate(tmp_path, 0) == (
         None, None, "the gate's state could not be read (no gate)")
-    monkeypatch.setattr(gate, "status", lambda root, now: {"running": 3, "queued": []})
+    monkeypatch.setattr(gate, "status", lambda root, now, **kw: {"running": 3, "queued": []})
     assert cli._machine_gate(tmp_path, 0)[:2] == (None, None)
 
 

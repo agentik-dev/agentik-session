@@ -1443,18 +1443,21 @@ def check_env(tree, drop):
 
 
 def env_digest(env):
-    """Each name of `env` but the job's mark, mapped to its value's SHA-256, 16 hex digits:
-    the record holds no value (brief 2, R2)."""
+    """Each name of `env` but the job's mark and its grant (`gate.GRANT_ENV`, hw6 B5), mapped
+    to its value's SHA-256, 16 hex digits: the record holds no value (brief 2, R2)."""
     import hashlib
     from . import gate
     return {k: hashlib.sha256(v.encode("utf-8", "surrogateescape")).hexdigest()[:16]
-            for k, v in sorted(env.items()) if k != gate.JOB_MARK}
+            for k, v in sorted(env.items()) if k != gate.JOB_MARK and k not in gate.GRANT_ENV}
 
 
 def env_differs(was, now):
     """The first name, in sorted order, whose digest differs between two `env_digest`s, a
-    name set in one alone counted; None where they are equal."""
-    return next((k for k in sorted(set(was) | set(now)) if was.get(k) != now.get(k)), None)
+    name set in one alone counted; None where they are equal. The grant's names are not
+    compared (hw6 B5), so a record written before them still proves its tree."""
+    from . import gate
+    return next((k for k in sorted(set(was) | set(now))
+                 if k not in gate.GRANT_ENV and was.get(k) != now.get(k)), None)
 
 
 def index_marks(tree):

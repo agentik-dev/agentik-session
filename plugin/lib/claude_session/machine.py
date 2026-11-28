@@ -35,8 +35,11 @@ READ_MOST = 1 << 16         # bytes, one file of /proc
 ATTEMPTS = 3                # tries of one call, the first included (SRE's three)
 LOAD_SHARE = 0.75           # the load ceiling, as a share of the cores (the gate's LOAD_SHARE)
 DISK_FLOOR_GB = 25.0        # the least free disk a start leaves
-MEM_RESERVE_SHARE = 0.125   # the memory the budget leaves to everything else
+MEM_RESERVE_SHARE = 0.25    # the memory the budget leaves to everything else (hw6 B3, R2)
+MEM_RESERVE_LEAST = 4096    # and at least this many MB of it
 DEFAULT_CLASS = {"cpu": 4, "mem_mb": 2048}      # a job that declares nothing (design/34 item 8)
+LIGHT_CLASS = {"cpu": 1, "mem_mb": 512}         # a light job that names none (hw6 B1)
+PARTS = ("grant", "load", "pressure", "disk")   # `budget`'s named parts (hw6 R3)
 GATE_KEEP_DAYS = 14         # the gate's own retention (gate.KEEP)
 RETRY_AFTER_MOST = 3600.0   # a Retry-After past an hour is not honoured
 DU_WORKERS = 4
@@ -400,21 +403,25 @@ def _reading(x, name, unread):
     return v
 
 
-def _part(d, key):
+def _part_of(d, key):
     v = d.get(key) if isinstance(d, dict) else None
     return v if isinstance(v, dict) else {}
 
 
-def budget(snapshot, grants, config=None, request=None) -> dict:
+def budget(snapshot, grants, config=None, request=None, volume=None) -> dict:
     """What is free of cores and memory against `grants` (a list of {cpu, mem_mb}), and for a
-    `request` ({cpu, mem_mb}) `fit`, {ok, why}. A request fits where its grant fits what is
+    `request` ({cpu, mem_mb}) `fit`, {ok, why}, and `parts` (hw6 R3): `grant`, `load`,
+    `pressure` and `disk`, each {state, reading, why}, the state `ok`, `held` or `unread`, so
+    a caller bounds each apart. The disk part reads the volume whose `holds` names `volume`
+    (R4), else the least free. A request fits where its grant fits what is
     not granted, the 1-minute load is under the ceiling, the pressure is `normal` and the
     least free disk is over the floor. A request over the whole budget is clamped to it and
     fits only with no grant out. `config` may give `load_ceiling` (a load, else LOAD_SHARE of
-    the cores), `disk_floor_gb`, `mem_reserve_mb` (else MEM_RESERVE_SHARE of the memory; a
-    negative one reads as 0). A value it cannot read as a finite number (a NaN, an infinity,
-    a string, None, a bool) in the config, a grant, the request or the snapshot's load and
-    disks is named in `unread`, and a request is then held. Never raises."""
+    the cores), `disk_floor_gb`, `mem_reserve_mb` (else the larger of MEM_RESERVE_LEAST and
+    MEM_RESERVE_SHARE of the memory; a negative one reads as 0). A value it cannot read as a
+    finite number (a NaN, an infinity, a string, None, a bool) in the config, a grant, the
+    request or the snapshot's load and disks is named in `unread`, and a request's `fit` is
+    then held; its `parts` name each such part `unread`. Never raises."""
     unread: list = []
     if config is not None and not isinstance(config, dict):
         unread.append(f"the config {_short(config)}")
@@ -428,14 +435,15 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
         if v is None:
             unread.append(f"the config's {name} {_short(cfg[name])}")
         return v
-    cores = _finite(_part(snap, "cores").get("total"))
+    cores = _finite(_part_of(snap, "cores").get("total"))
     cores = cores if cores is not None and cores > 0 else None
-    total_mb = _finite(_part(snap, "memory").get("total_mb"))
+    total_mb = _finite(_part_of(snap, "memory").get("total_mb"))
     total_mb = total_mb if total_mb is not None and total_mb >= 0 else None
     reserve = setting("mem_reserve_mb")
     mem_mb = None
     if total_mb is not None:
-        reserve = int(total_mb * MEM_RESERVE_SHARE) if reserve is None else max(0, reserve)
+        reserve = max(MEM_RESERVE_LEAST, int(total_mb * MEM_RESERVE_SHARE)) if reserve is None \
+            else max(0, reserve)
         mem_mb = max(0, int(total_mb - reserve))
     if grants is not None and not isinstance(grants, (list, tuple)):
         unread.append(f"the grants {_short(grants)}")
@@ -453,7 +461,7 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
     floor = setting("disk_floor_gb")
     floor = DISK_FLOOR_GB if floor is None else floor
     disks = snap.get("disks")
-    free_disks = []
+    free_disks, own = [], None
     for d in disks if isinstance(disks, (list, tuple)) else []:
         if not isinstance(d, dict) or d.get("free_gb") is None:
             continue
@@ -462,6 +470,9 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
             unread.append(f"the free disk of {_short(d.get('mount'))} {_short(d['free_gb'])}")
         else:
             free_disks.append(v)
+            holds = d.get("holds")
+            if volume is not None and isinstance(holds, list) and volume in holds:
+                own = v
     out = {"cores": cores, "mem_mb": mem_mb,
            "granted": {"count": len(grants), "cpu": g_cpu, "mem_mb": g_mem},
            "free": {"cpu": None if cores is None else max(0, cores - g_cpu),
@@ -472,6 +483,71 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
     if request is None:
         return out
     out["fit"] = _fit(snap, out, request, ceiling, floor)
+    out["parts"] = _parts(snap, out, request, ceiling, floor,
+                          out["disk_free_gb"] if volume is None else own)
+    return out
+
+
+def _part(state, reading, why) -> dict:
+    return {"state": state, "reading": reading, "why": why}
+
+
+def _grant_part(b, request) -> dict:
+    """The grant against what is not granted: a request over the whole budget is clamped to
+    it and fits with no grant out (it runs alone)."""
+    bad = [u for u in b["unread"] if u.startswith(("grant ", "the grants", "the config "))
+           or u.startswith("the config's mem_reserve_mb")]
+    cpu = need = None
+    if isinstance(request, dict):
+        cpu = _reading(request.get("cpu", 0), "the request's cpu", bad)
+        need = _reading(request.get("mem_mb", 0), "the request's mem_mb", bad)
+    else:
+        bad.append(f"the request {_short(request)}")
+    if bad:
+        return _part("unread", None, "it cannot read " + "; ".join(bad))
+    if b["cores"] is None or b["mem_mb"] is None:
+        return _part("unread", None, ("cores" if b["cores"] is None else "memory")
+                     + " did not answer")
+    alone = cpu > b["cores"] or need > b["mem_mb"]
+    cpu, need = min(cpu, b["cores"]), min(need, b["mem_mb"])
+    reading = {"cpu": cpu, "mem_mb": need, "alone": alone}
+    free = b["free"]
+    if alone and b["granted"]["count"]:
+        return _part("held", reading, f"over the budget: clamped to {cpu:g} cores and {need:g} "
+                     f"MB, it runs alone, and {b['granted']['count']} grants are out")
+    if not alone and (cpu > free["cpu"] or need > free["mem_mb"]):
+        return _part("held", reading, f"{cpu:g} cores and {need:g} MB asked, {free['cpu']:g} "
+                     f"and {free['mem_mb']:g} MB not granted")
+    return _part("ok", reading, f"{cpu:g} of {free['cpu']:g} cores and {need:g} of "
+                 f"{free['mem_mb']:g} MB free" + (", alone" if alone else ""))
+
+
+def _parts(snap, b, request, ceiling, floor, disk) -> dict:
+    """hw6 R3: each test of `_fit` apart, its reading kept. A reading that is a fault is
+    `unread`, which a caller may hold on or pass (the gate passes, hw6 B4)."""
+    out = {"grant": _grant_part(b, request)}
+    load = snap.get("load")
+    load = _finite(load[0]) if isinstance(load, (list, tuple)) and load else None
+    if load is None or load < 0 or ceiling is None:
+        out["load"] = _part("unread", None, "the load is unknown")
+    elif load >= ceiling:
+        out["load"] = _part("held", load, f"load {load:.2f} at or over the ceiling {ceiling:.2f}")
+    else:
+        out["load"] = _part("ok", load, f"load {load:.2f} under {ceiling:.2f}")
+    pressure = _part_of(snap, "memory").get("pressure")
+    if pressure == "normal":
+        out["pressure"] = _part("ok", pressure, "pressure normal")
+    elif pressure in ("warn", "critical"):
+        out["pressure"] = _part("held", pressure, f"memory pressure {pressure}")
+    else:
+        out["pressure"] = _part("unread", None, "memory pressure "
+                                + (pressure if isinstance(pressure, str) else _short(pressure)))
+    if disk is None:
+        out["disk"] = _part("unread", None, "the free disk is unknown")
+    elif disk < floor:                                  # fix 1, A5: under the floor, not at it
+        out["disk"] = _part("held", disk, f"{disk:g} GB free, under the floor of {floor:g}")
+    else:
+        out["disk"] = _part("ok", disk, f"{disk:g} GB free, the floor {floor:g}")
     return out
 
 
@@ -502,20 +578,20 @@ def _fit(snap, b, request, ceiling, floor) -> dict:
         no.append("the load is unknown")
     elif load >= ceiling:
         no.append(f"load {load:.2f} at or over the ceiling {ceiling:.2f}")
-    pressure = _part(snap, "memory").get("pressure") or "unknown"
+    pressure = _part_of(snap, "memory").get("pressure") or "unknown"
     if pressure != "normal":
         no.append("memory pressure "
                   + (pressure if isinstance(pressure, str) else _short(pressure)))
     disk = b["disk_free_gb"]
     if disk is None:
         no.append("the free disk is unknown")
-    elif disk <= floor:
-        no.append(f"{disk:g} GB free, at or under the floor of {floor:g}")
+    elif disk < floor:
+        no.append(f"{disk:g} GB free, under the floor of {floor:g}")
     if no:
         return {"ok": False, "why": "; ".join(no)}
     return {"ok": True, "why": f"fits: {cpu:g} of {b['free']['cpu']:g} cores and {need:g} of "
                                f"{b['free']['mem_mb']:g} MB free, load {load:.2f} under "
-                               f"{ceiling:.2f}, pressure normal, {disk:g} GB free over {floor:g}"}
+                               f"{ceiling:.2f}, pressure normal, {disk:g} GB free, the floor {floor:g}"}
 
 
 # ---- the disk's known consumers ------------------------------------------------------------
@@ -712,6 +788,37 @@ def reclaimable(rows) -> dict:
             k["count"] += 1
             k["gb"] = round(k["gb"] + (r.get("gb") or 0), 1)
     return out
+
+
+# ---- the job's peak (hw6 B2) ---------------------------------------------------------------
+
+def parse_ps_groups(text) -> dict:
+    """`ps -A -o pgid= -o rss=`: {pgid: kB}, the resident memory of each process group summed;
+    a line that is no two numbers is skipped."""
+    out: dict = {}
+    for line in (text or "").splitlines():
+        words = line.split()
+        if len(words) != 2 or not all(_digits(w) for w in words):
+            continue
+        g = int(words[0])
+        out[g] = out.get(g, 0) + int(words[1])
+    return out
+
+
+def group_rss_mb(pgids, probe=None) -> dict:
+    """{pgid: MB} for each of `pgids` that `ps` names, the sum of its group's resident memory;
+    {} where `ps` did not answer in RUN_BOUND. Never raises."""
+    want = {g for g in pgids or () if isinstance(g, int) and not isinstance(g, bool) and g > 0}
+    if not want:
+        return {}
+    try:
+        r = (probe or default_probe()).run(["ps", "-A", "-o", "pgid=", "-o", "rss="])
+    except Exception:                                   # noqa: BLE001 - a sample is skipped
+        return {}
+    if not r or r[0] != 0:
+        return {}
+    kb = parse_ps_groups(r[1])
+    return {g: round(kb[g] / 1024) for g in want if g in kb}
 
 
 # ---- backoff, pure -------------------------------------------------------------------------

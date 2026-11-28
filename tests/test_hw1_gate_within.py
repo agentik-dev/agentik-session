@@ -92,7 +92,9 @@ def test_w1_past_the_bound_it_says_queued_and_exits_75(box, monkeypatch):
         gate.result_path(box.root, g).write_text(json.dumps(
             {"id": g, "exit": 0, "cut": None, "seconds": 120.0, "key": key, "command": command}))
     rc, out, err = run("gate", "run", str(box.tree), "--within", "1", "--", *command)
-    assert (rc, out) == (75, f"queued {queued_id(err)}, est 2.0 min: {WORDS}\n")
+    gid2 = queued_id(err)                     # hw6 fix 1, A4: the first holds its key
+    assert rc == 75 and out.startswith(f"queued {gid2}, est 2.0 min, held by key ") \
+        and out.endswith(f": {WORDS}\n"), out
 
 
 # ---- W2: the result's three keys -----------------------------------------------------------
@@ -107,7 +109,8 @@ def test_w2_waited_cpu_seconds_and_tree(tmp_path):
     e = w.put(at=w.t - 30)
     gate.serve(w.root, w.fx(idle=0, reap=_reap, dirty=lambda r: 0, tree=lambda r: TREE))
     r = w.result(e["id"])
-    assert list(r)[-3:] == list(gate.MEASURE_KEYS) == ["waited", "cpu_seconds", "tree"]
+    assert list(r)[-6:] == list(gate.MEASURE_KEYS) == [                    # hw6 R6
+        "waited", "cpu_seconds", "tree", "peak_mb", "cpu", "mem_mb"]
     assert (r["waited"], r["cpu_seconds"], r["tree"]) == (30.0, 2.5, TREE)
 
 

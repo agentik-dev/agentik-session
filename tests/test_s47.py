@@ -262,20 +262,22 @@ def test_s47_a_held_lock_with_a_free_key_is_cut_past_its_wall_beside_a_runner(w,
 
 # ---- ruling 4: the ceiling -----------------------------------------------------
 
-def test_s47_above_the_ceiling_is_serial(w):
+def test_s47_above_the_ceiling_is_held_to_its_bound(w):
     w.load = 12.0                                     # 0.75 x 16; "under" is strict
     w.plan = {"a": (100, 0), "b": (100, 0)}
     a, b = w.put_in("one", "a"), w.put_in("two", "b")
     gate.serve(w.root, w.fx())
-    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+    ra, rb = w.result(a["id"]), w.result(b["id"])     # hw6 R5: each held 20 min at most
+    assert ra["started"] == T0 + gate.HOLD_MAX and ra["over"] == "load"
+    assert rb["started"] == ra["started"] + gate.START_SETTLE and rb["over"] == "load"
 
 
-def test_s47_nothing_running_starts_whatever_the_load(w, tmp_path):
-    w.load = 99.0
+def test_s47_a_first_start_is_held_by_the_load_and_a_failed_read_holds_nothing(w, tmp_path):
+    w.load = 99.0                                     # hw6 R5: the guard binds a first start
     w.plan = {"a": (10, 0)}
     a = w.put_in("one", "a")
     gate.serve(w.root, w.fx())
-    assert w.result(a["id"])["started"] == T0
+    assert w.result(a["id"])["started"] == T0 + gate.HOLD_MAX
     (tmp_path / "again").mkdir()
     w2 = W(tmp_path / "again")
 
@@ -284,7 +286,8 @@ def test_s47_nothing_running_starts_whatever_the_load(w, tmp_path):
     w2.plan = {"a": (10, 0)}
     a2 = w2.put_in("one", "a")
     gate.serve(w2.root, w2.fx(load=boom))
-    assert w2.result(a2["id"])["started"] == T0
+    r = w2.result(a2["id"])
+    assert r["started"] == T0 and r["guard_unread"] == "load" and "over" not in r
 
 
 def test_s47_settle_between_starts(w):
@@ -315,21 +318,24 @@ def test_s47_max_running(w):
     assert gate.MAX_RUNNING == 3
 
 
-def test_s47_a_failed_load_read_is_over(w):
+def test_s47_a_failed_load_read_holds_nothing(w):
     def boom():
         raise OSError("no load")
     w.plan = {"a": (100, 0), "b": (100, 0)}
     a, b = w.put_in("one", "a"), w.put_in("two", "b")
-    gate.serve(w.root, w.fx(load=boom))
-    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"] and w.peak == 1
+    gate.serve(w.root, w.fx(load=boom))               # hw6 R5: `guard unread: load`
+    rb = w.result(b["id"])
+    assert rb["started"] == T0 + gate.START_SETTLE and w.peak == 2
+    assert rb["guard_unread"] == "load"
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, None, "2", True])
-def test_s47_a_load_that_is_no_number_is_over(w, bad):
+def test_s47_a_load_that_is_no_number_holds_nothing(w, bad):
     w.plan = {"a": (100, 0), "b": (100, 0)}
     a, b = w.put_in("one", "a"), w.put_in("two", "b")
     gate.serve(w.root, w.fx(load=lambda: bad))
-    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"]
+    assert w.result(b["id"])["started"] < w.result(a["id"])["ended"]
+    assert w.result(a["id"])["guard_unread"] == "load"
 
 
 def test_s47_the_ceiling_defaults_to_three_quarters_of_the_cores(w):
@@ -354,12 +360,12 @@ def test_s47_the_config_sets_both_keys(w):
     assert w.peak == 2
 
 
-def test_s47_the_config_ceiling_holds_a_second_start(w):
-    w.user("gate:\n  load_ceiling: 1\n")
+def test_s47_the_config_ceiling_holds_a_start(w):
+    w.user("gate:\n  load_ceiling: 1\n  load_hold_max: 300\n")
     w.plan = {"a": (100, 0), "b": (100, 0)}
     a, b = w.put_in("one", "a"), w.put_in("two", "b")
-    gate.serve(w.root, w.fx())
-    assert w.result(b["id"])["started"] >= w.result(a["id"])["ended"]
+    gate.serve(w.root, w.fx())                        # load 2 over 1: each held 300 s
+    assert w.result(a["id"])["started"] == T0 + 300 and w.result(a["id"])["over"] == "load"
 
 
 @pytest.mark.parametrize("text", [
@@ -439,10 +445,11 @@ def test_s47_runner_json_lists_the_set(w):
     gate.serve(w.root, w.fx())
     assert all(list(s) == list(gate.RUNNER_KEYS) == ["pid", "since", "running"] for s in seen)
     pa, pb = w.spawned[0][2].pid, w.spawned[1][2].pid
-    assert {"id": a["id"], "pgid": pa} in seen[0]["running"]
-    assert any(s["running"] == [{"id": a["id"], "pgid": pa}, {"id": b["id"], "pgid": pb}]
+    g = {"grant": {"cpu": 4, "mem_mb": 2048}}          # hw6 fix 1, A5: each job's own grant
+    assert {"id": a["id"], "pgid": pa, **g} in seen[0]["running"]
+    assert any(s["running"] == [{"id": a["id"], "pgid": pa, **g}, {"id": b["id"], "pgid": pb, **g}]
                for s in seen)
-    assert any(s["running"] == [{"id": b["id"], "pgid": pb}] for s in seen)
+    assert any(s["running"] == [{"id": b["id"], "pgid": pb, **g}] for s in seen)
     assert any(s["running"] == [] for s in seen)
     assert all(s["pid"] == 777 for s in seen)
 
@@ -521,7 +528,8 @@ def test_s47_status_names_each_wait(w, tmp_path):
     bylock = w.put_in("two", "l", locks=[str(lock)])
     byload = w.put_in("three", "n")
     _live_runner(w, [{"id": run["id"], "pgid": 1}])
-    w.load = 20.54
+    held = {byload["id"]: {"what": "load 20.54 at or over the ceiling 12.00", "since": T0}}
+    (w.root / "gate" / gate.HOLDS).write_text(json.dumps(held))     # hw6 B4: the runner's
     st = gate.status(w.root, T0, fx=w.fx())
     lines = gate.status_lines(st)
     assert lines[0].startswith(f"running {run['id']} {run['repo']} since ")
@@ -529,7 +537,8 @@ def test_s47_status_names_each_wait(w, tmp_path):
     assert lines[1:4] == [
         f"queued {bykey['id']} {bykey['repo']} position 1 waits on key one",
         f"queued {bylock['id']} {bylock['repo']} position 2 waits on lock {lock}",
-        f"queued {byload['id']} {byload['repo']} position 3 waits on load 20.5 over 12"]
+        f"queued {byload['id']} {byload['repo']} position 3 waits on load 20.54 at or over "
+        f"the ceiling 12.00 since {gate._hm(T0)}"]
 
 
 def test_s47_status_names_a_lock_a_running_entry_holds(w, tmp_path):
@@ -540,13 +549,13 @@ def test_s47_status_names_a_lock_a_running_entry_holds(w, tmp_path):
     assert lines[1] == f"queued {q['id']} {q['repo']} position 1 waits on lock {lock}"
 
 
-def test_s47_status_says_a_failed_load_read(w):
+def test_s47_status_says_a_failed_load_read_holds_nothing(w):
     def boom():
         raise OSError("no load")
     run, q = w.put_in("one", "r"), w.put_in("two", "q")
     _live_runner(w, [{"id": run["id"], "pgid": 1}])
     lines = gate.status_lines(gate.status(w.root, T0, fx=w.fx(load=boom)))
-    assert lines[1] == f"queued {q['id']} {q['repo']} position 1 waits on load ? over 12"
+    assert lines[1] == f"queued {q['id']} {q['repo']} position 1"      # hw6 R5
 
 
 def test_s47_status_says_the_set_is_full_and_the_settle(w):
@@ -842,8 +851,9 @@ def test_s47_a1_the_id_is_written_before_the_spawn(w):
         seen.append(gate.runner_info(w.root)["running"])
         return w.popen(argv, **kw)
     gate.serve(w.root, w.fx(popen=popen))
+    g = {"grant": {"cpu": 4, "mem_mb": 2048}}          # hw6 fix 1, A5
     assert seen == [[{"id": a["id"], "pgid": None}],
-                    [{"id": a["id"], "pgid": 4000}, {"id": b["id"], "pgid": None}]]
+                    [{"id": a["id"], "pgid": 4000, **g}, {"id": b["id"], "pgid": None}]]
 
 
 @pytest.mark.parametrize("spawned", [False, True], ids=["before the spawn", "after the spawn"])

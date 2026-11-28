@@ -109,7 +109,24 @@ def temp_state_roots(tmp_path_factory, monkeypatch):
     # `harness._ps`; the suite runs inside sittings, so no test reads the live process tree.
     from claude_session import harness
     monkeypatch.setattr(harness, "_ps", lambda pid: None, raising=False)
+    # Packet hw6-budget: every runner a test drives meets a calm machine, so no test leans on
+    # this machine's load, memory or disk; a test that means a machine passes its own Fx.
+    from claude_session import gate
+    monkeypatch.setattr(gate, "_load_avg", lambda: 0.0)
+    monkeypatch.setattr(gate, "_snapshot", lambda paths: calm_snapshot())
+    monkeypatch.setattr(gate, "_sample", lambda pgids: {})
     return home
+
+
+def calm_snapshot(**over) -> dict:
+    """A machine with room for any test's queue: 64 cores, 256 GB, pressure normal, the job's
+    volume 500 GB free; `over` replaces a part."""
+    snap = {"cores": {"total": 64}, "load": [0.0, 0.0, 0.0],
+            "memory": {"total_mb": 262144, "free_mb": 200000, "pressure": "normal"},
+            "disks": [{"mount": "/", "total_gb": 1000.0, "free_gb": 500.0, "holds": ["job"]}],
+            "faults": []}
+    snap.update(over)
+    return snap
 
 
 FRONTIER_USER = "defaults:\n  profile: frontier\n"
