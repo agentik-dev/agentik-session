@@ -179,10 +179,30 @@ def parked_clause(shells) -> str:
     return "; parked on shell " + ", ".join(names) + (f" and {more} more" if more else "")
 
 
-def shell_name(task) -> str:
-    """A shell's id as a line prints it: printable ASCII, cut at SHELL_CAP with `...`."""
-    text = printable(task)
-    return text if len(text) <= SHELL_CAP else text[:SHELL_CAP - 3] + "..."
+def shell_name(task, cap: int = SHELL_CAP) -> str:
+    """A shell's id as a line prints it: printable ASCII with no backslash (build 2 T2: JSON
+    would double it), cut at `cap` with `...`."""
+    text = printable(task).replace("\\", "?")
+    return text if len(text) <= cap else text[:cap - 3] + "..."
+
+
+SHELL_CUT = 8                # build 2 T2: the shortest cut of an id the clause tries
+
+
+def parked_clauses(shells):
+    """Build 2 T2: the parked clause from the longest to the shortest, for the caller to take
+    the first whose whole output fits: PARKED_NAMED ids down to one, each cut from SHELL_CAP
+    down to SHELL_CUT, the rest `and N more`; then `; parked on N shells`; last "". With no
+    park, "" alone."""
+    shells = list(shells or ())
+    if shells:
+        for n in range(min(len(shells), PARKED_NAMED), 0, -1):
+            more = len(shells) - n
+            for cap in range(SHELL_CAP, SHELL_CUT - 1, -1):
+                yield ("; parked on shell " + ", ".join(shell_name(s, cap) for s in shells[:n])
+                       + (f" and {more} more" if more else ""))
+        yield f"; parked on {len(shells)} shell{'' if len(shells) == 1 else 's'}"
+    yield ""
 
 
 def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, end: datetime,
@@ -376,9 +396,18 @@ def _reading(sid: str, env, now: datetime) -> dict | None:
 
 
 def told(payload: dict, env, posture) -> tuple | None:
-    """R7, R8: (the line, whether it holds the launch) for a main thread's Agent or Task call
-    under `signal`, `ask` or `deny` in a session that keeps the discipline; else None. Never
-    raises: a fault in reading the ledger, the meter or the profile is None."""
+    """R7, R8: (the launch line, whether the room holds it); see `told_parts`. hw4 P5: the
+    line names the parks in full (`parked_clause`)."""
+    parts = told_parts(payload, env, posture)
+    return None if parts is None else (parts[0] + parked_clause(parts[2]), parts[1])
+
+
+def told_parts(payload: dict, env, posture) -> tuple | None:
+    """R7, R8: (the line, whether it holds the launch, and build 2 T2 the shells the helpers
+    out are parked on, for the caller to size the parked clause against its whole output) for
+    a main thread's Agent or Task call under `signal`, `ask` or `deny` in a session that keeps
+    the discipline; else None. Never raises: a fault in reading the ledger, the meter or the
+    profile is None."""
     try:
         if posture not in ("signal", "ask", "deny"):
             return None
@@ -400,9 +429,8 @@ def told(payload: dict, env, posture) -> tuple | None:
         c = cost(rd["costs"], k, rd["back"])
         word = verdict(rd["room"], c, end, out_ends, now, rd["points"], rd["alone"])
         text = line(word, rd["room"], len(out_ends), k, median, c, end,
-                    latest(out_ends, now), now, rd["alone"], TZ,
-                    parked=[s for s in rd.get("shells", ()) if s])
-        return text, word in HELD
+                    latest(out_ends, now), now, rd["alone"], TZ)
+        return text, word in HELD, [s for s in rd.get("shells", ()) if s]
     except Exception:                                   # noqa: BLE001  (a check, never a crash)
         return None
 

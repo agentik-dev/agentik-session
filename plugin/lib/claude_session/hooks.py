@@ -1121,6 +1121,21 @@ def _told(out: dict, told: tuple | None) -> dict:
     return out
 
 
+def _launch_out(build, parts) -> dict:
+    """Build 2 T2: `build(told)`, a spawn's whole output, with the launch line's parked clause
+    sized to what MAX_OUT leaves: the first of `room.parked_clauses` whose output fits, the
+    clause dropped last. `parts` is `room.told_parts`' (line, held, shells) or None."""
+    if parts is None:
+        return build(None)
+    from . import room
+    base, held, shells = parts
+    for clause in room.parked_clauses(shells):
+        out = build((base + clause, held))
+        if not clause or len(json.dumps(out)) <= MAX_OUT:
+            return out
+    return build((base, held))                   # not reached: the last clause is ""
+
+
 def _held(tool: str, told: tuple | None, posture) -> dict | None:
     """Packet nw4-launch-room R8: under `deny`, a launch the room holds is refused, the line
     its reason; else None."""
@@ -1216,11 +1231,12 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         return _warned({}, warn)
     cfg, zone = state(payload.get("session_id"), env)
     from . import room               # nw4: the launch line; never raises, None outside the rule
-    told = room.told(payload, os.environ if env is None else env, cfg.posture)
-    if cfg.posture in ("off", "signal"):
-        return _told(_warned({}, warn), told)   # signalling happens on the prompt, not here
+    parts = room.told_parts(payload, os.environ if env is None else env, cfg.posture)
+    if cfg.posture in ("off", "signal"):         # signalling happens on the prompt, not here
+        return _launch_out(lambda told: _told(_warned({}, warn), told), parts)
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
-        return _held(tool, told, cfg.posture) or _told(_warned({}, warn), told)
+        return _launch_out(lambda told: _held(tool, told, cfg.posture)
+                           or _told(_warned({}, warn), told), parts)
     plain = (None if discipline(_session_section(payload.get("session_id"), env))
              else _plain_budget(zone, used_pct(payload.get("session_id"), env)))   # st1 C2
 
@@ -1236,10 +1252,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "the rest is reserved for wrapping up."),
         }
 
-    held = _held(tool, told, cfg.posture)
-    if held:
-        return held
-    return _told(_warned({
+    return _launch_out(lambda told: _held(tool, told, cfg.posture) or _told(_warned({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
@@ -1250,7 +1263,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
         }
-    }, warn), told)
+    }, warn), told), parts)
 
 
 def _admission_line(sid=None) -> str | None:

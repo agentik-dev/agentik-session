@@ -605,3 +605,27 @@ def test_t1_a_fifo_at_a_state_file_is_read_as_absent_and_the_hook_returns(where,
     capsys.readouterr()
     assert got_parks == {} and marks == {}                        # read as absent
     assert not (sdir / hooks.ENDED / f"{BID}.json").exists()      # an absent park never ends
+
+
+_ODD = "\\" * 30 + "\x01\x1b\n\t\"é—\x7f" + "\\" * 8                 # 46 characters
+
+
+@pytest.mark.parametrize("posture", ["off", "signal", "ask", "deny"])
+@pytest.mark.parametrize("used", [65.0, 95.0])
+@pytest.mark.parametrize("ids", [lambda i: f"shell-{i}-" + "q" * 38, lambda i: _ODD[:-1] + str(i)])
+def test_t2_the_whole_output_with_parks_stays_inside_640_bytes(posture, used, ids):
+    assert len(ids(0)) == 46
+    _parked_ledger(5, tid=ids)
+    sdir = _session(used=used, posture=posture)
+    out = _launch()
+    whole = json.dumps(out)
+    assert len(whole) <= hooks.MAX_OUT, (len(whole), whole)
+    said = [out.get("systemMessage") or "", (out.get("hookSpecificOutput") or {}).get(
+        "additionalContext") or "", (out.get("hookSpecificOutput") or {}).get(
+        "permissionDecisionReason") or ""]
+    for text in said:
+        clause = text[text.find("; parked on"):] if "; parked on" in text else ""
+        assert "\\" not in clause and all(" " <= c <= "~" for c in clause), clause
+    if posture != "off" and not (posture == "deny" and "reserved" in whole):
+        assert "; parked on" in whole                             # the parks are still said
+    assert sdir.is_dir()
