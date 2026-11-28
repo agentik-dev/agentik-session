@@ -553,6 +553,7 @@ def _wait_unbounded(args: list) -> bool:
 _PAREN_OPEN = ("(", shellreader._MASK["("])     # a paren as written, and as the mask hides it
 _PAREN_SHUT = (")", shellreader._MASK[")"])
 _TICKS = ("`", shellreader._MASK["`"])
+_BREAKS = " \t\n;&|<>" + "".join(_PAREN_OPEN + _PAREN_SHUT + _TICKS)    # a word starts after one
 
 
 def _masked(text: str) -> str:
@@ -563,9 +564,11 @@ def _masked(text: str) -> str:
 def _unquoted(text: str) -> str:
     """The reader's masked text with each quoted span and each backslashed character turned
     into one `_`, so no word in quotes is read. Build 2, R1: the text of a `$(...)` or of
-    backticks inside double quotes is kept and read afresh, its own quotes blanked in turn."""
+    backticks inside double quotes is kept and read afresh, its own quotes blanked in turn.
+    Build 3, S1: in that text a comment, a `#` at a word's start, is dropped up to its newline,
+    in backticks up to a backtick, as the mask drops one outside quotes."""
     masked = _masked(text)
-    out, i, n = [], 0, len(masked)
+    out, i, n, start = [], 0, len(masked), False
     stack = []      # the open frames: a quote, or inside double quotes "`" or [depth] for `$(`
     while i < n:
         c = masked[i]
@@ -584,16 +587,22 @@ def _unquoted(text: str) -> str:
             elif c == "$" and masked[i + 1:i + 2] in _PAREN_OPEN:
                 stack.append([0])
                 out.append(" ")
-                i += 1
+                i, start = i + 1, True
             elif c in _TICKS:
                 stack.append("`")
                 out.append(" ")
+                start = True
             i += 1
             continue
         if c == "\\":                   # a line's own text, or a substitution's in quotes
             out.append("_")
-            i += 2
+            i, start = i + 2, False
             continue
+        if c == "#" and start and (top == "`" or isinstance(top, list)):
+            while i < n and masked[i] != "\n" and not (top == "`" and masked[i] in _TICKS):
+                i += 1
+            continue
+        start = c in _BREAKS
         if c in "'\"":
             stack.append(c)
             out.append("_")
@@ -612,15 +621,27 @@ def _unquoted(text: str) -> str:
     return "".join(out)
 
 
-def _heavy_forms(c, tokens: list) -> set:
+def _typed_names(tokens: list) -> dict:
+    """Build 3, S2: the line's words holding a `/`, found once per line, keyed by their base
+    name alone and by it with the word after them."""
+    index = {}
+    for k, t in enumerate(tokens):
+        if "/" in t:
+            base = os.path.basename(t)
+            index.setdefault((base, None), set()).add(t)
+            if k + 1 < len(tokens):
+                index.setdefault((base, tokens[k + 1]), set()).add(t)
+    return index
+
+
+def _heavy_forms(c, index: dict) -> set:
     """Build 2, R3: a command's words joined by one space, as typed and with the path dropped
     from its name. The typed name is a word of the line holding a `/` whose base name is the
     command's and that its first argument follows."""
     forms = {" ".join([c.name, *c.args])}
     first = c.args[0].split()[:1] if c.args else []
-    for k, t in enumerate(tokens):
-        if (t != c.name and "/" in t and os.path.basename(t) == c.name
-                and tokens[k + 1:k + 1 + len(first)] == first):
+    for t in index.get((c.name, first[0] if first else None), ()):
+        if t != c.name:
             forms.add(" ".join([t, *c.args]))
     return forms
 
@@ -735,8 +756,9 @@ def _helper_wait(payload: dict, env) -> dict | None:
         patterns = _helper_heavy(payload, env)
         tokens = [t.strip("'\"" + "".join(_TICKS[1:] + _PAREN_OPEN[1:] + _PAREN_SHUT[1:]))
                   for t in _WORD.findall(_masked(command))] if patterns else []
+        typed = _typed_names(tokens)
         for c in cmds:
-            if patterns and any(fnmatch.fnmatchcase(f, p) for f in _heavy_forms(c, tokens)
+            if patterns and any(fnmatch.fnmatchcase(f, p) for f in _heavy_forms(c, typed)
                                 for p in patterns):
                 heavy = True                                 # hw2 H4: told, never refused
             if c.name == "sleep":

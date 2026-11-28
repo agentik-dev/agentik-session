@@ -417,3 +417,59 @@ def test_1_heavy_not_a_list_or_the_main_thread_is_nothing():
     assert call("make check")[1] == {}
     _session("refuse", heavy=["make *"])
     assert call("make check", agent=None)[1] == {}
+
+
+# build 3, S1 (review 2, F3): a comment in a quoted substitution is no word of the loop test
+@pytest.mark.parametrize("value", ["say", "refuse"])
+@pytest.mark.parametrize("cmd", [
+    'msg="$(\n  # for the record\n  git log -1 --format=%s\n)"; sleep 2',
+    'x="$(echo x # while sleep\n)"; sleep 2',
+    'echo "`echo x # until then`"; sleep 2',
+    'echo "$(echo "a" # for now\n)"; sleep 2',
+])
+def test_s1_a_comment_in_a_quoted_substitution_is_dropped(value, cmd):
+    _session(value)
+    p, out = call(cmd)
+    assert out == {} and opened(p)
+
+
+@pytest.mark.parametrize("cmd", [
+    'out="$(until agentik session gate status | grep -q done; do sleep 5; done)" # note',
+    'out="$(until agentik session gate status | grep -q done; do sleep 5; done # note\n)"',
+    'x="$(echo $# ${#y} a#b "#q" \'#r\'; while :; do sleep 5; done)"',
+    'echo "`echo x # c`$(while :; do sleep 5; done)"',
+])
+def test_s1_r1_lines_and_a_hash_that_opens_no_comment_stay_refused(cmd):
+    _session("refuse")
+    assert call(cmd)[1] == denied(LOOP)
+
+
+# build 3, S2 (review 2, F4): the heavy match finds each word's base name once per line, so
+# its work grows with the line's length, not with its commands times its words
+def _basenames(monkeypatch, n):
+    seen = [0]
+    real = os.path.basename
+
+    def counted(t):
+        seen[0] += 1
+        return real(t)
+
+    monkeypatch.setattr(os.path, "basename", counted)
+    try:
+        assert call("while :; do sleep 5; done;" + "/c;" * n)[1] == denied(LOOP)
+    finally:
+        monkeypatch.setattr(os.path, "basename", real)
+    return seen[0]
+
+
+def test_s2_the_heavy_match_costs_the_lines_length(monkeypatch):
+    _session("refuse", heavy=["make *"])
+    small, large = _basenames(monkeypatch, 200), _basenames(monkeypatch, 400)
+    assert large - small <= 4 * 200
+
+
+def test_s2_the_reviews_line_keeps_its_answer():
+    line = "while :; do sleep 5; done;" + "/c;" * 3300
+    assert 9_900 <= len(line) <= 9_950
+    _session("refuse", heavy=["make *"])
+    assert call(line)[1] == denied(LOOP)
