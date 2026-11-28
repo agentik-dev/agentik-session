@@ -196,7 +196,8 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
     word (r2 F1), and a quoted or escaped backtick opens nothing (r3 F1).
     `ops` (g8a R7): each yield gains the operator before it and the command's read
     redirections, [(operator, word)].
-    A bare `{` right after `function NAME` starts a new command, as `NAME()`'s paren does (nw8)."""
+    A bare `{` right after `function NAME` starts a new command, as `NAME()`'s paren does (nw8),
+    after words of `_LEAD` alone too (nw9)."""
     masked = _mask(text, bash3, ticks)
     lex = shlex.shlex(masked, posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
@@ -234,7 +235,7 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
                 ins.append((expect, tok))
             expect = None
             continue
-        if tok == "{" and len(words) == 2 and words[0] == "function":
+        if tok == "{" and words[-2:-1] == ["function"] and all(w in _LEAD for w in words[:-2]):
             end = lex.instream.tell()     # past the word, and past its one ending character
             end -= 1 + (masked[end - 1:end] in " \t\r" + _PUNCT)
             if masked[end - 1:end + 1] in (" {", "\t{", "\r{"):    # neither quoted nor escaped
@@ -719,6 +720,7 @@ def _sub_end(text: str, i: int, bash3: bool, depth: int) -> int:
     if depth > _NEST:
         raise _Bound(text[:80])
     n, par, cases, quote, word, cmd = len(text), 0, 0, None, True, True
+    fn = 0                                # nw9: 1 after `function`, 2 after its NAME
     while i < n:
         c = text[i]
         if quote in ("'", "$'"):
@@ -752,10 +754,11 @@ def _sub_end(text: str, i: int, bash3: bool, depth: int) -> int:
             i = n if j < 0 else j
             continue
         if word and c not in " \t\n;&|()<>":
-            m = _KEY.match(text, i) if cmd and not bash3 else None
+            m = _KEY.match(text, i) if (cmd or fn == 2) and not bash3 else None
             w = m.group() if m else ""
-            cases += (w == "case") - (w == "esac" and cases > 0)
-            cmd = w in _LEAD
+            cases += cmd and (w == "case") - (w == "esac" and cases > 0)
+            fn = 1 if cmd and w == "function" else 2 if fn == 1 else 0
+            cmd = w in _LEAD if cmd else w == "{"    # nw9: the body after `function NAME {`
         if c in "'\"":
             quote = c
         elif c == "$" and text[i + 1:i + 2] == "'":
