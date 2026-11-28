@@ -138,7 +138,7 @@ def test_the_line_lands_in_the_chains_inbox_or_the_callers(root, repo):
     rc_ = json.loads(gate.result_path(root, c["id"]).read_text())
     assert list(ra) == [*gate.RESULT_KEYS, *gate.CHAIN_KEYS, *gate.MEASURE_KEYS]   # hw1 W2
     assert ra["chain"] == NAME
-    assert list(rc_) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]       # R8: the pin's keys
+    assert list(rc_) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]   # R8: the pin's keys, then hw1's
 
 
 def test_each_verb_that_queues_passes_the_session_flag(root, repo, monkeypatch):

@@ -348,3 +348,17 @@ def test_r3_the_fail_clause_prefers_a_line_that_is_not_makes_own(tmp_path, text,
     log.write_text(text)
     assert gate.fail_text(str(log), GID) == want
 
+
+def test_r4_a_job_is_never_returned_as_its_own_open_entry(box, monkeypatch):
+    idle(monkeypatch)
+    rc, out, _ = run("gate", "run", str(box.tree), "--", "/bin/echo", "hi")
+    gid = queued_id(out)
+    (gate.gate_dir(box.root) / "runner.json").write_text(json.dumps(
+        {"pid": os.getpid(), "since": 1.0, "running": [{"id": gid, "pgid": None}]}))
+    monkeypatch.setenv(gate.JOB_MARK, gid)
+    rc, out, err = run("gate", "run", str(box.tree), "--", "/bin/echo", "hi")
+    assert rc == 0 and out.startswith("queued ") and queued_id(out) != gid, err
+    assert len(gate.entries(box.root)) == 2                 # queued as at the pin
+    monkeypatch.delenv(gate.JOB_MARK)
+    rc, out, _ = run("gate", "run", str(box.tree), "--", "/bin/echo", "hi")
+    assert rc == 0 and out.startswith(f"open {gid} running ")    # another caller still is

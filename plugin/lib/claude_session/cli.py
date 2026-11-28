@@ -1979,14 +1979,16 @@ def cmd_gate(args) -> int:
         command = checked
         if not args.fresh and _gate_kept(root, args.repo):     # hw1 W3: nothing queued
             return 0
-    own = _own_entry(root, env) if args.wait else None
-    if own and os.path.isdir(args.repo) \
+    own = _own_entry(root, env)
+    if args.wait and own and os.path.isdir(args.repo) \
             and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
         _die(f"gate run: this is gate job {own['id'][:40]}; a job queued here on its own repo "
              "waits until the wall cuts it: run the command directly, or queue it without "
              "--wait", 2)
     tree = gate.clean_tree(os.path.realpath(args.repo)) if os.path.isdir(args.repo) else None
     hit = None if args.fresh else gate.open_entry(root, args.repo, command, tree)
+    if hit is not None and own is not None and hit[0]["id"] == own["id"]:
+        hit = None                   # hw1 R4: never its own open entry; queued as at the pin
     if hit is not None:                                  # hw1 W4: the open job, not a second
         e, state = hit
         print(f"open {e['id']} {state} repo {e['repo']}; result "
