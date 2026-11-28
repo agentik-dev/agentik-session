@@ -750,13 +750,13 @@ prompt cache's lifetime.
   `gate | <id> running` in your hand-back and end your turn; under `say` the same line is the
   call's context and it runs. A heredoc's body, a quoted word or a message is never a
   command; a sleep under a minute, an unread duration (`sleep "$N"`) and a reader's fault
-  pass, and `gate run --within` is never refused. The value is the session's resolved one,
+  pass, and `gate run --within` always passes. The value is the session's resolved one,
   read at each call, so a helper is judged by its coordinator's session; its first waits are
   kept in `helper-waits.json` under that session's folder (at most 256). The main thread is
   never denied or told. Under `say` or `refuse` the SubagentStart hook gives each helper the
   rule once, at its start. `helpers.heavy`, a list of patterns (none ship), matched with
   `fnmatch` on a command's words joined by one space, tells a helper's run of one to queue it
-  through the gate; it is never refused.
+  through the gate; that run is told, never denied.
 - A sitting is told its room at each launch. In a session that keeps the sitting discipline
   (every shipped profile but `starter`), the PreToolUse hook counts, at a main thread's Agent
   or Task call, `room = 100 x checkpoint_at - the meter - launch.back for each helper out`
