@@ -1384,21 +1384,25 @@ def resolved(root, r):
 
 def _not_rerun(root, fx: Fx, cfg: dict, e: dict) -> dict | None:
     """hw5 F3: rerun `e` has not started `RERUN_WAIT` after its flake, or is dropped (build 2,
-    S5): the flake's result reads `flake: load, not rerun` and its line is sent, then the rerun
-    leaves its result (`_left`, S2) and is taken out of the queue. The first's result, or None."""
+    S5): the rerun leaves its result (`_left`, S2) first, then the flake's result reads `flake:
+    load, not rerun` as its line is sent and the rerun is taken out of the queue; a pass that
+    finds the first still `load` beside that result does it all again (hw5b D1). The first's
+    result, or None."""
     gid = e["id"]
     of = e.get("rerun_of")
     first = _load(result_path(root, of)) if isinstance(of, str) and ID.match(of) else None
+    _left(root, e, fx.now())
     def take():
-        _left(root, e, fx.now())
         _unlink(_queue(root) / f"{gid}.json")
         _unlink(cancel_path(root, gid))
     if first is None or first.get("flake") != FLAKE:
         take()
         return first
     first["flake"] = NOT_RERUN
-    _write_private(result_path(root, first["id"]), json.dumps(first, indent=1) + "\n")
-    _tell(root, fx, cfg, first, take)
+    def mark():
+        _write_private(result_path(root, first["id"]), json.dumps(first, indent=1) + "\n")
+        take()
+    _tell(root, fx, cfg, first, mark)
     return first
 
 
@@ -1593,7 +1597,10 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     es = [e for e in entries(root) if e["id"] not in busy]
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
-            _unlink(_queue(root) / f"{e['id']}.json")
+            if (_load(result_path(root, e["id"])) or {}).get("flake") == NOT_RERUN:
+                _not_rerun(root, fx, cfg, e)          # hw5b D1: a take-out cut short
+            else:
+                _unlink(_queue(root) / f"{e['id']}.json")
             return True
     _sweep_marks(root)
     for e in es:                                      # fw5 R4: a marked entry never starts
