@@ -698,3 +698,23 @@ def test_t6_the_main_thread_s_task_stop_of_one_of_two_shells_keeps_the_park_on_t
     assert (parked()["task"], parked()["tasks"], ended()) == ("bg-002", ["bg-002"], False)
     _task_stop("bg-002", 2)
     assert parked() is None and ended()
+
+
+@pytest.mark.parametrize("tasks", [[1, 2], ["bg-001"], [_task(status="completed"), None],
+                                   [[_task()]], "[]", {}])
+@pytest.mark.parametrize("event", ["Stop", "PreToolUse", "UserPromptSubmit"])
+def test_t7_a_value_that_is_not_a_list_of_objects_ends_no_park(tasks, event, monkeypatch,
+                                                               capsys):
+    _park()
+    _dispatch(event, {"session_id": SID, "hook_event_name": event, "tool_name": "Read",
+                      "background_tasks": tasks}, monkeypatch, capsys)
+    _stop(aid=BID, tasks=tasks)                                 # another helper's stop
+    _stop(tasks=tasks)                                          # its own: no word either
+    assert parked() is not None and not ended()
+
+
+def test_t7_an_empty_list_is_a_list_and_ends_every_park(monkeypatch, capsys):
+    _park()
+    _dispatch("Stop", {"session_id": SID, "hook_event_name": "Stop", "background_tasks": []},
+              monkeypatch, capsys)
+    assert parked() is None and ended()

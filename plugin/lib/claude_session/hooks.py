@@ -2800,9 +2800,9 @@ def _helper_job(payload: dict, env) -> None:
 def _running_shells(payload: dict) -> list | None:
     """P3: (id, command or None) for each `background_tasks` entry that is an object of type
     `shell`, status `running`, with a non-empty string id; None where the payload holds no
-    such list."""
+    such list. Build 2 T7: a list is one whose every entry is an object; [] is one."""
     tasks = payload.get("background_tasks")
-    if not isinstance(tasks, list):
+    if not isinstance(tasks, list) or not all(isinstance(t, dict) for t in tasks):
         return None
     out = []
     for t in tasks:
