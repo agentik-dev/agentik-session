@@ -1268,20 +1268,48 @@ def _tell(root, fx: Fx, cfg: dict, result: dict, between) -> None:
         fx.log(err)
 
 
-def _not_rerun(root, fx: Fx, cfg: dict, e: dict) -> None:
-    """hw5 F3: rerun `e` has not started `RERUN_WAIT` after its flake: the flake's result reads
-    `flake: load, not rerun` and its line is sent, then the rerun is taken out of the queue."""
+def _left(root, e: dict, now) -> None:
+    """Build 2, S2: the result a rerun taken out of the queue leaves under its own id, exit
+    130, `flake: load, not rerun` and `rerun_of` the first, so its id is never unknown; a
+    reader takes the first's result for it (`resolved`). One already there is kept."""
     gid = e["id"]
-    first = _load(result_path(root, e.get("rerun_of") or ""))
+    if result_path(root, gid).exists():
+        return
+    _mkdir(entry_dir(root, gid))
+    result = {"id": gid, "repo": e.get("repo"), "command": e.get("command"),
+              "exit": CALLER_EXIT, "started": None, "ended": now, "seconds": None,
+              "log": str(entry_dir(root, gid) / "log"), "caller": e.get("caller"),
+              "cut": CUT_CALLER, "head": None, "key": _str_or_none(e.get("key")),
+              "flake": NOT_RERUN, "rerun_of": e.get("rerun_of")}
+    _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
+
+
+def resolved(root, r):
+    """Build 2, S2: a result as a wait or a drop answers it: for what a rerun taken out left
+    (`_left`), the first's result, where it is still there; else `r`."""
+    of = r.get("rerun_of") if isinstance(r, dict) and r.get("flake") == NOT_RERUN else None
+    first = _load(result_path(root, of)) if isinstance(of, str) and ID.match(of) else None
+    return first if first is not None else r
+
+
+def _not_rerun(root, fx: Fx, cfg: dict, e: dict) -> dict | None:
+    """hw5 F3: rerun `e` has not started `RERUN_WAIT` after its flake, or is dropped (build 2,
+    S5): the flake's result reads `flake: load, not rerun` and its line is sent, then the rerun
+    leaves its result (`_left`, S2) and is taken out of the queue. The first's result, or None."""
+    gid = e["id"]
+    of = e.get("rerun_of")
+    first = _load(result_path(root, of)) if isinstance(of, str) and ID.match(of) else None
     def take():
+        _left(root, e, fx.now())
         _unlink(_queue(root) / f"{gid}.json")
         _unlink(cancel_path(root, gid))
     if first is None or first.get("flake") != FLAKE:
         take()
-        return
+        return first
     first["flake"] = NOT_RERUN
     _write_private(result_path(root, first["id"]), json.dumps(first, indent=1) + "\n")
     _tell(root, fx, cfg, first, take)
+    return first
 
 
 def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
@@ -1828,12 +1856,12 @@ def wait(root, gid: str, poll=WAIT_POLL, timeout=None, sleep=None, clock=None, s
         cur = followed(root, gid) if follow else gid
         r = _load(result_path(root, cur))
         if r is not None:
-            return 0, r
+            return 0, resolved(root, r)                 # build 2, S2
         if not (_queue(root) / f"{cur}.json").exists():
             r = _load(result_path(root, cur))           # written between the two reads
             if r is None and cur != gid:                # the rerun taken out: the flake's
                 r = _load(result_path(root, gid))
-            return (0, r) if r is not None else (2, None)
+            return (0, resolved(root, r)) if r is not None else (2, None)
         if first or not alive((runner_info(root) or {}).get("pid")):
             (spawn or spawn_serve)(root)
             first = False
@@ -1863,7 +1891,7 @@ def drop(root, gid: str, fx: Fx | None = None, alive=_alive) -> tuple[int, str]:
             if r is None:
                 return 2, f"gate drop: no gate {gid} under {gate_dir(root)}"
     if r is not None:
-        return 0, wait_line(r)
+        return 0, wait_line(resolved(root, r))           # build 2, S2
     if gid in _running_ids(root, alive):
         os.rename(aside, path)
         return 1, f"running {gid}: not dropped"

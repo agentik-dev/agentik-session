@@ -235,7 +235,7 @@ def test_f3_a_rerun_not_started_in_30_minutes_goes_and_the_first_line_is_sent(tm
     gate.enqueue(w.root, str(other(w)), ["b", "x"], ENV, [], 5400, "", None, w.t)
     gate.serve(w.root, fx(w, {"a": STOP}))
     r1 = w.result(a["id"])
-    assert r1["flake"] == "load, not rerun" and not gate.result_path(w.root, r1["rerun"]).exists()
+    assert r1["flake"] == "load, not rerun" and w.result(r1["rerun"])["exit"] == 130   # S2
     assert not gate.entries(w.root) and [argv[0] for argv, _, _ in w.spawned] == ["a", "b"]
     got = lines(w)
     assert len(got) == 1 and got[0].startswith(f"gate {a['id']} ") \
@@ -443,3 +443,26 @@ def test_s1_the_opt_in_is_the_verbs_alone(box, monkeypatch, tmp_path):
     with pytest.raises(deliver.Red):
         deliver._make_install(str(box.tree), box.root, {"HOME": str(tmp_path)}, "x")
     assert asked == [False, False] and "rerun=" not in inspect.getsource(cli._gate_land)
+
+
+@pytest.mark.usefixtures("as_the_verb")
+def test_s2_a_rerun_taken_out_leaves_its_id_readable(tmp_path, monkeypatch, capsys):
+    w = World(tmp_path)
+    w.plan.update({"a": (100, 1), "b": (3000, 0)})
+    a = w.put(first="a", caller="s1")
+    gate.enqueue(w.root, str(other(w)), ["b", "x"], ENV, [], 5400, "", None, w.t)
+    gate.serve(w.root, fx(w, {"a": STOP}))           # b holds the machine past 30 minutes
+    r1 = w.result(a["id"])
+    rid = r1["rerun"]
+    left = w.result(rid)
+    assert (left["exit"], left["flake"], left["rerun_of"]) == (130, "load, not rerun", a["id"])
+    line = gate.wait_line(r1)
+    assert "; flake: load, not rerun; " in line and lines(w) == [line]
+    for follow in (False, True):
+        rc, got = gate.wait(w.root, rid, spawn=lambda root: False, follow=follow)
+        assert rc == 0 and got["id"] == a["id"] and gate.wait_line(got) == line
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    assert cli._gate_wait(w.root, rid, None, False, strict=True) == 1    # the first's code
+    assert capsys.readouterr().out.strip() == line
+    assert gate.drop(w.root, rid, fx=w.fx()) == (0, line)                # done
+    assert lines(w) == []                                                # nothing sent twice
