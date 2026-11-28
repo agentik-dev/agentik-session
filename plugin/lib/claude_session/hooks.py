@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import codecs
 import copy
+import fnmatch
 import hashlib
 import json
 import math
@@ -440,12 +441,19 @@ def _helper_charter(payload: dict) -> bool:
 HELPER_WAITS = "helper-waits.json"      # {"waits": [[agent_id, id], ...]}, the newest last
 HELPER_WAITS_MAX = 256                  # pairs kept; the oldest go first (well under SMALL)
 LONG_SLEEP = 60
-HELPER_WAIT_RULE = ("Queue the run with agentik session gate run, write gate | <id> running in "
-                    "your record and hand back; the result reaches the coordinator.")
+WAIT_BOUND = 100                        # hw2 H1: a helper's one wait, under the engine's move
+HELPER_WAIT_RULE = ("Queue the run with agentik session gate run <dir> --label <row> -- "
+                    "<command> (add --within 100 to wait once), write gate | <id> running in "
+                    "your hand-back and end your turn; the result reaches the coordinator.")
 HELPER_WAIT_DENY = "agentik-session: denied a helper's wait."
 HELPER_WAIT_SAY = "agentik-session: a helper is never the wait."
+HELPER_HEAVY = ("agentik-session: this run is listed as heavy for this repo: queue it with "
+                "agentik session gate run")
 CHAIN_WAIT = "--chain"                  # the chain stands for the id; no job id is an option
 _TOOL_WORDS = frozenset({"agentik-session", "claude-session", "claude_session"})
+_LOOP_WORDS = frozenset({"while", "until", "for"})
+_RUN_WAIT = frozenset({"--wai", "--wait"})    # `gate run`'s `--wait` and its one abbreviation
+_WORD = re.compile(r"[^ \t\r\n;&|<>()`]+")
 _DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)\Z")
 _UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -482,6 +490,87 @@ def _helper_wait_value(payload: dict, env) -> str:
     h = s.get("helpers") if isinstance(s, dict) else None
     v = h.get("wait") if isinstance(h, dict) else None
     return v if v in ("say", "refuse") else "allow"
+
+
+def _helper_heavy(payload: dict, env) -> list:
+    """hw2 H4: the resolved `helpers.heavy` of the payload's session, [] where it is none or
+    no list of strings."""
+    sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+    s = _regular_json(sdir / "resolved.json").get("session") if sdir else None
+    h = s.get("helpers") if isinstance(s, dict) else None
+    v = h.get("heavy") if isinstance(h, dict) else None
+    return v if isinstance(v, list) and all(isinstance(x, str) for x in v) else []
+
+
+def _tool_args(c) -> list | None:
+    """The words after this tool's name (`agentik session`, the launcher, its old name), None
+    for another command."""
+    args = list(c.args)
+    if c.name == "agentik" and args[:1] == ["session"]:
+        return args[1:]
+    return args if c.name in _TOOL_WORDS else None
+
+
+def _run_waits(args: list) -> bool:
+    """hw2 H1: a `gate run` whose own words, before the `--` that starts the job's command, hold
+    `--wait` (or `--wai`, its one unambiguous abbreviation)."""
+    for a in args:
+        if a == "--":
+            return False
+        if a in _RUN_WAIT:
+            return True
+    return False
+
+
+def _wait_unbounded(args: list) -> bool:
+    """hw2 H1: a `gate wait` the CLI would run (its parser takes the words, no help, an id or
+    `--chain`) with no `--timeout` or one over WAIT_BOUND; a timeout not read as a number is
+    the parser's refusal, so no wait."""
+    try:
+        ns, extras = _wait_parser().parse_known_intermixed_args(args)
+    except (ValueError, TypeError):
+        return False
+    if extras or ns.help or not (ns.chain or isinstance(ns.id, str)):
+        return False
+    return ns.timeout is None or not ns.timeout <= WAIT_BOUND
+
+
+def _unquoted(text: str) -> str:
+    """The reader's masked text (its heredoc bodies out, its comments dropped) with each quoted
+    span and each backslashed character turned into one `_`, so no word in quotes is read."""
+    masked = shellreader._mask(shellreader._here_scan(text)[0])
+    out, i, n, quote = [], 0, len(masked), None
+    while i < n:
+        c = masked[i]
+        if quote is None:
+            if c == "\\":
+                out.append("_")
+                i += 2
+                continue
+            if c in "'\"":
+                quote = c
+                out.append("_")
+            else:
+                out.append(c)
+        elif c == "\\" and quote == '"':
+            i += 2
+            continue
+        elif c == quote:
+            quote = None
+        i += 1
+    return "".join(out)
+
+
+def _loops(command: str, cmds) -> bool:
+    """hw2 H1, L10: `while`, `until` or `for` as a word of the line's masked text, or of a
+    first-level shell's `-c` script the reader yields."""
+    texts = [command]
+    for c in cmds:
+        if c.level == 0 and c.name in shellreader._SHELLS5:
+            kind, k = shellreader._script(c.args)
+            if kind == "c" and k is not None:
+                texts.append(c.args[k])
+    return any(w in _LOOP_WORDS for t in texts for w in _WORD.findall(_unquoted(t)))
 
 
 def _sleep_seconds(args: list) -> float | None:
@@ -553,7 +642,11 @@ def _helper_wait(payload: dict, env) -> dict | None:
     """Packet nw3-helper-wait R2 to R8: a helper's Bash under `say` or `refuse` whose line
     holds a long sleep or a second wait on one job: the denial (`refuse`) or the passing call's
     context (`say`); None otherwise, under `allow`, for the main thread and on any fault. A
-    first wait is recorded only where the call passes."""
+    first wait is recorded only where the call passes. hw2 H1, after nw3's two and in this
+    order: a background shell, `gate run --wait`, a `gate wait` with no bound of WAIT_BOUND s or
+    less, the line's sleeps adding to a minute, a sleep on a line whose masked text holds a loop
+    word; one clause is said, the first. hw2 H4: a command `helpers.heavy` lists is told as
+    context on the passing call, never refused."""
     if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
         return None
     try:
@@ -573,12 +666,25 @@ def _helper_wait(payload: dict, env) -> dict | None:
         waits = [w for w in doc.get("waits") or [] if isinstance(w, list) and len(w) == 2]
         seen = {(a, j) for a, j in waits}
         clause, new = None, []
+        slept, run_wait, unbounded = 0.0, False, False      # hw2 H1: judged after nw3's two
+        sleeps = heavy = False
+        patterns = _helper_heavy(payload, env)
         for c in cmds:
+            if patterns and any(fnmatch.fnmatchcase(" ".join([c.name, *c.args]), p)
+                                for p in patterns):
+                heavy = True                                 # hw2 H4: told, never refused
             if c.name == "sleep":
+                sleeps = True
                 n = _sleep_seconds(c.args)
+                slept += n or 0.0
                 if clause is None and n is not None and n >= LONG_SLEEP:
                     clause = f"a sleep of {_seconds_word(n)} s"
                 continue
+            words = _tool_args(c)
+            if words is not None and words[:2] == ["gate", "run"]:
+                run_wait = run_wait or _run_waits(words[2:])
+            if words is not None and words[:2] == ["gate", "wait"]:
+                unbounded = unbounded or _wait_unbounded(words[2:])
             j = _wait_id(c)
             if j is None:
                 continue
@@ -588,18 +694,25 @@ def _helper_wait(payload: dict, env) -> dict | None:
                 continue
             seen.add((aid, j))
             new.append([aid, j])
+        clause = (clause or (ti.get("run_in_background") is True and "a background shell")
+                  or (run_wait and "gate run --wait")
+                  or (unbounded and f"a wait with no bound of {WAIT_BOUND} s or less")
+                  or (slept >= LONG_SLEEP and f"sleeps of {_seconds_word(slept)} s")
+                  or (sleeps and _loops(command, cmds) and "a sleep in a loop") or None)
         if clause and value == "refuse":
             return _deny(f"agentik-session: an agent is never the wait ({clause}). "
                          + HELPER_WAIT_RULE, HELPER_WAIT_DENY)
         if new:
             store._write_private(sdir / HELPER_WAITS,
                                  json.dumps({"waits": (waits + new)[-HELPER_WAITS_MAX:]}))
-        if clause:
-            return {"hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "additionalContext": (f"agentik-session: an agent is never the wait "
-                                              f"({clause}). " + HELPER_WAIT_RULE)},
-                    "systemMessage": HELPER_WAIT_SAY}
+        told = ([f"agentik-session: an agent is never the wait ({clause}). " + HELPER_WAIT_RULE]
+                if clause else []) + ([HELPER_HEAVY] if heavy else [])
+        if told:
+            out = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                          "additionalContext": "\n\n".join(told)}}
+            if clause:
+                out["systemMessage"] = HELPER_WAIT_SAY
+            return out
     except Exception:                                   # noqa: BLE001  (R8: a fault passes)
         return None
     return None
@@ -936,8 +1049,9 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     close (n33), a RESPAWN close in the background (rc1), the stray writes (g8, lineguard),
     a gated file's write (g2b), the main thread's close while a job is out (rc2), and, under
     the session's `helpers.wait` (nw3), a helper's second wait on one gate job or its sleep of
-    a minute or more: denied under `refuse`, said as context on a passing call under `say`,
-    untouched under `allow`, the shipped default.
+    a minute or more, and (hw2) its background shell, `gate run --wait`, an unbounded
+    `gate wait`, sleeps adding to a minute and a sleep in a loop: denied under `refuse`, said as
+    context on a passing call under `say`, untouched under `allow`, the shipped default.
     A spawn goes through the family rule (wfd, wfg, h6), then the role check (mt1 R6), then, at
     a main thread's Agent or Task call alone, the launch check (nw4): in a session that keeps
     the sitting discipline and under `signal`, `ask` or `deny`, the room left to the line and

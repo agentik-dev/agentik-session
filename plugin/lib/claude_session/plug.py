@@ -42,7 +42,7 @@ TYPES = {"checkpoint_at": "number", "tools": "list", "plugins": "list", "verify"
          "gate.wall": "integer", "gate.load_ceiling": "number", "gate.max_running": "integer",
          "ceilings.context": "integer", "ceilings.turns": "integer",
          "launch.back": "number", "launch.narrow.points": "number",
-         "launch.narrow.alone": "number"}
+         "launch.narrow.alone": "number", "helpers.heavy": "list"}
 
 # R9: one sentence each, under 100 characters; a pattern's `*` is one segment or more.
 SUMMARIES = {
@@ -53,6 +53,7 @@ SUMMARIES = {
                        "session.",
     "posture": "What the budget guard does at a ceiling: off, signal, ask or deny.",
     "helpers.wait": "A helper's second wait on one job, or long sleep: allow, say or refuse.",
+    "helpers.heavy": "Command patterns a helper is told to queue through the gate, not run.",
     "launch.back": "The points of the context ceiling a hand-back costs, for a kind with under ten measured.",
     "launch.narrow.points": "The room after a launch under which it is narrow and must fit a wait.",
     "launch.narrow.alone": "The minutes a narrow launch may take when no helper is out, or every one out is overdue.",

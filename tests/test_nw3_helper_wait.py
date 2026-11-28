@@ -16,8 +16,9 @@ from claude_session.yamlsubset import load
 
 SID = "nw3-session-0001"
 HELPER, OTHER = "agent-nw3-a", "agent-nw3-b"
-RULE = ("Queue the run with agentik session gate run, write gate | <id> running in your record "
-        "and hand back; the result reaches the coordinator.")
+RULE = ("Queue the run with agentik session gate run <dir> --label <row> -- <command> (add "
+        "--within 100 to wait once), write gate | <id> running in your hand-back and end your "
+        "turn; the result reaches the coordinator.")                       # hw2 H2
 DENY_NOTE = "agentik-session: denied a helper's wait."
 SAY_NOTE = "agentik-session: a helper is never the wait."
 RECORD = "helper-waits.json"
@@ -155,7 +156,7 @@ def test_2_a_background_wake_is_denied():
 
 # ---- line 3: what is no command sleep passes under refuse ------------------------------------
 
-PASSED = ["sleep 59", "for i in 1 2 3; do sleep 30; done", "cat <<'EOF'\nsleep 90\nEOF",
+PASSED = ["sleep 59", "cat <<'EOF'\nsleep 90\nEOF",      # hw2 H1: a sleep in a loop is refused
           "git commit -F - <<EOF\nwait: sleep 90\nEOF", 'git commit -m "wait: sleep 90"',
           "echo 'sleep 90'", 'grep -n "sleep 90" notes.txt', 'sleep "$N"', "sleep $N",
           "sleep --help", "agentik session gate run /tmp/w --label x -- make check",
@@ -177,8 +178,9 @@ def test_3_no_long_sleep_passes(cmd):
 # The third spelling is the launcher's name before the rename, built from two parts so the
 # hygiene scan's `renamed` group (old names in live text) counts no fixture line here.
 OLD_NAME = "claude" + "-session"
-SPELLINGS = ["agentik session gate wait {id}", "agentik-session gate wait {id} --strict --timeout 540",
-             OLD_NAME + " gate wait --timeout 540 {id}"]
+SPELLINGS = ["agentik session gate wait {id} --timeout 90",      # hw2 H1: each wait bounded
+             "agentik-session gate wait {id} --strict --timeout 100",
+             OLD_NAME + " gate wait --timeout 60 {id}"]
 
 
 @pytest.mark.parametrize("spell", SPELLINGS)
@@ -197,10 +199,11 @@ def test_4_a_second_wait_on_one_job_is_denied(spell):
 
 def test_4_the_path_and_a_list_count():
     _session("refuse")
-    assert call("cd /tmp && /opt/x/bin/agentik-session gate wait J1")[1] == {}
-    assert call("agentik session gate wait J2; agentik session gate wait J1")[1] == denied(
+    T = " --timeout 90"                     # hw2 H1: each wait bounded
+    assert call("cd /tmp && /opt/x/bin/agentik-session gate wait J1" + T)[1] == {}
+    assert call("agentik session gate wait J2" + T + "; agentik session gate wait J1" + T)[1] == denied(
         "a second wait on J1")
-    assert call("agentik session gate wait J3 && agentik session gate wait J3")[1] == denied(
+    assert call("agentik session gate wait J3" + T + " && agentik session gate wait J3" + T)[1] == denied(
         "a second wait on J3")
 
 
@@ -209,16 +212,16 @@ def test_4_a_message_is_no_wait():
     assert call('git commit -m "agentik session gate wait J9"')[1] == {}
     assert call("echo 'agentik session gate wait J9'")[1] == {}
     assert not (_sdir() / RECORD).exists()
-    assert call("agentik session gate wait J9")[1] == {}
-    assert call("agentik session gate wait J9")[1] == denied("a second wait on J9")
+    assert call("agentik session gate wait J9 --timeout 90")[1] == {}       # hw2 H1: bounded
+    assert call("agentik session gate wait J9 --timeout 90")[1] == denied("a second wait on J9")
 
 
 def test_4_a_second_wait_on_the_chain_is_denied():
     _session("refuse")
-    assert call("agentik session gate wait --chain --timeout 540")[1] == {}
+    assert call("agentik session gate wait --chain --timeout 90")[1] == {}   # hw2 H1: bounded
     p, out = call("agentik session gate wait --chain")
     assert out == denied("a second wait on the chain") and not opened(p)
-    assert call("agentik session gate wait --chain", agent=OTHER)[1] == {}
+    assert call("agentik session gate wait --chain --timeout 90", agent=OTHER)[1] == {}
 
 
 def test_4_no_id_is_no_wait():
@@ -230,10 +233,10 @@ def test_4_no_id_is_no_wait():
 def test_4_the_record_is_bounded():
     _session("refuse")
     for i in range(hooks.HELPER_WAITS_MAX + 20):
-        assert call(f"agentik session gate wait K{i}")[1] == {}
+        assert call(f"agentik session gate wait K{i} --timeout 90")[1] == {}    # hw2 H1
     doc = json.loads((_sdir() / RECORD).read_text())
     assert len(doc["waits"]) == hooks.HELPER_WAITS_MAX
-    assert call(f"agentik session gate wait K{hooks.HELPER_WAITS_MAX + 19}")[1] == denied(
+    assert call(f"agentik session gate wait K{hooks.HELPER_WAITS_MAX + 19} --timeout 90")[1] == denied(
         f"a second wait on K{hooks.HELPER_WAITS_MAX + 19}")
 
 
@@ -248,11 +251,11 @@ def test_5_say_passes_and_carries_the_text(cmd, n):
 
 def test_5_say_a_second_and_third_wait():
     _session("say")
-    assert call("agentik session gate wait J1")[1] == {}
+    assert call("agentik session gate wait J1 --timeout 90")[1] == {}       # hw2 H1: bounded
     for _ in range(2):
         p, out = call("agentik session gate wait J1")
         assert out == said("a second wait on J1") and opened(p)
-    assert call("agentik session gate wait --chain")[1] == {}
+    assert call("agentik session gate wait --chain --timeout 90")[1] == {}
     assert call("agentik session gate wait --chain")[1] == said("a second wait on the chain")
 
 
@@ -288,10 +291,10 @@ def test_6_the_main_thread_sleeps():
     assert call("sleep 90", agent=None, background=True)[1] == {}
 
 
-def test_6_a_background_test_run_passes():
+def test_6_a_background_test_run_is_denied():     # hw2 H1: was passed, now a background shell
     _session("refuse")
     p, out = call("make test", background=True)
-    assert out == {} and opened(p)
+    assert out == denied("a background shell") and not opened(p)
 
 
 def test_6_a_line_past_the_bound_passes_unsaid():
@@ -327,13 +330,13 @@ def test_6_through_session_start(tmp_path):
 JOB_A, JOB_B = "20261122-110000-0001", "20261122-110000-0002"
 
 
-@pytest.mark.parametrize("opt", ["--t 540", "--time 540", "--timeo 540", "--time=540",
-                                 "--timeout=540"])
+@pytest.mark.parametrize("opt", ["--t 90", "--time 90", "--timeo 90", "--time=90",
+                                 "--timeout=90"])                  # hw2 H1: 540 is unbounded
 def test_b2_an_abbreviated_timeout_skips_its_value(opt):
     _session("refuse")
     wait = "agentik session gate wait " + opt + " {}"
     assert call(wait.format(JOB_A))[1] == {}
-    assert call(wait.format(JOB_B))[1] == {}            # a first wait on B, never on 540
+    assert call(wait.format(JOB_B))[1] == {}            # a first wait on B, never on 90
     assert call(wait.format(JOB_A))[1] == denied(f"a second wait on {JOB_A}")
     doc = json.loads((_sdir() / RECORD).read_text())
     assert doc == {"waits": [[HELPER, JOB_A], [HELPER, JOB_B]]}
@@ -342,7 +345,7 @@ def test_b2_an_abbreviated_timeout_skips_its_value(opt):
 @pytest.mark.parametrize("spell", ["--c", "--ch", "--chai"])
 def test_b2_an_abbreviated_chain_is_the_chains_wait(spell):
     _session("refuse")
-    assert call("agentik session gate wait " + spell)[1] == {}
+    assert call("agentik session gate wait " + spell + " --time 30")[1] == {}    # hw2 H1
     p, out = call("agentik session gate wait " + spell + " --time 30")
     assert out == denied("a second wait on the chain") and not opened(p)
     assert call("agentik session gate wait --chain")[1] == denied("a second wait on the chain")
@@ -360,7 +363,7 @@ def test_b2_a_line_the_parser_refuses_is_no_wait(line):
 @pytest.mark.parametrize("line", [f"--str --js {JOB_A}", f"{JOB_A} --str", f"-- {JOB_A}"])
 def test_b2_other_abbreviations_name_the_job(line):
     _session("refuse")
-    assert call(f"agentik session gate wait {JOB_A}")[1] == {}
+    assert call(f"agentik session gate wait {JOB_A} --timeout 90")[1] == {}     # hw2 H1
     assert call("agentik session gate wait " + line)[1] == denied(f"a second wait on {JOB_A}")
 
 
