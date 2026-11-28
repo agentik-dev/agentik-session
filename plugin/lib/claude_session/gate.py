@@ -129,6 +129,17 @@ CHAIN_INBOX_KEYS = ("chain", "head", "dirty", "label")
 CLOSED_WORDS = "this sitting has closed: the line stays for the successor"
 OPEN_NAMED = 3                      # the open jobs a start line names, then `and N more`
 JOB_MARK = "CLAUDE_SESSION_GATE_JOB"    # each job's env names its own id (packet FW4c, R2)
+OLD_ENTRY = 3600.0                  # an entry this old is never passed over (hw5 F1)
+LIGHT_WALL = 120                    # a light job's wall, and its most (hw5 F2)
+RERUN_WAIT = 1800.0                 # a rerun not started this long after its flake goes (F3)
+FLAKE_TAIL = 64 * 1024              # the log's bytes a flake's stop line is looked for in
+STOP_LINES = (b"bounded: stop: lock", b"bounded: stop: load", b"bounded: stop: wall",
+              b"panic: test timed out")         # land.STOPS's and Go's (a test pins both)
+PYTEST_TIMEOUT = re.compile(rb"^(?:\++ Timeout \++|E? *Failed: Timeout >.*)$", re.M)
+NOT_FLAKE = (b"--- FAIL", b"AssertionError", b"WARNING: DATA RACE")
+RED_KEYS = ("ceiling", "alongside")     # a red that ran, after MEASURE_KEYS (hw5 F3)
+MARK_KEYS = ("flake", "rerun", "rerun_of", "dropped")   # last, each only where it applies
+FLAKE, NOT_RERUN = "load", "load, not rerun"
 
 
 class GateError(Exception):
@@ -163,6 +174,57 @@ def cancel(root, gid: str) -> None:
     is closed unrun, a running one cut as the wall cuts; both read exit 130, `caller cut`."""
     _mkdir(_queue(root))
     _write_private(cancel_path(root, gid), "")
+
+
+def drop_path(root, gid: str) -> Path:
+    """Build 2, S7: the mark of a drop in hand, flocked by its `gate drop` while it works; the
+    entry itself is never moved."""
+    return _queue(root) / f"{gid}.drop"
+
+
+def _hand(root, gid: str):
+    """Open and flock `gid`'s drop mark, made 0600 where it is not there; the open file. One
+    a sweep unlinked while this waited on its flock is opened again."""
+    path = drop_path(root, gid)
+    for _ in range(5):
+        fh = os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            same = os.fstat(fh.fileno()).st_ino == os.stat(path).st_ino
+        except OSError:
+            same = False
+        if same:
+            return fh
+        fh.close()
+    raise OSError(f"the drop mark of {gid} kept moving")
+
+
+def _sweep_drops(root) -> set:
+    """Build 2, S7: the ids a drop has in hand, each mark whose flock is held; a mark whose
+    flock is free is a dead drop's and goes, its entry then queued as it was, or, where the
+    drop wrote its result, dropped by the step as any entry beside its result is."""
+    held = set()
+    try:
+        names = os.listdir(_queue(root))
+    except OSError:
+        return held
+    for name in names:
+        gid = name[:-5] if name.endswith(".drop") else ""
+        if not ID.match(gid):
+            continue
+        try:
+            fd = os.open(_queue(root) / name, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            held.add(gid)
+        else:
+            _unlink(_queue(root) / name)
+        finally:
+            os.close(fd)
+    return held
 
 
 def _sweep_marks(root) -> None:
@@ -364,6 +426,27 @@ def _branch(repo: str) -> str | None:
         return None
     out = p.stdout.strip() if p.returncode == 0 else ""
     return out or None
+
+
+def top_level(repo: str) -> str:
+    """Build 2, S3: a folder's worktree, `git -C <repo> rev-parse --show-toplevel` resolved;
+    the resolved folder where it is in no checkout or git fails. Never raises."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        p = subprocess.run(["git", "-C", repo, "rev-parse", "--show-toplevel"], env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=GIT_WAIT)
+        out = p.stdout.rstrip("\n") if p.returncode == 0 else ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        out = ""
+    return _real(out) if out else _real(repo)
+
+
+def worktree(e: dict):
+    """Build 2, S3: the worktree an entry's light-class tests read, its `top` where the entry
+    holds one (its folder was below its worktree's top), else its `repo`."""
+    t = e.get("top")
+    return t if isinstance(t, str) and t else e.get("repo")
 
 
 def repo_path(path) -> str | None:
@@ -652,25 +735,11 @@ def chain_status_lines(root, name: str, now, alive=_alive) -> list[str]:
     return out
 
 
-def enqueue(root, repo, command, env, locks, wall, label, caller, now,
-            named: bool = False, tree: str | None = None) -> dict:
-    """Write one entry (mode 0600, written then renamed) and return it. The id is
-    `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
-    `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave. `tree`, the
-    head's tree of a clean folder at the queue, is written last and only where given (hw1
-    W4), so an entry queued without one keeps the pin's keys."""
-    real = os.path.realpath(str(repo))
-    if not os.path.isdir(real):
-        raise GateError(f"no such repo directory: {repo}")
-    if not command or not all(isinstance(c, str) and c for c in command):
-        raise GateError("a command is wanted after --: gate run <repo> -- <command...>")
-    if not isinstance(wall, int) or isinstance(wall, bool) or wall <= 0:
-        raise GateError(f"the wall is a positive number of seconds, not {wall!r}")
-    if caller is not None and not _SID.match(str(caller)):
-        raise GateError(f"the caller is not a session id: {str(caller)[:40]!r}")
+def _write_entry(root, now, build) -> dict:
+    """Write the entry `build(id)` makes under flock(gate/queue.lock), the counter taken there,
+    and return it."""
     g = gate_dir(root)
     _mkdir(_queue(root))
-    key = repo_key(real)                # outside the queue's lock: git may take its time
     with open(g / "queue.lock", "a+") as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
@@ -678,7 +747,36 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
         except (OSError, ValueError):
             n = 1 + max((_counter(e["id"]) for e in entries(root)), default=0)
         _write_private(g / "counter", f"{n}\n")
-        gid = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}"
+        entry = build(time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{n}")
+        _write_private(_queue(root) / f"{entry['id']}.json", json.dumps(entry, indent=1) + "\n")
+    return entry
+
+
+def enqueue(root, repo, command, env, locks, wall, label, caller, now,
+            named: bool = False, tree: str | None = None, priority: bool = False,
+            light: bool = False, rerun: bool = False) -> dict:
+    """Write one entry (mode 0600, written then renamed) and return it. The id is
+    `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
+    `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave. `tree`, the
+    head's tree of a clean folder at the queue, is written last and only where given (hw1
+    W4), so an entry queued without one keeps the pin's keys; so are `priority` and `light`
+    (hw5 F1, F2), each `true`, after it, and `rerun` (build 2, S1), the `gate run` verb's
+    opt-in to one rerun of a load flake, kept as `may_rerun`: no other caller asks for it."""
+    real = os.path.realpath(str(repo))
+    if not os.path.isdir(real):
+        raise GateError(f"no such repo directory: {repo}")
+    if not command or not all(isinstance(c, str) and c for c in command):
+        raise GateError("a command is wanted after --: gate run <repo> -- <command...>")
+    if not isinstance(wall, int) or isinstance(wall, bool) or wall <= 0:
+        raise GateError(f"the wall is a positive number of seconds, not {wall!r}")
+    if light and wall > LIGHT_WALL:
+        raise GateError(f"a light job's wall is at most {LIGHT_WALL} seconds, not {wall}")
+    if caller is not None and not _SID.match(str(caller)):
+        raise GateError(f"the caller is not a session id: {str(caller)[:40]!r}")
+    key = repo_key(real)                # outside the queue's lock: git may take its time
+    top = top_level(real)               # build 2, S3: kept only where it is not `real`
+
+    def build(gid):
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
                  "locks": [lock_path(p) for p in locks], "wall": wall,
                  "label": label or "", "caller": caller, "queued": now, "key": key,
@@ -686,8 +784,52 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
                  "chain": chain_for(root, env, caller, named)}
         if _clean_head(tree):
             entry["tree"] = tree
-        _write_private(_queue(root) / f"{gid}.json", json.dumps(entry, indent=1) + "\n")
-    return entry
+        if top != real:
+            entry["top"] = top
+        entry.update({k: True for k, on in (("priority", priority), ("light", light),
+                                            ("may_rerun", rerun)) if on})
+        return entry
+    return _write_entry(root, now, build)
+
+
+def _requeue(root, e: dict, now) -> dict:
+    """hw5 F3: the rerun of flake `e`, the same command for the same chain or session, marked
+    `rerun_of` its id and `flaked` at `now`."""
+    def build(gid):
+        entry = {k: e.get(k) for k in ENTRY_KEYS}
+        entry.update({"id": gid, "queued": now})
+        entry.update({k: e[k] for k in ("tree", "top", "priority", "light") if k in e})
+        entry.update({"rerun_of": e["id"], "flaked": now})
+        return entry
+    return _write_entry(root, now, build)
+
+
+def _old(e: dict, now) -> bool:
+    q = e.get("queued")
+    return _number(q) and _number(now) and now - q >= OLD_ENTRY
+
+
+def pick_order(es: list[dict], now) -> list[dict]:
+    """hw5 F1, the order the runner picks in. Build 2, S6: the mark orders the entries of one
+    key alone. Between keys the order is the pin's, first queued first: each key keeps the
+    places its entries hold by counter, and fills them in its own order, an entry queued
+    `OLD_ENTRY` or more ago first, oldest first, then those marked `priority`, then the rest,
+    each first queued first."""
+    def rank(e):
+        if _old(e, now):
+            return (0, 0, e["queued"], _counter(e["id"]))
+        return (1, 0 if e.get("priority") is True else 1, 0, _counter(e["id"]))
+    fifo = sorted(es, key=lambda e: _counter(e["id"]))
+    keys = [entry_key(e) for e in fifo]
+    mine: dict = {}
+    for k, e in zip(keys, fifo):
+        mine.setdefault(k, []).append(e)
+    turns = {k: iter(sorted(v, key=rank)) for k, v in mine.items()}
+    return [next(turns[k]) for k in keys]
+
+
+def is_light(e: dict) -> bool:
+    return e.get("light") is True
 
 
 def open_entry(root, repo, command, tree, alive=_alive) -> tuple[dict, str] | None:
@@ -752,10 +894,12 @@ def _running_ids(root, alive=_alive) -> list[str]:
     return [gid for gid, _ in _pairs(r)] if r and alive(r.get("pid")) else []
 
 
-def position(root, gid: str, alive=_alive) -> int:
-    """The place among the entries not running (1 is next); 0 when not queued."""
+def position(root, gid: str, alive=_alive, now=None) -> int:
+    """The place among the entries not running in the pick's order (1 is next, hw5 F1); 0
+    when not queued."""
     run = _running_ids(root, alive)
-    ids = [e["id"] for e in entries(root) if e["id"] not in run]
+    now = time.time() if now is None else now
+    ids = [e["id"] for e in pick_order([e for e in entries(root) if e["id"] not in run], now)]
     return ids.index(gid) + 1 if gid in ids else 0
 
 
@@ -797,21 +941,35 @@ def _holds(es: list[dict], running: list[dict]):
     entry names, whatever its key, since that command may not have made it yet. An entry
     holds its key against every younger entry of that key, so a key stays FIFO. A wait on a
     key names the repo of the entry that holds it. Locks compare by `lock_key`, read here
-    and not trusted from the entry, so an older entry's spelling compares too."""
-    keys = {}
+    and not trusted from the entry, so an older entry's spelling compares too.
+    hw5 F2: a light entry is held only by an open entry of its key in its own worktree, and
+    holds only that worktree of its key against the entries after it. Build 2, S3: a worktree
+    is `worktree(e)`, its folder's top, whatever folder the entry named. S4: a light entry is
+    held while a landing of its key is queued or running, since a landing reads and removes a
+    worktree of its repo."""
+    keys, trees, lands = {}, {}, {}
     for x in running:
         keys.setdefault(entry_key(x), key_name(x))
+        trees.setdefault((entry_key(x), worktree(x)), key_name(x))
+    for x in [*running, *es]:
+        if land_branch(x.get("command")) is not None:
+            lands.setdefault(entry_key(x), key_name(x))
     named = _named(running)
     for e in es:
         k = entry_key(e)
+        t = (k, worktree(e))
         path = _locked(e) or next((p for p in _locks(e) if _is_named(p, named)), None)
         if path:
             yield e, ("lock", path)
-        elif k in keys:
-            yield e, ("key", keys[k])
+        elif is_light(e) and (t in trees or k in lands):
+            yield e, ("key", trees.get(t) or lands[k])
+        elif not is_light(e) and (k in keys or t in trees):
+            yield e, ("key", keys.get(k) or trees[t])
         else:
             yield e, None
-        keys.setdefault(k, key_name(e))
+        trees.setdefault(t, key_name(e))
+        if not is_light(e):
+            keys.setdefault(k, key_name(e))
 
 
 def _load_read(fx) -> float | None:
@@ -847,6 +1005,25 @@ def _over(cfg: dict, fx, count: int, last, now: float):
         return ("load", x, c)
     left = START_SETTLE - (now - last) if isinstance(last, (int, float)) else 0
     return ("settle", left) if left > 0 else None
+
+
+def _bar(cfg: dict, fx, e: dict, running: list[dict], last, now: float, memo=None):
+    """What bars entry `e`, which nothing holds, from starting now, or None. hw5 F3: nothing
+    starts beside a running rerun, and a rerun starts only with nothing running. hw5 F2: a
+    light entry, and a light one running, are not counted against `max_running`; ruling 4's
+    load and settle hold every entry, and bind only while one runs."""
+    rerun = next((x for x in running if x.get("rerun_of")), None)
+    if rerun is not None:
+        return ("rerun", rerun.get("id"))
+    if not running:
+        return None
+    if e.get("rerun_of"):
+        return ("alone", len(running))
+    count = 0 if is_light(e) else sum(1 for x in running if not is_light(x))
+    memo = {} if memo is None else memo
+    if count not in memo:
+        memo[count] = _over(cfg, fx, count, last, now)
+    return memo[count]
 
 
 def self_argv() -> list[str]:
@@ -1098,9 +1275,21 @@ def make_env(env) -> list | None:
     return sorted(k for k in MAKE_ENV if k in env) if isinstance(env, dict) else None
 
 
+def _marks(e: dict) -> dict:
+    """hw5 F3, F4: the result's `rerun_of` and `dropped`, each only where it applies."""
+    out = {}
+    if isinstance(e.get("rerun_of"), str) and ID.match(e["rerun_of"]):
+        out["rerun_of"] = e["rerun_of"]
+    if e.get("dropped") is True:
+        out["dropped"] = True
+    return out
+
+
 def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
-            note: str | None = None) -> dict:
-    """Write result.json last, atomically; drop the entry; tell the inbox and ntfy."""
+            note: str | None = None, flake: bool | None = None) -> dict:
+    """Write result.json last, atomically; drop the entry; tell the inbox and ntfy. hw5 F3:
+    a red whose stop line was found (`flake` not None) keeps `RED_KEYS`; a flake's rerun is
+    queued before its result is written, which names it, and no line is sent for it."""
     gid = e["id"]
     d = entry_dir(root, gid)
     _mkdir(d)
@@ -1117,8 +1306,37 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     if isinstance(chain, str) and CHAIN_RE.match(chain):     # nw2 R1: kept, the pin's keys first
         result.update({"chain": chain, "label": e.get("label") or ""})
     result.update(_measures(e))                               # hw1 W2: after every pin's key
+    if flake is not None:                     # hw5 F3: a red whose second test was asked
+        ceiling, along = e.get("ceiling"), e.get("alongside")
+        result.update({"ceiling": ceiling if _number(ceiling) else None,
+                       "alongside": [g for g in along if isinstance(g, str)]
+                       if isinstance(along, list) else None})
+    if flake:
+        try:
+            rerun = _requeue(root, e, ended)
+        except OSError as err:
+            fx.log(f"gate {gid}: a load flake, its rerun not queued: {err}")
+            flake = False
+        else:
+            result.update({"flake": FLAKE, "rerun": rerun["id"]})
+    result.update(_marks(e))
     _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
-    caller = e.get("caller")
+    if flake:                                         # its line waits for the rerun's (F3)
+        _unlink(_queue(root) / f"{gid}.json")
+        _unlink(cancel_path(root, gid))
+        _prune(root, ended)
+        return result
+    _tell(root, fx, cfg, result, lambda: (_unlink(_queue(root) / f"{gid}.json"),
+                                          _unlink(cancel_path(root, gid))))
+    _prune(root, ended)
+    return result
+
+
+def _tell(root, fx: Fx, cfg: dict, result: dict, between) -> None:
+    """A result's line to its chain's inbox, then `between()`, then to its caller's session's
+    inbox where it has no chain, then to ntfy."""
+    gid = result["id"]
+    caller = result.get("caller")
     if "chain" in result:
         # Brief 2, R2: a chain's line is written while its entry is still queued, so a
         # `wait_chain` that reads no open job then reads the line, and never answers 2 in
@@ -1129,8 +1347,7 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
             inbox_write(root, caller, result)
         except OSError as err:
             fx.log(f"gate {gid}: the inbox of chain {result['chain']} was not written: {err}")
-    _unlink(_queue(root) / f"{gid}.json")
-    _unlink(cancel_path(root, gid))
+    between()
     if "chain" not in result and isinstance(caller, str) and caller:
         try:
             inbox_write(root, caller, result)
@@ -1139,8 +1356,50 @@ def _finish(root, fx: Fx, cfg: dict, e: dict, rc: int, started, ended, cut,
     err = notify(result, cfg, fx.post)
     if err:
         fx.log(err)
-    _prune(root, ended)
-    return result
+
+
+def _left(root, e: dict, now) -> None:
+    """Build 2, S2: the result a rerun taken out of the queue leaves under its own id, exit
+    130, `flake: load, not rerun` and `rerun_of` the first, so its id is never unknown; a
+    reader takes the first's result for it (`resolved`). One already there is kept."""
+    gid = e["id"]
+    if result_path(root, gid).exists():
+        return
+    _mkdir(entry_dir(root, gid))
+    result = {"id": gid, "repo": e.get("repo"), "command": e.get("command"),
+              "exit": CALLER_EXIT, "started": None, "ended": now, "seconds": None,
+              "log": str(entry_dir(root, gid) / "log"), "caller": e.get("caller"),
+              "cut": CUT_CALLER, "head": None, "key": _str_or_none(e.get("key")),
+              "flake": NOT_RERUN, "rerun_of": e.get("rerun_of")}
+    _write_private(result_path(root, gid), json.dumps(result, indent=1) + "\n")
+
+
+def resolved(root, r):
+    """Build 2, S2: a result as a wait or a drop answers it: for what a rerun taken out left
+    (`_left`), the first's result, where it is still there; else `r`."""
+    of = r.get("rerun_of") if isinstance(r, dict) and r.get("flake") == NOT_RERUN else None
+    first = _load(result_path(root, of)) if isinstance(of, str) and ID.match(of) else None
+    return first if first is not None else r
+
+
+def _not_rerun(root, fx: Fx, cfg: dict, e: dict) -> dict | None:
+    """hw5 F3: rerun `e` has not started `RERUN_WAIT` after its flake, or is dropped (build 2,
+    S5): the flake's result reads `flake: load, not rerun` and its line is sent, then the rerun
+    leaves its result (`_left`, S2) and is taken out of the queue. The first's result, or None."""
+    gid = e["id"]
+    of = e.get("rerun_of")
+    first = _load(result_path(root, of)) if isinstance(of, str) and ID.match(of) else None
+    def take():
+        _left(root, e, fx.now())
+        _unlink(_queue(root) / f"{gid}.json")
+        _unlink(cancel_path(root, gid))
+    if first is None or first.get("flake") != FLAKE:
+        take()
+        return first
+    first["flake"] = NOT_RERUN
+    _write_private(result_path(root, first["id"]), json.dumps(first, indent=1) + "\n")
+    _tell(root, fx, cfg, first, take)
+    return first
 
 
 def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
@@ -1154,6 +1413,11 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     _mkdir(d)
     s.starting = gid
     _runner_write(root, fx, s)
+    if not (_queue(root) / f"{gid}.json").exists() or drop_path(root, gid).exists():
+        # hw5 F4, build 2 S7: a drop in hand after the pick; not run, and the drop finishes it
+        s.starting = None
+        _runner_write(root, fx, s)
+        return
     # Packet FW2 R2: the head before the spawn, since a queued entry's repo may move while it
     # waits; kept on the entry in memory for `_finish`. A head that raises reads None.
     try:
@@ -1184,6 +1448,12 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     if p is None:
         _close(root, fx, cfg, e, 127, started, None, s, reaped=False)
         return
+    # hw5 F3: what a flake's second test reads, kept on the entry in memory: the ceiling at
+    # the start, and every job that ran beside it, at its start or after.
+    e["ceiling"] = _ceiling(cfg, fx)
+    e["alongside"] = list(e["beside"])
+    for c in s.running:
+        c.e.setdefault("alongside", []).append(gid)
     s.running.append(_Child(e, p, started))
     s.last_start = started
     _runner_write(root, fx, s)
@@ -1199,8 +1469,40 @@ def _close(root, fx: Fx, cfg: dict, e: dict, rc: int, started, cut, s: _Set,
         e["dirty"]["end"] = _dirty_read(fx, e["id"], e["repo"], "end")
     with _open_log(entry_dir(root, e["id"]) / "log") as log:
         log.write(f"gate {e['id']}: exit {rc} in {round(ended - started)} s\n".encode())
-    _finish(root, fx, cfg, e, rc, started, ended, cut)
+    flake = is_flake(e, rc, entry_dir(root, e["id"]) / "log") if reaped and cut is None \
+        else None
+    _finish(root, fx, cfg, e, rc, started, ended, cut, flake=flake)
     _runner_write(root, fx, s)
+
+
+def _tail(path, most: int = FLAKE_TAIL) -> bytes:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - most))
+            return fh.read()
+    except (OSError, TypeError, ValueError):
+        return b""
+
+
+def is_flake(e: dict, rc, log) -> bool | None:
+    """hw5 F3: whether a red closed by its own exit, not cut, is a load flake; None where the
+    first test fails, so the second is not asked. Never a landing's job, never a rerun, and
+    never a job the `gate run` verb did not queue (build 2, S1: its red is its result). Its
+    log's last `FLAKE_TAIL` bytes hold a time bound's stop line, or its exit is a `timeout`'s
+    124, and none of `NOT_FLAKE`; and the 1-minute load at its start was at or over its
+    ceiling (ruling 4's word for over), or another job ran beside it."""
+    if rc == 0 or not isinstance(rc, int) or isinstance(rc, bool) or e.get("rerun_of") \
+            or e.get("may_rerun") is not True or land_branch(e.get("command")) is not None:
+        return None
+    tail = _tail(log)
+    stop = rc == 124 or any(s in tail for s in STOP_LINES) or PYTEST_TIMEOUT.search(tail)
+    if not stop or any(s in tail for s in NOT_FLAKE):
+        return None
+    load = (e.get("load") or {}).get("start") if isinstance(e.get("load"), dict) else None
+    one, ceiling = (load[0] if isinstance(load, list) and load else None), e.get("ceiling")
+    loaded = _number(one) and _number(ceiling) and one >= ceiling
+    return bool(loaded or e.get("alongside"))
 
 
 def _cut_reaped(c: _Child, fx: Fx) -> bool:
@@ -1287,7 +1589,7 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     if _reap(root, fx, cfg, s):
         return True
     running = [c.e for c in s.running]
-    busy = {x["id"] for x in running}
+    busy = {x["id"] for x in running} | _sweep_drops(root)     # build 2, S7: in a drop's hand
     es = [e for e in entries(root) if e["id"] not in busy]
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
@@ -1301,9 +1603,16 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             _finish(root, fx, cfg, e, CALLER_EXIT, now, now, CUT_CALLER,
                     note="its caller left the wait; not run")
             return True
+    now = fx.now()
+    for e in es:                                      # hw5 F3: a rerun not started in time
+        if _number(e.get("flaked")) and now - e["flaked"] >= RERUN_WAIT:
+            s.seen.pop(e["id"], None)
+            _not_rerun(root, fx, cfg, e)
+            return True
+    es = pick_order(es, now)                          # hw5 F1: the head is the pick's
     if not es:
         return False
-    head, now, seen = es[0], fx.now(), s.seen
+    head, seen = es[0], s.seen
     held = _lock_wait(head, running)
     wall = head.get("wall") if isinstance(head.get("wall"), int) else WALL
     for gid in [k for k in seen if k != head["id"] or not held]:
@@ -1315,11 +1624,12 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             _finish(root, fx, cfg, head, 126, first, now, CUT_LOCK,
                     note=f"lock {held} held past the wall ({wall} s); not run")
             return True
-    e = next((x for x, why in _holds(es, running) if why is None), None)
-    if e is None or (running and _over(cfg, fx, len(running), s.last_start, now)):
-        return False
-    _start(root, fx, cfg, e, s)
-    return True
+    memo: dict = {}                                   # one load read a pass, as at the pin
+    for e, why in _holds(es, running):
+        if why is None and _bar(cfg, fx, e, running, s.last_start, now, memo) is None:
+            _start(root, fx, cfg, e, s)
+            return True
+    return False
 
 
 def serve(root, fx: Fx | None = None) -> int:
@@ -1359,6 +1669,17 @@ def _start_dirt(d):
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
+def mark_text(result: dict) -> str:
+    """hw5 F5: `dropped; `, `flake: load; `, `flake: load, not rerun; ` and `rerun of <id>; `,
+    each where the result or its inbox line holds it; "" for an older one."""
+    out = "dropped; " if result.get("dropped") is True else ""
+    flake = result.get("flake")
+    out += f"flake: {flake}; " if flake in (FLAKE, NOT_RERUN) else ""
+    of = result.get("rerun_of")
+    out += f"rerun of {of}; " if isinstance(of, str) and ID.match(of) else ""
+    return out
+
+
 def wait_line(result: dict) -> str:
     """The pin's line; a chain's (design/31 item 10) adds the head, the dirt when it is not
     0 and the label cut to `LABEL_MOST` bytes, before the log."""
@@ -1370,6 +1691,7 @@ def wait_line(result: dict) -> str:
         head += f"head {h[:7] if h else '?'}; "
         head += f"dirty {dirt}; " if dirt else ""
         head += f"{lab}; " if lab else ""
+    head += mark_text(result)                                 # hw5 F5
     x = result.get("exit")
     fail = fail_text(result.get("log"), result.get("id")) if x != 0 or isinstance(x, bool) \
         else None
@@ -1600,22 +1922,37 @@ def est_text(s) -> str:
     return f"{s / 60:.1f}"
 
 
+def followed(root, gid: str) -> str:
+    """hw5 F3: the id a wait on `gid` waits on: its rerun's, where `gid`'s result is a load
+    flake whose rerun is queued or done; else `gid`."""
+    r = _load(result_path(root, gid))
+    nxt = r.get("rerun") if isinstance(r, dict) and r.get("flake") == FLAKE else None
+    if isinstance(nxt, str) and ID.match(nxt) and nxt != gid and (
+            (_queue(root) / f"{nxt}.json").exists() or result_path(root, nxt).exists()):
+        return nxt
+    return gid
+
+
 def wait(root, gid: str, poll=WAIT_POLL, timeout=None, sleep=None, clock=None, spawn=None,
-         alive=_alive) -> tuple[int, dict | None]:
+         alive=_alive, follow: bool = False) -> tuple[int, dict | None]:
     """(0, result) once result.json is there; (2, None) for an id neither queued nor
     done; (1, None) past `timeout` seconds. Spawns `serve` at the first poll, and again
-    only when runner.json names no live pid."""
+    only when runner.json names no live pid. `follow` (hw5 F3, `gate wait`): a load flake's
+    wait is its rerun's, and the flake's own result once its rerun is taken out."""
     sleep, clock = sleep or time.sleep, clock or time.monotonic
     if not isinstance(gid, str) or not ID.match(gid):
         return 2, None
     t0, first = clock(), True
     while True:
-        r = _load(result_path(root, gid))
+        cur = followed(root, gid) if follow else gid
+        r = _load(result_path(root, cur))
         if r is not None:
-            return 0, r
-        if not (_queue(root) / f"{gid}.json").exists():
-            r = _load(result_path(root, gid))           # written between the two reads
-            return (0, r) if r is not None else (2, None)
+            return 0, resolved(root, r)                 # build 2, S2
+        if not (_queue(root) / f"{cur}.json").exists():
+            r = _load(result_path(root, cur))           # written between the two reads
+            if r is None and cur != gid:                # the rerun taken out: the flake's
+                r = _load(result_path(root, gid))
+            return (0, resolved(root, r)) if r is not None else (2, None)
         if first or not alive((runner_info(root) or {}).get("pid")):
             (spawn or spawn_serve)(root)
             first = False
@@ -1623,6 +1960,59 @@ def wait(root, gid: str, poll=WAIT_POLL, timeout=None, sleep=None, clock=None, s
         if left is not None and left <= 0:
             return 1, None
         sleep(poll if left is None else min(poll, left))
+
+
+def drop(root, gid: str, fx: Fx | None = None, alive=_alive) -> tuple[int, str]:
+    """hw5 F4, `gate drop <id>`: (0, the result's line) where a queued entry was taken out,
+    its result written with exit 130 and `dropped`, or where `gid` already has a result;
+    (1, `running <id>: not dropped`) for a running one, untouched; (2, why) for an id the
+    queue does not know. Build 2, S7: the drop's mark (`drop_path`) is made and flocked
+    before the runner's file is read, and the runner reads the mark after it names its start
+    (`_start`), so one of the two sees the other; the entry is never moved, so a waiter reads
+    it as open, and a drop that dies leaves its mark unflocked, which the runner's next pass
+    sweeps (`_sweep_drops`). S5: a queued rerun is taken out as the 30-minute bound takes it
+    (`_not_rerun`), the first's line sent and printed; a drop of a flake whose rerun is
+    queued drops that rerun."""
+    fx = fx or Fx()
+    if not isinstance(gid, str) or not ID.match(gid):
+        return 2, f"gate drop: no gate {str(gid)[:40]!r} under {gate_dir(root)}"
+    path = _queue(root) / f"{gid}.json"
+    r = _load(result_path(root, gid))
+    if r is not None:
+        nxt = r.get("rerun") if r.get("flake") == FLAKE else None
+        if isinstance(nxt, str) and ID.match(nxt) and nxt != gid \
+                and (_queue(root) / f"{nxt}.json").exists() \
+                and not result_path(root, nxt).exists():
+            return drop(root, nxt, fx, alive)               # S5: the flake's queued rerun
+        return 0, wait_line(resolved(root, r))               # build 2, S2
+    if not path.exists():
+        r = _load(result_path(root, gid))                   # it ended between the two reads
+        return (0, wait_line(resolved(root, r))) if r is not None \
+            else (2, f"gate drop: no gate {gid} under {gate_dir(root)}")
+    fh = _hand(root, gid)
+    try:
+        if gid in _running_ids(root, alive):
+            _unlink(drop_path(root, gid))
+            return 1, f"running {gid}: not dropped"
+        e, r = _load(path), _load(result_path(root, gid))
+        if r is not None or e is None:                      # it ended in between
+            r = r or _load(result_path(root, gid))
+            _unlink(drop_path(root, gid))
+            return (0, wait_line(resolved(root, r))) if r is not None \
+                else (2, f"gate drop: no gate {gid} under {gate_dir(root)}")
+        cfg = _config(fx.env, fx.log)
+        if isinstance(e.get("rerun_of"), str) and ID.match(e["rerun_of"]):
+            _not_rerun(root, fx, cfg, e)                    # S5: as the 30-minute bound
+            out = wait_line(resolved(root, _load(result_path(root, gid))))
+        else:
+            e.update({"id": gid, "dropped": True})
+            now = fx.now()
+            out = wait_line(_finish(root, fx, cfg, e, CALLER_EXIT, now, now, CUT_CALLER,
+                                    note="dropped by gate drop; not run"))
+        _unlink(drop_path(root, gid))
+        return 0, out
+    finally:
+        fh.close()
 
 
 def _wait_text(why) -> str | None:
@@ -1636,6 +2026,8 @@ def _wait_text(why) -> str | None:
         return f"running {why[1]} of {why[2]}"
     if kind == "settle":
         return f"settle {round(why[1])} s"
+    if kind == "alone":                                     # hw5 F3
+        return f"a rerun, alone: {why[1]} running"
     return f"{kind} {why[1]}"
 
 
@@ -1676,14 +2068,15 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
         if r not in seen:
             seen[r] = repo_path(r) == want
         return seen[r]
-    waiting = [e for e in es if e["id"] not in run]
-    queued, over, last = [], None, None
-    for i, (e, why) in enumerate(_holds(waiting, [byid.get(g, {}) for g in run]), 1):
+    waiting = pick_order([e for e in es if e["id"] not in run], now)     # hw5 F1
+    queued, memo, last, cfg = [], {}, None, None
+    them = [byid.get(g, {"id": g}) for g in run]
+    for i, (e, why) in enumerate(_holds(waiting, them), 1):
         if why is None and running:
             if last is None:
                 last = max((x["since"] for x in running if x["since"]), default=0)
-                over = _over(_config(fx.env), fx, len(running), last, now)
-            why = over
+                cfg = _config(fx.env)
+            why = _bar(cfg, fx, e, them, last, now, memo)
         queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
                        "label": e.get("label") or "", "key": entry_key(e),
                        "wait": _wait_text(why), "caller": e.get("caller"),
@@ -1792,6 +2185,7 @@ def inbox_write(root, sid: str, result: dict) -> Path | None:
         body.update({"chain": chain, "head": _clean_head(result.get("head")),
                      "dirty": _start_dirt(result.get("dirty")),
                      "label": _label(result.get("label"))})
+    body.update({k: result[k] for k in ("flake", "rerun_of", "dropped") if k in result})  # F5
     path = d / f"{result['id']}.json"
     _write_private(path, json.dumps(body) + "\n")
     return path
