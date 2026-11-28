@@ -2929,16 +2929,21 @@ def _park_stopped(payload: dict, sdir: Path) -> None:
 
 def _park(payload: dict, sdir: Path, aid: str) -> bool:
     """P3: whether this stop is a park, writing `parked/<agent_id>.json` where it is. A running
-    shell whose command's first TASK_TEXT characters are a P2 record's of this helper is a
-    match. With no match and a list read, the helper's park and records go. Never raises:
+    shell whose id a P2 record of this helper holds is a match (build 2 T5); so is one whose
+    command's first TASK_TEXT characters are those of a P2 record of this helper with no id. With no match and a list read, the helper's park and records go. Never raises:
     a fault is no park."""
     try:
         shells = _running_shells(payload)
         if shells is None:
             return False
-        mine = {r.get("command")[:TASK_TEXT] for r in _helper_records(sdir, aid)
-                if isinstance(r.get("command"), str)}
-        hits = [(i, c) for i, c in shells if c is not None and c[:TASK_TEXT] in mine]
+        ids, mine = set(), set()                        # build 2 T5: the id where recorded
+        for r in _helper_records(sdir, aid):
+            if isinstance(r.get("task"), str) and r["task"]:
+                ids.add(r["task"])
+            elif isinstance(r.get("command"), str):
+                mine.add(r["command"][:TASK_TEXT])
+        hits = [(i, c) for i, c in shells
+                if i in ids or (c is not None and c[:TASK_TEXT] in mine)]
         if not hits:
             _forget(sdir, aid)
             try:
@@ -2946,7 +2951,7 @@ def _park(payload: dict, sdir: Path, aid: str) -> bool:
             except OSError:
                 pass
             return False
-        cmd = hits[0][1].encode("utf-8", "replace")[:PARK_TEXT].decode("utf-8", "ignore")
+        cmd = (hits[0][1] or "").encode("utf-8", "replace")[:PARK_TEXT].decode("utf-8", "ignore")
         store._write_private(sdir / PARKED / f"{aid}.json", json.dumps(
             {"at": time.time(), "task": hits[0][0], "tasks": [i for i, _ in hits],
              "command": cmd}))

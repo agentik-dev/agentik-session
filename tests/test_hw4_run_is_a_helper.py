@@ -311,8 +311,8 @@ def test_p3_the_payload_s_text_cut_at_1000_still_matches_and_the_record_keeps_20
 
 
 @pytest.mark.parametrize("task", [
-    _task(status="completed"), _task(typ="subagent"), _task(command="make check"),
-    {**_task(), "id": 7}, {**_task(), "command": None}, "bg-001", None])
+    _task(status="completed"), _task(typ="subagent"), _task("bg-009", command="make check"),
+    {**_task(), "id": 7}, {**_task("bg-009"), "command": None}, "bg-001", None])
 def test_p3_no_match_is_the_pin_s_stop(task):
     _session()
     _moved()
@@ -334,7 +334,7 @@ def test_p3_another_helper_s_record_is_no_match_and_two_with_one_line_both_park(
     _moved(aid=BID)
     _stop(tasks=[_task()])
     assert parked() is None and ended()
-    _moved(aid=AID, task="bg-002")
+    _moved(aid=AID, task=None, background=True)                # build 2 T5: no id, the text
     _stop(aid=AID, tasks=[_task()])
     _stop(aid=BID, tasks=[_task()])
     assert parked(AID)["task"] == "bg-001" and parked(BID)["task"] == "bg-001"
@@ -663,3 +663,20 @@ def test_t4_a_park_holds_the_respawn_past_settle_and_not_past_the_ceiling():
     assert ch._ready(sdir, t0 - 10 + 1800, 0.0) is True          # the ceiling ends the hold
     _stop(tasks=[])                                              # the park ends
     assert chain.helper_hold(sdir, later, 0.0, {}, 60, chain.STALE_CALL)[0] == []
+
+
+def test_t5_a_park_is_matched_on_the_recorded_id_not_another_helper_s_shell_of_one_line():
+    _session()
+    _moved(aid=AID, task="bg-001")
+    _moved(aid=BID, task="bg-002")                              # one command line, two shells
+    _stop(aid=AID, tasks=[_task("bg-001", status="completed"), _task("bg-002")])
+    assert parked(AID) is None and ended(AID)                   # its own shell has ended
+    _stop(aid=BID, tasks=[_task("bg-002")])
+    assert parked(BID)["tasks"] == ["bg-002"]
+
+
+def test_t5_an_id_matches_whatever_the_listed_command_says():
+    _session()
+    _moved(aid=AID, task="bg-001")
+    _stop(aid=AID, tasks=[{**_task("bg-001"), "command": None}])
+    assert parked(AID)["tasks"] == ["bg-001"] and parked(AID)["command"] == ""
