@@ -485,3 +485,92 @@ def test_a5_fits_on_an_unreadable_gate_prints_the_hold_and_no_grant_ok(monkeypat
     assert cli.main(["machine", "fits", "--cpu", "1", "--mem", "100"]) == 75
     err = capsys.readouterr().err
     assert err.startswith("the gate's state could not be read (x)\n") and "grant: ok" not in err
+
+
+# ---- fix 2 (review 2): H1 to H4 ------------------------------------------------------------
+
+def _one_under_load(w, edit, back=0.0):
+    w.load, w.cores, w.plan = 100.0, 16, {"j0": (300, 0)}
+    e = put(w, "one", "j0")
+    p = gate._queue(w.root) / f"{e['id']}.json"
+    d = json.loads(p.read_text())
+    edit(d)
+    p.write_text(json.dumps(d))
+    w.t -= back                                       # the clock steps back after the queueing
+    t0 = w.t
+    gate.serve(w.root, w.fx())
+    r = w.result(e["id"])
+    return r["started"] - t0, r.get("over")
+
+
+@pytest.mark.parametrize("ahead, back", [(3600.0, 0.0), (0.0, 3600.0), (5.0, 0.0)])
+def test_h1_a_queued_ahead_of_the_clock_holds_nothing(w, ahead, back):
+    t = w.t
+    assert _one_under_load(w, lambda d: d.update(queued=t + ahead), back) == (0, "load")
+
+
+def test_h1_the_guard_s_bound_still_holds_an_entry_queued_now(w):
+    t = w.t
+    assert _one_under_load(w, lambda d: d.update(queued=t)) == (gate.HOLD_MAX, "load")
+
+
+def test_h2_a_light_entry_passes_a_full_budget_and_the_ten_minutes(w):
+    w.load = 0.0
+    w.plan = {"a": (3000, 0), "b": (3000, 0), "c": (10, 0), "s": (20, 0)}
+    a = put(w, "one", "a", cpu=4, mem_mb=1000)
+    b = put(w, "two", "b", cpu=4, mem_mb=1000)
+    w.t += 120
+    c = put(w, "three", "c", cpu=4, mem_mb=1000)      # held by the budget, then `behind`
+    w.t += 900
+    s = put(w, "four", "s", wall=60, light=True)
+    gate.serve(w.root, w.fx(snapshot=eight()))
+    rs, rc = w.result(s["id"]), w.result(c["id"])
+    assert rc["started"] >= a["queued"] + 3000
+    assert rs["started"] - s["queued"] <= 2 * gate.START_SETTLE      # the pin's 120 s
+    assert {k: rs[k] for k in gate.CLASS_KEYS} == machine.LIGHT_CLASS
+
+
+def test_h2_a_light_job_running_is_not_counted_against_another_s_grant(w):
+    w.load = 0.0
+    w.plan = {"s": (100, 0), "a": (10, 0)}
+    s = put(w, "one", "s", wall=120, light=True)
+    a = put(w, "two", "a", cpu=8, mem_mb=1000)
+    gate.serve(w.root, w.fx(snapshot=eight()))
+    rs, ra = w.result(s["id"]), w.result(a["id"])
+    assert rs["started"] == T0 and ra["started"] < rs["ended"]
+    assert ra["cpu"] == 8 and {k: rs[k] for k in gate.CLASS_KEYS} == machine.LIGHT_CLASS
+
+
+def test_h3_observe_names_no_guard_whose_bound_has_passed(w):
+    w.load = 0.0
+    w.user("gate:\n  budget: observe\n")
+    w.plan = {"j0": (1500, 0), "j1": (10, 0)}
+    a, b = put(w, "one", "j0"), put(w, "one", "j1")
+    warn = snap_of(memory={"total_mb": 262144, "free_mb": 1, "pressure": "warn"})
+    gate.serve(w.root, w.fx(snapshot=warn))
+    ra, rb = w.result(a["id"]), w.result(b["id"])
+    assert ra["would_hold"] == {"pressure": "memory pressure warn"}
+    assert rb["started"] - b["queued"] >= gate.HOLD_MAX
+    assert "would_hold" not in rb and rb["over"] == "pressure"
+
+
+def _git(*argv, cwd):
+    import subprocess
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *argv],
+                   cwd=cwd, check=True, capture_output=True)
+
+
+def test_h4_a_landing_and_its_worktree_s_check_take_one_class(tmp_path):
+    root, repo, wt = tmp_path / "state", tmp_path / "proj", tmp_path / "wt"
+    root.mkdir()
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("commit", "-q", "--allow-empty", "-m", "x", cwd=repo)
+    _git("worktree", "add", "-q", "-b", "work", str(wt), "main", cwd=repo)
+    repo, wt = os.path.realpath(repo), os.path.realpath(wt)
+    check = [*gate.self_argv(), *gate.CHECK_JOB, wt]
+    landing = [*gate.self_argv(), *gate.LAND_JOB, repo, "work", "a" * 40, "/m"]
+    assert {repo, "proj"} <= gate._repo_names(wt) and ".." not in gate._repo_names(wt)
+    classes = [{"repo": "proj", "command": "make check", "cpu": 12, "mem_mb": 9000}]
+    for real, cmd in ((wt, check), (repo, landing)):
+        assert gate.job_class(root, real, cmd, classes) == {"cpu": 12, "mem_mb": 9000}

@@ -871,7 +871,7 @@ def _repo_names(real: str) -> set:
     out = {real, os.path.basename(real)}
     top = top_level(real) if os.path.isdir(real) else real
     common = _common_dir(top) if os.path.isdir(top) else None
-    for p in (top, os.path.dirname(common) if common else None):
+    for p in (top, os.path.dirname(os.path.normpath(common)) if common else None):  # H4
         if p:
             out |= {p, os.path.basename(p)}
     return out
@@ -1871,7 +1871,7 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     for e, why in _holds(es, running):
         if why is not None or _bar(cfg, fx, e, running, s.last_start, now, memo) is not None:
             continue
-        if behind is not None and not e.get("rerun_of"):     # B3; fix 1, F2: a rerun is hw5's
+        if behind is not None and not e.get("rerun_of") and not is_light(e):   # fix 2, H2
             holds[e["id"]] = {"what": f"the budget, behind {behind[0]}", "since": behind[1]}
             continue
         held = _admit(root, fx, cfg, e, s, now, memo)
@@ -1942,8 +1942,11 @@ def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
     named in `guard_unread`. Under `observe` the budget, the pressure and the disk hold
     nothing and `would_hold` names each with its reading at this pass (F6); the load holds
     under both. A rerun is left to hw5's bars by the budget and the load (F2), and a light
-    entry by the load (A2). The grant is the class clamped to the budget (N4). The runner
-    reads no disk consumer: the reader that prints the hold does (F1)."""
+    entry by the budget and the load, its grant its own class, and a light job running is
+    not counted against another's grant (A2, fix 2 H2). Fix 2: a guard passes over an entry
+    whose age is negative, a clock it cannot trust (H1), and the age is tested before
+    `observe` names a guard (H3). The grant is the class clamped to the budget (N4). The
+    runner reads no disk consumer: the reader that prints the hold does (F1)."""
     gid = e["id"]
     snap = dict(_snap_for(fx, s, e.get("repo"), now))
     if "load" not in memo:
@@ -1951,13 +1954,13 @@ def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
     x = memo["load"]
     snap["load"] = None if x is None else [x, x, x]
     grants = [c.e.get("grant") if _class_ok(c.e.get("grant")) else entry_class(c.e)
-              for c in s.running]
+              for c in s.running if not is_light(c.e)]
     cls = entry_class(e)
     parts = machine.budget(snap, grants, _machine_config(cfg, fx), cls, volume="job")["parts"]
     mode = cfg.get("budget", "hold")
     q = e.get("queued")
     age = now - q if _number(q) and _number(now) else None
-    skip = {"grant", "load"} if e.get("rerun_of") else {"load"} if is_light(e) else set()
+    skip = {"grant", "load"} if e.get("rerun_of") or is_light(e) else set()
     held, unread, over, would = [], [], [], {}
     for name in machine.PARTS:
         part, word = parts[name], "budget" if name == "grant" else name
@@ -1968,19 +1971,22 @@ def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
             continue
         if part["state"] != "held":
             continue
+        if name == "grant":
+            if mode != "hold":
+                would[word] = part["why"]
+            else:
+                held.append((word, part["why"], s.budget_since.setdefault(gid, now)))
+            continue
+        if age is None or age < 0 or age >= cfg.get(f"{name}_hold_max", HOLD_MAX):
+            over.append(word)                         # fix 2: H1 a clock stepped back, H3
+            continue
         if name != "load" and mode != "hold":
             would[word] = part["why"]
-            continue
-        if name == "grant":
-            held.append((word, part["why"], s.budget_since.setdefault(gid, now)))
-            continue
-        if age is None or age >= cfg.get(f"{name}_hold_max", HOLD_MAX):
-            over.append(word)
             continue
         held.append((word, part["why"], q))
     if held:
         return held
-    got = parts["grant"]["reading"]
+    got = None if is_light(e) else parts["grant"]["reading"]
     e["grant"] = {"cpu": max(1, int(round(got["cpu"]))),
                   "mem_mb": max(1, int(round(got["mem_mb"])))} \
         if isinstance(got, dict) and _number(got.get("cpu")) and _number(got.get("mem_mb")) \
