@@ -2696,7 +2696,11 @@ def _machine_roots(env, root) -> dict:
     from . import gate
     home = env.get("HOME") or os.path.expanduser("~")
     conf = env.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
-    paths = [os.getcwd()] + [x.get("repo") for x in gate.entries(root)]
+    try:
+        paths = [os.getcwd()]
+    except OSError:                                     # a removed folder: its repo is not read
+        paths = []
+    paths += [x.get("repo") for x in gate.entries(root)]
     try:
         names = os.listdir(gate.gate_dir(root))
     except OSError:
@@ -2734,14 +2738,18 @@ def _main_checkout(path: str) -> str | None:
         p = os.path.dirname(p)
 
 
-def _machine_gate(root, now) -> tuple[int, int]:
-    """(running, queued) of the gate, read once; a status that fails reads as none."""
+def _machine_gate(root, now) -> tuple[int | None, int | None, str | None]:
+    """(running, queued, None) of the gate, read once; (None, None, why) where its state
+    cannot be read, which `status` names in a fault and `fits` holds on (review 1, F10)."""
     from . import gate
     try:
         st = gate.status(root, now)
-    except Exception:                                   # noqa: BLE001 - the meter goes on
-        return 0, 0
-    return len(st.get("running") or []), len(st.get("queued") or [])
+        running, queued = st.get("running") or [], st.get("queued") or []
+        if not isinstance(running, list) or not isinstance(queued, list):
+            raise ValueError("its status is not two lists")
+    except Exception as err:                            # noqa: BLE001 - the meter goes on
+        return None, None, f"the gate's state could not be read ({err})"
+    return len(running), len(queued), None
 
 
 def _machine_config(env) -> dict:
@@ -2782,7 +2790,7 @@ def _machine_lines(doc, home) -> list[str]:
                f"{b['granted']['count']} jobs ({b['granted']['cpu']:g} cores, "
                f"{b['granted']['mem_mb']:g} MB); free {n(b['free']['cpu'])} cores, "
                f"{n(b['free']['mem_mb'], ' MB')}")
-    out.append(f"gate: {g['running']} running, {g['queued']} queued")
+    out.append(f"gate: {n(g['running'])} running, {n(g['queued'])} queued")
     cls = machine.DEFAULT_CLASS
     out.append(f"a {cls['cpu']}-core {cls['mem_mb']} MB job: "
                + ("fits now" if b["fit"]["ok"] else "held: " + b["fit"]["why"]))
@@ -2801,6 +2809,12 @@ def cmd_machine(args) -> int:
     `--dry-run` exits 2, since it is not built."""
     from . import machine
     env = dict(os.environ)
+    try:
+        os.getcwd()
+    except OSError as err:                              # review 1, F11
+        print(f"agentik-session: machine: the current folder is gone ({err.strerror}); run "
+              "it from one that is there", file=sys.stderr)
+        return 2
     if args.machine_verb == "reclaim" and not args.dry_run:
         print("agentik-session: machine reclaim is not built; --dry-run lists what it "
               "would free", file=sys.stderr)
@@ -2827,15 +2841,18 @@ def cmd_machine(args) -> int:
             print(f"fault: {f}")
         return 0
     snap = machine.snapshot({"home": roots["home"], "state": str(root)})
-    running, queued = _machine_gate(root, time.time())
-    grants = [dict(machine.DEFAULT_CLASS) for _ in range(running)]
+    running, queued, unread = _machine_gate(root, time.time())
+    grants = [dict(machine.DEFAULT_CLASS) for _ in range(running or 0)]
+    held = {"ok": False, "why": unread} if unread else None
     if args.machine_verb == "fits":
-        fit = machine.budget(snap, grants, _machine_config(env),
-                             {"cpu": args.cpu, "mem_mb": args.mem})["fit"]
+        fit = held or machine.budget(snap, grants, _machine_config(env),
+                                     {"cpu": args.cpu, "mem_mb": args.mem})["fit"]
         print(fit["why"], file=sys.stdout if fit["ok"] else sys.stderr)
         return 0 if fit["ok"] else 75
     b = machine.budget(snap, grants, _machine_config(env), dict(machine.DEFAULT_CLASS))
-    faults = list(snap["faults"])
+    if held:
+        b["fit"] = held
+    faults = list(snap["faults"]) + ([unread] if unread else [])
     if snap["paths"].get("gocache"):
         roots["gocache"] = snap["paths"]["gocache"]
     rows = machine.consumers(roots, faults=faults)[:MACHINE_TOP]

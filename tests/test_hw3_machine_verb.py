@@ -36,7 +36,7 @@ def verb(tmp_path, monkeypatch):
     roots = {"gate": str(tmp_path / "gate"), "home": str(tmp_path), "repos": [],
              "transcripts": str(tmp_path / "projects"), "scratch": str(tmp_path / "scratch"),
              "state_home": str(tmp_path / "nostate")}
-    state = {"running": 1, "probe": None}
+    state = {"running": 1, "probe": None, "unread": None}
 
     def probe():
         state["probe"] = mac_probe(gocache=str(tmp_path / "cache" / "go-build"),
@@ -44,7 +44,8 @@ def verb(tmp_path, monkeypatch):
         return state["probe"]
     monkeypatch.setattr(machine, "default_probe", probe)
     monkeypatch.setattr(cli, "_machine_roots", lambda env, root: dict(roots))
-    monkeypatch.setattr(cli, "_machine_gate", lambda root, now: (state["running"], 2))
+    monkeypatch.setattr(cli, "_machine_gate", lambda root, now: (
+        (None, None, state["unread"]) if state["unread"] else (state["running"], 2, None)))
     return state
 
 
@@ -98,12 +99,55 @@ def test_reclaim_is_a_dry_run_alone(verb):
 def test_the_gate_s_jobs_are_read_by_the_verb(tmp_path, monkeypatch):
     from claude_session import gate
     monkeypatch.setattr(gate, "status", lambda root, now: {"running": [{}, {}], "queued": [{}]})
-    assert cli._machine_gate(tmp_path, 0) == (2, 1)
+    assert cli._machine_gate(tmp_path, 0) == (2, 1, None)
 
     def broken(root, now):
         raise OSError("no gate")
     monkeypatch.setattr(gate, "status", broken)
-    assert cli._machine_gate(tmp_path, 0) == (0, 0)
+    assert cli._machine_gate(tmp_path, 0) == (
+        None, None, "the gate's state could not be read (no gate)")
+    monkeypatch.setattr(gate, "status", lambda root, now: {"running": 3, "queued": []})
+    assert cli._machine_gate(tmp_path, 0)[:2] == (None, None)
+
+
+# ---- review 1, R4: an unread gate is a fault and a hold; a removed folder exits 2 --------------
+
+def test_an_unread_gate_is_a_fault_in_status_and_a_hold_in_fits(verb):
+    verb["unread"] = "the gate's state could not be read (no gate)"
+    rc, out, err = run("machine", "status")
+    assert rc == 0, err
+    lines = out.splitlines()
+    assert "gate: unknown running, unknown queued" in lines
+    assert "fault: the gate's state could not be read (no gate)" in lines
+    assert "a 4-core 2048 MB job: held: the gate's state could not be read (no gate)" in lines
+    doc = json.loads(run("machine", "status", "--json")[1])
+    assert doc["gate"] == {"running": None, "queued": None}
+    assert doc["budget"]["fit"]["ok"] is False
+    rc, out, err = run("machine", "fits", "--cpu", "1", "--mem", "1")
+    assert rc == 75 and out == "" and "the gate's state could not be read" in err
+
+
+def test_a_removed_folder_exits_2_with_no_traceback(verb, tmp_path, monkeypatch):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    for argv in (("machine", "status"), ("machine", "fits", "--cpu", "1", "--mem", "1"),
+                 ("machine", "reclaim", "--dry-run")):
+        rc, out, err = run(*argv)
+        assert rc == 2 and out == "" and "current folder is gone" in err, (argv, err)
+        assert "Traceback" not in err
+
+
+def test_the_roots_skip_a_removed_folder(tmp_path, monkeypatch):
+    root = tmp_path / "xdg" / "example-tool"
+    (root / "gate" / "queue").mkdir(parents=True)
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    monkeypatch.chdir(gone)
+    gone.rmdir()
+    roots = cli._machine_roots({"HOME": str(tmp_path / "home")}, root)
+    assert roots["repos"] == []
 
 
 def test_the_roots_name_the_repos_the_gate_names(tmp_path, monkeypatch):
