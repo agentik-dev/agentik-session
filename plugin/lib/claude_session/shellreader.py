@@ -196,7 +196,8 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
     word (r2 F1), and a quoted or escaped backtick opens nothing (r3 F1).
     `ops` (g8a R7): each yield gains the operator before it and the command's read
     redirections, [(operator, word)].
-    A bare `{` right after `function NAME` starts a new command, as `NAME()`'s paren does (nw8)."""
+    A bare `{` right after `function NAME` starts a new command, as `NAME()`'s paren does (nw8),
+    after words of `_LEAD` alone too (nw9)."""
     masked = _mask(text, bash3, ticks)
     lex = shlex.shlex(masked, posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
@@ -234,7 +235,7 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
                 ins.append((expect, tok))
             expect = None
             continue
-        if tok == "{" and len(words) == 2 and words[0] == "function":
+        if tok == "{" and words[-2:-1] == ["function"] and all(w in _LEAD for w in words[:-2]):
             end = lex.instream.tell()     # past the word, and past its one ending character
             end -= 1 + (masked[end - 1:end] in " \t\r" + _PUNCT)
             if masked[end - 1:end + 1] in (" {", "\t{", "\r{"):    # neither quoted nor escaped
