@@ -622,3 +622,31 @@ def test_s7_a_live_drops_mark_is_kept_and_a_dead_ones_goes(tmp_path):
         assert w.spawned == [] and s.running == []
     finally:
         fh.close()
+
+
+@pytest.mark.usefixtures("as_the_verb")
+@pytest.mark.parametrize("b_secs", [600, 3000])     # hw5b D1: inside its 30 minutes, past them
+def test_hw5b_a_drop_of_a_rerun_dead_before_the_line_is_finished(tmp_path, monkeypatch, b_secs):
+    w = World(tmp_path)
+    w.plan.update({"a": (100, 1), "b": (b_secs, 0)})
+    a = w.put(first="a", caller="s1")
+    gate.enqueue(w.root, str(other(w)), ["b", "x"], ENV, [], 5400, "", None, w.t)
+    real, done = gate._tell, []
+
+    def hook(w_):
+        r = gate._load(gate.result_path(w.root, a["id"]))
+        if r and r.get("rerun") and not done:
+            done.append(r["rerun"])
+            monkeypatch.setattr(gate, "_tell", lambda *x, **k: (_ for _ in ()).throw(Died()))
+            with pytest.raises(Died):
+                gate.drop(w.root, r["rerun"], fx=w.fx(), alive=lambda p: True)
+            monkeypatch.setattr(gate, "_tell", real)
+            w.plan["a"] = (100, 0)                    # a rerun run after all is green
+    w.hooks.append(hook)
+    gate.serve(w.root, fx(w, {"a": STOP}))
+    r1 = w.result(a["id"])
+    assert r1["flake"] == "load, not rerun" and lines(w) == [gate.wait_line(r1)]
+    assert [argv[0] for argv, _, _ in w.spawned] == ["a", "b"] and _files(w) == []
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    assert {cli._gate_wait(w.root, g, None, False, strict=True) for g in (a["id"], done[0])} \
+        == {1}                                        # the two ids' waits exit alike

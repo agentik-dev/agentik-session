@@ -718,3 +718,27 @@ def test_t7_an_empty_list_is_a_list_and_ends_every_park(monkeypatch, capsys):
     _dispatch("Stop", {"session_id": SID, "hook_event_name": "Stop", "background_tasks": []},
               monkeypatch, capsys)
     assert parked() is None and ended()
+
+
+def _waits(wait, active=False):
+    sdir = _session()
+    s = json.loads((sdir / "resolved.json").read_text())["session"]
+    (sdir / "resolved.json").write_text(json.dumps({"session": {**s, "helpers": {"wait": wait}}}))
+    _moved()
+    return {**_stop_payload(tasks=[_task()]), "stop_hook_active": active}
+
+
+@pytest.mark.parametrize("wait", ["refuse", "say"])
+def test_k1_a_park_is_blocked_once_with_its_shell_s_id(wait, monkeypatch, capsys):
+    p = _waits(wait)
+    out = json.loads(_dispatch("SubagentStop", p, monkeypatch, capsys))
+    assert out["decision"] == "block" and "`bg-001` of yours" in out["reason"]
+    assert hooks.subagent_stop(p, _env()) == {} and parked()["blocked"] == ["bg-001"]   # once
+    p["background_tasks"] = [_task(status="completed")]                    # no park
+    assert _dispatch("SubagentStop", p, monkeypatch, capsys) == "" and ended()
+
+
+@pytest.mark.parametrize("wait,active", [("refuse", True), ("allow", False)])
+def test_k1_no_block_when_the_guard_is_on_or_under_allow(wait, active, monkeypatch, capsys):
+    p = _waits(wait, active)
+    assert _dispatch("SubagentStop", p, monkeypatch, capsys) == "" and parked()["blocked"] == []
