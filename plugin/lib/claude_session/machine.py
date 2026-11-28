@@ -409,7 +409,8 @@ def _part_of(d, key):
 
 
 def budget(snapshot, grants, config=None, request=None, volume=None) -> dict:
-    """What is free of cores and memory against `grants` (a list of {cpu, mem_mb}), and for a
+    """What is free of cores and memory against `grants` (any iterable of {cpu, mem_mb} but a
+    string, bytes or a mapping), and for a
     `request` ({cpu, mem_mb}) `fit`, {ok, why}, and `parts` (hw6 R3): `grant`, `load`,
     `pressure` and `disk`, each {state, reading, why}, the state `ok`, `held` or `unread`, so
     a caller bounds each apart. The disk part reads the volume whose `holds` names `volume`
@@ -421,7 +422,8 @@ def budget(snapshot, grants, config=None, request=None, volume=None) -> dict:
     MEM_RESERVE_SHARE of the memory; a negative one reads as 0). A value it cannot read as a
     finite number (a NaN, an infinity, a string, None, a bool) in the config, a grant, the
     request or the snapshot's load and disks is named in `unread`, and a request's `fit` is
-    then held; its `parts` name each such part `unread`. Never raises."""
+    then held; its `parts` name each such part `unread`. A config key set to None holds, and a
+    request or a grant without `cpu` or `mem_mb` reads as None there (hw3b). Never raises."""
     unread: list = []
     if config is not None and not isinstance(config, dict):
         unread.append(f"the config {_short(config)}")
@@ -445,16 +447,21 @@ def budget(snapshot, grants, config=None, request=None, volume=None) -> dict:
         reserve = max(MEM_RESERVE_LEAST, int(total_mb * MEM_RESERVE_SHARE)) if reserve is None \
             else max(0, reserve)
         mem_mb = max(0, int(total_mb - reserve))
-    if grants is not None and not isinstance(grants, (list, tuple)):
+    try:                                                # hw3b B2: any iterable, read once
+        seq = [] if grants is None else None if isinstance(grants, (str, bytes, bytearray)) \
+            or hasattr(grants, "keys") else list(grants)
+    except Exception:                                   # noqa: BLE001 - it holds, never raises
+        seq = None
+    if seq is None:
         unread.append(f"the grants {_short(grants)}")
-    grants = list(grants) if isinstance(grants, (list, tuple)) else []
+    grants = seq or []
     g_cpu = g_mem = 0
     for i, g in enumerate(grants, 1):
         if not isinstance(g, dict):
             unread.append(f"grant {i} {_short(g)}")
             continue
-        g_cpu += _reading(g.get("cpu", 0), f"grant {i}'s cpu", unread) or 0
-        g_mem += _reading(g.get("mem_mb", 0), f"grant {i}'s mem_mb", unread) or 0
+        g_cpu += _reading(g.get("cpu"), f"grant {i}'s cpu", unread) or 0
+        g_mem += _reading(g.get("mem_mb"), f"grant {i}'s mem_mb", unread) or 0
     ceiling = setting("load_ceiling")
     if ceiling is None:
         ceiling = LOAD_SHARE * cores if cores else None
@@ -499,8 +506,8 @@ def _grant_part(b, request) -> dict:
            or u.startswith("the config's mem_reserve_mb")]
     cpu = need = None
     if isinstance(request, dict):
-        cpu = _reading(request.get("cpu", 0), "the request's cpu", bad)
-        need = _reading(request.get("mem_mb", 0), "the request's mem_mb", bad)
+        cpu = _reading(request.get("cpu"), "the request's cpu", bad)
+        need = _reading(request.get("mem_mb"), "the request's mem_mb", bad)
     else:
         bad.append(f"the request {_short(request)}")
     if bad:
@@ -554,8 +561,8 @@ def _parts(snap, b, request, ceiling, floor, disk) -> dict:
 def _fit(snap, b, request, ceiling, floor) -> dict:
     bad = list(b["unread"])
     if isinstance(request, dict):
-        cpu = _reading(request.get("cpu", 0), "the request's cpu", bad)
-        need = _reading(request.get("mem_mb", 0), "the request's mem_mb", bad)
+        cpu = _reading(request.get("cpu"), "the request's cpu", bad)
+        need = _reading(request.get("mem_mb"), "the request's mem_mb", bad)
     else:
         bad.append(f"the request {_short(request)}")
     if bad:
