@@ -114,11 +114,11 @@ def test_enqueue_writes_a_private_entry_with_its_eleven_keys(w):
     assert ID.match(e["id"]) and e["id"].endswith("-1")
     assert stat.S_IMODE(p.stat().st_mode) == 0o600
     body = json.loads(p.read_text())
-    assert list(body) == list(gate.ENTRY_KEYS)
+    assert list(body) == [*gate.ENTRY_KEYS, *gate.CLASS_KEYS]          # hw6 B1: its class last
     assert body == {"id": e["id"], "repo": os.path.realpath(w.repo), "command": ["a", "x"],
                     "env": ENV, "locks": [], "wall": 5400, "label": "land s38",
                     "caller": "sess-1", "queued": T0, "key": gate.repo_key(str(w.repo)),
-                    "key_name": "repo", "chain": None}
+                    "key_name": "repo", "chain": None, "cpu": 4, "mem_mb": 2048}
     assert [n for n in os.listdir(p.parent) if n.startswith(".")] == []   # written, renamed
 
 
@@ -169,7 +169,9 @@ def test_serve_runs_fifo_and_writes_the_result_last(w):
     assert gate.serve(w.root, w.fx()) == 0
     assert [s[0] for s in w.spawned] == [["a", "x"], ["b", "x"]]
     _, kw, _ = w.spawned[0]
-    assert (kw["cwd"], kw["env"]) == (os.path.realpath(w.repo), {**ENV, gate.JOB_MARK: a["id"]})
+    assert (kw["cwd"], kw["env"]) == (os.path.realpath(w.repo), {    # hw6 B5: the grant
+        **ENV, gate.JOB_MARK: a["id"], "AGENTIK_CPUS": "4", "AGENTIK_MEM_MB": "2048",
+        "GOMAXPROCS": "4"})
     assert kw["start_new_session"] is True and kw["close_fds"] is True
     assert kw["stderr"] == subprocess.STDOUT
     ra, rb = w.result(a["id"]), w.result(b["id"])

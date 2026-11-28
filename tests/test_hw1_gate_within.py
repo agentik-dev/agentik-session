@@ -107,7 +107,8 @@ def test_w2_waited_cpu_seconds_and_tree(tmp_path):
     e = w.put(at=w.t - 30)
     gate.serve(w.root, w.fx(idle=0, reap=_reap, dirty=lambda r: 0, tree=lambda r: TREE))
     r = w.result(e["id"])
-    assert list(r)[-3:] == list(gate.MEASURE_KEYS) == ["waited", "cpu_seconds", "tree"]
+    assert list(r)[-6:] == list(gate.MEASURE_KEYS) == [                    # hw6 R6
+        "waited", "cpu_seconds", "tree", "peak_mb", "cpu", "mem_mb"]
     assert (r["waited"], r["cpu_seconds"], r["tree"]) == (30.0, 2.5, TREE)
 
 

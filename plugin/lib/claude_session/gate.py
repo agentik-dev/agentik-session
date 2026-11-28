@@ -54,7 +54,9 @@ reads no such job as a proof, since its command is no `make check` of today's fo
 from __future__ import annotations
 
 import fcntl
+import fnmatch
 import json
+import math
 import os
 import re
 import shlex
@@ -71,6 +73,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import install
+from . import machine
 from . import state as statefile
 
 ID = re.compile(r"^\d{8}-\d{6}-[1-9]\d{0,11}\Z")
@@ -117,7 +120,7 @@ SHOWN = "gate-shown.json"           # a closed sitting's chain lines already sho
 OLD_LINE = 86400.0                  # a chain line older than this is set aside (nw2 R2)
 LABEL_MOST = 48                     # a chain line's label, in bytes (nw2 R3)
 CHAIN_KEYS = ("chain", "label")     # a chain's result's keys after RESULT_KEYS
-MEASURE_KEYS = ("waited", "cpu_seconds", "tree")    # last in a result, each null if unknown (hw1 W2)
+MEASURE_KEYS = ("waited", "cpu_seconds", "tree", "peak_mb", "cpu", "mem_mb")    # hw1 W2, hw6 R6
 FAIL_MOST = 80                      # a red line's failing text, in bytes (hw1 W5)
 FAIL_LINE = re.compile(r"^(?:--- FAIL|FAIL|ERROR|make(?:\[\d+\])?: \*\*\*)"
                        r"|AssertionError|^(?:E\s+)?(?:[A-Za-z_][\w.]*)?Error:")
@@ -138,7 +141,17 @@ STOP_LINES = (b"bounded: stop: lock", b"bounded: stop: load", b"bounded: stop: w
 PYTEST_TIMEOUT = re.compile(rb"^(?:\++ Timeout \++|E? *Failed: Timeout >.*)$", re.M)
 NOT_FLAKE = (b"--- FAIL", b"AssertionError", b"WARNING: DATA RACE")
 RED_KEYS = ("ceiling", "alongside")     # a red that ran, after MEASURE_KEYS (hw5 F3)
-MARK_KEYS = ("flake", "rerun", "rerun_of", "dropped")   # last, each only where it applies
+MARK_KEYS = ("flake", "rerun", "rerun_of", "dropped", "over", "guard_unread", "would_hold")
+CLASS_KEYS = ("cpu", "mem_mb")          # an entry's class, after the pin's keys (hw6 B1, R1)
+HISTORY = 5                             # the results of one folder and command a class reads
+MEM_PLUS = 1.25                         # a peak's, or a JVM heap's, grant: it plus a quarter
+SAMPLE_EVERY = 10.0                     # seconds between two samples of a job's group (B2)
+SNAP_EVERY = 10.0                       # the seconds one folder's snapshot is reused (B3, B4)
+BUDGET_PASS = 600.0                     # an entry held this long by the budget is not passed
+HOLD_MAX = 1200                         # a guard's hold of one entry, at most (B4)
+GUARDS = ("load", "pressure", "disk")
+GRANT_ENV = ("AGENTIK_CPUS", "AGENTIK_MEM_MB", "GOMAXPROCS")   # B5; no digest counts them
+HOLDS = "holds.json"                    # the runner's word on what holds each entry, since when
 FLAKE, NOT_RERUN = "load", "load, not rerun"
 
 
@@ -256,12 +269,33 @@ def _write_private(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def _load(path: Path) -> dict | None:
+def _load(path: Path, strict: bool = False) -> dict | None:
+    """The file's mapping, or None. hw6 B6: with `strict`, a file that is there and cannot be
+    read raises GateError, so an unreadable gate is told from an empty one."""
     try:
         d = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return None
+    except OSError as err:
+        if strict:
+            raise GateError(f"{path}: {err.strerror or err}") from err
+        return None
+    except ValueError:
         return None
     return d if isinstance(d, dict) else None
+
+
+def _listdir(path, strict: bool = False) -> list[str]:
+    """The folder's names, [] where it is not there; hw6 B6: with `strict`, a folder that
+    cannot be read raises GateError."""
+    try:
+        return os.listdir(path)
+    except FileNotFoundError:
+        return []
+    except OSError as err:
+        if strict:
+            raise GateError(f"{path}: {err.strerror or err}") from err
+        return []
 
 
 def _unlink(path: Path) -> None:
@@ -754,14 +788,17 @@ def _write_entry(root, now, build) -> dict:
 
 def enqueue(root, repo, command, env, locks, wall, label, caller, now,
             named: bool = False, tree: str | None = None, priority: bool = False,
-            light: bool = False, rerun: bool = False) -> dict:
+            light: bool = False, rerun: bool = False, cpu: int | None = None,
+            mem_mb: int | None = None, jvm: bool = False, classes=None) -> dict:
     """Write one entry (mode 0600, written then renamed) and return it. The id is
     `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
     `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave. `tree`, the
     head's tree of a clean folder at the queue, is written last and only where given (hw1
     W4), so an entry queued without one keeps the pin's keys; so are `priority` and `light`
     (hw5 F1, F2), each `true`, after it, and `rerun` (build 2, S1), the `gate run` verb's
-    opt-in to one rerun of a load flake, kept as `may_rerun`: no other caller asks for it."""
+    opt-in to one rerun of a load flake, kept as `may_rerun`: no other caller asks for it.
+    hw6 B1: the class, `cpu` and `mem_mb` (and `jvm`), after `tree` and `top`, from
+    `job_class`."""
     real = os.path.realpath(str(repo))
     if not os.path.isdir(real):
         raise GateError(f"no such repo directory: {repo}")
@@ -775,6 +812,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
         raise GateError(f"the caller is not a session id: {str(caller)[:40]!r}")
     key = repo_key(real)                # outside the queue's lock: git may take its time
     top = top_level(real)               # build 2, S3: kept only where it is not `real`
+    cls = job_class(root, real, command, classes, cpu, mem_mb, jvm, light)
 
     def build(gid):
         entry = {"id": gid, "repo": real, "command": list(command), "env": dict(env),
@@ -786,6 +824,7 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
             entry["tree"] = tree
         if top != real:
             entry["top"] = top
+        entry.update(cls)
         entry.update({k: True for k, on in (("priority", priority), ("light", light),
                                             ("may_rerun", rerun)) if on})
         return entry
@@ -798,10 +837,115 @@ def _requeue(root, e: dict, now) -> dict:
     def build(gid):
         entry = {k: e.get(k) for k in ENTRY_KEYS}
         entry.update({"id": gid, "queued": now})
-        entry.update({k: e[k] for k in ("tree", "top", "priority", "light") if k in e})
+        entry.update({k: e[k] for k in ("tree", "top", *CLASS_KEYS, "jvm", "priority", "light")
+                      if k in e})
         entry.update({"rerun_of": e["id"], "flaked": now})
         return entry
     return _write_entry(root, now, build)
+
+
+def _whole(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool) and x > 0
+
+
+def _class_ok(c) -> bool:
+    return isinstance(c, dict) and all(_whole(c.get(k)) for k in CLASS_KEYS)
+
+
+def entry_class(e: dict) -> dict:
+    """hw6 B1: the entry's {cpu, mem_mb}; an entry of an older plugin, with none, reads as the
+    default, a light one as `machine.LIGHT_CLASS`."""
+    if _class_ok(e):
+        return {k: e[k] for k in CLASS_KEYS}
+    return dict(machine.LIGHT_CLASS if is_light(e) else machine.DEFAULT_CLASS)
+
+
+def _repo_names(real: str) -> set:
+    """What a `gate.classes` item's `repo` pattern is matched against: the folder, its top
+    and its main checkout (the common dir's parent), each as a path and a base name."""
+    out = {real, os.path.basename(real)}
+    top = top_level(real) if os.path.isdir(real) else real
+    common = _common_dir(top) if os.path.isdir(top) else None
+    for p in (top, os.path.dirname(common) if common else None):
+        if p:
+            out |= {p, os.path.basename(p)}
+    return out
+
+
+def _command_forms(command) -> set:
+    """A command's words joined by one space, as given and with the path dropped from its
+    name, as `helpers.heavy` reads one (hooks._heavy_forms); a check job reads `make check`."""
+    words = [w for w in command or [] if isinstance(w, str)]
+    if not words:
+        return set()
+    out = {" ".join(words), " ".join([os.path.basename(words[0]), *words[1:]])}
+    if check_worktree(words) is not None:
+        out.add("make check")
+    return out
+
+
+def class_match(classes, real: str, command) -> dict | None:
+    """The first item of the profile's `gate.classes` whose `repo` and `command` patterns
+    (fnmatch, case kept) match; None for none."""
+    names, forms = None, _command_forms(command)
+    for c in classes if isinstance(classes, list) else []:
+        if not (isinstance(c, dict) and isinstance(c.get("repo"), str)
+                and isinstance(c.get("command"), str) and _class_ok(c)):
+            continue
+        names = _repo_names(real) if names is None else names
+        if any(fnmatch.fnmatchcase(n, c["repo"]) for n in names) \
+                and any(fnmatch.fnmatchcase(f, c["command"]) for f in forms):
+            return {k: c[k] for k in CLASS_KEYS}
+    return None
+
+
+def history_class(root, real: str, command) -> dict:
+    """hw6 B1: from the last `HISTORY` results of this folder and command, newest first, the
+    largest of their CPU seconds over their run time, rounded up, and the largest peak plus a
+    quarter; each part only where a result holds it."""
+    rows = []
+    for n in _result_names(root)[:EST_SCAN]:
+        r = _load(result_path(root, n))
+        if r and r.get("repo") == real and r.get("command") == list(command):
+            rows.append(r)
+            if len(rows) == HISTORY:
+                break
+    out = {}
+    cpu = max((math.ceil(r["cpu_seconds"] / r["seconds"]) for r in rows
+               if _number(r.get("cpu_seconds")) and _number(r.get("seconds"))
+               and r["seconds"] > 0), default=None)
+    peak = max((r["peak_mb"] for r in rows if _number(r.get("peak_mb"))), default=None)
+    if cpu is not None:
+        out["cpu"] = max(1, int(cpu))
+    if peak is not None:
+        out["mem_mb"] = max(1, math.ceil(peak * MEM_PLUS))
+    return out
+
+
+def job_class(root, real: str, command, classes=None, cpu=None, mem_mb=None, jvm=False,
+              light=False) -> dict:
+    """hw6 B1, each part in turn: `--cpu` and `--mem` (a JVM's heap, plus a quarter); then a
+    light job's own class; else the profile's first `gate.classes` match, the folder's
+    history, and the default. `jvm` is kept, `true`, where given."""
+    out = {}
+    if _whole(cpu):
+        out["cpu"] = cpu
+    if _whole(mem_mb):
+        out["mem_mb"] = math.ceil(mem_mb * MEM_PLUS) if jvm else mem_mb
+    sources = [machine.LIGHT_CLASS] if light else [
+        lambda: class_match(classes, real, command), lambda: history_class(root, real, command),
+        machine.DEFAULT_CLASS]
+    for src in sources:
+        if len(out) == len(CLASS_KEYS):
+            break
+        got = src() if callable(src) else src
+        for k in CLASS_KEYS:
+            if k not in out and _whole((got or {}).get(k)):
+                out[k] = got[k]
+    out = {k: out[k] for k in CLASS_KEYS}
+    if jvm:
+        out["jvm"] = True
+    return out
 
 
 def _old(e: dict, now) -> bool:
@@ -855,13 +999,13 @@ def open_entry(root, repo, command, tree, alive=_alive) -> tuple[dict, str] | No
     return None
 
 
-def entries(root) -> list[dict]:
-    """The queue, oldest (lowest counter) first; a file that does not parse is skipped."""
+def entries(root, strict: bool = False) -> list[dict]:
+    """The queue, oldest (lowest counter) first; a file that does not parse is skipped. With
+    `strict` (hw6 B6) a queue or a gate folder that cannot be read raises GateError."""
     out = []
-    try:
-        names = os.listdir(_queue(root))
-    except OSError:
-        return []
+    if strict:
+        _listdir(gate_dir(root), strict)
+    names = _listdir(_queue(root), strict)
     for name in names:
         stem = name[:-5] if name.endswith(".json") else ""
         if not ID.match(stem):
@@ -872,8 +1016,8 @@ def entries(root) -> list[dict]:
     return sorted(out, key=lambda e: _counter(e["id"]))
 
 
-def runner_info(root) -> dict | None:
-    return _load(gate_dir(root) / "runner.json")
+def runner_info(root, strict: bool = False) -> dict | None:
+    return _load(gate_dir(root) / "runner.json", strict)
 
 
 def _pairs(r: dict | None) -> list[tuple]:
@@ -889,8 +1033,8 @@ def _pairs(r: dict | None) -> list[tuple]:
             if isinstance(x, dict) and isinstance(x.get("id"), str) and ID.match(x["id"])]
 
 
-def _running_ids(root, alive=_alive) -> list[str]:
-    r = runner_info(root)
+def _running_ids(root, alive=_alive, strict: bool = False) -> list[str]:
+    r = runner_info(root, strict)
     return [gid for gid, _ in _pairs(r)] if r and alive(r.get("pid")) else []
 
 
@@ -996,13 +1140,11 @@ def _ceiling(cfg: dict, fx) -> float:
 
 def _over(cfg: dict, fx, count: int, last, now: float):
     """Ruling 4, with `count` > 0 running: what bars a further start, (kind, ...) or None.
-    `last` is the last start. A load read that failed is over the ceiling."""
+    `last` is the last start. hw6 R5: the load is no longer read here; it is a guard of
+    `_admit`, bounded, and binds a first start too."""
     most = cfg.get("max_running", MAX_RUNNING)
     if count >= most:
         return ("running", count, most)
-    x, c = _load_read(fx), _ceiling(cfg, fx)
-    if x is None or x >= c:
-        return ("load", x, c)
     left = START_SETTLE - (now - last) if isinstance(last, (int, float)) else 0
     return ("settle", left) if left > 0 else None
 
@@ -1010,8 +1152,8 @@ def _over(cfg: dict, fx, count: int, last, now: float):
 def _bar(cfg: dict, fx, e: dict, running: list[dict], last, now: float, memo=None):
     """What bars entry `e`, which nothing holds, from starting now, or None. hw5 F3: nothing
     starts beside a running rerun, and a rerun starts only with nothing running. hw5 F2: a
-    light entry, and a light one running, are not counted against `max_running`; ruling 4's
-    load and settle hold every entry, and bind only while one runs."""
+    light entry, and a light one running, are not counted against `max_running`; the settle
+    holds every entry and binds only while one runs (the load is `_admit`'s, hw6 R5)."""
     rerun = next((x for x in running if x.get("rerun_of")), None)
     if rerun is not None:
         return ("rerun", rerun.get("id"))
@@ -1070,6 +1212,23 @@ def _load_avg() -> float:
     return os.getloadavg()[0]
 
 
+def _snapshot(paths) -> dict:
+    """hw6 B3, B4: the machine for a start, the volumes of `paths` read."""
+    return machine.snapshot(paths)
+
+
+def _sample(pgids) -> dict:
+    """hw6 B2: {pgid: MB} of each running job's group."""
+    return machine.group_rss_mb(pgids)
+
+
+def _largest(root, folder) -> str | None:
+    """hw6 B4: the largest of the disk's known consumers for a disk hold's line, one read."""
+    rows = machine.consumers({"gate": str(gate_dir(root)), "repos": [top_level(folder)]})
+    r = next((x for x in rows if x.get("gb") is not None), None)
+    return f"largest {r['path']} {r['gb']:g} GB ({r['kind']})" if r else None
+
+
 def _reap_child(proc) -> tuple[int | None, float | None]:
     """One look at a child that never waits (hw1 W2): (its code, as `Popen.poll` gives it, or
     None while it runs; its user plus system seconds from `wait4`, its waited-for descendants
@@ -1096,7 +1255,7 @@ class Fx:
     killpg: Callable = os.killpg
     post: Callable = _default_post
     log: Callable[[str], None] = _log_line
-    load: Callable[[], float] = _load_avg
+    load: Callable[[], float] = lambda: _load_avg()     # each read late, so a test sets one
     cores: Callable[[], int | None] = os.cpu_count
     env: dict = field(default_factory=lambda: dict(os.environ))
     idle: float = IDLE
@@ -1108,6 +1267,9 @@ class Fx:
     dirty: Callable[[str], int | None] = _dirty
     tree: Callable[[str], str | None] = _tree           # the head's tree at a clean start (hw1)
     reap: Callable = _reap_child                        # (code, cpu seconds) of one look (hw1)
+    snapshot: Callable = lambda paths: _snapshot(paths)  # the machine for a start (hw6)
+    sample: Callable = lambda pgids: _sample(pgids)      # {pgid: MB} of the running (hw6 B2)
+    largest: Callable = lambda root, folder: _largest(root, folder)   # a disk hold's (B4)
 
 
 
@@ -1140,6 +1302,13 @@ class _Set:
     starting: str | None = None
     last_start: float | None = None
     seen: dict = field(default_factory=dict)
+    budget_since: dict = field(default_factory=dict)    # hw6 B3: id -> first held by it
+    guard_since: dict = field(default_factory=dict)     # B4: (id, guard) -> first held by it
+    would: dict = field(default_factory=dict)           # B7: (id, part) -> first it would hold
+    largest: dict = field(default_factory=dict)         # B4: id -> its disk hold's consumer
+    snaps: dict = field(default_factory=dict)           # folder -> (at, snapshot)
+    last_sample: float | None = None
+    holds: dict | None = None                           # what holds.json was last written as
 
 
 def _runner_write(root, fx: Fx, s: _Set) -> None:
@@ -1252,10 +1421,15 @@ def _tree_read(fx: Fx, gid: str, repo) -> str | None:
 
 def _measures(e: dict) -> dict:
     """hw1 W2: the result's `waited`, `cpu_seconds` and `tree`, from what the runner kept on
-    the entry in its memory, each null where it was not read."""
+    the entry in its memory, each null where it was not read; hw6 R6: `peak_mb`, null where no
+    sample was taken, and the class as granted, `cpu` and `mem_mb` (an entry not started,
+    its class)."""
+    grant = e.get("grant") if _class_ok(e.get("grant")) else entry_class(e)
     return {"waited": e.get("waited") if _number(e.get("waited")) else None,
-            "cpu_seconds": e.get("cpu") if _number(e.get("cpu")) else None,
-            "tree": _clean_head(e.get("start_tree"))}
+            "cpu_seconds": e.get("cpu_seconds") if _number(e.get("cpu_seconds")) else None,
+            "tree": _clean_head(e.get("start_tree")),
+            "peak_mb": e.get("peak_mb") if _number(e.get("peak_mb")) else None,
+            "cpu": grant["cpu"], "mem_mb": grant["mem_mb"]}
 
 
 def _machine(e: dict) -> dict:
@@ -1282,6 +1456,12 @@ def _marks(e: dict) -> dict:
         out["rerun_of"] = e["rerun_of"]
     if e.get("dropped") is True:
         out["dropped"] = True
+    for k in ("over", "guard_unread"):                  # hw6 B4, R6
+        if isinstance(e.get(k), str) and e[k]:
+            out[k] = e[k]
+    w = e.get("would_hold")                             # hw6 B7: `observe`'s
+    if isinstance(w, dict) and w:
+        out["would_hold"] = dict(w)
     return out
 
 
@@ -1402,6 +1582,16 @@ def _not_rerun(root, fx: Fx, cfg: dict, e: dict) -> dict | None:
     return first
 
 
+def grant_env(e: dict) -> dict:
+    """hw6 B5: the job's environment, its id, and its class as granted: `AGENTIK_CPUS`,
+    `AGENTIK_MEM_MB`, and `GOMAXPROCS` where the job's environment holds none."""
+    g = e.get("grant") if _class_ok(e.get("grant")) else entry_class(e)
+    env = {**(e.get("env") or {}), JOB_MARK: e["id"], "AGENTIK_CPUS": str(g["cpu"]),
+           "AGENTIK_MEM_MB": str(g["mem_mb"])}
+    env.setdefault("GOMAXPROCS", str(g["cpu"]))
+    return env
+
+
 def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     """Spawn one entry into the set. Its id goes to runner.json first, its `pgid` null until
     the spawn answers, so a runner that dies in between leaves the entry named and the next
@@ -1438,7 +1628,7 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
         log.write(f"gate {gid}: {e['repo']}: {shlex.join(e['command'])}\n".encode())
         log.flush()
         try:
-            p = fx.popen(e["command"], cwd=e["repo"], env={**(e.get("env") or {}), JOB_MARK: gid},
+            p = fx.popen(e["command"], cwd=e["repo"], env=grant_env(e),
                          stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True, close_fds=True)
         except (OSError, ValueError, subprocess.SubprocessError) as err:
@@ -1509,8 +1699,29 @@ def _cut_reaped(c: _Child, fx: Fx) -> bool:
     """Whether a child the cut signalled is gone, its seconds kept where `wait4` gave them."""
     code, cpu = fx.reap(c.proc)
     if code is not None:
-        c.e["cpu"] = cpu
+        c.e["cpu_seconds"] = cpu
     return code is not None
+
+
+def _peaks(fx: Fx, s: _Set) -> None:
+    """hw6 B2: every `SAMPLE_EVERY` seconds one sample of the running jobs' groups, each
+    job's `peak_mb` the largest sum seen; a sample that fails is skipped, never raised."""
+    if not s.running:
+        return
+    now = fx.now()
+    if s.last_sample is not None and now - s.last_sample < SAMPLE_EVERY:
+        return
+    s.last_sample = now
+    try:
+        got = fx.sample([getattr(c.proc, "pid", None) for c in s.running])
+    except Exception as err:                            # noqa: BLE001 (a sample is skipped)
+        fx.log(f"gate: a sample of the running groups failed: {err}")
+        return
+    for c in s.running:
+        mb = got.get(getattr(c.proc, "pid", None)) if isinstance(got, dict) else None
+        if _number(mb):
+            was = c.e.get("peak_mb")
+            c.e["peak_mb"] = max(mb, was) if _number(was) else mb
 
 
 def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
@@ -1520,10 +1731,11 @@ def _reap(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     group's id stays its own), then 124 once it is gone or a second grace has passed. True
     when one closed."""
     closed = False
+    _peaks(fx, s)
     for c in list(s.running):
         now, code, cut = fx.now(), None, None
         if c.term_at is None:
-            code, c.e["cpu"] = fx.reap(c.proc)
+            code, c.e["cpu_seconds"] = fx.reap(c.proc)
             if code is not None:
                 code = code if code >= 0 else 128 - code
                 _signal_group(c.proc.pid, signal.SIGKILL, fx)
@@ -1625,11 +1837,130 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
                     note=f"lock {held} held past the wall ({wall} s); not run")
             return True
     memo: dict = {}                                   # one load read a pass, as at the pin
+    _forget(s, {e["id"] for e in es})
+    holds, behind = {}, None
     for e, why in _holds(es, running):
-        if why is None and _bar(cfg, fx, e, running, s.last_start, now, memo) is None:
+        if why is not None or _bar(cfg, fx, e, running, s.last_start, now, memo) is not None:
+            continue
+        if behind is not None:                        # hw6 B3: an entry held ten minutes
+            holds[e["id"]] = {"what": f"the budget, behind {behind[0]}", "since": behind[1]}
+            continue
+        held = _admit(root, fx, cfg, e, s, now, memo)
+        if held is None:
+            _write_holds(root, s, holds)
             _start(root, fx, cfg, e, s)
             return True
+        holds[e["id"]] = {"what": "; ".join(w for _, w, _ in held),
+                          "since": min(t for _, _, t in held)}
+        first = next((t for k, _, t in held if k == "budget"), None)
+        if first is not None and now - first >= BUDGET_PASS:
+            behind = (e["id"], first)
+    _write_holds(root, s, holds)
     return False
+
+
+def _forget(s: _Set, ids: set) -> None:
+    """The runner's memory of holds, kept only for the entries still queued."""
+    for d in (s.budget_since, s.largest):
+        for k in [k for k in d if k not in ids]:
+            del d[k]
+    for d in (s.guard_since, s.would):
+        for k in [k for k in d if k[0] not in ids]:
+            del d[k]
+
+
+def _write_holds(root, s: _Set, holds: dict) -> None:
+    """holds.json, what holds each entry the budget or a guard holds and since when, which
+    `status` reads; written only when it moved."""
+    if holds == s.holds:
+        return
+    try:
+        _write_private(gate_dir(root) / HOLDS, json.dumps(holds) + "\n")
+    except OSError:                                     # status then names no hold
+        return
+    s.holds = dict(holds)
+
+
+def _machine_config(cfg: dict, fx: Fx) -> dict:
+    """What `machine.budget` reads of the gate's profile: the gate's own ceiling (`_ceiling`),
+    and the reserve and the floor where set (hw6 R2)."""
+    out = {"load_ceiling": _ceiling(cfg, fx)}
+    out.update({k: cfg[k] for k in ("mem_reserve_mb", "disk_floor_gb") if k in cfg})
+    return out
+
+
+def _snap_for(fx: Fx, s: _Set, folder, now) -> dict:
+    """The machine for a start in `folder`, its volume named `job` (R4); one read a folder per
+    `SNAP_EVERY`; a read that raises is an empty snapshot, every part then unread."""
+    hit = s.snaps.get(folder)
+    if hit is not None and 0 <= now - hit[0] < SNAP_EVERY:
+        return hit[1]
+    try:
+        snap = fx.snapshot({"job": folder, "gocache": None})
+    except Exception as err:                            # noqa: BLE001 (each part unread)
+        fx.log(f"gate: the machine was not read: {err}")
+        snap = None
+    snap = snap if isinstance(snap, dict) else {}
+    s.snaps[folder] = (now, snap)
+    return snap
+
+
+def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
+    """hw6 B3, B4, B7: None where `e` may start now, its grant kept on it, else what holds it,
+    [(part, why, since)]. The budget (`grant`) holds under `hold` until it fits; each guard
+    holds one entry for its bound at most (`gate.<guard>_hold_max`), then is passed over and
+    named in `over`; a part whose reading is a fault holds nothing and is named in
+    `guard_unread`. Under `observe` the budget, the pressure and the disk hold nothing and
+    `would_hold` says what would have held and for how long; the load holds under both."""
+    gid = e["id"]
+    snap = dict(_snap_for(fx, s, e.get("repo"), now))
+    if "load" not in memo:
+        memo["load"] = _load_read(fx)
+    x = memo["load"]
+    snap["load"] = None if x is None else [x, x, x]
+    grants = [c.e.get("grant") if _class_ok(c.e.get("grant")) else entry_class(c.e)
+              for c in s.running]
+    cls = entry_class(e)
+    parts = machine.budget(snap, grants, _machine_config(cfg, fx), cls, volume="job")["parts"]
+    mode = cfg.get("budget", "hold")
+    held, unread, over, would = [], [], [], {}
+    for name in machine.PARTS:
+        part, word = parts[name], "budget" if name == "grant" else name
+        if part["state"] == "unread":
+            unread.append(word)
+            continue
+        if part["state"] != "held":
+            continue
+        if name != "load" and mode != "hold":
+            first = s.would.setdefault((gid, word), now)
+            would[word] = round(now - first, 1)
+            continue
+        if name == "grant":
+            held.append((word, part["why"], s.budget_since.setdefault(gid, now)))
+            continue
+        first = s.guard_since.setdefault((gid, word), now)
+        if now - first >= cfg.get(f"{name}_hold_max", HOLD_MAX):
+            over.append(word)
+            continue
+        why = part["why"]
+        if name == "disk":
+            if gid not in s.largest:
+                try:
+                    s.largest[gid] = fx.largest(root, e.get("repo"))
+                except Exception:                       # noqa: BLE001 (the line goes on)
+                    s.largest[gid] = None
+            why += f"; {s.largest[gid]}" if s.largest[gid] else ""
+        held.append((word, why, first))
+    if held:
+        return held
+    g = parts["grant"]
+    e["grant"] = {"cpu": max(1, int(round(g["reading"]["cpu"]))),
+                  "mem_mb": max(1, int(round(g["reading"]["mem_mb"])))} \
+        if g["state"] == "ok" else cls
+    e.update({k: ", ".join(v) for k, v in (("over", over), ("guard_unread", unread)) if v})
+    if would:
+        e["would_hold"] = would
+    return None
 
 
 def serve(root, fx: Fx | None = None) -> int:
@@ -1677,6 +2008,9 @@ def mark_text(result: dict) -> str:
     out += f"flake: {flake}; " if flake in (FLAKE, NOT_RERUN) else ""
     of = result.get("rerun_of")
     out += f"rerun of {of}; " if isinstance(of, str) and ID.match(of) else ""
+    for k, word in (("over", "over"), ("guard_unread", "guard unread")):     # hw6 B4
+        v = result.get(k)
+        out += f"{word}: {v[:40]}; " if isinstance(v, str) and v else ""
     return out
 
 
@@ -1857,13 +2191,10 @@ def strict_code(result) -> int:
     return x if isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 255 else 1
 
 
-def _result_names(root) -> list[str]:
+def _result_names(root, strict: bool = False) -> list[str]:
     """The entry dirs under the gate, newest first by counter."""
-    try:
-        return sorted((n for n in os.listdir(gate_dir(root)) if ID.match(n)),
-                      key=_counter, reverse=True)
-    except OSError:
-        return []
+    return sorted((n for n in _listdir(gate_dir(root), strict) if ID.match(n)),
+                  key=_counter, reverse=True)
 
 
 def _greens(root, command=None) -> dict:
@@ -2031,7 +2362,8 @@ def _wait_text(why) -> str | None:
     return f"{kind} {why[1]}"
 
 
-def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = None) -> dict:
+def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = None,
+           strict: bool = False) -> dict:
     """{running, queued, done, runner}: the entries running, a list; the rest in order, each
     with its key and its wait; the last five results newest first; the live runner or None.
     The wait is the runner's own rule, from `_holds` and `_over`; the load is read only for
@@ -2043,12 +2375,16 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
     an entry or result whose `repo` resolves to it, or a landing's result of the branch the
     folder has checked out on the folder's key; `done` holds every result `KEEP` keeps.
     A `running` or `queued` item ends with the entry's `caller` and `queued`, null where the
-    entry holds none (packet su4, R1)."""
+    entry holds none (packet su4, R1). hw6 B4: an entry the budget or a guard holds says what
+    and since when, from the runner's holds.json. B6: with `strict`, a gate that cannot be
+    read raises GateError and never reads as empty."""
     fx = fx or Fx()
-    r = runner_info(root)
+    r = runner_info(root, strict)
     live = r if r and alive(r.get("pid")) else None
-    run = _running_ids(root, alive)
-    es = entries(root)
+    run = [gid for gid, _ in _pairs(r)] if live else []
+    es = entries(root, strict)
+    names = _result_names(root, strict)
+    held = _load(gate_dir(root) / HOLDS) or {}
     byid = {e["id"]: e for e in es}
     running = []
     for gid in run:
@@ -2077,9 +2413,13 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
                 last = max((x["since"] for x in running if x["since"]), default=0)
                 cfg = _config(fx.env)
             why = _bar(cfg, fx, e, them, last, now, memo)
+        wait = _wait_text(why)
+        h = held.get(e["id"]) if why is None else None
+        if isinstance(h, dict) and isinstance(h.get("what"), str):        # hw6 B4
+            wait = h["what"] + (f" since {_hm(h['since'])}" if _number(h.get("since")) else "")
         queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
                        "label": e.get("label") or "", "key": entry_key(e),
-                       "wait": _wait_text(why), "caller": e.get("caller"),
+                       "wait": wait, "caller": e.get("caller"),
                        "queued": e.get("queued")})
     done, tree = [], {}
 
@@ -2090,7 +2430,7 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
             tree["branch"] = _branch(want)
             tree["key"] = repo_key(want) if tree["branch"] else None
         return branch == tree["branch"] and res.get("key") == tree["key"]
-    for n in _result_names(root):
+    for n in names:
         res = _load(result_path(root, n))
         if res is None:
             continue

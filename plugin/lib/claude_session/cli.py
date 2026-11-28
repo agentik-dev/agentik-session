@@ -2023,6 +2023,8 @@ def cmd_gate(args) -> int:
             _die(f"gate run: --light runs at most {gate.LIGHT_WALL} s, not --wall {args.wall}", 2)
         if gate.land_branch(command) is not None:
             _die("gate run: --light is for a short job; a landing is never light", 2)
+    if args.jvm and args.mem is None:                     # hw6 B1
+        _die("gate run: --jvm says the heap as --mem MB; give --mem", 2)
     if args.check or args.in_job:
         checked = _gate_check(root, args, env, command)
         if isinstance(checked, int):
@@ -2055,7 +2057,9 @@ def cmd_gate(args) -> int:
                          args.label or "", caller, time.time(),
                          named=args.session is not None, tree=tree,  # nw2 R1: a session, no chain
                          priority=args.priority, light=args.light,   # hw5 F1, F2
-                         rerun=True)          # build 2, S1: the verb's job alone may be rerun
+                         rerun=True,          # build 2, S1: the verb's job alone may be rerun
+                         cpu=args.cpu, mem_mb=args.mem, jvm=args.jvm,   # hw6 B1
+                         classes=gate._config(env).get("classes"))
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)
@@ -2299,7 +2303,8 @@ def _gate_land(root, args, env) -> int:
         if args.fresh:
             job_env[land.FRESH] = "1"
         e = gate.enqueue(root, repo, command, job_env, [], wall, f"land {branch}", caller,
-                         time.time(), named=args.session is not None, priority=True)  # hw5 F1
+                         time.time(), named=args.session is not None, priority=True,  # hw5 F1
+                         classes=gate._config(env).get("classes"))                   # hw6 B1
     except gate.GateError as err:
         _die(f"gate land: {err}", 2)
     gate.spawn_serve(root)
@@ -2668,6 +2673,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="a short job (a stamp, a lint), walled at 120 s: runs beside its "
                          "repo's job of another worktree and counts against no max_running; "
                          "not with --check or a --wall over 120")
+    gr.add_argument("--cpu", type=_positive_int, metavar="N",
+                    help="the job's cores (hw6 B1); else the profile's gate.classes, the "
+                         "job's history, or 4 (1 for --light)")
+    gr.add_argument("--mem", type=_positive_int, metavar="MB",
+                    help="the job's memory in MB; with --jvm, its heap, granted plus a quarter")
+    gr.add_argument("--jvm", action="store_true",
+                    help="a JVM job (TLC): --mem is its heap; needs --mem")
     gr.add_argument("command", nargs="*", help="the command after --, run as argv")
     gd = gsub.add_parser("drop", help="take a queued gate job out, its result exit 130 and its "
                                        "line 'dropped'; a running job is not touched (exit 1)")
@@ -2891,7 +2903,7 @@ def _machine_gate(root, now) -> tuple[int | None, int | None, str | None]:
     cannot be read, which `status` names in a fault and `fits` holds on (review 1, F10)."""
     from . import gate
     try:
-        st = gate.status(root, now)
+        st = gate.status(root, now, strict=True)        # hw6 B6: unreadable is not empty
         running, queued = st.get("running") or [], st.get("queued") or []
         if not isinstance(running, list) or not isinstance(queued, list):
             raise ValueError("its status is not two lists")
@@ -2901,12 +2913,14 @@ def _machine_gate(root, now) -> tuple[int | None, int | None, str | None]:
 
 
 def _machine_config(env) -> dict:
-    """The gate's own `load_ceiling` where the user set one, so the two read one ceiling."""
+    """The gate's own `load_ceiling`, `mem_reserve_mb` and `disk_floor_gb` where the user set
+    them, so the verb and the gate read one profile (hw6 R2)."""
     try:
-        set_ = resolver.gate_config(env).get("load_ceiling")
-    except Exception:                                   # noqa: BLE001 - the default holds
-        set_ = None
-    return {"load_ceiling": set_} if isinstance(set_, (int, float)) else {}
+        g = resolver.gate_config(env)
+    except Exception:                                   # noqa: BLE001 - the defaults hold
+        g = {}
+    return {k: g[k] for k in ("load_ceiling", "mem_reserve_mb", "disk_floor_gb")
+            if isinstance(g.get(k), (int, float)) and not isinstance(g.get(k), bool)}
 
 
 def _home_short(path, home) -> str:
@@ -2993,9 +3007,14 @@ def cmd_machine(args) -> int:
     grants = [dict(machine.DEFAULT_CLASS) for _ in range(running or 0)]
     held = {"ok": False, "why": unread} if unread else None
     if args.machine_verb == "fits":
-        fit = held or machine.budget(snap, grants, _machine_config(env),
-                                     {"cpu": args.cpu, "mem_mb": args.mem})["fit"]
-        print(fit["why"], file=sys.stdout if fit["ok"] else sys.stderr)
+        b = machine.budget(snap, grants, _machine_config(env),
+                           {"cpu": args.cpu, "mem_mb": args.mem})
+        fit = held or b["fit"]
+        out = sys.stdout if fit["ok"] else sys.stderr
+        print(fit["why"], file=out)
+        for name in machine.PARTS:                      # hw6 R3: the same parts as the gate
+            part = b["parts"][name]
+            print(f"{name}: {part['state']}: {part['why']}", file=out)
         return 0 if fit["ok"] else 75
     b = machine.budget(snap, grants, _machine_config(env), dict(machine.DEFAULT_CLASS))
     if held:
