@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import codecs
 import copy
+import fnmatch
 import hashlib
 import json
 import math
@@ -440,12 +441,28 @@ def _helper_charter(payload: dict) -> bool:
 HELPER_WAITS = "helper-waits.json"      # {"waits": [[agent_id, id], ...]}, the newest last
 HELPER_WAITS_MAX = 256                  # pairs kept; the oldest go first (well under SMALL)
 LONG_SLEEP = 60
-HELPER_WAIT_RULE = ("Queue the run with agentik session gate run, write gate | <id> running in "
-                    "your record and hand back; the result reaches the coordinator.")
+WAIT_BOUND = 100                        # hw2 H1: a helper's one wait, under the engine's move
+HELPER_WAIT_RULE = ("Queue the run with agentik session gate run <dir> --label <row> -- "
+                    "<command> (add --within 100 to wait once), write gate | <id> running in "
+                    "your hand-back and end your turn; the result reaches the coordinator.")
 HELPER_WAIT_DENY = "agentik-session: denied a helper's wait."
 HELPER_WAIT_SAY = "agentik-session: a helper is never the wait."
+HELPER_HEAVY = ("agentik-session: this run is listed as heavy for this repo: queue it with "
+                "agentik session gate run")
+HELPER_START = (                        # hw2 H3: SubagentStart's one paragraph
+    "agentik-session: you are a helper, and a helper never waits. Each shell call of yours ends "
+    "inside two minutes. A run that may take longer is queued: agentik session gate run "
+    "<absolute dir> --label <row> -- <command>, or --check for the repo's full check; add "
+    "--within 100 to wait once. Write the job's id in your hand-back and end your turn: the "
+    "result reaches your coordinator. Start no background shell and no sleep loop. If the "
+    "engine moves a call of yours to the background, never wait on it and never kill by a "
+    "command's text: stop it with TaskStop and the id it printed if you have that tool, else "
+    "write that id in your hand-back. This overrides a brief that bars the verb.")
 CHAIN_WAIT = "--chain"                  # the chain stands for the id; no job id is an option
 _TOOL_WORDS = frozenset({"agentik-session", "claude-session", "claude_session"})
+_LOOP_WORDS = frozenset({"while", "until", "for"})
+_RUN_WAIT = frozenset({"--wai", "--wait"})    # `gate run`'s `--wait` and its one abbreviation
+_WORD = re.compile(r"[^ \t\r\n;&|<>()`]+")
 _DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)\Z")
 _UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -484,6 +501,163 @@ def _helper_wait_value(payload: dict, env) -> str:
     return v if v in ("say", "refuse") else "allow"
 
 
+def _helper_heavy(payload: dict, env) -> list:
+    """hw2 H4: the resolved `helpers.heavy` of the payload's session, [] where it is none or
+    no list of strings."""
+    sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+    s = _regular_json(sdir / "resolved.json").get("session") if sdir else None
+    h = s.get("helpers") if isinstance(s, dict) else None
+    v = h.get("heavy") if isinstance(h, dict) else None
+    return v if isinstance(v, list) and all(isinstance(x, str) for x in v) else []
+
+
+def _tool_args(c) -> list | None:
+    """The words after this tool's name (`agentik session`, the launcher, its old name), None
+    for another command."""
+    args = list(c.args)
+    if c.name == "agentik" and args[:1] == ["session"]:
+        return args[1:]
+    return args if c.name in _TOOL_WORDS else None
+
+
+def _run_waits(args: list) -> bool:
+    """hw2 H1: a `gate run` whose own words, before the `--` that starts the job's command, hold
+    `--wait` (or `--wai`, its one unambiguous abbreviation)."""
+    for a in args:
+        if a == "--":
+            return False
+        if a in _RUN_WAIT:
+            return True
+    return False
+
+
+def _wait_unbounded(args: list) -> bool:
+    """hw2 H1: a `gate wait` the CLI would run (its parser takes the words, no help, an id or
+    `--chain`) with no `--timeout` or one over WAIT_BOUND. Build 2, R2: a timeout not read as a
+    plain finite number (a variable, a substitution, an expansion, any other word) is no bound."""
+    try:
+        ns, extras = _wait_parser(str).parse_known_intermixed_args(args)
+    except (ValueError, TypeError):
+        return False
+    if extras or ns.help or not (ns.chain or isinstance(ns.id, str)):
+        return False
+    if ns.timeout is None:
+        return True
+    try:
+        t = float(ns.timeout)
+    except ValueError:
+        return True
+    return not (math.isfinite(t) and t <= WAIT_BOUND)
+
+
+_PAREN_OPEN = ("(", shellreader._MASK["("])     # a paren as written, and as the mask hides it
+_PAREN_SHUT = (")", shellreader._MASK[")"])
+_TICKS = ("`", shellreader._MASK["`"])
+_BREAKS = " \t\n;&|<>" + "".join(_PAREN_OPEN + _PAREN_SHUT + _TICKS)    # a word starts after one
+
+
+def _masked(text: str) -> str:
+    """The reader's own mask of a line: its heredoc bodies out, its comments dropped."""
+    return shellreader._mask(shellreader._here_scan(text)[0])
+
+
+def _unquoted(text: str) -> str:
+    """The reader's masked text with each quoted span and each backslashed character turned
+    into one `_`, so no word in quotes is read. Build 2, R1: the text of a `$(...)` or of
+    backticks inside double quotes is kept and read afresh, its own quotes blanked in turn.
+    Build 3, S1: in that text a comment, a `#` at a word's start, is dropped up to its newline,
+    in backticks up to a backtick, as the mask drops one outside quotes."""
+    masked = _masked(text)
+    out, i, n, start = [], 0, len(masked), False
+    stack = []      # the open frames: a quote, or inside double quotes "`" or [depth] for `$(`
+    while i < n:
+        c = masked[i]
+        top = stack[-1] if stack else None
+        if top == "'":
+            if c == "'":
+                stack.pop()
+            i += 1
+            continue
+        if top == '"':
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                stack.pop()
+            elif c == "$" and masked[i + 1:i + 2] in _PAREN_OPEN:
+                stack.append([0])
+                out.append(" ")
+                i, start = i + 1, True
+            elif c in _TICKS:
+                stack.append("`")
+                out.append(" ")
+                start = True
+            i += 1
+            continue
+        if c == "\\":                   # a line's own text, or a substitution's in quotes
+            out.append("_")
+            i, start = i + 2, False
+            continue
+        if c == "#" and start and (top == "`" or isinstance(top, list)):
+            while i < n and masked[i] != "\n" and not (top == "`" and masked[i] in _TICKS):
+                i += 1
+            continue
+        start = c in _BREAKS
+        if c in "'\"":
+            stack.append(c)
+            out.append("_")
+        elif top == "`" and c in _TICKS:
+            stack.pop()
+            out.append(" ")
+        elif isinstance(top, list) and (c in _PAREN_OPEN or c in _PAREN_SHUT):
+            if c in _PAREN_SHUT and not top[0]:
+                stack.pop()
+            else:
+                top[0] += 1 if c in _PAREN_OPEN else -1
+            out.append(" ")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _typed_names(tokens: list) -> dict:
+    """Build 3, S2: the line's words holding a `/`, found once per line, keyed by their base
+    name alone and by it with the word after them."""
+    index = {}
+    for k, t in enumerate(tokens):
+        if "/" in t:
+            base = os.path.basename(t)
+            index.setdefault((base, None), set()).add(t)
+            if k + 1 < len(tokens):
+                index.setdefault((base, tokens[k + 1]), set()).add(t)
+    return index
+
+
+def _heavy_forms(c, index: dict) -> set:
+    """Build 2, R3: a command's words joined by one space, as typed and with the path dropped
+    from its name. The typed name is a word of the line holding a `/` whose base name is the
+    command's and that its first argument follows."""
+    forms = {" ".join([c.name, *c.args])}
+    first = c.args[0].split()[:1] if c.args else []
+    for t in index.get((c.name, first[0] if first else None), ()):
+        if t != c.name:
+            forms.add(" ".join([t, *c.args]))
+    return forms
+
+
+def _loops(command: str, cmds) -> bool:
+    """hw2 H1, L10: `while`, `until` or `for` as a word of the line's masked text, or of a
+    first-level shell's `-c` script the reader yields."""
+    texts = [command]
+    for c in cmds:
+        if c.level == 0 and c.name in shellreader._SHELLS5:
+            kind, k = shellreader._script(c.args)
+            if kind == "c" and k is not None:
+                texts.append(c.args[k])
+    return any(w in _LOOP_WORDS for t in texts for w in _WORD.findall(_unquoted(t)))
+
+
 def _sleep_seconds(args: list) -> float | None:
     """GNU sleep's sum of its arguments, None where one is not read as a duration."""
     total = 0.0
@@ -510,14 +684,14 @@ class _WaitWords(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def _wait_parser() -> argparse.ArgumentParser:
+def _wait_parser(timeout=float) -> argparse.ArgumentParser:
     """The options `cli`'s `gate wait` parser takes (a test holds the two alike), `--help` a
-    flag here so that it prints nothing."""
+    flag here so that it prints nothing; `timeout` the type `--timeout`'s value is read as."""
     p = _WaitWords(prog="gate wait", add_help=False)
     p.add_argument("-h", "--help", action="store_true")
     p.add_argument("id", nargs="?")
     p.add_argument("--chain", action="store_true")
-    p.add_argument("--timeout", type=float, metavar="SECONDS")
+    p.add_argument("--timeout", type=timeout, metavar="SECONDS")
     p.add_argument("--json", action="store_true")
     p.add_argument("--strict", action="store_true")
     return p
@@ -553,7 +727,11 @@ def _helper_wait(payload: dict, env) -> dict | None:
     """Packet nw3-helper-wait R2 to R8: a helper's Bash under `say` or `refuse` whose line
     holds a long sleep or a second wait on one job: the denial (`refuse`) or the passing call's
     context (`say`); None otherwise, under `allow`, for the main thread and on any fault. A
-    first wait is recorded only where the call passes."""
+    first wait is recorded only where the call passes. hw2 H1, after nw3's two and in this
+    order: a background shell, `gate run --wait`, a `gate wait` with no bound of WAIT_BOUND s or
+    less, the line's sleeps adding to a minute, a sleep on a line whose masked text holds a loop
+    word; one clause is said, the first. hw2 H4: a command `helpers.heavy` lists is told as
+    context on the passing call, never refused."""
     if not payload.get("agent_id") or payload.get("tool_name") != "Bash":
         return None
     try:
@@ -573,12 +751,28 @@ def _helper_wait(payload: dict, env) -> dict | None:
         waits = [w for w in doc.get("waits") or [] if isinstance(w, list) and len(w) == 2]
         seen = {(a, j) for a, j in waits}
         clause, new = None, []
+        slept, run_wait, unbounded = 0.0, False, False      # hw2 H1: judged after nw3's two
+        sleeps = heavy = False
+        patterns = _helper_heavy(payload, env)
+        tokens = [t.strip("'\"" + "".join(_TICKS[1:] + _PAREN_OPEN[1:] + _PAREN_SHUT[1:]))
+                  for t in _WORD.findall(_masked(command))] if patterns else []
+        typed = _typed_names(tokens)
         for c in cmds:
+            if patterns and any(fnmatch.fnmatchcase(f, p) for f in _heavy_forms(c, typed)
+                                for p in patterns):
+                heavy = True                                 # hw2 H4: told, never refused
             if c.name == "sleep":
+                sleeps = True
                 n = _sleep_seconds(c.args)
+                slept += n or 0.0
                 if clause is None and n is not None and n >= LONG_SLEEP:
                     clause = f"a sleep of {_seconds_word(n)} s"
                 continue
+            words = _tool_args(c)
+            if words is not None and words[:2] == ["gate", "run"]:
+                run_wait = run_wait or _run_waits(words[2:])
+            if words is not None and words[:2] == ["gate", "wait"]:
+                unbounded = unbounded or _wait_unbounded(words[2:])
             j = _wait_id(c)
             if j is None:
                 continue
@@ -588,18 +782,25 @@ def _helper_wait(payload: dict, env) -> dict | None:
                 continue
             seen.add((aid, j))
             new.append([aid, j])
+        clause = (clause or (ti.get("run_in_background") is True and "a background shell")
+                  or (run_wait and "gate run --wait")
+                  or (unbounded and f"a wait with no bound of {WAIT_BOUND} s or less")
+                  or (slept >= LONG_SLEEP and f"sleeps of {_seconds_word(slept)} s")
+                  or (sleeps and _loops(command, cmds) and "a sleep in a loop") or None)
         if clause and value == "refuse":
             return _deny(f"agentik-session: an agent is never the wait ({clause}). "
                          + HELPER_WAIT_RULE, HELPER_WAIT_DENY)
         if new:
             store._write_private(sdir / HELPER_WAITS,
                                  json.dumps({"waits": (waits + new)[-HELPER_WAITS_MAX:]}))
-        if clause:
-            return {"hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "additionalContext": (f"agentik-session: an agent is never the wait "
-                                              f"({clause}). " + HELPER_WAIT_RULE)},
-                    "systemMessage": HELPER_WAIT_SAY}
+        told = ([f"agentik-session: an agent is never the wait ({clause}). " + HELPER_WAIT_RULE]
+                if clause else []) + ([HELPER_HEAVY] if heavy else [])
+        if told:
+            out = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                          "additionalContext": "\n\n".join(told)}}
+            if clause:
+                out["systemMessage"] = HELPER_WAIT_SAY
+            return out
     except Exception:                                   # noqa: BLE001  (R8: a fault passes)
         return None
     return None
@@ -936,8 +1137,9 @@ def pre_tool_use(payload: dict, env=None) -> dict:
     close (n33), a RESPAWN close in the background (rc1), the stray writes (g8, lineguard),
     a gated file's write (g2b), the main thread's close while a job is out (rc2), and, under
     the session's `helpers.wait` (nw3), a helper's second wait on one gate job or its sleep of
-    a minute or more: denied under `refuse`, said as context on a passing call under `say`,
-    untouched under `allow`, the shipped default.
+    a minute or more, and (hw2) its background shell, `gate run --wait`, an unbounded
+    `gate wait`, sleeps adding to a minute and a sleep in a loop: denied under `refuse`, said as
+    context on a passing call under `say`, untouched under `allow`, the shipped default.
     A spawn goes through the family rule (wfd, wfg, h6), then the role check (mt1 R6), then, at
     a main thread's Agent or Task call alone, the launch check (nw4): in a session that keeps
     the sitting discipline and under `signal`, `ask` or `deny`, the room left to the line and
@@ -2579,6 +2781,19 @@ def instructions_loaded(payload: dict, env=None) -> dict:
     return {}
 
 
+def subagent_start(payload: dict, env=None) -> dict:
+    """Packet hw2-helper-rules H3: under the session's `helpers.wait` of `say` or `refuse`, the
+    rule as the helper's `additionalContext` and nothing else; {} under `allow` and on any fault,
+    which dispatch prints as nothing (QUIET_PASS). It writes nothing."""
+    try:
+        if _helper_wait_value(payload, os.environ if env is None else env) == "allow":
+            return {}
+    except Exception:                                   # noqa: BLE001  (H3: a fault is silent)
+        return {}
+    return {"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                   "additionalContext": HELPER_START}}
+
+
 HANDLERS = {
     "pre-tool-use": pre_tool_use,
     "post-tool-use": post_tool_use,
@@ -2593,6 +2808,7 @@ HANDLERS = {
     "post-model-switch": post_model_switch,
     "instructions-loaded": instructions_loaded,
     "subagent-stop": subagent_stop,
+    "subagent-start": subagent_start,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -2601,7 +2817,8 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
                  "PreCompact": pre_compact, "PostModelSwitch": post_model_switch,
-                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop})
+                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop,
+                 "SubagentStart": subagent_start})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
                     "post-model-switch", "PostModelSwitch",    # StopFailure: fire-and-forget
@@ -2611,7 +2828,8 @@ SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.
 # Either way, its pass prints nothing; its block still prints its decision.
-QUIET_PASS = frozenset({"pre-compact", "PreCompact"})
+# SubagentStart (hw2 H3) prints its rule and nothing under `allow` or on a fault.
+QUIET_PASS = frozenset({"pre-compact", "PreCompact", "subagent-start", "SubagentStart"})
 
 
 def dispatch(event: str) -> int:

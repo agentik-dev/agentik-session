@@ -104,7 +104,8 @@ RUN_KEYS = ("prompt", "model")
 POSTURES = ("off", "signal", "ask", "deny")
 # Packet nw3-helper-wait R1: `helpers` is a mapping whose one key is `wait`, one of these; the
 # PreToolUse hook reads it from the resolved `session` section (hooks.HELPER_WAIT).
-HELPERS_KEYS = ("wait",)
+# hw2 H4: `heavy`, a list of command patterns, none where unset (hooks.HELPER_HEAVY).
+HELPERS_KEYS = ("wait", "heavy")
 HELPER_WAITS = ("allow", "say", "refuse")
 # Packet nw4-launch-room R12: `launch` is a mapping of these; `narrow` of NARROW_KEYS; `kinds`
 # maps each kind to {median, p90}, minutes, the ninth decile at least the median (room.py).
@@ -609,6 +610,9 @@ def _validate(s: dict) -> None:
         raise ResolveError("helpers must be a mapping of " + ", ".join(HELPERS_KEYS))
     if hp.get("wait") not in HELPER_WAITS:
         raise ResolveError(f"helpers.wait must be one of {', '.join(HELPER_WAITS)}")
+    hv = hp.get("heavy", [])              # hw2 H4
+    if not isinstance(hv, list) or not all(isinstance(x, str) for x in hv):
+        raise ResolveError("helpers.heavy must be a list of strings")
     _validate_launch(s.get("launch"))     # packet nw4-launch-room R12
     cp = s.get("checkpoint_at")
     if not isinstance(cp, (int, float)) or isinstance(cp, bool) or not 0 < cp <= 1:
