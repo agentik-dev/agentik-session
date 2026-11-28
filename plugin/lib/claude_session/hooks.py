@@ -449,6 +449,15 @@ HELPER_WAIT_DENY = "agentik-session: denied a helper's wait."
 HELPER_WAIT_SAY = "agentik-session: a helper is never the wait."
 HELPER_HEAVY = ("agentik-session: this run is listed as heavy for this repo: queue it with "
                 "agentik session gate run")
+HELPER_START = (                        # hw2 H3: SubagentStart's one paragraph
+    "agentik-session: you are a helper, and a helper never waits. Each shell call of yours ends "
+    "inside two minutes. A run that may take longer is queued: agentik session gate run "
+    "<absolute dir> --label <row> -- <command>, or --check for the repo's full check; add "
+    "--within 100 to wait once. Write the job's id in your hand-back and end your turn: the "
+    "result reaches your coordinator. Start no background shell and no sleep loop. If the "
+    "engine moves a call of yours to the background, never wait on it and never kill by a "
+    "command's text: stop it with TaskStop and the id it printed if you have that tool, else "
+    "write that id in your hand-back. This overrides a brief that bars the verb.")
 CHAIN_WAIT = "--chain"                  # the chain stands for the id; no job id is an option
 _TOOL_WORDS = frozenset({"agentik-session", "claude-session", "claude_session"})
 _LOOP_WORDS = frozenset({"while", "until", "for"})
@@ -2693,6 +2702,19 @@ def instructions_loaded(payload: dict, env=None) -> dict:
     return {}
 
 
+def subagent_start(payload: dict, env=None) -> dict:
+    """Packet hw2-helper-rules H3: under the session's `helpers.wait` of `say` or `refuse`, the
+    rule as the helper's `additionalContext` and nothing else; {} under `allow` and on any fault,
+    which dispatch prints as nothing (QUIET_PASS). It writes nothing."""
+    try:
+        if _helper_wait_value(payload, os.environ if env is None else env) == "allow":
+            return {}
+    except Exception:                                   # noqa: BLE001  (H3: a fault is silent)
+        return {}
+    return {"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                   "additionalContext": HELPER_START}}
+
+
 HANDLERS = {
     "pre-tool-use": pre_tool_use,
     "post-tool-use": post_tool_use,
@@ -2707,6 +2729,7 @@ HANDLERS = {
     "post-model-switch": post_model_switch,
     "instructions-loaded": instructions_loaded,
     "subagent-stop": subagent_stop,
+    "subagent-start": subagent_start,
 }
 # The plugin's shim passes the event as Claude Code names it.
 HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
@@ -2715,7 +2738,8 @@ HANDLERS.update({"PreToolUse": pre_tool_use, "PostToolUse": post_tool_use,
                  "StopFailure": stop_failure,
                  "PostToolUseFailure": post_tool_use_failure, "PostToolBatch": post_tool_batch,
                  "PreCompact": pre_compact, "PostModelSwitch": post_model_switch,
-                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop})
+                 "InstructionsLoaded": instructions_loaded, "SubagentStop": subagent_stop,
+                 "SubagentStart": subagent_start})
 # Stop's stdout is read as a decision, so it gets none: exit 0, empty stdout, always.
 SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
                     "post-model-switch", "PostModelSwitch",    # StopFailure: fire-and-forget
@@ -2725,7 +2749,8 @@ SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
 # on claude 2.1.296, not documented. The "Hooks reference" (as of 2026-10-14) sends most
 # events' passing stdout to the debug log and does not list PreCompact as an exception.
 # Either way, its pass prints nothing; its block still prints its decision.
-QUIET_PASS = frozenset({"pre-compact", "PreCompact"})
+# SubagentStart (hw2 H3) prints its rule and nothing under `allow` or on a fault.
+QUIET_PASS = frozenset({"pre-compact", "PreCompact", "subagent-start", "SubagentStart"})
 
 
 def dispatch(event: str) -> int:

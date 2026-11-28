@@ -78,7 +78,7 @@ def _rows(box, app=config.APP):
 
 MAIN_FLOW = '''case "$1" in
   Stop|StopFailure|SubagentStop|InstructionsLoaded|PostToolUseFailure|PostToolBatch|PostModelSwitch) "$tool" hook "$1" >/dev/null 2>&1; exit 0 ;;
-  PreCompact) "$tool" hook "$1"; exit 0 ;;
+  PreCompact|SubagentStart) "$tool" hook "$1"; exit 0 ;;
 esac
 exec "$tool" hook "$1"
 '''
