@@ -624,18 +624,23 @@ def post_model_switch(payload: dict, env=None) -> dict:
 
 def _session_family(payload: dict, env) -> str | None:
     """The session's model family as its records give it: `model.json` and the meter's last
-    main-thread line. None for a helper's payload, with no record, or when the two disagree
-    (a switch one of them has not seen yet): the caller fails closed on None."""
+    main-thread line. None for a helper's payload, with no record, when the two disagree
+    (a switch one of them has not seen yet), or when finding or reading the records raises
+    (row nw7: a state home that cannot be expanded). None is a session not known, which
+    `_spawn_rule` treats as denying a Fable helper alone."""
     if payload.get("agent_id"):
         return None
-    sdir = _session_dir(payload.get("session_id"), env, fallback=False)
-    if sdir is None:
-        return None
     seen = set()
-    for name in (MODEL_REC, "meter.json"):
-        m = _load_json(sdir / name).get("model")
-        if isinstance(m, str) and m:
-            seen.add(workflowguard.family(m) or "other")
+    try:
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None:
+            return None
+        for name in (MODEL_REC, "meter.json"):
+            m = _load_json(sdir / name).get("model")
+            if isinstance(m, str) and m:
+                seen.add(workflowguard.family(m) or "other")
+    except Exception:                                   # noqa: BLE001  (nw7: as the caller)
+        return None
     return seen.pop() if len(seen) == 1 else None
 
 
