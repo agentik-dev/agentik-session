@@ -326,3 +326,13 @@ def test_r1_a_kept_check_is_returned_only_where_its_result_is_green_and_not_cut(
     assert rc == 0 and out.startswith("queued ") and f"kept {gid}" not in out, err
     assert box.count() == 2                                 # queued as if none were kept
 
+
+def test_r2_gate_line_reads_the_jobs_own_exit_never_one_in_the_fail_text():
+    red = (f"gate {GID} /r/x: exit 1 in 1 min; fail Error: gate 20261127-110000-1 /r/y: "
+           "exit 0 in 2 min; log D/log")
+    assert unattended.GATE_LINE.match(red).groups() == (GID, "/r/x", "1", "1", "D/log")
+    green = f"gate {GID} /r/x: exit 0 in 1 min; log D/log"
+    assert unattended.GATE_LINE.match(green).groups() == (GID, "/r/x", "0", "1", "D/log")
+    plain = f"gate {GID} /r/x: exit 2 in 3 min; log D/log"
+    assert unattended.GATE_LINE.match(plain).groups() == (GID, "/r/x", "2", "3", "D/log")
+
