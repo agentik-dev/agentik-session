@@ -179,19 +179,23 @@ def test_b4_the_disk_guard_reads_the_job_s_volume_and_status_names_the_largest(w
            {"mount": "/other", "free_gb": 900.0, "holds": ["home"]}]
     w.plan = {"a": (10, 0)}
     a = put(w, "one", "a")
-    stops = []
+    stops, asked = [], []
+
+    def largest(folder):                              # fix 1, F4: the reader's, not the runner's
+        asked.append(folder)
+        return "largest /x/cache 40 GB (idle)"
 
     def peek(world):
         if not stops and gate.result_path(w.root, a["id"]).exists() is False:
-            st = gate.status(w.root, w.t, alive=lambda pid: True, fx=w.fx())
+            st = gate.status(w.root, w.t, alive=lambda pid: True, fx=w.fx(), largest=largest)
             stops.append(gate.status_lines(st))
     w.hooks.append(peek)
-    gate.serve(w.root, w.fx(snapshot=snap_of(disks=low),
-                            largest=lambda root, folder: "largest /x/cache 40 GB (idle)"))
+    gate.serve(w.root, w.fx(snapshot=snap_of(disks=low)))
     r = w.result(a["id"])
     assert r["started"] == T0 + gate.HOLD_MAX and r["over"] == "disk"
-    assert f"waits on 10 GB free, at or under the floor of 25; largest /x/cache 40 GB (idle) " \
+    assert f"waits on 10 GB free, under the floor of 25; largest /x/cache 40 GB (idle) " \
            f"since {gate._hm(T0)}" in stops[0][0]
+    assert asked == [a["repo"]]
     fine = [{"mount": "/", "free_gb": 5.0, "holds": ["home"]},
             {"mount": "/w", "free_gb": 100.0, "holds": ["job"]}]
     b = put(w, "two", "a")
@@ -274,7 +278,8 @@ def test_b7_observe_holds_nothing_new_and_says_what_would_have(w):
         memory={"total_mb": 16384, "pressure": "warn"})))
     ra, rb = w.result(a["id"]), w.result(b["id"])
     assert ra["started"] == T0 and rb["started"] == T0 + 60
-    assert ra["would_hold"] == {"pressure": 0.0} and set(rb["would_hold"]) == {"budget", "pressure"}
+    assert ra["would_hold"] == {"pressure": "memory pressure warn"}
+    assert set(rb["would_hold"]) == {"budget", "pressure"}
     w.load = 99.0                                     # the load guard holds under both
     c = put(w, "three", "c")
     gate.serve(w.root, w.fx(snapshot=eight()))
@@ -309,3 +314,174 @@ def test_every_hold_ends_by_its_bound_or_the_queue_emptying(w, seed):
         r = w.result(e["id"])
         assert r["exit"] == 0 and r["cut"] is None
         assert r["started"] - T0 <= total + gate.HOLD_MAX + len(es) * gate.START_SETTLE
+
+
+@pytest.mark.parametrize("n,cfg", [(3, ""), (4, ""), (4, "gate:\n  load_hold_max: 300\n"
+                                                     "  pressure_hold_max: 600\n"
+                                                     "  disk_hold_max: 900\n")])
+def test_a1_a_guard_s_bound_counts_from_the_queueing_in_one_key(w, n, cfg):
+    """Fix 1, A1: one key's entries under a load, a pressure and a disk that never ease; each
+    starts by the largest guard's bound from its queueing, or when its key frees after it."""
+    if cfg:
+        w.user(cfg)
+    most = 900 if cfg else gate.HOLD_MAX
+    w.plan = {f"j{i}": (300, 0) for i in range(n)}
+    es = [put(w, "one", f"j{i}") for i in range(n)]
+    w.load = 100.0
+    gate.serve(w.root, w.fx(snapshot=snap_of(
+        memory={"total_mb": 262144, "pressure": "warn"},
+        disks=[{"mount": "/", "free_gb": 1.0, "holds": ["job"]}])))
+    ended = None
+    for e in es:
+        r = w.result(e["id"])
+        bound = max(e["queued"] + most, ended or 0)
+        assert bound <= r["started"] <= bound + gate.START_SETTLE
+        ended = r["ended"]
+    assert w.result(es[0]["id"])["over"] == "load, pressure, disk"
+    assert w.result(es[1]["id"])["started"] == w.result(es[0]["id"])["ended"]
+
+
+# ---- fix 1: the review's blocks and the amended rulings ------------------------------------
+
+def test_f1_f4_a_disk_hold_reads_no_consumer_in_the_runner_s_pass(w, monkeypatch):
+    """F1: a job's wall is cut on time with four entries held by the disk; the runner reads
+    no consumer (a `du` of up to 20 s each), the reader does."""
+    def slow(*a, **k):
+        w.t += 20.0
+        return []
+    monkeypatch.setattr(machine, "consumers", slow)
+    monkeypatch.setattr(gate, "_largest", lambda root, folder: slow(), raising=False)
+    w.load = 0.0
+    w.plan = {"long": (None, 0), **{f"j{i}": (10, 0) for i in range(4)}}
+    big = put(w, "r0", "long", wall=120)
+    w.t += 0.5
+    for i in range(4):
+        put(w, f"r{i + 1}", f"j{i}")
+    gate.serve(w.root, w.fx(snapshot=lambda paths: calm_snapshot(disks=[
+        {"mount": "/", "free_gb": 1.0 if w.spawned else 500.0, "holds": ["job"]}])))
+    r = w.result(big["id"])
+    assert r["exit"] == 124 and r["ended"] - r["started"] <= 120 + gate.GRACE + 3 * gate.POLL
+
+
+def test_f4_the_reader_names_the_largest_on_the_job_s_volume(tmp_path, monkeypatch):
+    rows = [{"path": "/elsewhere", "gb": 300.0, "kind": "idle"},
+            {"path": str(tmp_path), "gb": 17.0, "kind": "person"}]
+    seen = []
+    monkeypatch.setattr(machine, "consumers", lambda roots, **k: seen.append(roots) or rows)
+    monkeypatch.setattr(cli, "_machine_roots", lambda env, root: {"repos": ["/r"]})
+    monkeypatch.setattr(machine, "gocache", lambda probe: None)
+    largest = cli._disk_largest({}, tmp_path)
+    assert largest(str(tmp_path)) == f"largest {tmp_path} 17 GB (person)"
+    assert largest(str(tmp_path)) and len(seen) == 1            # one read a call of the reader
+
+
+def test_f2_a_rerun_is_not_held_by_the_load_guard(tmp_path):
+    from test_gate import World
+    from test_hw5_flake_rerun import HIGH, STOP, talking
+    w = World(tmp_path)
+    other = tmp_path / "repo2"
+    other.mkdir()
+    w.plan["a"], w.plan["b"] = (100, 1), (1200, 0)
+    a = gate.enqueue(w.root, str(w.repo), ["a", "x"], ENV, [], 5400, "", "s1", w.t, rerun=True)
+    b = gate.enqueue(w.root, str(other), ["b", "x"], ENV, [], 5400, "", None, w.t)
+    gate.serve(w.root, w.fx(idle=0, popen=talking(w, {"a": STOP}), loads=HIGH,
+                            load=lambda: 100.0, cores=lambda: 4))
+    r1, rb = w.result(a["id"]), w.result(b["id"])
+    assert r1["flake"] == gate.FLAKE and [x[0][0] for x in w.spawned] == ["a", "b", "a"]
+    r2 = w.result(r1["rerun"])
+    assert r2["started"] == rb["ended"] and r2["exit"] == 1 and "over" not in r2
+
+
+def test_a2_a_light_entry_passes_the_load_and_not_the_pressure(w):
+    w.load = 100.0
+    w.plan = {"s": (5, 0)}
+    s = gate.enqueue(w.root, w.dir("one"), ["s", "x"], ENV, [], 60, "", None, w.t, light=True)
+    gate.serve(w.root, w.fx())
+    assert w.result(s["id"])["started"] == T0 and "over" not in w.result(s["id"])
+    t = gate.enqueue(w.root, w.dir("one"), ["s", "x"], ENV, [], 60, "", None, w.t, light=True)
+    gate.serve(w.root, w.fx(snapshot=snap_of(memory={"total_mb": 65536, "pressure": "warn"})))
+    assert w.result(t["id"])["over"] == "pressure"
+
+
+def test_a3_a_landing_and_a_check_take_their_repo_s_check_class(w):
+    repo = w.dir("one")
+    land_cmd = [*gate.self_argv(), *gate.LAND_JOB, repo, "feature", "a" * 40, "/m"]
+    check_cmd = [*gate.self_argv(), *gate.CHECK_JOB, repo]
+    classes = [{"repo": "one", "command": "make check", "cpu": 12, "mem_mb": 9000}]
+    for cmd in (land_cmd, check_cmd):
+        assert gate.job_class(w.root, repo, cmd, classes) == {"cpu": 12, "mem_mb": 9000}
+    gid = "20261128-000000-1"
+    gate._mkdir(gate.result_path(w.root, gid).parent)
+    gate._write_private(gate.result_path(w.root, gid), json.dumps(
+        {"id": gid, "repo": repo, "key": gate.repo_key(repo), "command": check_cmd,
+         "seconds": 100.0, "cpu_seconds": 750.0, "peak_mb": 4000}))
+    assert gate.job_class(w.root, repo, land_cmd) == {"cpu": 8, "mem_mb": 5000}
+
+
+def test_a4_the_held_caller_is_told_what_holds_it(w, capsys):
+    e = put(w, "one", "a")
+    gate._write_private(gate.gate_dir(w.root) / gate.HOLDS, json.dumps(
+        {e["id"]: {"what": "load 14.50 at or over the ceiling 12.00", "since": T0}}))
+    import unittest.mock as um
+    with um.patch.object(gate, "wait", lambda root, gid, timeout=None: (1, None)):
+        assert cli._gate_within_wait(w.root, e, 5) == gate.QUEUED
+    line = capsys.readouterr().out.strip()
+    assert line.startswith(f"queued {e['id']}, held by load 14.50 at or over the ceiling "
+                           f"12.00 since {gate._hm(T0)}: write the id")
+
+
+def test_a5_the_verb_reads_the_gate_s_grants_and_the_floor_is_under(w):
+    w.plan = {"a": (100, 0)}
+    a = put(w, "one", "a", cpu=6, mem_mb=3000)
+    got = []
+    w.hooks.append(lambda world: got.append(gate.running_grants(w.root, alive=lambda p: True)))
+    gate.serve(w.root, w.fx())
+    assert [{"cpu": 6, "mem_mb": 3000}] in got
+    disk = lambda gb: machine.budget(calm_snapshot(disks=[{"mount": "/", "free_gb": gb,
+                                                          "holds": ["job"]}]), [], {},
+                                     {"cpu": 1, "mem_mb": 1}, volume="job")["parts"]["disk"]
+    assert disk(25.0)["state"] == "ok" and disk(24.9)["state"] == "held"
+    assert a["id"]
+
+
+def test_f3_an_entry_and_a_runner_json_that_cannot_be_read_raise_under_strict(w):
+    e = put(w, "one", "a")
+    f = gate._queue(w.root) / f"{e['id']}.json"
+    os.chmod(f, 0)
+    try:
+        assert gate.entries(w.root) == []                         # the pin's read, kept
+        with pytest.raises(gate.GateError):
+            gate.entries(w.root, strict=True)
+        assert cli._machine_gate(w.root, T0)[:2] == (None, None)
+    finally:
+        os.chmod(f, 0o600)
+    (gate.gate_dir(w.root) / "runner.json").write_text('{"pid": 1, "running": [{"id": "')
+    assert gate.runner_info(w.root) is None
+    with pytest.raises(gate.GateError):
+        gate.runner_info(w.root, strict=True)
+    f.write_text("{")
+    assert cli._machine_gate(w.root, T0)[:2] == (None, None)
+
+
+def test_f6_observe_names_each_reading_and_clamps_the_class(w):
+    w.load = 0.0
+    w.user("gate:\n  budget: observe\n")
+    w.plan = {"a": (600, 0), "b": (600, 0), "c": (100, 0)}
+    a, b = put(w, "one", "a", cpu=6, mem_mb=1000), put(w, "two", "b", cpu=6, mem_mb=1000)
+    c = put(w, "three", "c", cpu=100, mem_mb=1000)
+    gate.serve(w.root, w.fx(snapshot=eight()))
+    rb, rc = w.result(b["id"]), w.result(c["id"])
+    assert rb["would_hold"] == {"budget": "6 cores and 1000 MB asked, 2 and 11288 MB not granted"}
+    assert (rc["cpu"], rc["mem_mb"]) == (8, 1000)
+    env = next(kw["env"] for argv, kw, _ in w.spawned if argv[0] == "c")
+    assert (env["AGENTIK_CPUS"], env["GOMAXPROCS"]) == ("8", "8")
+
+
+def test_a5_fits_on_an_unreadable_gate_prints_the_hold_and_no_grant_ok(monkeypatch, capsys):
+    monkeypatch.setattr(machine, "snapshot", lambda paths=None, **k: calm_snapshot())
+    monkeypatch.setattr(cli, "_machine_roots", lambda env, root: {"home": "/h"})
+    monkeypatch.setattr(cli, "_machine_gate", lambda root, now: (
+        None, None, "the gate's state could not be read (x)"))
+    assert cli.main(["machine", "fits", "--cpu", "1", "--mem", "100"]) == 75
+    err = capsys.readouterr().err
+    assert err.startswith("the gate's state could not be read (x)\n") and "grant: ok" not in err

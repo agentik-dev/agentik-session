@@ -92,7 +92,9 @@ def test_w1_past_the_bound_it_says_queued_and_exits_75(box, monkeypatch):
         gate.result_path(box.root, g).write_text(json.dumps(
             {"id": g, "exit": 0, "cut": None, "seconds": 120.0, "key": key, "command": command}))
     rc, out, err = run("gate", "run", str(box.tree), "--within", "1", "--", *command)
-    assert (rc, out) == (75, f"queued {queued_id(err)}, est 2.0 min: {WORDS}\n")
+    gid2 = queued_id(err)                     # hw6 fix 1, A4: the first holds its key
+    assert rc == 75 and out.startswith(f"queued {gid2}, est 2.0 min, held by key ") \
+        and out.endswith(f": {WORDS}\n"), out
 
 
 # ---- W2: the result's three keys -----------------------------------------------------------

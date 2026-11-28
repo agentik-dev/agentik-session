@@ -2007,7 +2007,8 @@ def cmd_gate(args) -> int:
         return 0
     if verb == "status":
         gate.spawn_serve(root)
-        st = gate.status(root, time.time(), repo=getattr(args, "repo", None))
+        st = gate.status(root, time.time(), repo=getattr(args, "repo", None),
+                         largest=_disk_largest(env, root))      # hw6 fix 1, F1 and F4
         est = gate.entry_estimates(root)
         print(json.dumps(plug.envelope("gate", {**st, "est": est}), indent=2) if args.json
               else "\n".join(gate.status_lines(st, est)))
@@ -2077,6 +2078,48 @@ def cmd_gate(args) -> int:
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
 
 
+HELD_MOST = 120             # the bytes of a hold `--within`'s queued line names (hw6 fix 1, A4)
+
+
+def _held_by(root, gid: str) -> str | None:
+    """What holds a queued entry, in `gate status`'s words, cut to `HELD_MOST`; None where
+    nothing does or the gate cannot be read."""
+    from . import gate
+    try:
+        st = gate.status(root, time.time())
+    except Exception:                                   # noqa: BLE001 - the line goes on
+        return None
+    why = next((x.get("wait") for x in st.get("queued") or [] if x.get("id") == gid), None)
+    if not isinstance(why, str) or not why:
+        return None
+    return why if len(why.encode()) <= HELD_MOST else gate._label(why, HELD_MOST)
+
+
+def _disk_largest(env, root):
+    """hw6 fix 1, F1 and F4: a disk hold's reader names its volume's largest consumer from the
+    roots `machine status` sizes, read at most once a call, in the reader's own process."""
+    from . import machine
+    rows: list = []
+
+    def largest(folder):
+        if not rows:
+            roots = _machine_roots(env, root)
+            roots.setdefault("gocache", machine.gocache(machine.default_probe()))
+            rows.append(machine.consumers(roots))
+        try:
+            dev = os.stat(folder).st_dev
+        except (OSError, TypeError, ValueError):
+            return None
+        for r in rows[0]:
+            try:
+                if r.get("gb") is not None and os.stat(r["path"]).st_dev == dev:
+                    return f"largest {r['path']} {r['gb']:g} GB ({r['kind']})"
+            except (OSError, KeyError, TypeError, ValueError):
+                continue
+        return None
+    return largest
+
+
 def _gate_within(args) -> int | None:
     """hw1 W1: `--within`'s seconds, a whole number from 1 to `gate.WITHIN_MOST`; anything else,
     or `--within` beside `--wait`, refused with 2 before anything is queued."""
@@ -2105,7 +2148,9 @@ def _gate_within_wait(root, e: dict, within: int) -> int:
     if rc == 1:
         got = gate.key_estimates(root, e.get("command")).get(gate.entry_key(e))
         est = f", est {gate.est_text(got[0])} min" if got is not None else ""
-        print(f"queued {gid}{est}: write the id in your hand-back and end your turn",
+        why = _held_by(root, gid)                                # hw6 fix 1, A4
+        held = f", held by {why}" if why else ""
+        print(f"queued {gid}{est}{held}: write the id in your hand-back and end your turn",
               flush=True)
         return gate.QUEUED
     print(gate.wait_line(result), flush=True)
@@ -2967,9 +3012,9 @@ def _machine_lines(doc, home) -> list[str]:
 def cmd_machine(args) -> int:
     """`agentik session machine status|fits|reclaim` (packet hw3-machine, M6): the module's
     snapshot joined with the gate, which the verb reads and the module never does. Each
-    running job is a grant of the default class. `fits` exits 0 or 75; `reclaim` with no
-    `--dry-run` exits 2, since it is not built."""
-    from . import machine
+    running job is the grant the gate's runner names (hw6 fix 1, A5). `fits` exits 0 or 75;
+    `reclaim` with no `--dry-run` exits 2, since it is not built."""
+    from . import gate, machine
     env = dict(os.environ)
     try:
         os.getcwd()
@@ -3004,7 +3049,10 @@ def cmd_machine(args) -> int:
         return 0
     snap = machine.snapshot({"home": roots["home"], "state": str(root)})
     running, queued, unread = _machine_gate(root, time.time())
-    grants = [dict(machine.DEFAULT_CLASS) for _ in range(running or 0)]
+    try:                                                # hw6 fix 1, A5: the gate's own grants
+        grants = [] if unread else gate.running_grants(root, strict=True)
+    except Exception as err:                            # noqa: BLE001 - the meter goes on
+        grants, unread = [], f"the gate's state could not be read ({err})"
     held = {"ok": False, "why": unread} if unread else None
     if args.machine_verb == "fits":
         b = machine.budget(snap, grants, _machine_config(env),
@@ -3014,6 +3062,9 @@ def cmd_machine(args) -> int:
         print(fit["why"], file=out)
         for name in machine.PARTS:                      # hw6 R3: the same parts as the gate
             part = b["parts"][name]
+            if name == "grant" and held:                # fix 1, A5: no grant read on no gate
+                print("grant: unread: the gate's grants are not known", file=out)
+                continue
             print(f"{name}: {part['state']}: {part['why']}", file=out)
         return 0 if fit["ok"] else 75
     b = machine.budget(snap, grants, _machine_config(env), dict(machine.DEFAULT_CLASS))

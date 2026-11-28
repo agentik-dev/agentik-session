@@ -198,7 +198,8 @@ def test_runner_json_holds_its_keys_while_an_entry_runs(w):
     running = [s for s in seen if s["running"]]
     assert running and list(running[0]) == list(gate.RUNNER_KEYS)
     assert (running[0]["running"], running[0]["pid"]) == \
-        ([{"id": a["id"], "pgid": w.spawned[0][2].pid}], 777)
+        ([{"id": a["id"], "pgid": w.spawned[0][2].pid,
+           "grant": {"cpu": 4, "mem_mb": 2048}}], 777)             # hw6 fix 1, A5
     assert any(s["running"] == [] for s in seen)
 
 

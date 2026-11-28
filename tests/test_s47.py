@@ -445,10 +445,11 @@ def test_s47_runner_json_lists_the_set(w):
     gate.serve(w.root, w.fx())
     assert all(list(s) == list(gate.RUNNER_KEYS) == ["pid", "since", "running"] for s in seen)
     pa, pb = w.spawned[0][2].pid, w.spawned[1][2].pid
-    assert {"id": a["id"], "pgid": pa} in seen[0]["running"]
-    assert any(s["running"] == [{"id": a["id"], "pgid": pa}, {"id": b["id"], "pgid": pb}]
+    g = {"grant": {"cpu": 4, "mem_mb": 2048}}          # hw6 fix 1, A5: each job's own grant
+    assert {"id": a["id"], "pgid": pa, **g} in seen[0]["running"]
+    assert any(s["running"] == [{"id": a["id"], "pgid": pa, **g}, {"id": b["id"], "pgid": pb, **g}]
                for s in seen)
-    assert any(s["running"] == [{"id": b["id"], "pgid": pb}] for s in seen)
+    assert any(s["running"] == [{"id": b["id"], "pgid": pb, **g}] for s in seen)
     assert any(s["running"] == [] for s in seen)
     assert all(s["pid"] == 777 for s in seen)
 
@@ -850,8 +851,9 @@ def test_s47_a1_the_id_is_written_before_the_spawn(w):
         seen.append(gate.runner_info(w.root)["running"])
         return w.popen(argv, **kw)
     gate.serve(w.root, w.fx(popen=popen))
+    g = {"grant": {"cpu": 4, "mem_mb": 2048}}          # hw6 fix 1, A5
     assert seen == [[{"id": a["id"], "pgid": None}],
-                    [{"id": a["id"], "pgid": 4000}, {"id": b["id"], "pgid": None}]]
+                    [{"id": a["id"], "pgid": 4000, **g}, {"id": b["id"], "pgid": None}]]
 
 
 @pytest.mark.parametrize("spawned", [False, True], ids=["before the spawn", "after the spawn"])

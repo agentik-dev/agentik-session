@@ -46,6 +46,9 @@ def verb(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_machine_roots", lambda env, root: dict(roots))
     monkeypatch.setattr(cli, "_machine_gate", lambda root, now: (
         (None, None, state["unread"]) if state["unread"] else (state["running"], 2, None)))
+    from claude_session import gate                    # hw6 fix 1, A5: the gate's own grants
+    monkeypatch.setattr(gate, "running_grants", lambda root, **kw: [
+        state.get("grant", dict(machine.DEFAULT_CLASS))] * (state["running"] or 0))
     return state
 
 

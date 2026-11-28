@@ -544,10 +544,10 @@ def _parts(snap, b, request, ceiling, floor, disk) -> dict:
                                 + (pressure if isinstance(pressure, str) else _short(pressure)))
     if disk is None:
         out["disk"] = _part("unread", None, "the free disk is unknown")
-    elif disk <= floor:
-        out["disk"] = _part("held", disk, f"{disk:g} GB free, at or under the floor of {floor:g}")
+    elif disk < floor:                                  # fix 1, A5: under the floor, not at it
+        out["disk"] = _part("held", disk, f"{disk:g} GB free, under the floor of {floor:g}")
     else:
-        out["disk"] = _part("ok", disk, f"{disk:g} GB free over {floor:g}")
+        out["disk"] = _part("ok", disk, f"{disk:g} GB free, the floor {floor:g}")
     return out
 
 
@@ -585,13 +585,13 @@ def _fit(snap, b, request, ceiling, floor) -> dict:
     disk = b["disk_free_gb"]
     if disk is None:
         no.append("the free disk is unknown")
-    elif disk <= floor:
-        no.append(f"{disk:g} GB free, at or under the floor of {floor:g}")
+    elif disk < floor:
+        no.append(f"{disk:g} GB free, under the floor of {floor:g}")
     if no:
         return {"ok": False, "why": "; ".join(no)}
     return {"ok": True, "why": f"fits: {cpu:g} of {b['free']['cpu']:g} cores and {need:g} of "
                                f"{b['free']['mem_mb']:g} MB free, load {load:.2f} under "
-                               f"{ceiling:.2f}, pressure normal, {disk:g} GB free over {floor:g}"}
+                               f"{ceiling:.2f}, pressure normal, {disk:g} GB free, the floor {floor:g}"}
 
 
 # ---- the disk's known consumers ------------------------------------------------------------

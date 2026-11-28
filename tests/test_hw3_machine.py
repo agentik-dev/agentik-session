@@ -293,7 +293,7 @@ def test_a_request_that_fits():
     (_snap(load=None), {}, [], "the load is unknown"),
     (_snap(pressure="warn"), {}, [], "memory pressure warn"),
     (_snap(pressure="unknown"), {}, [], "memory pressure unknown"),
-    (_snap(free_gb=25.0), {}, [], "25 GB free, at or under the floor of 25"),
+    (_snap(free_gb=24.5), {}, [], "24.5 GB free, under the floor of 25"),     # hw6 fix 1, A5
     (_snap(free_gb=40.0), {"disk_floor_gb": 50}, [], "the floor of 50"),
     (_snap(), {}, [{"cpu": 14, "mem_mb": 0}], "2 and"),
     (_snap(), {}, [{"cpu": 0, "mem_mb": 114000}], "MB not granted"),

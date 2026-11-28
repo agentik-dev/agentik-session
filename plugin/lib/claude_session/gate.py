@@ -271,7 +271,8 @@ def _write_private(path: Path, text: str) -> None:
 
 def _load(path: Path, strict: bool = False) -> dict | None:
     """The file's mapping, or None. hw6 B6: with `strict`, a file that is there and cannot be
-    read raises GateError, so an unreadable gate is told from an empty one."""
+    read, or that is no JSON mapping (fix 1, F3), raises GateError, so an unreadable gate is
+    told from an empty one."""
     try:
         d = json.loads(Path(path).read_text())
     except FileNotFoundError:
@@ -280,8 +281,12 @@ def _load(path: Path, strict: bool = False) -> dict | None:
         if strict:
             raise GateError(f"{path}: {err.strerror or err}") from err
         return None
-    except ValueError:
+    except ValueError as err:
+        if strict:
+            raise GateError(f"{path}: it does not parse ({err})") from err
         return None
+    if strict and not isinstance(d, dict):
+        raise GateError(f"{path}: it is no mapping")
     return d if isinstance(d, dict) else None
 
 
@@ -874,14 +879,21 @@ def _repo_names(real: str) -> set:
 
 def _command_forms(command) -> set:
     """A command's words joined by one space, as given and with the path dropped from its
-    name, as `helpers.heavy` reads one (hooks._heavy_forms); a check job reads `make check`."""
+    name, as `helpers.heavy` reads one (hooks._heavy_forms); a check job and a landing's job
+    read `make check` (fix 1, A3)."""
     words = [w for w in command or [] if isinstance(w, str)]
     if not words:
         return set()
     out = {" ".join(words), " ".join([os.path.basename(words[0]), *words[1:]])}
-    if check_worktree(words) is not None:
+    if _check_like(words):
         out.add("make check")
     return out
+
+
+def _check_like(command) -> bool:
+    """Fix 1, A3: a check job's or a landing's command, each a `make check` of its repo."""
+    return isinstance(command, list) and (check_worktree(command) is not None
+                                          or land_branch(command) is not None)
 
 
 def class_match(classes, real: str, command) -> dict | None:
@@ -902,11 +914,15 @@ def class_match(classes, real: str, command) -> dict | None:
 def history_class(root, real: str, command) -> dict:
     """hw6 B1: from the last `HISTORY` results of this folder and command, newest first, the
     largest of their CPU seconds over their run time, rounded up, and the largest peak plus a
-    quarter; each part only where a result holds it."""
-    rows = []
+    quarter; each part only where a result holds it. Fix 1, A3: a check job's or a landing's
+    reads every check job and landing of its repo's key."""
+    rows, key = [], repo_key(real) if _check_like(list(command)) else None
     for n in _result_names(root)[:EST_SCAN]:
         r = _load(result_path(root, n))
-        if r and r.get("repo") == real and r.get("command") == list(command):
+        if not r:
+            continue
+        if (r.get("repo") == real and r.get("command") == list(command)) if key is None \
+                else (r.get("key") == key and _check_like(r.get("command"))):
             rows.append(r)
             if len(rows) == HISTORY:
                 break
@@ -1001,7 +1017,8 @@ def open_entry(root, repo, command, tree, alive=_alive) -> tuple[dict, str] | No
 
 def entries(root, strict: bool = False) -> list[dict]:
     """The queue, oldest (lowest counter) first; a file that does not parse is skipped. With
-    `strict` (hw6 B6) a queue or a gate folder that cannot be read raises GateError."""
+    `strict` (hw6 B6) a queue, a gate folder or an entry file (fix 1, F3) that cannot be read
+    or parsed raises GateError."""
     out = []
     if strict:
         _listdir(gate_dir(root), strict)
@@ -1010,7 +1027,7 @@ def entries(root, strict: bool = False) -> list[dict]:
         stem = name[:-5] if name.endswith(".json") else ""
         if not ID.match(stem):
             continue
-        e = _load(_queue(root) / name)
+        e = _load(_queue(root) / name, strict)
         if e is not None and e.get("id") == stem:
             out.append(e)
     return sorted(out, key=lambda e: _counter(e["id"]))
@@ -1031,6 +1048,22 @@ def _pairs(r: dict | None) -> list[tuple]:
         return []
     return [(x["id"], x.get("pgid")) for x in run
             if isinstance(x, dict) and isinstance(x.get("id"), str) and ID.match(x["id"])]
+
+
+def running_grants(root, alive=_alive, strict: bool = False) -> list[dict]:
+    """Fix 1, A5: each running job's grant, as the live runner's runner.json names it, else
+    its entry's class, else the default; [] with no live runner."""
+    r = runner_info(root, strict)
+    if not (r and alive(r.get("pid"))):
+        return []
+    run = r.get("running") if isinstance(r.get("running"), list) else []
+    grant = {x["id"]: x.get("grant") for x in run if isinstance(x, dict) and "id" in x}
+    byid = {e["id"]: e for e in entries(root, strict)}
+    out = []
+    for gid, _ in _pairs(r):
+        g = grant.get(gid)
+        out.append({k: g[k] for k in CLASS_KEYS} if _class_ok(g) else entry_class(byid.get(gid, {})))
+    return out
 
 
 def _running_ids(root, alive=_alive, strict: bool = False) -> list[str]:
@@ -1222,13 +1255,6 @@ def _sample(pgids) -> dict:
     return machine.group_rss_mb(pgids)
 
 
-def _largest(root, folder) -> str | None:
-    """hw6 B4: the largest of the disk's known consumers for a disk hold's line, one read."""
-    rows = machine.consumers({"gate": str(gate_dir(root)), "repos": [top_level(folder)]})
-    r = next((x for x in rows if x.get("gb") is not None), None)
-    return f"largest {r['path']} {r['gb']:g} GB ({r['kind']})" if r else None
-
-
 def _reap_child(proc) -> tuple[int | None, float | None]:
     """One look at a child that never waits (hw1 W2): (its code, as `Popen.poll` gives it, or
     None while it runs; its user plus system seconds from `wait4`, its waited-for descendants
@@ -1269,7 +1295,6 @@ class Fx:
     reap: Callable = _reap_child                        # (code, cpu seconds) of one look (hw1)
     snapshot: Callable = lambda paths: _snapshot(paths)  # the machine for a start (hw6)
     sample: Callable = lambda pgids: _sample(pgids)      # {pgid: MB} of the running (hw6 B2)
-    largest: Callable = lambda root, folder: _largest(root, folder)   # a disk hold's (B4)
 
 
 
@@ -1303,16 +1328,13 @@ class _Set:
     last_start: float | None = None
     seen: dict = field(default_factory=dict)
     budget_since: dict = field(default_factory=dict)    # hw6 B3: id -> first held by it
-    guard_since: dict = field(default_factory=dict)     # B4: (id, guard) -> first held by it
-    would: dict = field(default_factory=dict)           # B7: (id, part) -> first it would hold
-    largest: dict = field(default_factory=dict)         # B4: id -> its disk hold's consumer
     snaps: dict = field(default_factory=dict)           # folder -> (at, snapshot)
     last_sample: float | None = None
     holds: dict | None = None                           # what holds.json was last written as
 
 
 def _runner_write(root, fx: Fx, s: _Set) -> None:
-    run = [{"id": c.e["id"], "pgid": c.proc.pid} for c in s.running]
+    run = [{"id": c.e["id"], "pgid": c.proc.pid, "grant": c.e.get("grant")} for c in s.running]
     if s.starting is not None:
         run.append({"id": s.starting, "pgid": None})
     _write_private(gate_dir(root) / "runner.json",
@@ -1849,7 +1871,7 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     for e, why in _holds(es, running):
         if why is not None or _bar(cfg, fx, e, running, s.last_start, now, memo) is not None:
             continue
-        if behind is not None:                        # hw6 B3: an entry held ten minutes
+        if behind is not None and not e.get("rerun_of"):     # B3; fix 1, F2: a rerun is hw5's
             holds[e["id"]] = {"what": f"the budget, behind {behind[0]}", "since": behind[1]}
             continue
         held = _admit(root, fx, cfg, e, s, now, memo)
@@ -1859,6 +1881,8 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
             return True
         holds[e["id"]] = {"what": "; ".join(w for _, w, _ in held),
                           "since": min(t for _, _, t in held)}
+        if any(k == "disk" for k, _, _ in held):      # fix 1, F1: its reader names the largest
+            holds[e["id"]]["disk"] = True
         first = next((t for k, _, t in held if k == "budget"), None)
         if first is not None and now - first >= BUDGET_PASS:
             behind = (e["id"], first)
@@ -1867,13 +1891,10 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
 
 
 def _forget(s: _Set, ids: set) -> None:
-    """The runner's memory of holds, kept only for the entries still queued."""
-    for d in (s.budget_since, s.largest):
-        for k in [k for k in d if k not in ids]:
-            del d[k]
-    for d in (s.guard_since, s.would):
-        for k in [k for k in d if k[0] not in ids]:
-            del d[k]
+    """The runner's memory of the budget's holds, kept only for the entries still queued; a
+    guard keeps none, since its bound counts from the entry's `queued` (fix 1, A1)."""
+    for k in [k for k in s.budget_since if k not in ids]:
+        del s.budget_since[k]
 
 
 def _write_holds(root, s: _Set, holds: dict) -> None:
@@ -1914,11 +1935,15 @@ def _snap_for(fx: Fx, s: _Set, folder, now) -> dict:
 
 def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
     """hw6 B3, B4, B7: None where `e` may start now, its grant kept on it, else what holds it,
-    [(part, why, since)]. The budget (`grant`) holds under `hold` until it fits; each guard
-    holds one entry for its bound at most (`gate.<guard>_hold_max`), then is passed over and
-    named in `over`; a part whose reading is a fault holds nothing and is named in
-    `guard_unread`. Under `observe` the budget, the pressure and the disk hold nothing and
-    `would_hold` says what would have held and for how long; the load holds under both."""
+    [(part, why, since)]. The budget (`grant`) holds under `hold` until it fits. Fix 1, A1: a
+    guard holds an entry only while less than its bound (`gate.<guard>_hold_max`) has passed
+    since the entry's `queued`, then is passed over and named in `over`; the time is on disk,
+    so a restart starts no hold over. A part whose reading is a fault holds nothing and is
+    named in `guard_unread`. Under `observe` the budget, the pressure and the disk hold
+    nothing and `would_hold` names each with its reading at this pass (F6); the load holds
+    under both. A rerun is left to hw5's bars by the budget and the load (F2), and a light
+    entry by the load (A2). The grant is the class clamped to the budget (N4). The runner
+    reads no disk consumer: the reader that prints the hold does (F1)."""
     gid = e["id"]
     snap = dict(_snap_for(fx, s, e.get("repo"), now))
     if "load" not in memo:
@@ -1930,40 +1955,36 @@ def _admit(root, fx: Fx, cfg: dict, e: dict, s: _Set, now, memo):
     cls = entry_class(e)
     parts = machine.budget(snap, grants, _machine_config(cfg, fx), cls, volume="job")["parts"]
     mode = cfg.get("budget", "hold")
+    q = e.get("queued")
+    age = now - q if _number(q) and _number(now) else None
+    skip = {"grant", "load"} if e.get("rerun_of") else {"load"} if is_light(e) else set()
     held, unread, over, would = [], [], [], {}
     for name in machine.PARTS:
         part, word = parts[name], "budget" if name == "grant" else name
+        if name in skip:
+            continue
         if part["state"] == "unread":
             unread.append(word)
             continue
         if part["state"] != "held":
             continue
         if name != "load" and mode != "hold":
-            first = s.would.setdefault((gid, word), now)
-            would[word] = round(now - first, 1)
+            would[word] = part["why"]
             continue
         if name == "grant":
             held.append((word, part["why"], s.budget_since.setdefault(gid, now)))
             continue
-        first = s.guard_since.setdefault((gid, word), now)
-        if now - first >= cfg.get(f"{name}_hold_max", HOLD_MAX):
+        if age is None or age >= cfg.get(f"{name}_hold_max", HOLD_MAX):
             over.append(word)
             continue
-        why = part["why"]
-        if name == "disk":
-            if gid not in s.largest:
-                try:
-                    s.largest[gid] = fx.largest(root, e.get("repo"))
-                except Exception:                       # noqa: BLE001 (the line goes on)
-                    s.largest[gid] = None
-            why += f"; {s.largest[gid]}" if s.largest[gid] else ""
-        held.append((word, why, first))
+        held.append((word, part["why"], q))
     if held:
         return held
-    g = parts["grant"]
-    e["grant"] = {"cpu": max(1, int(round(g["reading"]["cpu"]))),
-                  "mem_mb": max(1, int(round(g["reading"]["mem_mb"])))} \
-        if g["state"] == "ok" else cls
+    got = parts["grant"]["reading"]
+    e["grant"] = {"cpu": max(1, int(round(got["cpu"]))),
+                  "mem_mb": max(1, int(round(got["mem_mb"])))} \
+        if isinstance(got, dict) and _number(got.get("cpu")) and _number(got.get("mem_mb")) \
+        else cls
     e.update({k: ", ".join(v) for k, v in (("over", over), ("guard_unread", unread)) if v})
     if would:
         e["would_hold"] = would
@@ -2370,7 +2391,7 @@ def _wait_text(why) -> str | None:
 
 
 def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = None,
-           strict: bool = False) -> dict:
+           strict: bool = False, largest=None) -> dict:
     """{running, queued, done, runner}: the entries running, a list; the rest in order, each
     with its key and its wait; the last five results newest first; the live runner or None.
     The wait is the runner's own rule, from `_holds` and `_over`; the load is read only for
@@ -2384,7 +2405,9 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
     A `running` or `queued` item ends with the entry's `caller` and `queued`, null where the
     entry holds none (packet su4, R1). hw6 B4: an entry the budget or a guard holds says what
     and since when, from the runner's holds.json. B6: with `strict`, a gate that cannot be
-    read raises GateError and never reads as empty."""
+    read raises GateError and never reads as empty. Fix 1, F1 and F4: `largest`, the reader's
+    own call of a folder to its volume's largest consumer, names it after a disk hold, once a
+    folder."""
     fx = fx or Fx()
     r = runner_info(root, strict)
     live = r if r and alive(r.get("pid")) else None
@@ -2412,7 +2435,7 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
             seen[r] = repo_path(r) == want
         return seen[r]
     waiting = pick_order([e for e in es if e["id"] not in run], now)     # hw5 F1
-    queued, memo, last, cfg = [], {}, None, None
+    queued, memo, last, cfg, big = [], {}, None, None, {}
     them = [byid.get(g, {"id": g}) for g in run]
     for i, (e, why) in enumerate(_holds(waiting, them), 1):
         if why is None and running:
@@ -2423,7 +2446,16 @@ def status(root, now, alive=_alive, fx: Fx | None = None, repo: str | None = Non
         wait = _wait_text(why)
         h = held.get(e["id"]) if why is None else None
         if isinstance(h, dict) and isinstance(h.get("what"), str):        # hw6 B4
-            wait = h["what"] + (f" since {_hm(h['since'])}" if _number(h.get("since")) else "")
+            wait = h["what"]
+            if h.get("disk") is True and largest is not None:
+                folder = e.get("repo")
+                if folder not in big:
+                    try:
+                        big[folder] = largest(folder)
+                    except Exception:                   # noqa: BLE001 (the line goes on)
+                        big[folder] = None
+                wait += f"; {big[folder]}" if big[folder] else ""
+            wait += f" since {_hm(h['since'])}" if _number(h.get("since")) else ""
         queued.append({"id": e["id"], "repo": e.get("repo"), "position": i, "lock": _locked(e),
                        "label": e.get("label") or "", "key": entry_key(e),
                        "wait": wait, "caller": e.get("caller"),

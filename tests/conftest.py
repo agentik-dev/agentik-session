@@ -115,7 +115,6 @@ def temp_state_roots(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(gate, "_load_avg", lambda: 0.0)
     monkeypatch.setattr(gate, "_snapshot", lambda paths: calm_snapshot())
     monkeypatch.setattr(gate, "_sample", lambda pgids: {})
-    monkeypatch.setattr(gate, "_largest", lambda root, folder: None)
     return home
 
 
