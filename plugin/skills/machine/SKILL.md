@@ -19,9 +19,9 @@ space, the gate's running and queued jobs and the three largest consumers.
 `agentik session machine fits --cpu N --mem MB` exits 0 where a run fits now,
 else 75 with the why.
 
-- Run a build through `agentik session gate run`; it holds every `make` here.
-  Say a heavy job's size: `--cpu N --mem MB` (a JVM's heap with `--jvm`); the
-  job reads its grant as `AGENTIK_CPUS` and `AGENTIK_MEM_MB`.
+- Run a build through `agentik session gate run`; it holds every `make`.
+  Size a heavy job: `--cpu N --mem MB` (a JVM's heap: `--jvm`); it reads
+  its grant in `AGENTIK_CPUS`, `AGENTIK_MEM_MB`.
 - Never clean by hand: `agentik session machine reclaim --dry-run` lists what
   is safe to free; anything marked `person` is the owner's.
 - Never loop on a `sleep` to wait for room: queue the run and hand back.
