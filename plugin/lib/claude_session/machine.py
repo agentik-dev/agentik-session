@@ -103,6 +103,21 @@ def _num(text):
     return x if math.isfinite(x) else None
 
 
+def _digits(word):
+    """ASCII digits alone: `str.isdigit` is true of `"²"`, which `int()` refuses."""
+    return isinstance(word, str) and word.isascii() and word.isdigit()
+
+
+def _finite(x):
+    """`x` where it is an int or a float, no bool, and finite; else None."""
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return None
+    try:
+        return x if math.isfinite(x) else None
+    except OverflowError:                       # an int past a float's range
+        return None
+
+
 def parse_sysctl(text) -> dict:
     """`sysctl a b` output, `name: value` a line, as {name: value}; a line that is no pair is
     skipped (sysctl names an unknown name on stderr and goes on)."""
@@ -129,7 +144,7 @@ def parse_vm_stat(text) -> dict:
         if not sep or not name.startswith("Pages "):
             continue
         n = value.strip().rstrip(".")
-        if n.isdigit():
+        if _digits(n):
             out[name[len("Pages "):].strip().lower().replace(" ", "_")] = int(n)
     return out
 
@@ -140,7 +155,7 @@ def parse_meminfo(text) -> dict:
     for line in (text or "").splitlines():
         name, sep, value = line.partition(":")
         words = value.split()
-        if sep and words and words[0].isdigit():
+        if sep and words and _digits(words[0]):
             out[name.strip()] = int(words[0])
     return out
 
@@ -165,7 +180,7 @@ def parse_df(text) -> list:
     out = []
     for line in (text or "").splitlines()[1:]:
         words = line.split(None, 5)
-        if len(words) < 6 or not all(w.isdigit() for w in words[1:4]):
+        if len(words) < 6 or not all(_digits(w) for w in words[1:4]):
             continue
         out.append({"mount": words[5], "total_kb": int(words[1]), "used_kb": int(words[2]),
                     "free_kb": int(words[3])})
@@ -188,7 +203,7 @@ def parse_ps(text) -> dict:
     kb = dict.fromkeys(PROCESS_NAMES, 0)
     for line in (text or "").splitlines():
         words = line.strip().split(None, 1)
-        if len(words) != 2 or not words[0].isdigit():
+        if len(words) != 2 or not _digits(words[0]):
             continue
         kind = _proc_kind(words[1])
         if kind:
@@ -205,7 +220,7 @@ def parse_du(text):
     if not lines:
         return None
     word = lines[-1].split()[0]
-    return int(word) if word.isdigit() else None
+    return int(word) if _digits(word) else None
 
 
 def linux_pressure(psi: dict, meminfo: dict) -> str:
@@ -262,9 +277,9 @@ def _cores(probe, plat, ctl, faults):
         faults.append("cores: the count did not answer")
     if plat == "darwin":
         p, e = ctl.get("hw.perflevel0.physicalcpu"), ctl.get("hw.perflevel1.physicalcpu")
-        if p and p.isdigit():
+        if _digits(p):
             cores["performance"] = int(p)
-            cores["efficiency"] = int(e) if e and e.isdigit() else 0
+            cores["efficiency"] = int(e) if _digits(e) else 0
         else:
             faults.append("cores: hw.perflevel0.physicalcpu did not answer")
     return cores
@@ -282,7 +297,7 @@ def _load(probe, faults):
 def _memory_mac(probe, ctl, faults):
     mem = {"total_mb": None, "free_mb": None, "pressure": "unknown"}
     total = ctl.get("hw.memsize")
-    if total and total.isdigit():
+    if _digits(total):
         mem["total_mb"] = int(total) // MB
     else:
         faults.append("memory: hw.memsize did not answer")
@@ -294,7 +309,7 @@ def _memory_mac(probe, ctl, faults):
     else:
         faults.append("memory: vm_stat did not answer")
     level = ctl.get("kern.memorystatus_vm_pressure_level")
-    if level and level.isdigit() and int(level) in _MAC_PRESSURE:
+    if _digits(level) and int(level) in _MAC_PRESSURE:
         mem["pressure"] = _MAC_PRESSURE[int(level)]
     else:
         faults.append("memory: kern.memorystatus_vm_pressure_level did not answer")
@@ -372,8 +387,22 @@ def snapshot(paths=None, probe=None, platform=None) -> dict:
 
 # ---- the budget, pure ----------------------------------------------------------------------
 
-def _amount(x):
-    return x if isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 else 0
+def _short(x):
+    return repr(x)[:40]
+
+
+def _reading(x, name, unread):
+    """`x` where it is a finite number of 0 or more; else None, and `name` in `unread`."""
+    v = _finite(x)
+    if v is None or v < 0:
+        unread.append(f"{name} {_short(x)}")
+        return None
+    return v
+
+
+def _part(d, key):
+    v = d.get(key) if isinstance(d, dict) else None
+    return v if isinstance(v, dict) else {}
 
 
 def budget(snapshot, grants, config=None, request=None) -> dict:
@@ -382,31 +411,64 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
     not granted, the 1-minute load is under the ceiling, the pressure is `normal` and the
     least free disk is over the floor. A request over the whole budget is clamped to it and
     fits only with no grant out. `config` may give `load_ceiling` (a load, else LOAD_SHARE of
-    the cores), `disk_floor_gb`, `mem_reserve_mb` (else MEM_RESERVE_SHARE of the memory)."""
-    cfg = config or {}
-    snap = snapshot or {}
-    cores = (snap.get("cores") or {}).get("total")
-    mem = snap.get("memory") or {}
-    total_mb = mem.get("total_mb")
-    reserve = cfg.get("mem_reserve_mb")
-    if total_mb is not None and not isinstance(reserve, (int, float)):
-        reserve = int(total_mb * MEM_RESERVE_SHARE)
-    mem_mb = max(0, int(total_mb - reserve)) if total_mb is not None else None
-    grants = list(grants or [])
-    g_cpu = sum(_amount(g.get("cpu")) for g in grants if isinstance(g, dict))
-    g_mem = sum(_amount(g.get("mem_mb")) for g in grants if isinstance(g, dict))
-    ceiling = cfg.get("load_ceiling")
-    if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool):
+    the cores), `disk_floor_gb`, `mem_reserve_mb` (else MEM_RESERVE_SHARE of the memory; a
+    negative one reads as 0). A value it cannot read as a finite number (a NaN, an infinity,
+    a string, None, a bool) in the config, a grant, the request or the snapshot's load and
+    disks is named in `unread`, and a request is then held. Never raises."""
+    unread: list = []
+    if config is not None and not isinstance(config, dict):
+        unread.append(f"the config {_short(config)}")
+    cfg = config if isinstance(config, dict) else {}
+    snap = snapshot if isinstance(snapshot, dict) else {}
+
+    def setting(name):
+        if name not in cfg:
+            return None
+        v = _finite(cfg[name])
+        if v is None:
+            unread.append(f"the config's {name} {_short(cfg[name])}")
+        return v
+    cores = _finite(_part(snap, "cores").get("total"))
+    cores = cores if cores is not None and cores > 0 else None
+    total_mb = _finite(_part(snap, "memory").get("total_mb"))
+    total_mb = total_mb if total_mb is not None and total_mb >= 0 else None
+    reserve = setting("mem_reserve_mb")
+    mem_mb = None
+    if total_mb is not None:
+        reserve = int(total_mb * MEM_RESERVE_SHARE) if reserve is None else max(0, reserve)
+        mem_mb = max(0, int(total_mb - reserve))
+    if grants is not None and not isinstance(grants, (list, tuple)):
+        unread.append(f"the grants {_short(grants)}")
+    grants = list(grants) if isinstance(grants, (list, tuple)) else []
+    g_cpu = g_mem = 0
+    for i, g in enumerate(grants, 1):
+        if not isinstance(g, dict):
+            unread.append(f"grant {i} {_short(g)}")
+            continue
+        g_cpu += _reading(g.get("cpu", 0), f"grant {i}'s cpu", unread) or 0
+        g_mem += _reading(g.get("mem_mb", 0), f"grant {i}'s mem_mb", unread) or 0
+    ceiling = setting("load_ceiling")
+    if ceiling is None:
         ceiling = LOAD_SHARE * cores if cores else None
-    floor = cfg.get("disk_floor_gb", DISK_FLOOR_GB)
-    free_disks = [d.get("free_gb") for d in snap.get("disks") or []
-                  if isinstance(d.get("free_gb"), (int, float))]
+    floor = setting("disk_floor_gb")
+    floor = DISK_FLOOR_GB if floor is None else floor
+    disks = snap.get("disks")
+    free_disks = []
+    for d in disks if isinstance(disks, (list, tuple)) else []:
+        if not isinstance(d, dict) or d.get("free_gb") is None:
+            continue
+        v = _finite(d["free_gb"])
+        if v is None:
+            unread.append(f"the free disk of {_short(d.get('mount'))} {_short(d['free_gb'])}")
+        else:
+            free_disks.append(v)
     out = {"cores": cores, "mem_mb": mem_mb,
            "granted": {"count": len(grants), "cpu": g_cpu, "mem_mb": g_mem},
            "free": {"cpu": None if cores is None else max(0, cores - g_cpu),
                     "mem_mb": None if mem_mb is None else max(0, mem_mb - g_mem)},
            "load_ceiling": None if ceiling is None else round(ceiling, 2),
-           "disk_floor_gb": floor, "disk_free_gb": min(free_disks) if free_disks else None}
+           "disk_floor_gb": floor, "disk_free_gb": min(free_disks) if free_disks else None,
+           "unread": unread}
     if request is None:
         return out
     out["fit"] = _fit(snap, out, request, ceiling, floor)
@@ -414,7 +476,14 @@ def budget(snapshot, grants, config=None, request=None) -> dict:
 
 
 def _fit(snap, b, request, ceiling, floor) -> dict:
-    cpu, need = _amount(request.get("cpu")), _amount(request.get("mem_mb"))
+    bad = list(b["unread"])
+    if isinstance(request, dict):
+        cpu = _reading(request.get("cpu", 0), "the request's cpu", bad)
+        need = _reading(request.get("mem_mb", 0), "the request's mem_mb", bad)
+    else:
+        bad.append(f"the request {_short(request)}")
+    if bad:
+        return {"ok": False, "why": "held: it cannot read " + "; ".join(bad)}
     if b["cores"] is None or b["mem_mb"] is None:
         return {"ok": False, "why": "the budget is unknown: "
                 + ("cores" if b["cores"] is None else "memory") + " did not answer"}
@@ -427,14 +496,16 @@ def _fit(snap, b, request, ceiling, floor) -> dict:
     elif not clamped and (cpu > b["free"]["cpu"] or need > b["free"]["mem_mb"]):
         no.append(f"{cpu:g} cores and {need:g} MB asked, {b['free']['cpu']:g} and "
                   f"{b['free']['mem_mb']:g} MB not granted")
-    load = (snap.get("load") or [None])[0]
+    load = snap.get("load")
+    load = _finite(load[0]) if isinstance(load, (list, tuple)) and load else None
     if load is None or ceiling is None:
         no.append("the load is unknown")
     elif load >= ceiling:
         no.append(f"load {load:.2f} at or over the ceiling {ceiling:.2f}")
-    pressure = (snap.get("memory") or {}).get("pressure") or "unknown"
+    pressure = _part(snap, "memory").get("pressure") or "unknown"
     if pressure != "normal":
-        no.append(f"memory pressure {pressure}")
+        no.append("memory pressure "
+                  + (pressure if isinstance(pressure, str) else _short(pressure)))
     disk = b["disk_free_gb"]
     if disk is None:
         no.append("the free disk is unknown")
@@ -648,11 +719,22 @@ def reclaimable(rows) -> dict:
 def backoff(attempt, retry_after=None, base=1.0, cap=60.0, rng=random.random) -> float:
     """Seconds before the next try: `retry_after` where it is a number of seconds from 0 to
     an hour (a header's text is read as one), else full jitter, `rng() * min(cap, base *
-    2 ** attempt)`. Make at most ATTEMPTS tries of one call."""
+    2 ** attempt)`. Make at most ATTEMPTS tries of one call. An `attempt`, `base` or `cap`
+    that is not a finite number of 0 or more reads as its default (0, 1.0, 60.0), and what
+    `rng` gives is held to 0 to 1: it never raises and never returns a negative."""
     if not isinstance(retry_after, bool):
         x = _num(retry_after.strip() if isinstance(retry_after, str) else retry_after) \
             if isinstance(retry_after, (int, float, str)) else None
         if x is not None and 0 <= x <= RETRY_AFTER_MOST:
             return float(x)
-    n = max(0, min(int(attempt) if isinstance(attempt, (int, float)) else 0, 64))
-    return rng() * min(cap, base * 2 ** n)
+
+    def own(x, default):
+        v = _finite(x)
+        return default if v is None or v < 0 else v
+    n = min(int(own(attempt, 0)), 64)
+    try:
+        r = _finite(rng())
+    except Exception:                                   # noqa: BLE001 - a caller's rng
+        r = None
+    r = random.random() if r is None else min(max(r, 0.0), 1.0)
+    return float(r * min(own(cap, 60.0), own(base, 1.0) * 2 ** n))

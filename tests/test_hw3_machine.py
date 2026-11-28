@@ -321,6 +321,64 @@ def test_the_budget_is_pure_and_takes_an_unknown_snapshot():
     assert fit == {"ok": False, "why": "the budget is unknown: cores did not answer"}
 
 
+# ---- review 1, R2: the budget holds on what it cannot read ------------------------------------
+
+NAN, INF = float("nan"), float("inf")
+SIXTEEN = [{"cpu": 16, "mem_mb": 0}]
+
+
+@pytest.mark.parametrize("snap,cfg,grants,req", [
+    (_snap(load=500.0), {"load_ceiling": NAN}, [], None),
+    (_snap(load=500.0), {"load_ceiling": INF}, [], None),
+    (_snap(free_gb=0.1), {"disk_floor_gb": NAN}, [], None),
+    (_snap(load=NAN), {}, [], None),
+    (_snap(free_gb=NAN), {}, [], None),
+    (_snap(free_gb=-INF), {}, [], None),
+    (_snap(), {}, SIXTEEN, {"cpu": "8", "mem_mb": 1}),
+    (_snap(), {}, SIXTEEN, {"cpu": None, "mem_mb": 1}),
+    (_snap(), {}, [], {"cpu": 1, "mem_mb": None}),
+    (_snap(), {}, [], {"cpu": True, "mem_mb": 1}),
+    (_snap(), {}, [], {"cpu": NAN, "mem_mb": 1}),
+    (_snap(), {}, [], {"cpu": 1, "mem_mb": INF}),
+    (_snap(), {}, [{"cpu": "16", "mem_mb": 0}], None),
+    (_snap(), {}, [{"cpu": None, "mem_mb": 0}], None),
+    (_snap(), {}, [{"cpu": 4, "mem_mb": NAN}], None),
+    (_snap(), {"mem_reserve_mb": None}, [], None),
+    (_snap(), {"load_ceiling": False}, [], None),
+])
+def test_a_value_the_budget_cannot_read_holds(snap, cfg, grants, req):
+    fit = machine.budget(snap, grants, cfg, req or {"cpu": 1, "mem_mb": 1})["fit"]
+    assert fit["ok"] is False and fit["why"], fit
+
+
+@pytest.mark.parametrize("snap,grants,cfg,req", [
+    (_snap(), [], {"disk_floor_gb": "25"}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], {"disk_floor_gb": None}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], {"mem_reserve_mb": NAN}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], {"mem_reserve_mb": INF}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], {}, 5),
+    (_snap(), [], {}, "x"),
+    (_snap(), [], {}, []),
+    (_snap(), 5, {}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [None, "x"], {}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], "x", {"cpu": 1, "mem_mb": 1}),
+    (dict(_snap(), disks=[None]), [], {}, {"cpu": 1, "mem_mb": 1}),
+    (dict(_snap(), disks=5, load="x", cores=3, memory=[]), [], {}, {"cpu": 1, "mem_mb": 1}),
+    ("x", [], {}, {"cpu": 1, "mem_mb": 1}),
+    (_snap(), [], {}, {"cpu": 10 ** 400, "mem_mb": 1}),
+])
+def test_the_budget_never_raises_on_caller_input_and_holds(snap, grants, cfg, req):
+    fit = machine.budget(snap, grants, cfg, req)["fit"]
+    assert fit["ok"] is False and fit["why"], fit
+
+
+def test_a_negative_reserve_reads_as_0_and_skipped_disks_still_fit():
+    b = machine.budget(_snap(), [], {"mem_reserve_mb": -1e9}, {"cpu": 1, "mem_mb": 1})
+    assert b["mem_mb"] == 131072 and b["fit"]["ok"] is True
+    snap = dict(_snap(), disks=[None, {"mount": "/a", "free_gb": 100.0}])
+    assert machine.budget(snap, [], {}, {"cpu": 1, "mem_mb": 1})["fit"]["ok"] is True
+
+
 # ---- M4: the disk's consumers ---------------------------------------------------------------
 
 def _git(*argv, cwd):
@@ -495,3 +553,39 @@ def test_backoff_takes_base_cap_and_three_attempts():
     assert machine.ATTEMPTS == 3
     assert machine.backoff(2, base=0.1, cap=1.0, rng=lambda: 1.0) == pytest.approx(0.4)
     assert machine.backoff(5, base=0.1, cap=1.0, rng=lambda: 1.0) == 1.0
+
+
+# ---- review 1, R3: backoff never raises or goes negative; the parsers take ASCII digits --------
+
+@pytest.mark.parametrize("kw,want", [
+    ({"attempt": float("nan")}, 0.5), ({"attempt": float("inf")}, 0.5),
+    ({"attempt": -float("inf")}, 0.5), ({"attempt": 3, "base": -1}, 4.0),
+    ({"attempt": 3, "base": float("nan")}, 4.0), ({"attempt": 3, "base": float("inf")}, 4.0),
+    ({"attempt": 3, "cap": float("nan")}, 4.0), ({"attempt": 3, "cap": -5}, 4.0),
+    ({"attempt": 10 ** 400}, 0.5),
+])
+def test_backoff_reads_what_it_cannot_use_as_its_default(kw, want):
+    assert machine.backoff(rng=lambda: 0.5, **kw) == want
+
+
+def test_backoff_is_never_negative():
+    assert machine.backoff(3, rng=lambda: -1.0) == 0.0
+    assert machine.backoff(3, base=-1, cap=-1, rng=lambda: 1.0) >= 0.0
+
+
+SUPER = "²"        # a digit to str.isdigit, none to int()
+
+
+def test_the_parsers_take_ascii_digits_alone():
+    assert machine.parse_du(f"{SUPER} /x") is None
+    assert machine.parse_meminfo(f"MemTotal: {SUPER} kB\n") == {}
+    assert machine.parse_ps(f"{SUPER} python\n")["python"]["count"] == 0
+    assert machine.parse_df(DF_HEAD + f"/dev/x {SUPER} 1 1 1% /\n") == []
+    assert "free" not in machine.parse_vm_stat(MAC_VM_STAT.splitlines()[0]
+                                               + f"\nPages free: {SUPER}.\n")
+    text = (f"hw.memsize: {SUPER}\nkern.memorystatus_vm_pressure_level: {SUPER}\n"
+            f"hw.perflevel0.physicalcpu: {SUPER}\nhw.perflevel1.physicalcpu: {SUPER}\n")
+    pr = mac_probe(answers={("sysctl",): (0, text), ("ps",): (0, f"{SUPER} python\n")})
+    snap = machine.snapshot({"home": "/x/home"}, probe=pr)
+    assert snap["memory"]["total_mb"] is None and snap["cores"]["performance"] is None
+    assert snap["processes"]["python"]["count"] == 0
