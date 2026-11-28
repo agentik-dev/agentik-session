@@ -34,7 +34,7 @@ resolves to deny, even though Claude Code still reports success. Read section
    own hooks (`SessionStart`; `PreToolUse`, `PostToolUse` and
    `PostToolUseFailure` on every tool; `PostToolBatch`, `UserPromptSubmit`,
    `Stop`, `StopFailure`, `SessionEnd`, `PreCompact`, `PostModelSwitch`,
-   `InstructionsLoaded`, `SubagentStop`) through `hooks/run`, which execs
+   `InstructionsLoaded`, `SubagentStop`, `SubagentStart`) through `hooks/run`, which execs
    the plugin's own `bin/agentik-session hook <event>`, never one on
    PATH. Nothing is merged into `~/.claude/settings.json`. To upgrade, the plugin
    first: `claude plugin update session@agentik`, which new sessions pick up and
@@ -42,8 +42,8 @@ resolves to deny, even though Claude Code still reports success. Read section
    the switch on, or under an older shim, hooks run that CLI. A CLI older than its
    plugin exits 2 on a hook event it does not know; the shim drops that exit
    on `Stop`, `StopFailure`, `SubagentStop`, `InstructionsLoaded`, `PostToolUseFailure`, `PostToolBatch`,
-   `PostModelSwitch` and `PreCompact` (keeping
-   PreCompact's stdout, its block; the others' streams go to `/dev/null`), so no turn end,
+   `PostModelSwitch`, `PreCompact` and `SubagentStart` (keeping
+   PreCompact's stdout, its block, and SubagentStart's, a helper's rule; the others' streams go to `/dev/null`), so no turn end,
    no helper's loop or end and no
    compaction you type is blocked. The older
    CLI's own doctor reads green: only a doctor of 2.0.0-alpha.4 or later
@@ -741,14 +741,22 @@ prompt cache's lifetime.
   what the PreToolUse hook does with a helper's Bash that holds, as a command the shell runs,
   a `sleep` of 60 seconds or more (its arguments summed; in a list, a loop, a substitution or
   a `bash -c` script too, background or not) or this tool's `gate wait <id>` on a job the same
-  helper already waited on (`gate wait --chain` a second time too). Under `refuse` the call
-  is denied with one line: queue the run with `agentik session gate run`, write
-  `gate | <id> running` in your record and hand back; under `say` the same line is the
+  helper already waited on (`gate wait --chain` a second time too); and (packet hw2) a call
+  with `run_in_background`, `gate run --wait`, a `gate wait` with no `--timeout` or one over
+  100, sleeps on one line adding to a minute, and a `sleep` on a line whose text outside
+  quotes, comments and heredoc bodies holds `while`, `until` or `for` as a word. Under
+  `refuse` the call is denied with one line: queue the run with `agentik session gate run
+  <dir> --label <row> -- <command>` (add `--within 100` to wait once), write
+  `gate | <id> running` in your hand-back and end your turn; under `say` the same line is the
   call's context and it runs. A heredoc's body, a quoted word or a message is never a
   command; a sleep under a minute, an unread duration (`sleep "$N"`) and a reader's fault
-  pass. The value is the session's resolved one, read at each call, so a helper is judged by
-  its coordinator's session; its first waits are kept in `helper-waits.json` under that
-  session's folder (at most 256). The main thread is never denied or told.
+  pass, and `gate run --within` always passes. The value is the session's resolved one,
+  read at each call, so a helper is judged by its coordinator's session; its first waits are
+  kept in `helper-waits.json` under that session's folder (at most 256). The main thread is
+  never denied or told. Under `say` or `refuse` the SubagentStart hook gives each helper the
+  rule once, at its start. `helpers.heavy`, a list of patterns (none ship), matched with
+  `fnmatch` on a command's words joined by one space, tells a helper's run of one to queue it
+  through the gate; that run is told, never denied.
 - A sitting is told its room at each launch. In a session that keeps the sitting discipline
   (every shipped profile but `starter`), the PreToolUse hook counts, at a main thread's Agent
   or Task call, `room = 100 x checkpoint_at - the meter - launch.back for each helper out`

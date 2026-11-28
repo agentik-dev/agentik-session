@@ -38,7 +38,7 @@ HOOKS_CAP = 1048576
 HOOK_WALL = {"SessionStart": 10, "PreToolUse": 5, "PostToolUse": 5, "PostToolUseFailure": 5,
              "PostToolBatch": 5, "UserPromptSubmit": 5, "Stop": 5, "StopFailure": 5,
              "SessionEnd": 15, "PreCompact": 5, "PostModelSwitch": 5, "InstructionsLoaded": 5,
-             "SubagentStop": 5}
+             "SubagentStop": 5, "SubagentStart": 5}
 HOOK_MARGIN = 0.5
 HOOK_DEADLINE = {e: w - HOOK_MARGIN for e, w in HOOK_WALL.items()}
 CUT_DEADLINE = 124          # the hook's own deadline fired: the row's exit; the hook exits 0

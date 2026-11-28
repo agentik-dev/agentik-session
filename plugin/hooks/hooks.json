@@ -39,6 +39,9 @@
     ],
     "SubagentStop": [
       {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SubagentStop", "timeout": 5}]}
+    ],
+    "SubagentStart": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run\" SubagentStart", "timeout": 5}]}
     ]
   }
 }
