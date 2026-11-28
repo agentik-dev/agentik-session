@@ -1986,6 +1986,12 @@ def cmd_gate(args) -> int:
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
+    if verb == "drop":                                    # hw5 F4
+        rc, text = gate.drop(root, args.id)
+        if rc == 2:
+            _die(text, 2)
+        print(text, flush=True)
+        return rc
     if verb == "publish":
         from . import publish
         return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
@@ -2010,6 +2016,13 @@ def cmd_gate(args) -> int:
     if command[:1] == ["--"]:
         command = command[1:]
     within = _gate_within(args)
+    if args.light:                                        # hw5 F2
+        if args.check or args.in_job:
+            _die("gate run: --light is for a short job; a check is never light", 2)
+        if args.wall is not None and args.wall > gate.LIGHT_WALL:
+            _die(f"gate run: --light runs at most {gate.LIGHT_WALL} s, not --wall {args.wall}", 2)
+        if gate.land_branch(command) is not None:
+            _die("gate run: --light is for a short job; a landing is never light", 2)
     if args.check or args.in_job:
         checked = _gate_check(root, args, env, command)
         if isinstance(checked, int):
@@ -2036,10 +2049,13 @@ def cmd_gate(args) -> int:
         return _gate_wait(root, e["id"], None, False) if args.wait else 0
     try:
         caller = gate.resolve_caller(args, env)
-        wall = args.wall if args.wall is not None else _gate_wall(env)
+        wall = args.wall if args.wall is not None else \
+            gate.LIGHT_WALL if args.light else _gate_wall(env)
         e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
                          args.label or "", caller, time.time(),
-                         named=args.session is not None, tree=tree)  # nw2 R1: a session, no chain
+                         named=args.session is not None, tree=tree,  # nw2 R1: a session, no chain
+                         priority=args.priority, light=args.light,   # hw5 F1, F2
+                         rerun=True)          # build 2, S1: the verb's job alone may be rerun
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)
@@ -2079,10 +2095,13 @@ def _gate_within_wait(root, e: dict, within: int) -> int:
     rc, result = gate.wait(root, e["id"], timeout=within)
     if rc == 2:
         _die(f"gate run: gate {e['id']} is neither queued nor done under {gate.gate_dir(root)}", 2)
+    gid = e["id"]
+    if rc == 0 and gate.followed(root, gid) != gid:          # hw5 F3: a load flake's rerun
+        rc, gid = 1, gate.followed(root, gid)
     if rc == 1:
         got = gate.key_estimates(root, e.get("command")).get(gate.entry_key(e))
         est = f", est {gate.est_text(got[0])} min" if got is not None else ""
-        print(f"queued {e['id']}{est}: write the id in your hand-back and end your turn",
+        print(f"queued {gid}{est}: write the id in your hand-back and end your turn",
               flush=True)
         return gate.QUEUED
     print(gate.wait_line(result), flush=True)
@@ -2280,7 +2299,7 @@ def _gate_land(root, args, env) -> int:
         if args.fresh:
             job_env[land.FRESH] = "1"
         e = gate.enqueue(root, repo, command, job_env, [], wall, f"land {branch}", caller,
-                         time.time(), named=args.session is not None)
+                         time.time(), named=args.session is not None, priority=True)  # hw5 F1
     except gate.GateError as err:
         _die(f"gate land: {err}", 2)
     gate.spawn_serve(root)
@@ -2349,7 +2368,7 @@ def _gate_wait_chain(root, args, env) -> int:
 
 def _gate_wait(root, gid: str, timeout, as_json: bool, strict: bool = False) -> int:
     from . import gate
-    rc, result = gate.wait(root, gid, timeout=timeout)
+    rc, result = gate.wait(root, gid, timeout=timeout, follow=True)      # hw5 F3
     if rc == 2:
         _die(f"gate wait: no gate {gid[:40]!r} under {gate.gate_dir(root)}; "
              "agentik session gate status lists them", 2)
@@ -2620,7 +2639,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "ceiling, its result to the caller; publish, and land "
                                       "--push, push main's head a gate result proves green")
     gsub = gt.add_subparsers(dest="gate_verb", required=True,
-                             metavar="run|wait|status|land|publish")
+                             metavar="run|drop|wait|status|land|publish")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")
     gr.add_argument("--session", metavar="SID",
@@ -2642,7 +2661,17 @@ def build_parser() -> argparse.ArgumentParser:
                          "and keep its record, so a landing of the same tree may take it; no "
                          "command after it")
     gr.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
+    gr.add_argument("--priority", action="store_true",
+                    help="picked before the unmarked entries of its repo; an entry queued an "
+                         "hour or more ago still goes first")
+    gr.add_argument("--light", action="store_true",
+                    help="a short job (a stamp, a lint), walled at 120 s: runs beside its "
+                         "repo's job of another worktree and counts against no max_running; "
+                         "not with --check or a --wall over 120")
     gr.add_argument("command", nargs="*", help="the command after --, run as argv")
+    gd = gsub.add_parser("drop", help="take a queued gate job out, its result exit 130 and its "
+                                       "line 'dropped'; a running job is not touched (exit 1)")
+    gd.add_argument("id")
     gw = gsub.add_parser("wait", help="wait for a gate's result and print its line")
     gw.add_argument("id", nargs="?")
     gw.add_argument("--chain", action="store_true",
@@ -2783,7 +2812,204 @@ def build_parser() -> argparse.ArgumentParser:
                     help="with `capture`: how many payloads, 1 to 5 (1)")
     hk.add_argument("--show", action="store_true", help="with `capture`: list the captures")
     hk.set_defaults(func=cmd_hook)
+
+    mc = sub.add_parser("machine", help="the machine's meter: cores, load, memory, disks and "
+                                        "what holds the disk; whether a run fits (packet "
+                                        "hw3-machine)")
+    msub = mc.add_subparsers(dest="machine_verb", required=True, metavar="status|fits|reclaim")
+    mst = msub.add_parser("status", help="the snapshot, the budget against the gate's running "
+                                         "jobs, the queue's depth and the three largest "
+                                         "consumers of the disk")
+    mst.add_argument("--json", action="store_true")
+    mft = msub.add_parser("fits", help="exit 0 where a run of N cores and MB fits now, else "
+                                       "75 with the why on stderr")
+    mft.add_argument("--cpu", type=_positive_int, required=True, metavar="N")
+    mft.add_argument("--mem", type=_positive_int, required=True, metavar="MB")
+    mrc = msub.add_parser("reclaim", help="with --dry-run, the disk's known consumers by kind "
+                                          "and what auto and idle would free; it removes "
+                                          "nothing")
+    mrc.add_argument("--dry-run", action="store_true")
+    mrc.add_argument("--json", action="store_true")
+    mc.set_defaults(func=cmd_machine)
     return p
+
+
+MACHINE_SCHEMA = "agentik.machine.status/1"
+MACHINE_TOP = 3             # `machine status`'s largest consumers
+MACHINE_SCRATCH = "/tmp/claude-{uid}"      # the scratch root Claude Code's sittings share
+
+
+def _machine_roots(env, root) -> dict:
+    """The folders `machine status` and `reclaim` size: the gate's, the transcripts, each
+    state folder beside this tool's, the scratch root, and the worktrees of this folder's
+    repo and of each repo the gate's queue and kept results name, but a repo inside the
+    scratch root, whose size the scratch root's holds."""
+    from . import gate
+    home = env.get("HOME") or os.path.expanduser("~")
+    conf = env.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+    try:
+        paths = [os.getcwd()]
+    except OSError:                                     # a removed folder: its repo is not read
+        paths = []
+    paths += [x.get("repo") for x in gate.entries(root)]
+    try:
+        names = os.listdir(gate.gate_dir(root))
+    except OSError:
+        names = []
+    for name in names:
+        if gate.ID.match(name):
+            paths.append((gate._load(gate.result_path(root, name)) or {}).get("repo"))
+    scratch = MACHINE_SCRATCH.format(uid=os.getuid())
+    inside = os.path.realpath(scratch).rstrip("/") + "/"
+    repos: list[str] = []
+    for p in paths:
+        top = _main_checkout(p) if isinstance(p, str) and p else None
+        if top and top not in repos and not (top + "/").startswith(inside):
+            repos.append(top)
+    return {"gate": str(gate.gate_dir(root)), "home": home,
+            "transcripts": os.path.join(conf, "projects"), "state_home": str(Path(root).parent),
+            "scratch": scratch, "repos": repos}
+
+
+def _main_checkout(path: str) -> str | None:
+    """The main checkout of the repo `path` is in: the folder above its common `.git`."""
+    from . import gate
+    p = os.path.realpath(path)
+    while True:
+        if os.path.exists(os.path.join(p, ".git")):
+            common = gate._common_dir(p)
+            common = os.path.realpath(common) if common else None
+            return os.path.dirname(common) if common and os.path.basename(common) == ".git" \
+                else None
+        if p == os.path.dirname(p):
+            return None
+        p = os.path.dirname(p)
+
+
+def _machine_gate(root, now) -> tuple[int | None, int | None, str | None]:
+    """(running, queued, None) of the gate, read once; (None, None, why) where its state
+    cannot be read, which `status` names in a fault and `fits` holds on (review 1, F10)."""
+    from . import gate
+    try:
+        st = gate.status(root, now)
+        running, queued = st.get("running") or [], st.get("queued") or []
+        if not isinstance(running, list) or not isinstance(queued, list):
+            raise ValueError("its status is not two lists")
+    except Exception as err:                            # noqa: BLE001 - the meter goes on
+        return None, None, f"the gate's state could not be read ({err})"
+    return len(running), len(queued), None
+
+
+def _machine_config(env) -> dict:
+    """The gate's own `load_ceiling` where the user set one, so the two read one ceiling."""
+    try:
+        set_ = resolver.gate_config(env).get("load_ceiling")
+    except Exception:                                   # noqa: BLE001 - the default holds
+        set_ = None
+    return {"load_ceiling": set_} if isinstance(set_, (int, float)) else {}
+
+
+def _home_short(path, home) -> str:
+    h = (home or "").rstrip("/")
+    return "~" + path[len(h):] if h and (path == h or path.startswith(h + "/")) else path
+
+
+def _machine_lines(doc, home) -> list[str]:
+    from . import machine
+    s, b, g = doc["snapshot"], doc["budget"], doc["gate"]
+    c, m, load = s["cores"], s["memory"], s["load"]
+
+    def n(x, unit=""):
+        return "unknown" if x is None else f"{x:g}{unit}"
+    kinds = "" if c["performance"] is None else \
+        f" ({c['performance']} performance, {c['efficiency']} efficiency)"
+    out = [f"cores: {n(c['total'])}{kinds}; load "
+           + (" ".join(f"{x:.2f}" for x in load) if load else "unknown"),
+           f"memory: {n(m['total_mb'], ' MB')}, {n(m['free_mb'], ' MB')} free, "
+           f"pressure {m['pressure']}"]
+    for d in s["disks"]:
+        out.append(f"disk: {d['mount']} {n(d['total_gb'], ' GB')}, {n(d['free_gb'], ' GB')} "
+                   f"free ({', '.join(d['holds'])})")
+    if s["processes"]:
+        out.append("processes: " + ", ".join(
+            f"{k} {v['count']}" + (f" ({v['rss_mb']} MB)" if v["count"] else "")
+            for k, v in s["processes"].items()))
+    out.append(f"budget: {n(b['cores'])} cores, {n(b['mem_mb'], ' MB')}; granted "
+               f"{b['granted']['count']} jobs ({b['granted']['cpu']:g} cores, "
+               f"{b['granted']['mem_mb']:g} MB); free {n(b['free']['cpu'])} cores, "
+               f"{n(b['free']['mem_mb'], ' MB')}")
+    out.append(f"gate: {n(g['running'])} running, {n(g['queued'])} queued")
+    cls = machine.DEFAULT_CLASS
+    out.append(f"a {cls['cpu']}-core {cls['mem_mb']} MB job: "
+               + ("fits now" if b["fit"]["ok"] else "held: " + b["fit"]["why"]))
+    for r in doc["consumers"]:
+        out.append(f"largest: {_home_short(r['path'], home)} {n(r['gb'], ' GB')} "
+                   f"({r['kind']}: {r['what']})")
+    for f in doc["faults"]:
+        out.append(f"fault: {f}")
+    return out
+
+
+def cmd_machine(args) -> int:
+    """`agentik session machine status|fits|reclaim` (packet hw3-machine, M6): the module's
+    snapshot joined with the gate, which the verb reads and the module never does. Each
+    running job is a grant of the default class. `fits` exits 0 or 75; `reclaim` with no
+    `--dry-run` exits 2, since it is not built."""
+    from . import machine
+    env = dict(os.environ)
+    try:
+        os.getcwd()
+    except OSError as err:                              # review 1, F11
+        print(f"agentik-session: machine: the current folder is gone ({err.strerror}); run "
+              "it from one that is there", file=sys.stderr)
+        return 2
+    if args.machine_verb == "reclaim" and not args.dry_run:
+        print("agentik-session: machine reclaim is not built; --dry-run lists what it "
+              "would free", file=sys.stderr)
+        return 2
+    root = resolver.state_dir(env)
+    roots = _machine_roots(env, root)
+    if args.machine_verb == "reclaim":
+        roots.setdefault("gocache", machine.gocache(machine.default_probe()))
+        faults: list = []
+        rows = machine.consumers(roots, faults=faults)
+        sums = machine.reclaimable(rows)
+        if args.json:
+            print(json.dumps({"schema": MACHINE_SCHEMA, "consumers": rows, "kinds": sums,
+                              "faults": faults}, indent=2))
+            return 0
+        for kind in machine.KINDS:
+            print(f"{kind}: {sums[kind]['count']}, {sums[kind]['gb']:g} GB")
+            for r in (x for x in rows if x["kind"] == kind):
+                gb = "unknown" if r["gb"] is None else f"{r['gb']:g} GB"
+                print(f"  {_home_short(r['path'], roots['home'])} {gb}: {r['what']}")
+        free = round(sums["auto"]["gb"] + sums["idle"]["gb"], 1)
+        print(f"would free: {free:g} GB (auto and idle); a dry run, nothing removed")
+        for f in faults:
+            print(f"fault: {f}")
+        return 0
+    snap = machine.snapshot({"home": roots["home"], "state": str(root)})
+    running, queued, unread = _machine_gate(root, time.time())
+    grants = [dict(machine.DEFAULT_CLASS) for _ in range(running or 0)]
+    held = {"ok": False, "why": unread} if unread else None
+    if args.machine_verb == "fits":
+        fit = held or machine.budget(snap, grants, _machine_config(env),
+                                     {"cpu": args.cpu, "mem_mb": args.mem})["fit"]
+        print(fit["why"], file=sys.stdout if fit["ok"] else sys.stderr)
+        return 0 if fit["ok"] else 75
+    b = machine.budget(snap, grants, _machine_config(env), dict(machine.DEFAULT_CLASS))
+    if held:
+        b["fit"] = held
+    faults = list(snap["faults"]) + ([unread] if unread else [])
+    if snap["paths"].get("gocache"):
+        roots["gocache"] = snap["paths"]["gocache"]
+    rows = machine.consumers(roots, faults=faults)[:MACHINE_TOP]
+    doc = {"schema": MACHINE_SCHEMA, "snapshot": snap, "budget": b,
+           "gate": {"running": running, "queued": queued}, "consumers": rows,
+           "faults": faults}
+    print(json.dumps(doc, indent=2) if args.json
+          else "\n".join(_machine_lines(doc, roots["home"])))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

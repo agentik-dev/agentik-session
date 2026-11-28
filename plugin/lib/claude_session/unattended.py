@@ -1279,7 +1279,9 @@ def _iso(t: float) -> str:
 
 # wait_line's, a red's `; fail <text>` read past (hw1 W5); the repo group is not greedy, so an
 # exit inside the fail text is never the job's (hw1 review 1, R2)
-GATE_LINE = re.compile(r"^gate (\S+) (.+?): exit (-?\d+) in (\S+) min(?:; fail [^;]*)?; log (.+)$")
+GATE_LINE = re.compile(r"^gate (\S+) (.+?): exit (-?\d+) in (\S+) min"
+                       r"(?:; (?:dropped|flake: load(?:, not rerun)?|rerun of [^;\s]+))*"   # hw5
+                       r"(?:; fail [^;]*)?; log (.+)$")
 LAND_OK = re.compile(r"^land (\S+): ok (\S+?)(?:,.*)?$")
 LAND_RED = re.compile(r"^land (\S+): red (\S+) exit (-?\d+)(?:,.*)?$")
 STANDS = ("remove", "branch")       # land's steps after the merge: main has moved
