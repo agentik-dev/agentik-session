@@ -2054,11 +2054,13 @@ def _gate_within_wait(root, e: dict, within: int) -> int:
 
 def _gate_kept(root, repo) -> bool:
     """hw1 W3: True, `kept <id>` and that result's line printed, where a kept check of this
-    clean worktree's head holds (`land.kept_for_run`); False, nothing printed, else."""
+    clean worktree's head holds (`land.kept_for_run`) and that id's result is green and not cut
+    (review 1, R1); False, nothing printed, else."""
     from . import gate, land
     gid, _ = land.kept_for_run(root, repo)
     result = gate._load(gate.result_path(root, gid)) if gid else None
-    if result is None:
+    if not isinstance(result, dict) or gate.strict_code(result) != 0 \
+            or result.get("cut") is not None:
         return False
     print(f"kept {gid}", flush=True)
     print(gate.wait_line(result), flush=True)

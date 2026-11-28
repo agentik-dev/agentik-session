@@ -312,3 +312,17 @@ def test_w5_the_longest_line_fits_a_hooks_room_alone(tmp_path):
     assert "; fail FAILED " in line
     out = json.dumps(hooks._with_gate({}, "UserPromptSubmit", [line]))
     assert len(out) <= hooks.MAX_OUT, (len(out), line)
+
+
+# ---- the fix of review 1 ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("change", [{"exit": 1}, {"exit": 125, "cut": gate.CUT_DIED},
+                                    {"cut": gate.CUT_WALL}])
+def test_r1_a_kept_check_is_returned_only_where_its_result_is_green_and_not_cut(box, change):
+    gid = box.check()
+    p = gate.result_path(box.root, gid)
+    p.write_text(json.dumps({**json.loads(p.read_text()), **change}))
+    rc, out, err = run("gate", "run", str(box.tree), "--check")
+    assert rc == 0 and out.startswith("queued ") and f"kept {gid}" not in out, err
+    assert box.count() == 2                                 # queued as if none were kept
+
