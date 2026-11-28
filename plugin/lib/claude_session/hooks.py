@@ -1121,6 +1121,21 @@ def _told(out: dict, told: tuple | None) -> dict:
     return out
 
 
+def _launch_out(build, parts) -> dict:
+    """Build 2 T2: `build(told)`, a spawn's whole output, with the launch line's parked clause
+    sized to what MAX_OUT leaves: the first of `room.parked_clauses` whose output fits, the
+    clause dropped last. `parts` is `room.told_parts`' (line, held, shells) or None."""
+    if parts is None:
+        return build(None)
+    from . import room
+    base, held, shells = parts
+    for clause in room.parked_clauses(shells):
+        out = build((base + clause, held))
+        if not clause or len(json.dumps(out)) <= MAX_OUT:
+            return out
+    return build((base, held))                   # not reached: the last clause is ""
+
+
 def _held(tool: str, told: tuple | None, posture) -> dict | None:
     """Packet nw4-launch-room R8: under `deny`, a launch the room holds is refused, the line
     its reason; else None."""
@@ -1216,11 +1231,12 @@ def pre_tool_use(payload: dict, env=None) -> dict:
         return _warned({}, warn)
     cfg, zone = state(payload.get("session_id"), env)
     from . import room               # nw4: the launch line; never raises, None outside the rule
-    told = room.told(payload, os.environ if env is None else env, cfg.posture)
-    if cfg.posture in ("off", "signal"):
-        return _told(_warned({}, warn), told)   # signalling happens on the prompt, not here
+    parts = room.told_parts(payload, os.environ if env is None else env, cfg.posture)
+    if cfg.posture in ("off", "signal"):         # signalling happens on the prompt, not here
+        return _launch_out(lambda told: _told(_warned({}, warn), told), parts)
     if zone not in (WINDDOWN, RESERVE, EXHAUSTED):
-        return _held(tool, told, cfg.posture) or _told(_warned({}, warn), told)
+        return _launch_out(lambda told: _held(tool, told, cfg.posture)
+                           or _told(_warned({}, warn), told), parts)
     plain = (None if discipline(_session_section(payload.get("session_id"), env))
              else _plain_budget(zone, used_pct(payload.get("session_id"), env)))   # st1 C2
 
@@ -1236,10 +1252,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "the rest is reserved for wrapping up."),
         }
 
-    held = _held(tool, told, cfg.posture)
-    if held:
-        return held
-    return _told(_warned({
+    return _launch_out(lambda told: _held(tool, told, cfg.posture) or _told(_warned({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
@@ -1250,7 +1263,7 @@ def pre_tool_use(payload: dict, env=None) -> dict:
                 "enough budget to finish and hand off cleanly. Consider a "
                 "smaller fan-out."),
         }
-    }, warn), told)
+    }, warn), told), parts)
 
 
 def _admission_line(sid=None) -> str | None:
@@ -2372,11 +2385,13 @@ def _post_tool_use(payload: dict, env) -> dict:
     if payload.get("agent_id"):
         _tool_stamp(payload, env, "PostToolUse")          # the stamp, then the close (B-F1)
         _close_call(payload, env)
+        _helper_job(payload, env)                         # hw4 P2: never raises
         return {}
     sdir = _session_dir(payload.get("session_id"), env, fallback=False)
     if sdir is not None:
         _confirm(payload, sdir)
         _job_open(payload, sdir)                         # rc2 R2: never raises
+        _park_stopped(payload, sdir)                     # hw4 P4: never raises
     line = _ran_unconfirmed(payload, env, sdir)          # rc3 R2: read first, it only reads
     return _with_respawn(_post_meter(payload, env, sdir,
                                      room=UNCONFIRMED_SHORT if line else None), line)
@@ -2732,6 +2747,229 @@ def pre_compact(payload: dict, env=None) -> dict:
     return {"decision": "block", "reason": COMPACT_BLOCKED}
 
 
+# ---- hw4-run-is-a-helper P2 to P4: a helper parked on a shell ---------------------------------
+# The shapes read are the engine's hook pages' (hq design/34 §10 lists them as unverified): a
+# Bash PostToolUse's `tool_response.backgroundTaskId`; SubagentStop's `background_tasks`, each
+# entry's `id`, `type`, `status` and `command` (cut at 1,000 characters by the engine). Anything
+# else parks nobody and ends no park.
+
+HELPER_JOBS = "helper-jobs"  # P2: `helper-jobs/<agent_id>/<tool_use_id>` {at, task, command}
+PARKED = "parked"            # P3: `parked/<agent_id>.json` {at, task, tasks, command}
+TASK_TEXT = 1000             # P3: the characters of a command the engine keeps in a task
+PARK_TEXT = 200              # P3: the bytes of the command a park keeps
+
+
+def _state_json(path: Path) -> dict:
+    """Build 2 T1: this row's reader of a state file (a P2 record, a park, a capture's mark):
+    a path that is not a regular file is {} at once and never opened; else `_regular_json`,
+    which never blocks either. Never raises."""
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return {}
+    except (OSError, ValueError):
+        return {}
+    return _regular_json(path)
+
+
+def _helper_job(payload: dict, env) -> None:
+    """P2: a helper's Bash call whose `tool_response.backgroundTaskId` is a non-empty string
+    (the engine moved it), or whose `tool_input.run_in_background` is true, writes
+    `helper-jobs/<agent_id>/<tool_use_id>` {at, task, command (its first TASK_TEXT
+    characters)}, for id-shaped ids and a session folder that exists. Never raises."""
+    try:
+        aid, tid = payload.get("agent_id"), payload.get("tool_use_id")
+        if (payload.get("tool_name") != "Bash" or not isinstance(aid, str) or not _SID.match(aid)
+                or not isinstance(tid, str) or not _SID.match(tid)):
+            return
+        resp, ti = payload.get("tool_response"), payload.get("tool_input")
+        ti = ti if isinstance(ti, dict) else {}
+        task = resp.get("backgroundTaskId") if isinstance(resp, dict) else None
+        task = task if isinstance(task, str) and task else None
+        cmd = ti.get("command")
+        if not isinstance(cmd, str) or (task is None and ti.get("run_in_background") is not True):
+            return
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None or not sdir.is_dir():
+            return
+        store._write_private(sdir / HELPER_JOBS / aid / tid, json.dumps(
+            {"at": time.time(), "task": task, "command": cmd[:TASK_TEXT]}))
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _running_shells(payload: dict) -> list | None:
+    """P3: (id, command or None) for each `background_tasks` entry that is an object of type
+    `shell`, status `running`, with a non-empty string id; None where the payload holds no
+    such list. Build 2 T7: a list is one whose every entry is an object; [] is one."""
+    tasks = payload.get("background_tasks")
+    if not isinstance(tasks, list) or not all(isinstance(t, dict) for t in tasks):
+        return None
+    out = []
+    for t in tasks:
+        if (isinstance(t, dict) and t.get("type") == "shell" and t.get("status") == "running"
+                and isinstance(t.get("id"), str) and t["id"]):
+            c = t.get("command")
+            out.append((t["id"], c if isinstance(c, str) else None))
+    return out
+
+
+def _helper_records(sdir: Path, aid: str) -> list:
+    """P2's records of one helper, [object], by name; [] with none."""
+    d = sdir / HELPER_JOBS / aid
+    try:
+        names = sorted(n for n in os.listdir(d) if not n.startswith("."))
+    except OSError:
+        return []
+    return [_state_json(d / n) for n in names]
+
+
+def _park_tasks(rec: dict) -> list:
+    tasks = rec.get("tasks") if isinstance(rec.get("tasks"), list) else [rec.get("task")]
+    return [t for t in tasks if isinstance(t, str) and t]
+
+
+def parks(sdir) -> dict:
+    """P5: agent id -> the first shell id of each park record under `sdir`; {} on any fault.
+    A read; never raises."""
+    out: dict = {}
+    try:
+        d = Path(sdir) / PARKED
+        for name in sorted(os.listdir(d)) if d.is_dir() else ():
+            if name.startswith(".") or not name.endswith(".json"):
+                continue
+            tasks = _park_tasks(_state_json(d / name))
+            if tasks and _SID.match(name[:-5]):
+                out[name[:-5]] = tasks[0]
+    except Exception:                                   # noqa: BLE001
+        return {}
+    return out
+
+
+def _park_end(sdir: Path, aid: str) -> None:
+    """P4: a park ends: `ended/<agent_id>.json` {at} written, then the park and the helper's
+    P2 records removed. Never raises."""
+    try:
+        store._write_private(sdir / ENDED / f"{aid}.json", json.dumps({"at": time.time()}))
+    except OSError:
+        pass
+    _forget(sdir, aid)
+    try:
+        (sdir / PARKED / f"{aid}.json").unlink()
+    except OSError:
+        pass
+
+
+def _forget(sdir: Path, aid: str) -> None:
+    """The helper's P2 records removed, files alone. Never raises."""
+    d = sdir / HELPER_JOBS / aid
+    try:
+        for name in os.listdir(d):
+            p = d / name
+            if stat.S_ISREG(os.lstat(p).st_mode):
+                p.unlink()
+        d.rmdir()
+    except OSError:
+        pass
+
+
+def _parks_seen(payload: dict, sdir: Path, skip: str | None = None) -> None:
+    """P4: a payload that carries a `background_tasks` list ends each park of the session (but
+    `skip`'s) none of whose shells it lists as running. Never raises."""
+    try:
+        shells = _running_shells(payload)
+        d = sdir / PARKED
+        if shells is None or not d.is_dir():
+            return
+        running = {i for i, _ in shells}
+        for name in sorted(os.listdir(d)):
+            aid = name[:-5]
+            if name.startswith(".") or not name.endswith(".json") or aid == skip \
+                    or not _SID.match(aid):
+                continue
+            tasks = _park_tasks(_state_json(d / name))      # T1: none read, no park
+            if tasks and not any(t in running for t in tasks):
+                _park_end(sdir, aid)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def parks_seen(payload: dict, env) -> None:
+    """P4 for any event's payload: the session's folder from its own id. Never raises."""
+    try:
+        if "background_tasks" not in payload:
+            return
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is not None and sdir.is_dir():
+            _parks_seen(payload, sdir)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _park_stopped(payload: dict, sdir: Path) -> None:
+    """P4: the main thread's `TaskStop` (its `task_id`, else its deprecated `shell_id`) that
+    reached PostToolUse takes that task out of each park holding it (build 2 T6), and a park
+    that holds none then ends. Never raises."""
+    try:
+        if payload.get("agent_id") or payload.get("tool_name") != "TaskStop":
+            return
+        ti = payload.get("tool_input")
+        ti = ti if isinstance(ti, dict) else {}
+        task = next((v for v in (ti.get("task_id"), ti.get("shell_id"))
+                     if isinstance(v, str) and v), None)
+        d = sdir / PARKED
+        if task is None or not d.is_dir():
+            return
+        for name in sorted(os.listdir(d)):
+            aid = name[:-5]
+            if name.startswith(".") or not name.endswith(".json") or not _SID.match(aid):
+                continue
+            rec = _state_json(d / name)
+            tasks = _park_tasks(rec)
+            if task not in tasks:
+                continue
+            rest = [t for t in tasks if t != task]      # build 2 T6: that shell alone goes
+            if rest:
+                store._write_private(d / name, json.dumps({**rec, "task": rest[0],
+                                                           "tasks": rest}))
+            else:
+                _park_end(sdir, aid)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _park(payload: dict, sdir: Path, aid: str) -> bool:
+    """P3: whether this stop is a park, writing `parked/<agent_id>.json` where it is. A running
+    shell whose id a P2 record of this helper holds is a match (build 2 T5); so is one whose
+    command's first TASK_TEXT characters are those of a P2 record of this helper with no id. With no match and a list read, the helper's park and records go. Never raises:
+    a fault is no park."""
+    try:
+        shells = _running_shells(payload)
+        if shells is None:
+            return False
+        ids, mine = set(), set()                        # build 2 T5: the id where recorded
+        for r in _helper_records(sdir, aid):
+            if isinstance(r.get("task"), str) and r["task"]:
+                ids.add(r["task"])
+            elif isinstance(r.get("command"), str):
+                mine.add(r["command"][:TASK_TEXT])
+        hits = [(i, c) for i, c in shells
+                if i in ids or (c is not None and c[:TASK_TEXT] in mine)]
+        if not hits:
+            _forget(sdir, aid)
+            try:
+                (sdir / PARKED / f"{aid}.json").unlink()
+            except OSError:
+                pass
+            return False
+        cmd = (hits[0][1] or "").encode("utf-8", "replace")[:PARK_TEXT].decode("utf-8", "ignore")
+        store._write_private(sdir / PARKED / f"{aid}.json", json.dumps(
+            {"at": time.time(), "task": hits[0][0], "tasks": [i for i, _ in hits],
+             "command": cmd}))
+        return True
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
 def subagent_stop(payload: dict, env=None) -> dict:
     """Packet h4 R2: a helper has ended, so every call it opened has ended, a call a
     rejection ended included, which gets no Post. For a payload whose `agent_id` is
@@ -2744,6 +2982,10 @@ def subagent_stop(payload: dict, env=None) -> dict:
     stamps the coordinator's occupancy at the helper's end, `backs/<agent_id>.json`, for the
     main thread's next Stop to read, only at the end of a helper whose spawn line `_spawned`
     finds (nw4c R1), so an engine's own agent gets none; with no reading it writes no stamp.
+    Packet hw4 P3, P4: first each other park whose shells the payload no longer lists as
+    running ends; then a stop whose `background_tasks` holds a running shell of this helper's
+    P2 records is a park, `parked/<agent_id>.json`, and writes no `ended/` record. Build 2
+    T3: a parked helper's stop with no such list leaves its park and writes no `ended/` record.
     It never raises and says nothing: dispatch prints nothing for it (SILENT)."""
     try:
         aid = payload.get("agent_id")
@@ -2753,10 +2995,16 @@ def subagent_stop(payload: dict, env=None) -> dict:
                             os.environ if env is None else env, fallback=False)
         if sdir is None or not sdir.is_dir():
             return {}
-        try:                                            # nw6b Y1: before the calls go
-            store._write_private(sdir / ENDED / f"{aid}.json", json.dumps({"at": time.time()}))
-        except OSError:
-            pass
+        _parks_seen(payload, sdir, skip=aid)            # hw4 P4: never raises
+        if _running_shells(payload) is None and _park_tasks(
+                _state_json(sdir / PARKED / f"{aid}.json")):
+            pass                                        # build 2 T3: no list, the park stands
+        elif not _park(payload, sdir, aid):             # hw4 P3: a park writes no end
+            try:                                        # nw6b Y1: before the calls go
+                store._write_private(sdir / ENDED / f"{aid}.json",
+                                     json.dumps({"at": time.time()}))
+            except OSError:
+                pass
         cdir = sdir / CALLS
         for name in os.listdir(cdir) if cdir.is_dir() else ():
             if name.startswith("."):                    # a write in flight, as `_ready` skips
@@ -2832,6 +3080,69 @@ SILENT = frozenset({"stop", "Stop", "stop-failure", "StopFailure",
 QUIET_PASS = frozenset({"pre-compact", "PreCompact", "subagent-start", "SubagentStart"})
 
 
+# ---- hw4-run-is-a-helper P6: the capture of raw payloads ---------------------------------------
+CAPTURES = "captures"        # `captures/<event>-<n>.json`, the raw payloads; `<event>.mark.json`
+CAPTURE_EVENTS = {"SubagentStop": "SubagentStop", "subagent-stop": "SubagentStop",
+                  "PostToolUse": "PostToolUse", "post-tool-use": "PostToolUse"}
+CAPTURE_MAX = 5
+_CAPTURED = re.compile(r"^(SubagentStop|PostToolUse)-([0-9]{1,6})\.json\Z")
+
+
+def capture_mark(sdir: Path, event: str, count: int) -> Path:
+    """P6: `captures/<event>.mark.json` {event, left, at}: the next `count` payloads of
+    `event` are kept. Raises ValueError for another event or count."""
+    if event not in ("SubagentStop", "PostToolUse") or isinstance(count, bool) \
+            or not isinstance(count, int) or not 1 <= count <= CAPTURE_MAX:
+        raise ValueError("capture: SubagentStop or PostToolUse, a count of 1 to 5")
+    p = sdir / CAPTURES / f"{event}.mark.json"
+    store._write_private(p, json.dumps({"event": event, "left": count, "at": time.time()}))
+    return p
+
+
+def captures(sdir: Path) -> tuple:
+    """P6: (the captures' names in order, {event: payloads left} of each mark). A read."""
+    d = sdir / CAPTURES
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return [], {}
+    kept = sorted((m.group(1), int(m.group(2)), n) for n in names if (m := _CAPTURED.match(n)))
+    marks = {}
+    for event in ("SubagentStop", "PostToolUse"):
+        left = _state_json(d / f"{event}.mark.json").get("left")
+        if isinstance(left, int) and not isinstance(left, bool) and left > 0:
+            marks[event] = left
+    return [n for _, _, n in kept], marks
+
+
+def _capture(event: str, raw: str, payload: dict, env) -> None:
+    """P6: while a mark for this event stands in the payload's session's folder, its raw
+    payload, whole, to `captures/<event>-<n>.json` (0600, `n` after the highest there), and the
+    mark's count down by one, the mark removed at none left. PostToolUse keeps a Bash call's
+    alone. A fault is swallowed; nothing printed or decided changes."""
+    try:
+        name = CAPTURE_EVENTS.get(event)
+        if name is None or (name == "PostToolUse" and payload.get("tool_name") != "Bash"):
+            return
+        sdir = _session_dir(payload.get("session_id"), env, fallback=False)
+        if sdir is None:
+            return
+        mark = sdir / CAPTURES / f"{name}.mark.json"
+        left = _state_json(mark).get("left")
+        if not isinstance(left, int) or isinstance(left, bool) or left < 1:
+            return
+        left = min(left, CAPTURE_MAX)
+        got = [int(m.group(2)) for n in os.listdir(mark.parent)
+               if (m := _CAPTURED.match(n)) and m.group(1) == name]
+        store._write_private(sdir / CAPTURES / f"{name}-{max(got, default=0) + 1}.json", raw)
+        if left <= 1:
+            mark.unlink()
+        else:
+            store._write_private(mark, json.dumps({**_state_json(mark), "left": left - 1}))
+    except Exception:                                   # noqa: BLE001 - never fails a hook
+        pass
+
+
 def dispatch(event: str) -> int:
     """Read the payload on stdin, print JSON on stdout.
 
@@ -2845,6 +3156,7 @@ def dispatch(event: str) -> int:
         harness.rotate(resolver.state_dir(os.environ))
     except Exception:            # noqa: BLE001 - a measure never fails a hook
         pass
+    raw = ""
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw or "{}")
@@ -2852,6 +3164,10 @@ def dispatch(event: str) -> int:
             payload = {}
     except Exception:            # a bad encoding, bad JSON, a payload too deep to parse
         payload = {}
+    if event in CAPTURE_EVENTS:  # hw4 P6: never raises, changes nothing printed
+        _capture(event, raw, payload, os.environ)
+    if event not in ("subagent-stop", "SubagentStop"):
+        parks_seen(payload, os.environ)     # hw4 P4 (SubagentStop's own handler reads it)
     try:
         out = HANDLERS[event](payload)
     except Exception:

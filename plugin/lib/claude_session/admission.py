@@ -645,6 +645,56 @@ def runs(rows) -> list:
     return out
 
 
+def helper_runs(rows) -> list:
+    """Packet hw4-run-is-a-helper P1: each helper's run for the launch line and the report, in
+    `runs`' order: its first run of `runs` (its first spawn) to its last `done`, a resume
+    between them opening no second run; open (end and minutes None) while a `resume` follows
+    its last done, or with no done. A helper whose run is `runs`' one alone, ended by its last
+    done, keeps its minutes; any other takes the wall clock from its start to its last done,
+    None where that done is swept. A run with no agentId is `runs`' own. Admission's own
+    readers (`fit`, the rise, the stale test, the band, `decide`) keep `runs`, so their numbers
+    do not change. Pure."""
+    rs = runs(rows)
+    last_done, last_resume = {}, {}
+    for r in rows:
+        k = r.get("kind")
+        t = _when(r.get("ts")) if k in ("done", "resume") else None
+        aid = _str(r.get("agentId") if k == "done" else r.get("to")) if t is not None else None
+        if aid is None:
+            continue
+        if k == "done" and (aid not in last_done or t >= last_done[aid][0]):
+            last_done[aid] = (t, r.get("swept") is True)
+        elif k == "resume" and (aid not in last_resume or t > last_resume[aid]):
+            last_resume[aid] = t
+    mine: dict = {}
+    for x in rs:
+        if x["agentId"]:
+            mine.setdefault(x["agentId"], []).append(x)
+    out = []
+    for x in rs:
+        aid = x["agentId"]
+        if aid is None:
+            out.append(x)
+            continue
+        group = mine.pop(aid, None)
+        if group is None:                         # a later run of a helper already counted
+            continue
+        ended = [y for y in group if y["end"] is not None]
+        last = max(ended, key=lambda y: y["end"]) if ended else None
+        t1, swept = (last["end"], last["minutes"] is None) if last else (None, False)
+        d = last_done.get(aid)
+        if d is not None and d[0] >= x["start"] and (t1 is None or d[0] > t1):
+            t1, swept = d
+        resumed = last_resume.get(aid)
+        if t1 is None or (resumed is not None and resumed > t1):
+            out.append({**x, "end": None, "minutes": None})
+        elif len(group) == 1 and t1 == x["end"]:
+            out.append(x)
+        else:
+            out.append({**x, "end": t1, "minutes": None if swept else _minutes(t1 - x["start"])})
+    return out
+
+
 def _p95(xs: list) -> float:
     s = sorted(xs)
     return s[max(0, math.ceil(0.95 * len(s)) - 1)]

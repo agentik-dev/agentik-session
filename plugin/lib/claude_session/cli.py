@@ -44,6 +44,42 @@ def cmd_budget(args) -> int:
     return 0
 
 
+def _capture_count(text: str) -> int:
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= hooks.CAPTURE_MAX:
+        raise argparse.ArgumentTypeError(f"a count of 1 to {hooks.CAPTURE_MAX}")
+    return n
+
+
+def cmd_capture(args) -> int:
+    """Packet hw4-run-is-a-helper P6: `hook capture <event> [--count N]` sets the mark in this
+    session's state folder ($CLAUDE_CODE_SESSION_ID); `--show` lists the captures and marks."""
+    sdir = hooks._session_dir(None, os.environ)
+    if sdir is None:
+        print("capture: no session: CLAUDE_CODE_SESSION_ID names none", file=sys.stderr)
+        return 1
+    if args.show:
+        names, marks = hooks.captures(sdir)
+        where = sdir / hooks.CAPTURES
+        for name in names:
+            print(f"{where / name}  {(where / name).stat().st_size} bytes")
+        for event, left in sorted(marks.items()):
+            print(f"capture mark: {event}: {left} left")
+        if not names and not marks:
+            print("capture: no capture in this session")
+        return 0
+    if args.target is None:
+        print("capture: name SubagentStop or PostToolUse, or --show", file=sys.stderr)
+        return 2
+    p = hooks.capture_mark(sdir, args.target, args.count)
+    print(f"capture: the next {args.count} {args.target} payload"
+          f"{'' if args.count == 1 else 's'} of this session go to {p.parent}")
+    return 0
+
+
 def cmd_hook(args) -> int:
     """The hook, and last the row of what it did (S49 Amendment 1): `code` is what this process
     will exit with, whichever way the handler leaves. A KeyboardInterrupt dies by the signal, so
@@ -59,6 +95,8 @@ def cmd_hook(args) -> int:
     one, once, never none.
     Packet rr5a, review 1's F1: the records resolver asked inside the hook ends its child by the
     hook's own deadline less its margin, and a cut kills any child still alive."""
+    if args.event == "capture":     # hw4 P6: a verb, not an event: no hook row
+        return cmd_capture(args)
     t0 = harness.take_t0(os.environ)
     code = 1                        # an uncaught exception's exit
     done = []
@@ -2760,8 +2798,19 @@ def build_parser() -> argparse.ArgumentParser:
                      "are as the preview hashed them")
     eg.set_defaults(func=cmd_gates)
 
-    hk = sub.add_parser("hook")   # internal: invoked by Claude Code hooks
-    hk.add_argument("event", choices=sorted(hooks.HANDLERS))
+    hk = sub.add_parser(           # internal: invoked by Claude Code hooks
+        "hook", description="The plugin's hook handler, run by Claude Code with an event's name. "
+        "`hook capture SubagentStop|PostToolUse [--count N]` keeps that event's next N raw "
+        "payloads (1 to 5, 1 by default; PostToolUse a Bash call's alone), whole, under this "
+        "session's state folder in captures/; `hook capture --show` lists them. A capture "
+        "changes nothing the hook prints or decides.")
+    hk.add_argument("event", choices=sorted(hooks.HANDLERS) + ["capture"],
+                    help="the event, or `capture`")
+    hk.add_argument("target", nargs="?", choices=sorted(set(hooks.CAPTURE_EVENTS.values())),
+                    help="with `capture`: the event whose payloads are kept")
+    hk.add_argument("--count", type=_capture_count, default=1,
+                    help="with `capture`: how many payloads, 1 to 5 (1)")
+    hk.add_argument("--show", action="store_true", help="with `capture`: list the captures")
     hk.set_defaults(func=cmd_hook)
 
     mc = sub.add_parser("machine", help="the machine's meter: cores, load, memory, disks and "
