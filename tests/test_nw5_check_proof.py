@@ -93,7 +93,7 @@ class Box:
         p.write_text("x\n") if on else p.unlink()
 
     def check(self, tree=None, *extra):
-        rc, out, err = run("gate", "run", str(tree or self.tree), "--check", *extra)
+        rc, out, err = run("gate", "run", str(tree or self.tree), "--check", "--fresh", *extra)
         assert rc == 0, err
         return out.split()[1]
 

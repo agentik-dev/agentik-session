@@ -19,7 +19,10 @@
 # second `gate wait` on one job and its `sleep` of 60 seconds or more: `allow` (the shipped
 # default, entry 10: nothing asked of a first session), `say` (the rule is said, the call
 # passes) or `refuse`; the three coordinator profiles, frontier, orchestrator and
-# orchestrator-opus, state `refuse`. The main thread is never refused.
+# orchestrator-opus, state `refuse`. The main thread is never refused. Packet hw2 adds a
+# helper's background shell, `gate run --wait`, a `gate wait` with no bound of 100 s or less,
+# sleeps adding to a minute and a sleep in a loop, and the rule said at SubagentStart.
+# `helpers.heavy` (hw2), a list of command patterns, none where unset, is told, never refused.
 # Strict YAML subset (D12): mappings, scalars, flat lists, one-level flow maps.
 
 # The window each model family runs on. A model string names its family
