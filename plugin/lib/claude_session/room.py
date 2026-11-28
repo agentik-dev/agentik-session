@@ -38,6 +38,8 @@ PLAIN = {"build": "builder", "fix": "fix", "phase": "phase 2", "review": "review
 SHORTER = "start a shorter helper or write its brief for the next sitting"
 NEXT = "write its brief for the next sitting"
 RESPAWN = "bring the charter current and respawn; the successor starts it"
+PARKED_NAMED = 3             # hw4 P5: the shells the launch line names, then `and N more`
+SHELL_CAP = 24               # hw4 P5: a shell's id as a line prints it
 
 _FIX = re.compile(r"\b(?:fix|fixes|mend)\b|\breview-\d+", re.I)
 _BUILD_N = re.compile(r"\bbuild\s+(\d{1,6})\b", re.I)
@@ -166,11 +168,34 @@ def plain(k: str) -> str:
     return PLAIN.get(k, "helper")
 
 
+def parked_clause(shells) -> str:
+    """hw4 P5: `; parked on shell <id>` for the launch line, at most PARKED_NAMED ids (each in
+    printable ASCII, cut at SHELL_CAP), then `and N more`; empty with no park."""
+    shells = list(shells or ())
+    if not shells:
+        return ""
+    names = [shell_name(s) for s in shells[:PARKED_NAMED]]
+    more = len(shells) - len(names)
+    return "; parked on shell " + ", ".join(names) + (f" and {more} more" if more else "")
+
+
+def shell_name(task) -> str:
+    """A shell's id as a line prints it: printable ASCII, cut at SHELL_CAP with `...`."""
+    text = printable(task)
+    return text if len(text) <= SHELL_CAP else text[:SHELL_CAP - 3] + "..."
+
+
 def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, end: datetime,
-         last: datetime | None, now: datetime, alone: float, tz=None) -> str:
+         last: datetime | None, now: datetime, alone: float, tz=None, parked=()) -> str:
     """R7: the one line a launch is told, in the verdict's form. `last` is `latest`'s: None
     with none out, and with every one out overdue (brief 2 R2), where the bound is now plus
-    `alone` and a held launch is still told to start a shorter helper."""
+    `alone` and a held launch is still told to start a shorter helper. hw4 P5: `parked`, the
+    shells the helpers out are parked on, is named last (`parked_clause`)."""
+    return (_line(word, rm, n_out, k, median, back, end, last, now, alone, tz)
+            + parked_clause(parked))
+
+
+def _line(word, rm, n_out, k, median, back, end, last, now, alone, tz) -> str:
     this, cost = f"this {plain(k)}", _pts(back)
     head = f"launch: room {_pts(rm)} to the line, {_out(n_out)}; {this} (about {_whole(median)} min, {cost}) fits"
     if word == "wide":
@@ -193,12 +218,16 @@ def line(word: str, rm: float, n_out: int, k: str, median: float, back: float, e
             + (NEXT if n_out else RESPAWN))
 
 
-def status_line(rm: float, out: list, tz=None) -> str:
-    """R10: the room, and each helper out ((kind, end) pairs) with its expected end."""
+def status_line(rm: float, out: list, tz=None, shells=None) -> str:
+    """R10: the room, and each helper out ((kind, end) pairs) with its expected end; hw4 P5: a
+    helper whose entry in `shells` (beside `out`) names a shell, `parked on shell <id>` in
+    place of its end."""
     if not out:
         return f"launch: room {_pts(rm)} to the line, none out"
+    shells = list(shells or ()) + [None] * len(out)
     return (f"launch: room {_pts(rm)} to the line, {len(out)} out: "
-            + ", ".join(f"a {plain(k)} about {_hm(e, tz)}" for k, e in out))
+            + ", ".join(f"a {plain(k)} parked on shell {shell_name(s)}" if s else
+                        f"a {plain(k)} about {_hm(e, tz)}" for (k, e), s in zip(out, shells)))
 
 
 # ---- the readers: no write, no raise ----------------------------------------------------------
@@ -280,14 +309,14 @@ def _kind_of(spawns: dict):
 
 def back_pairs(rows, all_runs=None, spawns=None) -> list:
     """Packet nw4b R5: (kind, tokens) for each `back` line of the ledger's rows, in order, its
-    kind its helper's run's (the run of `admission.runs` with its agentId, given its kind by
+    kind its helper's run's (the run of `admission.helper_runs` with its agentId, given its kind by
     `kind` from its spawn line), so a resumed helper's hand-back counts to its spawn's kind. A
     line whose agentId has no spawn line, or whose tokens are no positive number, is not
     counted. Pure."""
     spawns = _spawns(rows) if spawns is None else spawns
     kind_of = _kind_of(spawns)
     by_aid: dict = {}
-    for r in admission.runs(rows) if all_runs is None else all_runs:
+    for r in admission.helper_runs(rows) if all_runs is None else all_runs:
         if r["agentId"] and r["agentId"] in spawns:
             by_aid.setdefault(r["agentId"], r)
     out = []
@@ -325,21 +354,25 @@ def _reading(sid: str, env, now: datetime) -> dict | None:
     rows = _ledger(env)
     spawns = _spawns(rows)
     kind_of = _kind_of(spawns)
-    all_runs = admission.runs(rows)
+    all_runs = admission.helper_runs(rows)       # hw4 P1: a helper's run, not a turn's
     tab = table(seeds, [(kind_of(r), r["minutes"]) for r in all_runs if r["minutes"] is not None])
     ceil = m.get("ceilings")                # not an object: no ceiling (fix of review 1 R3)
     costs = backs(back, back_pairs(rows, all_runs, spawns),
                   ceil.get("context") if isinstance(ceil, dict) else None)
     minutes(tab, FALLBACK)                       # a table with no fallback is a fault
-    own = admission.runs([r for r in rows if r.get("session") == sid or r.get("kind") == "done"])
-    out = []
+    own = admission.helper_runs([r for r in rows if r.get("session") == sid
+                                 or r.get("kind") == "done"])
+    parks = hooks.parks(sdir)                    # hw4 P5: a parked helper is out
+    out, shells = [], []
     for r in own:
-        if r["end"] is None:
+        shell = parks.get(r["agentId"]) if r["agentId"] else None
+        if r["end"] is None or shell is not None:
             k = kind_of(r)
             out.append((k, ends(r["start"], now, *minutes(tab, k))))
+            shells.append(shell)
     return {"room": room(100.0 * hooks._checkpoint_k(m), used, [cost(costs, k, back) for k, _ in out]),
-            "out": out, "table": tab, "back": back, "costs": costs, "points": points,
-            "alone": alone}
+            "out": out, "shells": shells, "table": tab, "back": back, "costs": costs,
+            "points": points, "alone": alone}
 
 
 def told(payload: dict, env, posture) -> tuple | None:
@@ -367,7 +400,8 @@ def told(payload: dict, env, posture) -> tuple | None:
         c = cost(rd["costs"], k, rd["back"])
         word = verdict(rd["room"], c, end, out_ends, now, rd["points"], rd["alone"])
         text = line(word, rd["room"], len(out_ends), k, median, c, end,
-                    latest(out_ends, now), now, rd["alone"], TZ)
+                    latest(out_ends, now), now, rd["alone"], TZ,
+                    parked=[s for s in rd.get("shells", ()) if s])
         return text, word in HELD
     except Exception:                                   # noqa: BLE001  (a check, never a crash)
         return None
@@ -377,7 +411,7 @@ def status_for(sid, env) -> str | None:
     """R10: the `launch:` line for `status`, under R8's condition; None otherwise or on a fault."""
     try:
         rd = _reading(sid, env, _now()) if isinstance(sid, str) and sid else None
-        return status_line(rd["room"], rd["out"], TZ) if rd else None
+        return status_line(rd["room"], rd["out"], TZ, rd.get("shells")) if rd else None
     except Exception:                                   # noqa: BLE001  (a read, never a crash)
         return None
 
