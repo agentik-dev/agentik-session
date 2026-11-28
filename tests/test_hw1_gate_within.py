@@ -261,7 +261,7 @@ GID = "20261127-120000-3"
     ("E   AssertionError: assert 1 == 2\n", "E AssertionError: assert 1 == 2"),
     ("    raise ValueError('bad')\nValueError: bad\n", "ValueError: bad"),
     ("Error: no such file\n", "Error: no such file"),
-    ("FAIL a\nmake: *** [check] Error 2\n", "make: *** [check] Error 2"),
+    ("FAIL a\nmake: *** [check] Error 2\n", "FAIL a"),           # hw1 R3: not make's own
     (f"FAIL a\ngate {GID}: Error: the gate's own\n", "FAIL a"),
     ("all good\nErrors are fine here\n", None),
 ])
@@ -335,4 +335,16 @@ def test_r2_gate_line_reads_the_jobs_own_exit_never_one_in_the_fail_text():
     assert unattended.GATE_LINE.match(green).groups() == (GID, "/r/x", "0", "1", "D/log")
     plain = f"gate {GID} /r/x: exit 2 in 3 min; log D/log"
     assert unattended.GATE_LINE.match(plain).groups() == (GID, "/r/x", "2", "3", "D/log")
+
+
+@pytest.mark.parametrize("text,want", [
+    ("FAILED tests/test_a.py::test_b - assert 1 == 2\nmake[1]: *** [test] Error 1\n"
+     "make: *** [check] Error 2\n", "FAILED tests/test_a.py::test_b - assert 1 == 2"),
+    ("--- FAIL: TestX (0.00s)\nmake[2]: *** [go] Error 1\n", "--- FAIL: TestX (0.00s)"),
+    ("make[1]: *** [test] Error 1\nmake: *** [check] Error 2\n", "make: *** [check] Error 2"),
+])
+def test_r3_the_fail_clause_prefers_a_line_that_is_not_makes_own(tmp_path, text, want):
+    log = tmp_path / "log"
+    log.write_text(text)
+    assert gate.fail_text(str(log), GID) == want
 

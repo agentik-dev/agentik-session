@@ -121,6 +121,7 @@ MEASURE_KEYS = ("waited", "cpu_seconds", "tree")    # last in a result, each nul
 FAIL_MOST = 80                      # a red line's failing text, in bytes (hw1 W5)
 FAIL_LINE = re.compile(r"^(?:--- FAIL|FAIL|ERROR|make(?:\[\d+\])?: \*\*\*)"
                        r"|AssertionError|^(?:E\s+)?(?:[A-Za-z_][\w.]*)?Error:")
+MAKE_FAIL = re.compile(r"^make(?:\[\d+\])?: \*\*\*")     # make's own; another is said first (R3)
 WITHIN_MOST = 100                   # `gate run --within`'s bound, in seconds (hw1 W1)
 QUEUED = 75                         # `--within`'s exit when the job is still open
 TAIL = 20                           # a red's log lines `--within` prints
@@ -1404,13 +1405,17 @@ def log_lines(path) -> list[str]:
 def fail_text(path, gid) -> str | None:
     """hw1 W5: the log's last line that reads as a failure (`FAIL`, `--- FAIL`, `ERROR`, `make:
     ***`, an `AssertionError` or an `Error:` line), the gate's own lines aside, as a label is
-    held and cut to `FAIL_MOST` bytes; None where there is none."""
+    held and cut to `FAIL_MOST` bytes; None where there is none. A line that is not make's own
+    is taken before make's, and make's only where there is no other (hw1 review 1, R3)."""
     skip = f"gate {gid}: "
+    made = None
     for ln in reversed(log_lines(path)):
         t = ln.strip()
         if t and not t.startswith(skip) and FAIL_LINE.search(t):
-            return _json_cut(_label(t, FAIL_MOST), FAIL_MOST) or None
-    return None
+            if not MAKE_FAIL.match(t):
+                return _json_cut(_label(t, FAIL_MOST), FAIL_MOST) or None
+            made = made or t
+    return _json_cut(_label(made, FAIL_MOST), FAIL_MOST) or None if made else None
 
 
 def _json_cut(text: str, most: int) -> str:
