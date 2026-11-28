@@ -5,8 +5,10 @@ folder (`CLAUDE_CONFIG_DIR`) and a plugin's install are written under tmp_path, 
 made-up plugin, marketplace and type names. A session whose model is not known still
 refuses a Fable helper alone, in the pin's words.
 """
+import io
 import json
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -231,3 +233,15 @@ def test_6_the_role_check_still_warns_and_refuses(session, helper, role_model):
     parent(MODELS[session], posture="deny", tiers={"build": role_model})
     r = reason(spawn(helper, prompt="tier: build\nthe packet"))
     assert "tier: build" in r and f"Name model: '{role_model}'" in r
+
+
+# --- 7. row nw7: a family read that raises refuses a Fable helper alone, through the hook ----
+
+def test_7_a_raising_family_read_passes_all_but_fable(monkeypatch, capsys):
+    monkeypatch.setattr(hooks.resolver, "state_dir", lambda env: 1 / 0)
+    for m in HELPERS:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Agent",
+            "session_id": SID, "tool_input": {"prompt": "p", "description": "d", "model": m}})))
+        assert hooks.dispatch("PreToolUse") == 0
+        out = json.loads(capsys.readouterr().out)
+        assert (reason(out) == fable_named(UNKNOWN)) if m == "fable" else out == {}, m
