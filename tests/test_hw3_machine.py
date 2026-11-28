@@ -379,6 +379,27 @@ def test_a_negative_reserve_reads_as_0_and_skipped_disks_still_fit():
     assert machine.budget(snap, [], {}, {"cpu": 1, "mem_mb": 1})["fit"]["ok"] is True
 
 
+# ---- hw3b: a missing key holds, and the grants are any iterable -----------------------------
+
+@pytest.mark.parametrize("req,key", [({}, "cpu"), ({"cpu": 1}, "mem_mb"), ({"mem_mb": 1}, "cpu")])
+def test_hw3b_a_request_without_a_key_holds_and_names_it(req, key):
+    b = machine.budget(_snap(), [], {}, req)
+    assert b["fit"]["ok"] is False and f"the request's {key} None" in b["fit"]["why"], b["fit"]
+    assert b["parts"]["grant"]["state"] == "unread" and key in b["parts"]["grant"]["why"]
+
+
+def test_hw3b_a_grant_without_a_key_holds_and_the_grants_are_any_iterable_but_a_string():
+    four, req = [{"cpu": 3, "mem_mb": 1024}] * 4, {"cpu": 4, "mem_mb": 2048}
+    assert "grant 1's cpu None" in machine.budget(_snap(), [{}], {}, req)["fit"]["why"]
+    want = machine.budget(_snap(), four, {}, req)
+    assert want["fit"]["ok"] is True and want["granted"]["count"] == 4
+    for grants in ((g for g in four), dict(enumerate(four)).values()):
+        assert machine.budget(_snap(), grants, {}, req) == want
+    for grants in ("abcd", b"abcd", {"a": four[0]}, 5):
+        fit = machine.budget(_snap(), grants, {}, req)["fit"]
+        assert fit["ok"] is False and "the grants" in fit["why"], fit
+
+
 # ---- M4: the disk's consumers ---------------------------------------------------------------
 
 def _git(*argv, cwd):
