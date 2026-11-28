@@ -195,8 +195,10 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
     one, is no subshell's edge (r2 F2), in backticks too (r3 F1); a quoted or escaped one is a
     word (r2 F1), and a quoted or escaped backtick opens nothing (r3 F1).
     `ops` (g8a R7): each yield gains the operator before it and the command's read
-    redirections, [(operator, word)]."""
-    lex = shlex.shlex(_mask(text, bash3, ticks), posix=True, punctuation_chars=_PUNCT)
+    redirections, [(operator, word)].
+    A bare `{` right after `function NAME` starts a new command, as `NAME()`'s paren does (nw8)."""
+    masked = _mask(text, bash3, ticks)
+    lex = shlex.shlex(masked, posix=True, punctuation_chars=_PUNCT)
     lex.commenters = ""                   # g5: `_mask` alone tells a comment's `#`
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
@@ -232,6 +234,12 @@ def _commands(text: str, bash3: bool = False, ticks: bool = True, ops: bool = Fa
                 ins.append((expect, tok))
             expect = None
             continue
+        if tok == "{" and len(words) == 2 and words[0] == "function":
+            end = lex.instream.tell()     # past the word, and past its one ending character
+            end -= 1 + (masked[end - 1:end] in " \t\r" + _PUNCT)
+            if masked[end - 1:end + 1] in (" {", "\t{", "\r{"):    # neither quoted nor escaped
+                yield (words, outs, before, ins) if ops else (words, outs)
+                words, outs, before, ins = [], [], None, []
         if not outs and (tok == "case" and all(w in _LEAD for w in words) or
                          raw.endswith("`case") and (ticks - raw[-4:].count("`")) % 2):
             cases.append("head")          # r3 F1: a `case` glued to its opening backtick too
