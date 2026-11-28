@@ -495,3 +495,28 @@ def test_s4_a_light_job_is_held_while_a_landing_of_its_key_is_open():
         got = dict((e["id"], why) for e, why in gate._holds(order, []))
         assert got[li["id"]] == ("key", "main") and got[landing["id"]] is None
     assert [why for _, why in gate._holds([other_key], [landing])] == [None]
+
+
+def test_s6_the_mark_orders_one_keys_entries_alone(tmp_path):
+    es = [{"id": "20991231-000000-1", "key": "A", "queued": 100.0},
+          {"id": "20991231-000000-2", "key": "B", "queued": 101.0, "priority": True},
+          {"id": "20991231-000000-3", "key": "A", "queued": 102.0, "priority": True},
+          {"id": "20991231-000000-4", "key": "B", "queued": 103.0}]
+    assert [e["id"][-1] for e in gate.pick_order(es, 200.0)] == ["3", "2", "1", "4"]
+    assert [e["id"][-1] for e in gate.pick_order(es, 100.0 + 3600)] == ["1", "2", "3", "4"]
+    w = World(tmp_path)                               # review 1's probe: max_running 1
+    cfg = w.home / ".claude" / "agentik" / "profiles.yaml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("gate:\n  max_running: 1\n")
+    w.plan.update({"a": (100, 0), "b": (100, 0)})
+    a = w.put(first="a")
+    b = gate.enqueue(w.root, str(other(w)), ["b", "x"], ENV, [], 5400, "", None, w.t + 1,
+                     priority=True)
+    assert a["key"] != b["key"]
+    alive = lambda pid: False                                       # noqa: E731
+    assert (gate.position(w.root, a["id"], alive, now=w.t + 2),
+            gate.position(w.root, b["id"], alive, now=w.t + 2)) == (1, 2)
+    st = gate.status(w.root, w.t + 2, alive=alive, fx=fx(w))
+    assert [q["id"] for q in st["queued"]] == [a["id"], b["id"]]
+    gate.serve(w.root, fx(w))
+    assert [argv[0] for argv, _, _ in w.spawned] == ["a", "b"]

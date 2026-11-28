@@ -759,13 +759,22 @@ def _old(e: dict, now) -> bool:
 
 
 def pick_order(es: list[dict], now) -> list[dict]:
-    """hw5 F1, the order the runner picks in: an entry queued `OLD_ENTRY` or more ago first,
-    oldest first; then those marked `priority`, then the rest, each first queued first."""
+    """hw5 F1, the order the runner picks in. Build 2, S6: the mark orders the entries of one
+    key alone. Between keys the order is the pin's, first queued first: each key keeps the
+    places its entries hold by counter, and fills them in its own order, an entry queued
+    `OLD_ENTRY` or more ago first, oldest first, then those marked `priority`, then the rest,
+    each first queued first."""
     def rank(e):
         if _old(e, now):
             return (0, 0, e["queued"], _counter(e["id"]))
         return (1, 0 if e.get("priority") is True else 1, 0, _counter(e["id"]))
-    return sorted(es, key=rank)
+    fifo = sorted(es, key=lambda e: _counter(e["id"]))
+    keys = [entry_key(e) for e in fifo]
+    mine: dict = {}
+    for k, e in zip(keys, fifo):
+        mine.setdefault(k, []).append(e)
+    turns = {k: iter(sorted(v, key=rank)) for k, v in mine.items()}
+    return [next(turns[k]) for k in keys]
 
 
 def is_light(e: dict) -> bool:
