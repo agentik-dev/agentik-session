@@ -402,7 +402,10 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
     `settle` seconds old. `stale` holds the calls an end would pass, `{"id", "age"}`.
     A call whose `at` is no time (`_opened`) is aged from its first sight, `first[path]` on
     `mono`, which this sets; its age is then None (u1's fold). `held_calls`, where given,
-    gains `{"id", "age"}` for each call that holds (nw6b Y3: what a ceiling goes past)."""
+    gains `{"id", "age"}` for each call that holds (nw6b Y3: what a ceiling goes past).
+    hw4 build 2 T4: a helper with a park record (hooks.parks) holds as a helper not yet ended,
+    named in `open` while the record stands, under `_ready`'s ceiling as a call is; it adds
+    no entry to `held_calls`."""
     # calls/ first, then the stamp: a helper's Post stamps before it closes (B-F1), so a
     # close between the two reads leaves a fresh stamp, never a gap.
     try:
@@ -435,6 +438,7 @@ def helper_hold(sdir: Path, now: float, mono: float, first: dict, settle, stale_
         held_calls.extend({"id": cid, "age": int(age) if timed else None}
                           for cid, age, timed, _ in holds)
     holding = [aid if isinstance(aid, str) else None for _, _, _, aid in holds]
+    holding += sorted(set(hooks.parks(sdir)) - set(holding))    # hw4 build 2 T4: a park holds
     if bad:
         return holding, True, []
     stale = [] if holding else [{"id": cid, "age": int(age) if timed else None}

@@ -644,3 +644,22 @@ def test_t3_a_stop_with_no_list_of_a_helper_with_no_park_is_the_pin_s():
     _session()
     _stop(tasks=None)
     assert parked() is None and ended()
+
+
+def test_t4_a_park_holds_the_respawn_past_settle_and_not_past_the_ceiling():
+    import time
+    _park()
+    sdir, t0 = _sdir(), time.time()
+    for name, body in ((hooks.MARKER, {"written": t0 - 10, "session": SID}),
+                       (hooks.ACTIVITY, {"at": t0 - 6}), (hooks.TURN_ENDED, {"at": t0 - 5})):
+        (sdir / name).write_text(json.dumps(body))
+    later = t0 + 61                                              # past `settle`, 60 s
+    assert chain.helper_hold(sdir, later, 0.0, {}, 60, chain.STALE_CALL)[0] == [AID]
+    ch = chain.Chain("c1", ["--model", "m"], resolver.state_dir(os.environ), chain.Effects(),
+                     {"cap": 12, "floor": 0, "settle": 60, chain.HOLD_MAX: 1800},
+                     poll=2, grace=10, kill_grace=30)
+    ch.g = {**ch.g, "settle": 60, chain.HOLD_MAX: 1800}         # as `run` resolves them
+    assert ch._ready(sdir, later, 0.0) is False                  # the park holds it
+    assert ch._ready(sdir, t0 - 10 + 1800, 0.0) is True          # the ceiling ends the hold
+    _stop(tasks=[])                                              # the park ends
+    assert chain.helper_hold(sdir, later, 0.0, {}, 60, chain.STALE_CALL)[0] == []
