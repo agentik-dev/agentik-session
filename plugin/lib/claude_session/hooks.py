@@ -2907,7 +2907,8 @@ def parks_seen(payload: dict, env) -> None:
 
 def _park_stopped(payload: dict, sdir: Path) -> None:
     """P4: the main thread's `TaskStop` (its `task_id`, else its deprecated `shell_id`) that
-    reached PostToolUse ends each park holding that task. Never raises."""
+    reached PostToolUse takes that task out of each park holding it (build 2 T6), and a park
+    that holds none then ends. Never raises."""
     try:
         if payload.get("agent_id") or payload.get("tool_name") != "TaskStop":
             return
@@ -2920,8 +2921,17 @@ def _park_stopped(payload: dict, sdir: Path) -> None:
             return
         for name in sorted(os.listdir(d)):
             aid = name[:-5]
-            if (not name.startswith(".") and name.endswith(".json") and _SID.match(aid)
-                    and task in _park_tasks(_state_json(d / name))):
+            if name.startswith(".") or not name.endswith(".json") or not _SID.match(aid):
+                continue
+            rec = _state_json(d / name)
+            tasks = _park_tasks(rec)
+            if task not in tasks:
+                continue
+            rest = [t for t in tasks if t != task]      # build 2 T6: that shell alone goes
+            if rest:
+                store._write_private(d / name, json.dumps({**rec, "task": rest[0],
+                                                           "tasks": rest}))
+            else:
                 _park_end(sdir, aid)
     except Exception:                                   # noqa: BLE001
         pass

@@ -680,3 +680,21 @@ def test_t5_an_id_matches_whatever_the_listed_command_says():
     _moved(aid=AID, task="bg-001")
     _stop(aid=AID, tasks=[{**_task("bg-001"), "command": None}])
     assert parked(AID)["tasks"] == ["bg-001"] and parked(AID)["command"] == ""
+
+
+def _task_stop(task, n):
+    hooks.post_tool_use({"session_id": SID, "tool_name": "TaskStop",
+                         "tool_use_id": f"toolu_t6_{n}", "tool_input": {"task_id": task},
+                         "tool_response": {"message": "ok"}}, _env())
+
+
+def test_t6_the_main_thread_s_task_stop_of_one_of_two_shells_keeps_the_park_on_the_other():
+    _session()
+    _moved(task="bg-001")
+    _moved(task="bg-002")
+    _stop(tasks=[_task("bg-001"), _task("bg-002")])
+    assert parked()["tasks"] == ["bg-001", "bg-002"]
+    _task_stop("bg-001", 1)
+    assert (parked()["task"], parked()["tasks"], ended()) == ("bg-002", ["bg-002"], False)
+    _task_stop("bg-002", 2)
+    assert parked() is None and ended()
