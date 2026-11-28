@@ -458,6 +458,10 @@ HELPER_START = (                        # hw2 H3: SubagentStart's one paragraph
     "engine moves a call of yours to the background, never wait on it and never kill by a "
     "command's text: stop it with TaskStop and the id it printed if you have that tool, else "
     "write that id in your hand-back. This overrides a brief that bars the verb.")
+HELPER_PARK = (                         # hw4b K2: SubagentStop's block at a park
+    "agentik-session: the shell {} of yours still runs, and a helper never ends its turn over "
+    "a live shell. Stop it with TaskStop and that id if you have that tool, then hand back; if "
+    "you have no such tool, write the id in your hand-back and end your turn again.")
 CHAIN_WAIT = "--chain"                  # the chain stands for the id; no job id is an option
 _TOOL_WORDS = frozenset({"agentik-session", "claude-session", "claude_session"})
 _LOOP_WORDS = frozenset({"while", "until", "for"})
@@ -2962,9 +2966,10 @@ def _park(payload: dict, sdir: Path, aid: str) -> bool:
                 pass
             return False
         cmd = (hits[0][1] or "").encode("utf-8", "replace")[:PARK_TEXT].decode("utf-8", "ignore")
+        old = _state_json(sdir / PARKED / f"{aid}.json").get("blocked")    # hw4b K3: kept
         store._write_private(sdir / PARKED / f"{aid}.json", json.dumps(
             {"at": time.time(), "task": hits[0][0], "tasks": [i for i, _ in hits],
-             "command": cmd}))
+             "command": cmd, "blocked": old if isinstance(old, list) else []}))
         return True
     except Exception:                                   # noqa: BLE001
         return False
@@ -2986,9 +2991,9 @@ def subagent_stop(payload: dict, env=None) -> dict:
     running ends; then a stop whose `background_tasks` holds a running shell of this helper's
     P2 records is a park, `parked/<agent_id>.json`, and writes no `ended/` record. Build 2
     T3: a parked helper's stop with no such list leaves its park and writes no `ended/` record.
-    It never raises and says nothing: dispatch prints nothing for it (SILENT)."""
+    It never raises and says nothing but hw4b's block at a park, the one answer dispatch prints."""
     try:
-        aid = payload.get("agent_id")
+        aid, park = payload.get("agent_id"), False
         if not isinstance(aid, str) or not _SID.match(aid):
             return {}
         sdir = _session_dir(payload.get("session_id"),
@@ -2999,7 +3004,7 @@ def subagent_stop(payload: dict, env=None) -> dict:
         if _running_shells(payload) is None and _park_tasks(
                 _state_json(sdir / PARKED / f"{aid}.json")):
             pass                                        # build 2 T3: no list, the park stands
-        elif not _park(payload, sdir, aid):             # hw4 P3: a park writes no end
+        elif not (park := _park(payload, sdir, aid)):   # hw4 P3: a park writes no end
             try:                                        # nw6b Y1: before the calls go
                 store._write_private(sdir / ENDED / f"{aid}.json",
                                      json.dumps({"at": time.time()}))
@@ -3016,6 +3021,15 @@ def subagent_stop(payload: dict, env=None) -> dict:
             except Exception:                           # noqa: BLE001 - one file, never the rest
                 continue
         _back_stamp(sdir, aid, os.environ if env is None else env)
+        rec = _state_json(sdir / PARKED / f"{aid}.json") if park else {}    # hw4b K1, K3
+        done = rec.get("blocked") if isinstance(rec.get("blocked"), list) else []
+        new = [t for t in _park_tasks(rec) if t not in done]
+        if new and payload.get("stop_hook_active") is False and _helper_wait_value(
+                payload, os.environ if env is None else env) != "allow":
+            store._write_private(sdir / PARKED / f"{aid}.json",
+                                 json.dumps({**rec, "blocked": done + new}))
+            return {"decision": "block",
+                    "reason": HELPER_PARK.format(", ".join(f"`{t}`" for t in new))}
     except Exception:                                   # noqa: BLE001
         pass
     return {}
@@ -3172,7 +3186,8 @@ def dispatch(event: str) -> int:
         out = HANDLERS[event](payload)
     except Exception:
         out = {}
-    if event in SILENT or (event in QUIET_PASS and not out):
+    if (event in SILENT and not (event in ("subagent-stop", "SubagentStop") and out.get(
+            "decision") == "block")) or (event in QUIET_PASS and not out):   # hw4b K1
         return 0
     print(json.dumps(out or {}))
     return 0
