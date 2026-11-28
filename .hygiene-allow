@@ -166,4 +166,6 @@ design/packets/is3-readme-needs.md: sibling
 # nw5-check-proof: gate.check_drop's default name, an environment variable's name that holds the sibling ledger tool's word, in a fixture and an assert, in 667f9d1 until b1e47ed; the tip builds it from parts (the coordinator's ruling).
 tests/test_nw5_check_proof.py: sibling
 tests/test_s47.py: sibling
+# hw6-budget: a test's `git -c user.email` flag held a made-up address at the reserved `.invalid` name, one line in e9161c44; the head's file holds it split (the coordinator's ruling).
+tests/test_hw6_budget.py: email
 records: out
