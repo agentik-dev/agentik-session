@@ -884,11 +884,16 @@ def _holds(es: list[dict], running: list[dict]):
     and not trusted from the entry, so an older entry's spelling compares too.
     hw5 F2: a light entry is held only by an open entry of its key in its own worktree, and
     holds only that worktree of its key against the entries after it. Build 2, S3: a worktree
-    is `worktree(e)`, its folder's top, whatever folder the entry named."""
-    keys, trees = {}, {}
+    is `worktree(e)`, its folder's top, whatever folder the entry named. S4: a light entry is
+    held while a landing of its key is queued or running, since a landing reads and removes a
+    worktree of its repo."""
+    keys, trees, lands = {}, {}, {}
     for x in running:
         keys.setdefault(entry_key(x), key_name(x))
         trees.setdefault((entry_key(x), worktree(x)), key_name(x))
+    for x in [*running, *es]:
+        if land_branch(x.get("command")) is not None:
+            lands.setdefault(entry_key(x), key_name(x))
     named = _named(running)
     for e in es:
         k = entry_key(e)
@@ -896,8 +901,8 @@ def _holds(es: list[dict], running: list[dict]):
         path = _locked(e) or next((p for p in _locks(e) if _is_named(p, named)), None)
         if path:
             yield e, ("lock", path)
-        elif is_light(e) and t in trees:
-            yield e, ("key", trees[t])
+        elif is_light(e) and (t in trees or k in lands):
+            yield e, ("key", trees.get(t) or lands[k])
         elif not is_light(e) and (k in keys or t in trees):
             yield e, ("key", keys.get(k) or trees[t])
         else:

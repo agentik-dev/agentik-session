@@ -483,3 +483,15 @@ def test_s3_a_light_job_reads_its_folders_worktree(box):
     assert [why is None for _, why in gate._holds([li, li2], [])] == [True, False]
     assert [why is None for _, why in gate._holds([li2], [li])] == [False]  # one at a time
     assert gate.top_level(str(box.root)) == gate._real(str(box.root))       # in no checkout
+
+
+def test_s4_a_light_job_is_held_while_a_landing_of_its_key_is_open():
+    land_job = [*gate.self_argv(), *gate.LAND_JOB, "/main", "b", "a" * 40, "/m"]
+    landing = {"id": "20991231-000000-1", "key": "K", "repo": "/main", "command": land_job}
+    li = {"id": "20991231-000000-2", "key": "K", "repo": "/wt", "light": True}
+    other_key = {"id": "20991231-000000-3", "key": "J", "repo": "/wt2", "light": True}
+    assert [why for _, why in gate._holds([li], [landing])] == [("key", "main")]   # running
+    for order in ([landing, li], [li, landing]):                                 # queued
+        got = dict((e["id"], why) for e, why in gate._holds(order, []))
+        assert got[li["id"]] == ("key", "main") and got[landing["id"]] is None
+    assert [why for _, why in gate._holds([other_key], [landing])] == [None]
