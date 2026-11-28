@@ -176,6 +176,57 @@ def cancel(root, gid: str) -> None:
     _write_private(cancel_path(root, gid), "")
 
 
+def drop_path(root, gid: str) -> Path:
+    """Build 2, S7: the mark of a drop in hand, flocked by its `gate drop` while it works; the
+    entry itself is never moved."""
+    return _queue(root) / f"{gid}.drop"
+
+
+def _hand(root, gid: str):
+    """Open and flock `gid`'s drop mark, made 0600 where it is not there; the open file. One
+    a sweep unlinked while this waited on its flock is opened again."""
+    path = drop_path(root, gid)
+    for _ in range(5):
+        fh = os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+")
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            same = os.fstat(fh.fileno()).st_ino == os.stat(path).st_ino
+        except OSError:
+            same = False
+        if same:
+            return fh
+        fh.close()
+    raise OSError(f"the drop mark of {gid} kept moving")
+
+
+def _sweep_drops(root) -> set:
+    """Build 2, S7: the ids a drop has in hand, each mark whose flock is held; a mark whose
+    flock is free is a dead drop's and goes, its entry then queued as it was, or, where the
+    drop wrote its result, dropped by the step as any entry beside its result is."""
+    held = set()
+    try:
+        names = os.listdir(_queue(root))
+    except OSError:
+        return held
+    for name in names:
+        gid = name[:-5] if name.endswith(".drop") else ""
+        if not ID.match(gid):
+            continue
+        try:
+            fd = os.open(_queue(root) / name, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            held.add(gid)
+        else:
+            _unlink(_queue(root) / name)
+        finally:
+            os.close(fd)
+    return held
+
+
 def _sweep_marks(root) -> None:
     """A mark whose entry is gone (its job ended before the mark landed) goes."""
     try:
@@ -1362,7 +1413,8 @@ def _start(root, fx: Fx, cfg: dict, e: dict, s: _Set) -> None:
     _mkdir(d)
     s.starting = gid
     _runner_write(root, fx, s)
-    if not (_queue(root) / f"{gid}.json").exists():  # hw5 F4: dropped after the pick, not run
+    if not (_queue(root) / f"{gid}.json").exists() or drop_path(root, gid).exists():
+        # hw5 F4, build 2 S7: a drop in hand after the pick; not run, and the drop finishes it
         s.starting = None
         _runner_write(root, fx, s)
         return
@@ -1537,7 +1589,7 @@ def _step(root, fx: Fx, cfg: dict, s: _Set) -> bool:
     if _reap(root, fx, cfg, s):
         return True
     running = [c.e for c in s.running]
-    busy = {x["id"] for x in running}
+    busy = {x["id"] for x in running} | _sweep_drops(root)     # build 2, S7: in a drop's hand
     es = [e for e in entries(root) if e["id"] not in busy]
     for e in es:
         if result_path(root, e["id"]).exists():       # a runner died after its result
@@ -1914,33 +1966,53 @@ def drop(root, gid: str, fx: Fx | None = None, alive=_alive) -> tuple[int, str]:
     """hw5 F4, `gate drop <id>`: (0, the result's line) where a queued entry was taken out,
     its result written with exit 130 and `dropped`, or where `gid` already has a result;
     (1, `running <id>: not dropped`) for a running one, untouched; (2, why) for an id the
-    queue does not know. The entry is renamed aside before the runner's file is read, and
-    the runner reads the entry after it names its start (`_start`), so one of the two sees
-    the other: a start named there puts the entry back."""
+    queue does not know. Build 2, S7: the drop's mark (`drop_path`) is made and flocked
+    before the runner's file is read, and the runner reads the mark after it names its start
+    (`_start`), so one of the two sees the other; the entry is never moved, so a waiter reads
+    it as open, and a drop that dies leaves its mark unflocked, which the runner's next pass
+    sweeps (`_sweep_drops`). S5: a queued rerun is taken out as the 30-minute bound takes it
+    (`_not_rerun`), the first's line sent and printed; a drop of a flake whose rerun is
+    queued drops that rerun."""
     fx = fx or Fx()
     if not isinstance(gid, str) or not ID.match(gid):
         return 2, f"gate drop: no gate {str(gid)[:40]!r} under {gate_dir(root)}"
-    path, aside = _queue(root) / f"{gid}.json", _queue(root) / f"{gid}.drop"
+    path = _queue(root) / f"{gid}.json"
     r = _load(result_path(root, gid))
-    if r is None:
-        try:
-            os.rename(path, aside)
-        except OSError:
-            r = _load(result_path(root, gid))           # it ended between the two reads
-            if r is None:
-                return 2, f"gate drop: no gate {gid} under {gate_dir(root)}"
     if r is not None:
-        return 0, wait_line(resolved(root, r))           # build 2, S2
-    if gid in _running_ids(root, alive):
-        os.rename(aside, path)
-        return 1, f"running {gid}: not dropped"
-    e = _load(aside) or {"id": gid}
-    e.update({"id": gid, "dropped": True})
-    now = fx.now()
-    result = _finish(root, fx, _config(fx.env, fx.log), e, CALLER_EXIT, now, now, CUT_CALLER,
-                     note="dropped by gate drop; not run")
-    _unlink(aside)
-    return 0, wait_line(result)
+        nxt = r.get("rerun") if r.get("flake") == FLAKE else None
+        if isinstance(nxt, str) and ID.match(nxt) and nxt != gid \
+                and (_queue(root) / f"{nxt}.json").exists() \
+                and not result_path(root, nxt).exists():
+            return drop(root, nxt, fx, alive)               # S5: the flake's queued rerun
+        return 0, wait_line(resolved(root, r))               # build 2, S2
+    if not path.exists():
+        r = _load(result_path(root, gid))                   # it ended between the two reads
+        return (0, wait_line(resolved(root, r))) if r is not None \
+            else (2, f"gate drop: no gate {gid} under {gate_dir(root)}")
+    fh = _hand(root, gid)
+    try:
+        if gid in _running_ids(root, alive):
+            _unlink(drop_path(root, gid))
+            return 1, f"running {gid}: not dropped"
+        e, r = _load(path), _load(result_path(root, gid))
+        if r is not None or e is None:                      # it ended in between
+            r = r or _load(result_path(root, gid))
+            _unlink(drop_path(root, gid))
+            return (0, wait_line(resolved(root, r))) if r is not None \
+                else (2, f"gate drop: no gate {gid} under {gate_dir(root)}")
+        cfg = _config(fx.env, fx.log)
+        if isinstance(e.get("rerun_of"), str) and ID.match(e["rerun_of"]):
+            _not_rerun(root, fx, cfg, e)                    # S5: as the 30-minute bound
+            out = wait_line(resolved(root, _load(result_path(root, gid))))
+        else:
+            e.update({"id": gid, "dropped": True})
+            now = fx.now()
+            out = wait_line(_finish(root, fx, cfg, e, CALLER_EXIT, now, now, CUT_CALLER,
+                                    note="dropped by gate drop; not run"))
+        _unlink(drop_path(root, gid))
+        return 0, out
+    finally:
+        fh.close()
 
 
 def _wait_text(why) -> str | None:

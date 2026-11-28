@@ -520,3 +520,104 @@ def test_s6_the_mark_orders_one_keys_entries_alone(tmp_path):
     assert [q["id"] for q in st["queued"]] == [a["id"], b["id"]]
     gate.serve(w.root, fx(w))
     assert [argv[0] for argv, _, _ in w.spawned] == ["a", "b"]
+
+
+@pytest.mark.usefixtures("as_the_verb")
+def test_s5_a_drop_of_a_queued_rerun_sends_the_flakes_red(tmp_path):
+    w = World(tmp_path)
+    w.plan.update({"a": (100, 1), "b": (600, 0)})
+    a = w.put(first="a", caller="s1")
+    gate.enqueue(w.root, str(other(w)), ["b", "x"], ENV, [], 5400, "", None, w.t)
+    said = []
+
+    def hook(w_):
+        r = gate._load(gate.result_path(w.root, a["id"]))
+        if r and r.get("rerun") and not said:
+            said.append(gate.drop(w.root, r["rerun"], fx=w.fx()))
+    w.hooks.append(hook)
+    gate.serve(w.root, fx(w, {"a": STOP}))           # b runs beside it, so a is a flake
+    r1 = w.result(a["id"])
+    line = gate.wait_line(r1)
+    assert r1["flake"] == "load, not rerun" and said == [(0, line)] and lines(w) == [line]
+    assert w.result(r1["rerun"])["rerun_of"] == a["id"]
+    for gid in (a["id"], r1["rerun"]):
+        assert gate.wait(w.root, gid, spawn=lambda root: False, follow=True)[1]["id"] == a["id"]
+    assert [argv[0] for argv, _, _ in w.spawned] == ["a", "b"]
+
+
+def test_s5_a_drop_of_the_flakes_own_id_takes_its_rerun(tmp_path):
+    w = World(tmp_path)
+    a, r = _flaked(w, rerun_done=False)
+    (gate.gate_dir(w.root) / "runner.json").write_text(json.dumps(
+        {"pid": 1, "running": [{"id": r, "pgid": 9}]}))
+    assert gate.drop(w.root, a, fx=w.fx(), alive=lambda pid: True) == \
+        (1, f"running {r}: not dropped")
+    assert [e["id"] for e in gate.entries(w.root)] == [r]
+    rc, text = gate.drop(w.root, a, fx=w.fx(), alive=lambda pid: False)
+    assert rc == 0 and text.startswith(f"gate {a} ") and "; flake: load, not rerun; " in text
+    assert not gate.entries(w.root) and w.result(r)["rerun_of"] == a
+    assert gate.drop(w.root, r, fx=w.fx()) == (0, text)
+
+
+class Died(BaseException):
+    pass
+
+
+def _files(w: World):
+    return sorted(p.name for p in gate._queue(w.root).iterdir())
+
+
+def test_s7_a_drop_of_a_running_job_never_moves_its_entry(tmp_path, monkeypatch):
+    w = World(tmp_path)
+    a = w.put(caller="s1")
+    (gate.gate_dir(w.root) / "runner.json").write_text(json.dumps(
+        {"pid": 1, "running": [{"id": a["id"], "pgid": 9}]}))
+    seen, real = [], gate._running_ids
+
+    def between(root, alive=None):                    # a waiter polls inside the drop
+        seen.append((gate.wait(root, a["id"], timeout=0, spawn=lambda r: False,
+                               alive=lambda p: True), f"{a['id']}.json" in _files(w)))
+        return real(root, alive=lambda p: True)
+    monkeypatch.setattr(gate, "_running_ids", between)
+    assert gate.drop(w.root, a["id"], fx=w.fx())[0] == 1
+    assert seen == [((1, None), True)] and _files(w) == [f"{a['id']}.json"]
+
+
+@pytest.mark.parametrize("where", ["_finish", "_tell"])
+def test_s7_a_drop_that_dies_is_finished_or_undone_by_the_next_pass(tmp_path, monkeypatch,
+                                                                     where):
+    w = World(tmp_path)
+    w.plan["a"] = (10, 0)
+    a = w.put(caller="s1")
+    real = getattr(gate, where)
+
+    def dying(*x, **k):                               # _tell: after the result, before its line
+        raise Died()
+    monkeypatch.setattr(gate, where, dying)
+    with pytest.raises(Died):
+        gate.drop(w.root, a["id"], fx=w.fx(), alive=lambda p: False)
+    monkeypatch.setattr(gate, where, real)
+    assert f"{a['id']}.drop" in _files(w)
+    assert gate.wait(w.root, a["id"], timeout=0, spawn=lambda r: False)[0] in (0, 1)  # never 2
+    gate.serve(w.root, fx(w))
+    assert _files(w) == []
+    r = w.result(a["id"])
+    if where == "_finish":                            # undone: queued as it was, then run
+        assert r["exit"] == 0 and "dropped" not in r and w.spawned
+    else:                                             # its dropped result stands
+        assert r["exit"] == 130 and r["dropped"] is True and not w.spawned
+
+
+def test_s7_a_live_drops_mark_is_kept_and_a_dead_ones_goes(tmp_path):
+    w = World(tmp_path)
+    a, b = w.put(), w.put(first="b")
+    fh = gate._hand(w.root, a["id"])
+    gate.drop_path(w.root, b["id"]).write_text("")    # no flock: its drop died
+    try:
+        assert gate._sweep_drops(w.root) == {a["id"]}
+        assert f"{a['id']}.drop" in _files(w) and f"{b['id']}.drop" not in _files(w)
+        s = gate._Set(w.t)
+        gate._start(w.root, w.fx(), {}, a, s)        # a drop in hand: never started
+        assert w.spawned == [] and s.running == []
+    finally:
+        fh.close()
