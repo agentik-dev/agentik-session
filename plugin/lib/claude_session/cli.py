@@ -1971,35 +1971,98 @@ def cmd_gate(args) -> int:
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
+    within = _gate_within(args)
     if args.check or args.in_job:
         checked = _gate_check(root, args, env, command)
         if isinstance(checked, int):
             return checked
         command = checked
+        if not args.fresh and _gate_kept(root, args.repo):     # hw1 W3: nothing queued
+            return 0
     own = _own_entry(root, env) if args.wait else None
     if own and os.path.isdir(args.repo) \
             and gate.repo_key(os.path.realpath(args.repo)) == gate.entry_key(own):
         _die(f"gate run: this is gate job {own['id'][:40]}; a job queued here on its own repo "
              "waits until the wall cuts it: run the command directly, or queue it without "
              "--wait", 2)
+    tree = gate.clean_tree(os.path.realpath(args.repo)) if os.path.isdir(args.repo) else None
+    hit = None if args.fresh else gate.open_entry(root, args.repo, command, tree)
+    if hit is not None:                                  # hw1 W4: the open job, not a second
+        e, state = hit
+        print(f"open {e['id']} {state} repo {e['repo']}; result "
+              f"{gate.result_path(root, e['id'])}", flush=True)
+        if within is not None:
+            return _gate_within_wait(root, e, within)
+        return _gate_wait(root, e["id"], None, False) if args.wait else 0
     try:
         caller = gate.resolve_caller(args, env)
         wall = args.wall if args.wall is not None else _gate_wall(env)
         e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
                          args.label or "", caller, time.time(),
-                         named=args.session is not None)     # nw2 R1: a session, no chain
+                         named=args.session is not None, tree=tree)  # nw2 R1: a session, no chain
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)
+    # hw1 W1: under --within the queued line goes to stderr, so stdout is the one outcome.
     print(f"queued {e['id']} position {gate.position(root, e['id'])} repo {e['repo']} "
           f"caller {caller[:8] if caller else 'none'}; result {gate.result_path(root, e['id'])}",
-          flush=True)
+          flush=True, file=sys.stderr if within is not None else sys.stdout)
     # Packet FW2 R5: the estimate on stderr, so run's stdout stays the queued line alone.
     got = gate.key_estimates(root, e["command"]).get(e["key"])     # nw2 R7: this command's
     if got is not None:
         print(f"est {gate.est_text(got[0])} min: the median of this repo's last {got[1]} greens",
               file=sys.stderr, flush=True)
+    if within is not None:
+        return _gate_within_wait(root, e, within)
     return _gate_wait(root, e["id"], None, False) if args.wait else 0
+
+
+def _gate_within(args) -> int | None:
+    """hw1 W1: `--within`'s seconds, a whole number from 1 to `gate.WITHIN_MOST`; anything else,
+    or `--within` beside `--wait`, refused with 2 before anything is queued."""
+    from . import gate
+    raw = getattr(args, "within", None)
+    if raw is None:
+        return None
+    if args.wait:
+        _die("gate run: --within is the bounded wait; give it or --wait, not both", 2)
+    if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= gate.WITHIN_MOST:
+        _die(f"gate run: --within takes a whole number of seconds from 1 to {gate.WITHIN_MOST}, "
+             f"not {raw[:20]!r}", 2)
+    return int(raw)
+
+
+def _gate_within_wait(root, e: dict, within: int) -> int:
+    """hw1 W1: wait at most `within` seconds, as `gate wait` polls; the result's line, the log's
+    last lines on a red, and the job's code; else the queued line, and 75."""
+    from . import gate
+    rc, result = gate.wait(root, e["id"], timeout=within)
+    if rc == 2:
+        _die(f"gate run: gate {e['id']} is neither queued nor done under {gate.gate_dir(root)}", 2)
+    if rc == 1:
+        got = gate.key_estimates(root, e.get("command")).get(gate.entry_key(e))
+        est = f", est {gate.est_text(got[0])} min" if got is not None else ""
+        print(f"queued {e['id']}{est}: write the id in your hand-back and end your turn",
+              flush=True)
+        return gate.QUEUED
+    print(gate.wait_line(result), flush=True)
+    if gate.strict_code(result) != 0:
+        for ln in gate.log_lines(result.get("log"))[-gate.TAIL:]:
+            print(ln)
+    return gate.strict_code(result)
+
+
+def _gate_kept(root, repo) -> bool:
+    """hw1 W3: True, `kept <id>` and that result's line printed, where a kept check of this
+    clean worktree's head holds (`land.kept_for_run`); False, nothing printed, else."""
+    from . import gate, land
+    gid, _ = land.kept_for_run(root, repo)
+    result = gate._load(gate.result_path(root, gid)) if gid else None
+    if result is None:
+        return False
+    print(f"kept {gid}", flush=True)
+    print(gate.wait_line(result), flush=True)
+    return True
 
 
 def _gate_check(root, args, env, command):
@@ -2526,6 +2589,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="cut the command after SECONDS (default: gate.wall, 5400)")
     gr.add_argument("--label", metavar="TEXT", help="a label for status")
     gr.add_argument("--wait", action="store_true", help="then wait for the result")
+    gr.add_argument("--within", metavar="SECONDS",
+                    help="wait at most SECONDS, 1 to 100: the result's line and the job's exit, "
+                         "else 'queued <id>' and exit 75; not with --wait")
+    gr.add_argument("--fresh", action="store_true",
+                    help="queue it even where a kept check, or an open job of the same clean "
+                         "tree and command, would be returned")
     gr.add_argument("--check", action="store_true",
                     help="queue make check in this clean worktree, run as a landing runs it, "
                          "and keep its record, so a landing of the same tree may take it; no "

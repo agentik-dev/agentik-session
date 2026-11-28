@@ -173,7 +173,7 @@ def test_serve_runs_fifo_and_writes_the_result_last(w):
     assert kw["start_new_session"] is True and kw["close_fds"] is True
     assert kw["stderr"] == subprocess.STDOUT
     ra, rb = w.result(a["id"]), w.result(b["id"])
-    assert list(ra) == list(gate.RESULT_KEYS)
+    assert list(ra) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]
     assert (ra["exit"], rb["exit"], ra["cut"], rb["cut"]) == (0, 3, None, None)
     assert rb["started"] >= ra["ended"] and ra["seconds"] == 3
     log = Path(rb["log"]).read_text().splitlines()

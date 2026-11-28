@@ -136,8 +136,9 @@ def test_the_line_lands_in_the_chains_inbox_or_the_callers(root, repo):
     assert (root / "sessions" / C / "inbox" / f"{c['id']}.json").exists()
     ra = json.loads(gate.result_path(root, a["id"]).read_text())
     rc_ = json.loads(gate.result_path(root, c["id"]).read_text())
-    assert list(ra) == [*gate.RESULT_KEYS, *gate.CHAIN_KEYS] and ra["chain"] == NAME
-    assert list(rc_) == list(gate.RESULT_KEYS)                       # R8: the pin's keys
+    assert list(ra) == [*gate.RESULT_KEYS, *gate.CHAIN_KEYS, *gate.MEASURE_KEYS]   # hw1 W2
+    assert ra["chain"] == NAME
+    assert list(rc_) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]       # R8: the pin's keys
 
 
 def test_each_verb_that_queues_passes_the_session_flag(root, repo, monkeypatch):

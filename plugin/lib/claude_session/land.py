@@ -1670,10 +1670,11 @@ def newer_red(root, gid, key, tree, want, branch):
     return None
 
 
-def kept_check(root, repo, tree, branch, given, head, ours):
+def kept_check(root, repo, tree, branch, given, head, ours, main=True):
     """R4: (the kept record's id, "") or (None, the first test that failed). The newest record
     of this key for the head's tree under its own job's form is the one taken; any newer red
-    of this worktree voids it, whatever its job (brief 3, R1)."""
+    of this worktree voids it, whatever its job (brief 3, R1). `main` False skips the one test
+    that is a landing's alone, main where it was (hw1 W3, for `gate run --check`)."""
     import time
     from . import gate
     drop, names, age = check_config()
@@ -1700,7 +1701,7 @@ def kept_check(root, repo, tree, branch, given, head, ours):
         return None, "%s checked %s, not the landing's head" % (gid, str(seen)[:12])
     if rec.get("worktree") != os.path.realpath(tree):
         return None, "%s ran in another worktree" % gid
-    if rec.get("main") != ours:
+    if main and rec.get("main") != ours:
         return None, "%s ran with main at %s" % (gid, str(rec.get("main"))[:12])
     if rec.get("links") != links_of(tree, names):
         return None, "%s's links differ now" % gid
@@ -1718,6 +1719,22 @@ def kept_check(root, repo, tree, branch, given, head, ours):
     if red:
         return None, "%s is red after %s" % (red, gid)
     return gid, ""
+
+
+def kept_for_run(root, tree):
+    """hw1 W3: `gate run <worktree> --check`'s look, (the kept record's id, "") or (None, why):
+    `kept_check`'s tests on the worktree's head, its branch and its own checkout, all but main
+    where it was. Never raises: a read that fails is no kept check."""
+    from . import gate
+    try:
+        real = os.path.realpath(tree)
+        head = _rev(real, "HEAD")
+        if head is None:
+            return None, "no head"
+        return kept_check(root, real, real, gate._branch(real) or "", head, head, None,
+                          main=False)
+    except Exception as err:                            # noqa: BLE001 - then the check runs
+        return None, "the look failed: %s" % err
 
 
 def dry_check(root, repo, tree, branch, given, head, fresh, stamp):

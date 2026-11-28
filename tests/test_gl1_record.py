@@ -85,7 +85,7 @@ def test_gl1_1_a_job_run_to_its_end_holds_the_machine(w, tmp_path):
     assert gate.serve(w.root, w.fx(popen=popen, loads=loads, load=lambda: 0.0,
                                    cores=lambda: 8)) == 0
     ra, rb = w.result(a["id"]), w.result(b["id"])
-    assert list(ra) == list(gate.RESULT_KEYS) == list(rb)
+    assert list(ra) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS] == list(rb)
     assert ra["load"] == {"start": [1.24, 0.5, 0.25], "end": [4.56, 3.34, 2.0]}
     assert rb["load"] == {"start": [2.0, 1.0, 0.5], "end": [3.0, 2.0, 1.0]}
     assert (ra["beside"], rb["beside"]) == ([], [a["id"]])
@@ -186,7 +186,7 @@ def test_gl1_3_a_command_that_cannot_start_and_a_recovered_job(w, tmp_path):
     assert gate.serve(w.root, w.fx(loads=calls((1, 1, 1)), dirty=lambda repo: 7,
                                    load=lambda: 0.0, cores=lambda: 8)) == 0
     rb = w.result(b["id"])
-    assert rb["exit"] == 127 and list(rb) == list(gate.RESULT_KEYS)
+    assert rb["exit"] == 127 and list(rb) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]
     assert rb["load"] == {"start": [1.0, 1.0, 1.0], "end": None}   # no child was reaped
     assert rb["dirty"] == {"start": 7, "end": None} and rb["beside"] == [a["id"]]
     c = w.put("c")
@@ -196,7 +196,7 @@ def test_gl1_3_a_command_that_cannot_start_and_a_recovered_job(w, tmp_path):
     assert gate.serve(w.root, w.fx(loads=calls((1, 1, 1)), dirty=lambda repo: 7)) == 0
     rc_ = w.result(c["id"])
     assert (rc_["exit"], rc_["cut"]) == (125, gate.CUT_DIED) and w.spawned[-1][0][0] != "c"
-    assert list(rc_) == list(gate.RESULT_KEYS)
+    assert list(rc_) == [*gate.RESULT_KEYS, *gate.MEASURE_KEYS]
     assert {k: rc_[k] for k in NEW} == NULLS
 
 
