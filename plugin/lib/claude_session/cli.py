@@ -1948,6 +1948,12 @@ def cmd_gate(args) -> int:
         return _gate_wait(root, args.id, args.timeout, args.json, args.strict)
     if verb == "land":
         return _gate_land(root, args, env)
+    if verb == "drop":                                    # hw5 F4
+        rc, text = gate.drop(root, args.id)
+        if rc == 2:
+            _die(text, 2)
+        print(text, flush=True)
+        return rc
     if verb == "publish":
         from . import publish
         return publish.main(list(args.repos), root, env, dry=args.dry_run, install=args.install)
@@ -1972,6 +1978,13 @@ def cmd_gate(args) -> int:
     if command[:1] == ["--"]:
         command = command[1:]
     within = _gate_within(args)
+    if args.light:                                        # hw5 F2
+        if args.check or args.in_job:
+            _die("gate run: --light is for a short job; a check is never light", 2)
+        if args.wall is not None and args.wall > gate.LIGHT_WALL:
+            _die(f"gate run: --light runs at most {gate.LIGHT_WALL} s, not --wall {args.wall}", 2)
+        if gate.land_branch(command) is not None:
+            _die("gate run: --light is for a short job; a landing is never light", 2)
     if args.check or args.in_job:
         checked = _gate_check(root, args, env, command)
         if isinstance(checked, int):
@@ -1998,10 +2011,12 @@ def cmd_gate(args) -> int:
         return _gate_wait(root, e["id"], None, False) if args.wait else 0
     try:
         caller = gate.resolve_caller(args, env)
-        wall = args.wall if args.wall is not None else _gate_wall(env)
+        wall = args.wall if args.wall is not None else \
+            gate.LIGHT_WALL if args.light else _gate_wall(env)
         e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
                          args.label or "", caller, time.time(),
-                         named=args.session is not None, tree=tree)  # nw2 R1: a session, no chain
+                         named=args.session is not None, tree=tree,  # nw2 R1: a session, no chain
+                         priority=args.priority, light=args.light)   # hw5 F1, F2
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)
@@ -2041,10 +2056,13 @@ def _gate_within_wait(root, e: dict, within: int) -> int:
     rc, result = gate.wait(root, e["id"], timeout=within)
     if rc == 2:
         _die(f"gate run: gate {e['id']} is neither queued nor done under {gate.gate_dir(root)}", 2)
+    gid = e["id"]
+    if rc == 0 and gate.followed(root, gid) != gid:          # hw5 F3: a load flake's rerun
+        rc, gid = 1, gate.followed(root, gid)
     if rc == 1:
         got = gate.key_estimates(root, e.get("command")).get(gate.entry_key(e))
         est = f", est {gate.est_text(got[0])} min" if got is not None else ""
-        print(f"queued {e['id']}{est}: write the id in your hand-back and end your turn",
+        print(f"queued {gid}{est}: write the id in your hand-back and end your turn",
               flush=True)
         return gate.QUEUED
     print(gate.wait_line(result), flush=True)
@@ -2242,7 +2260,7 @@ def _gate_land(root, args, env) -> int:
         if args.fresh:
             job_env[land.FRESH] = "1"
         e = gate.enqueue(root, repo, command, job_env, [], wall, f"land {branch}", caller,
-                         time.time(), named=args.session is not None)
+                         time.time(), named=args.session is not None, priority=True)  # hw5 F1
     except gate.GateError as err:
         _die(f"gate land: {err}", 2)
     gate.spawn_serve(root)
@@ -2311,7 +2329,7 @@ def _gate_wait_chain(root, args, env) -> int:
 
 def _gate_wait(root, gid: str, timeout, as_json: bool, strict: bool = False) -> int:
     from . import gate
-    rc, result = gate.wait(root, gid, timeout=timeout)
+    rc, result = gate.wait(root, gid, timeout=timeout, follow=True)      # hw5 F3
     if rc == 2:
         _die(f"gate wait: no gate {gid[:40]!r} under {gate.gate_dir(root)}; "
              "agentik session gate status lists them", 2)
@@ -2582,7 +2600,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "ceiling, its result to the caller; publish, and land "
                                       "--push, push main's head a gate result proves green")
     gsub = gt.add_subparsers(dest="gate_verb", required=True,
-                             metavar="run|wait|status|land|publish")
+                             metavar="run|drop|wait|status|land|publish")
     gr = gsub.add_parser("run", help="queue a gate command in a repo and print its id")
     gr.add_argument("repo", help="the repo the command runs in")
     gr.add_argument("--session", metavar="SID",
@@ -2604,7 +2622,17 @@ def build_parser() -> argparse.ArgumentParser:
                          "and keep its record, so a landing of the same tree may take it; no "
                          "command after it")
     gr.add_argument("--in-job", action="store_true", help=argparse.SUPPRESS)
+    gr.add_argument("--priority", action="store_true",
+                    help="picked before the unmarked entries of its repo; an entry queued an "
+                         "hour or more ago still goes first")
+    gr.add_argument("--light", action="store_true",
+                    help="a short job (a stamp, a lint), walled at 120 s: runs beside its "
+                         "repo's job of another worktree and counts against no max_running; "
+                         "not with --check or a --wall over 120")
     gr.add_argument("command", nargs="*", help="the command after --, run as argv")
+    gd = gsub.add_parser("drop", help="take a queued gate job out, its result exit 130 and its "
+                                       "line 'dropped'; a running job is not touched (exit 1)")
+    gd.add_argument("id")
     gw = gsub.add_parser("wait", help="wait for a gate's result and print its line")
     gw.add_argument("id", nargs="?")
     gw.add_argument("--chain", action="store_true",
