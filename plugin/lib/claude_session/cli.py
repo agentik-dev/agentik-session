@@ -2016,7 +2016,8 @@ def cmd_gate(args) -> int:
         e = gate.enqueue(root, args.repo, command, dict(env), args.lock or [], wall,
                          args.label or "", caller, time.time(),
                          named=args.session is not None, tree=tree,  # nw2 R1: a session, no chain
-                         priority=args.priority, light=args.light)   # hw5 F1, F2
+                         priority=args.priority, light=args.light,   # hw5 F1, F2
+                         rerun=True)          # build 2, S1: the verb's job alone may be rerun
     except gate.GateError as err:
         _die(f"gate run: {err}", 2)
     gate.spawn_serve(root)

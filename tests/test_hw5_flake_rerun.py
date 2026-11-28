@@ -28,6 +28,16 @@ def fx(w: World, said=None, loads=LOW, **over):
                 cores=lambda: 4, **over)
 
 
+@pytest.fixture
+def as_the_verb(monkeypatch):
+    """Build 2, S1: the World's entries queued as the `gate run` verb queues them, the one
+    caller opted in to a load flake's rerun."""
+    def put(self, first="a", locks=(), wall=5400, caller=None, label="", at=None):
+        return gate.enqueue(self.root, str(self.repo), [first, "x"], ENV, list(locks), wall,
+                            label, caller, self.t if at is None else at, rerun=True)
+    monkeypatch.setattr(World, "put", put)
+
+
 def lines(w: World, sid="s1"):
     return gate.inbox_take(w.root, sid, limit=10)
 
@@ -145,6 +155,7 @@ def test_f2_a_light_job_runs_beside_its_keys_job_of_another_worktree(tmp_path):
     assert rb["beside"] == [a["id"]] and rb["ended"] < w.result(a["id"])["ended"]
 
 
+@pytest.mark.usefixtures("as_the_verb")
 # ---- F3: one rerun of a load flake -------------------------------------------------------
 
 def test_f3_a_flake_under_load_is_rerun_alone_and_only_its_line_is_sent(tmp_path):
@@ -178,6 +189,7 @@ def test_f3_not_a_flake_is_told_at_once(tmp_path, said, loads, rc):
     assert "flake" not in r and len(w.spawned) == 1 and len(lines(w)) == 1
 
 
+@pytest.mark.usefixtures("as_the_verb")
 @pytest.mark.parametrize("said", [b"bounded: stop: load\n", b"+++++++ Timeout +++++++\n",
                                   b"E   Failed: Timeout >10.0s\n"])
 def test_f3_each_stop_line_and_a_timeouts_124(tmp_path, said):
@@ -189,6 +201,7 @@ def test_f3_each_stop_line_and_a_timeouts_124(tmp_path, said):
     assert set(land.STOPS) <= set(gate.STOP_LINES)
 
 
+@pytest.mark.usefixtures("as_the_verb")
 def test_f3_a_job_beside_it_makes_a_flake_at_low_load(tmp_path):
     w = World(tmp_path)
     w.plan.update({"a": (200, 1), "b": (10, 0)})
@@ -214,6 +227,7 @@ def test_f3_a_wall_cut_and_a_landing_are_never_rerun(tmp_path):
     assert rb["exit"] == 1 and "flake" not in rb and len(w.spawned) == 2
 
 
+@pytest.mark.usefixtures("as_the_verb")
 def test_f3_a_rerun_not_started_in_30_minutes_goes_and_the_first_line_is_sent(tmp_path):
     w = World(tmp_path)
     w.plan.update({"a": (100, 1), "b": (3000, 0)})
@@ -394,3 +408,38 @@ def test_f5_a_flakes_red_then_its_reruns_green_is_kept(box):
     rc, out, err = run("gate", "run", str(box.tree), "--check")
     assert (rc, out.splitlines()[0]) == (0, f"kept {second}"), err
     assert f"; rerun of {first}; " in out.splitlines()[1]
+
+
+# ---- build 2: review 1's blocks F1 to F5 and notes N3, N4, N5, N7 ------------------------
+
+def test_s1_a_job_the_plugin_queues_for_itself_is_never_rerun(tmp_path):
+    w = World(tmp_path)
+    w.plan["a"] = (100, 1)
+    a = w.put(first="a", caller="s1")                 # enqueue's default: no opt-in
+    assert "may_rerun" not in a
+    gate.serve(w.root, fx(w, {"a": STOP}, loads=HIGH))
+    r = w.result(a["id"])
+    assert r["exit"] == 1 and not {"flake", "rerun", "ceiling", "alongside"} & set(r)
+    assert [argv[0] for argv, _, _ in w.spawned] == ["a"] and not gate.entries(w.root)
+    got = lines(w)
+    assert len(got) == 1 and got[0].startswith(f"gate {a['id']} ") and "flake" not in got[0]
+
+
+def test_s1_the_opt_in_is_the_verbs_alone(box, monkeypatch, tmp_path):
+    from claude_session import commit, deliver
+    asked = []
+
+    def record(*a, **k):
+        asked.append(k.get("rerun", False))
+        raise gate.GateError("recorded")
+    monkeypatch.setattr(gate, "spawn_serve", lambda root, popen=None: False)
+    rc, out, err = run("gate", "run", str(box.tree), "--", "true")
+    gid = out.split()[1]
+    assert rc == 0 and next(e for e in gate.entries(box.root)
+                            if e["id"] == gid)["may_rerun"] is True
+    monkeypatch.setattr(gate, "enqueue", record)
+    assert commit._gate_check(str(box.tree), ["make", "check"], {"HOME": str(tmp_path)},
+                              None, 600) == 1
+    with pytest.raises(deliver.Red):
+        deliver._make_install(str(box.tree), box.root, {"HOME": str(tmp_path)}, "x")
+    assert asked == [False, False] and "rerun=" not in inspect.getsource(cli._gate_land)

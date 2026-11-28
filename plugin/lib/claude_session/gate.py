@@ -682,13 +682,14 @@ def _write_entry(root, now, build) -> dict:
 
 def enqueue(root, repo, command, env, locks, wall, label, caller, now,
             named: bool = False, tree: str | None = None, priority: bool = False,
-            light: bool = False) -> dict:
+            light: bool = False, rerun: bool = False) -> dict:
     """Write one entry (mode 0600, written then renamed) and return it. The id is
     `YYYYMMDD-HHMMSS-<counter>`, the counter taken under flock(gate/queue.lock). Its
     `chain` is `chain_for`'s (nw2 R1); `named` is a `--session` the caller gave. `tree`, the
     head's tree of a clean folder at the queue, is written last and only where given (hw1
     W4), so an entry queued without one keeps the pin's keys; so are `priority` and `light`
-    (hw5 F1, F2), each `true`, after it."""
+    (hw5 F1, F2), each `true`, after it, and `rerun` (build 2, S1), the `gate run` verb's
+    opt-in to one rerun of a load flake, kept as `may_rerun`: no other caller asks for it."""
     real = os.path.realpath(str(repo))
     if not os.path.isdir(real):
         raise GateError(f"no such repo directory: {repo}")
@@ -710,7 +711,8 @@ def enqueue(root, repo, command, env, locks, wall, label, caller, now,
                  "chain": chain_for(root, env, caller, named)}
         if _clean_head(tree):
             entry["tree"] = tree
-        entry.update({k: True for k, on in (("priority", priority), ("light", light)) if on})
+        entry.update({k: True for k, on in (("priority", priority), ("light", light),
+                                            ("may_rerun", rerun)) if on})
         return entry
     return _write_entry(root, now, build)
 
@@ -1366,12 +1368,13 @@ def _tail(path, most: int = FLAKE_TAIL) -> bytes:
 
 def is_flake(e: dict, rc, log) -> bool | None:
     """hw5 F3: whether a red closed by its own exit, not cut, is a load flake; None where the
-    first test fails, so the second is not asked. Never a landing's job and never a rerun. Its
+    first test fails, so the second is not asked. Never a landing's job, never a rerun, and
+    never a job the `gate run` verb did not queue (build 2, S1: its red is its result). Its
     log's last `FLAKE_TAIL` bytes hold a time bound's stop line, or its exit is a `timeout`'s
     124, and none of `NOT_FLAKE`; and the 1-minute load at its start was at or over its
     ceiling (ruling 4's word for over), or another job ran beside it."""
     if rc == 0 or not isinstance(rc, int) or isinstance(rc, bool) or e.get("rerun_of") \
-            or land_branch(e.get("command")) is not None:
+            or e.get("may_rerun") is not True or land_branch(e.get("command")) is not None:
         return None
     tail = _tail(log)
     stop = rc == 124 or any(s in tail for s in STOP_LINES) or PYTEST_TIMEOUT.search(tail)
