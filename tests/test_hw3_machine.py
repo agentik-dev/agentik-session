@@ -419,6 +419,63 @@ def test_the_porcelain_reader_skips_a_bare_and_a_prunable_tree():
         {"path": "/x/repo/.claude/worktrees/a", "head": "abc", "branch": "a"}]
 
 
+# ---- review 1, R1: the git reads are the gate's ------------------------------------------------
+
+def _kinds(tmp_path, repo):
+    pr = mac_probe(du=(tmp_path, {}), real=("git",))
+    rows = machine.consumers({"repos": [str(repo)]}, probe=pr)
+    return {os.path.basename(r["path"]): r["kind"] for r in rows}, pr
+
+
+def test_untracked_work_is_seen_when_the_repo_hides_it(tmp_path):
+    repo, wts = _repo(tmp_path)
+    _git("config", "status.showUntrackedFiles", "no", cwd=repo)
+    (wts / "landed" / "new.txt").write_text("n\n")
+    kinds, _ = _kinds(tmp_path, repo)
+    assert kinds["landed"] == "person"
+
+
+def test_the_read_runs_no_fsmonitor(tmp_path):
+    repo, _ = _repo(tmp_path)
+    mark, hook = tmp_path / "ran", tmp_path / "fsmonitor.sh"
+    hook.write_text(f"#!/bin/sh\ntouch '{mark}'\n")
+    hook.chmod(0o755)
+    _git("config", "core.fsmonitor", str(hook), cwd=repo)
+    kinds, _ = _kinds(tmp_path, repo)
+    assert kinds["landed"] == "idle"
+    assert not mark.exists()
+
+
+def test_the_read_rewrites_no_index(tmp_path):
+    repo, wts = _repo(tmp_path)
+    t = time.time() + 5
+    os.utime(wts / "landed" / "a.txt", (t, t))          # a stale index, which a status refreshes
+    index = repo / ".git" / "worktrees" / "landed" / "index"
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+    kinds, _ = _kinds(tmp_path, repo)
+    assert kinds["landed"] == "idle"
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+    assert not (repo / ".git" / "worktrees" / "landed" / "index.lock").exists()
+
+
+def test_an_inherited_git_dir_does_not_move_the_read(tmp_path, monkeypatch):
+    repo, _ = _repo(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    _git("init", "-q", "-b", "main", cwd=other)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    kinds, pr = _kinds(tmp_path, repo)
+    assert {"landed", "ahead", "dirty"} <= set(kinds)
+    gits = [(argv, env) for argv, _t, _c, env in pr.calls if argv[0] == "git"]
+    assert gits
+    for argv, env in gits:
+        assert tuple(argv[3:3 + len(machine.GIT_READ)]) == machine.GIT_READ, argv
+        assert env is not None and not any(k.startswith("GIT_") for k in env)
+    status = [argv for argv, _ in gits if "status" in argv]
+    assert status and all(tuple(a[-4:]) == machine.GIT_STATUS for a in status)
+
+
 # ---- M5: backoff ----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("attempt,want", [(0, 0.5), (1, 1.0), (3, 4.0), (6, 30.0), (10, 30.0),

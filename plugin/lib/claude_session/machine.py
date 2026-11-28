@@ -538,6 +538,18 @@ def parse_worktrees(text) -> list:
     return out
 
 
+GIT_READ = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+GIT_STATUS = ("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+
+
+def _git(probe, folder, *args):
+    """One git read as the gate's dirt read runs it (`gate._dirty`, `land.STATUS`): no
+    optional lock, so the index is not rewritten; no fsmonitor and no hook, so the repo's
+    config runs no command; no `GIT_*` from the caller, so the read is of `folder`."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return probe.run(["git", "-C", folder, *GIT_READ, *args], env=env)
+
+
 def _under(path, top):
     p, t = os.path.realpath(path), os.path.realpath(top)
     return p != t and p.startswith(t.rstrip(os.sep) + os.sep)
@@ -548,10 +560,10 @@ def _worktree_kind(probe, repo, wt):
     name = wt["branch"] or "a detached head"
     if not wt["head"]:
         return "person", f"worktree of {name}: no head"
-    r = probe.run(["git", "-C", repo, "merge-base", "--is-ancestor", wt["head"], "main"])
+    r = _git(probe, repo, "merge-base", "--is-ancestor", wt["head"], "main")
     if r is None or r[0] != 0:
         return "person", f"worktree of {name}: not merged into main"
-    r = probe.run(["git", "-C", wt["path"], "status", "--porcelain"])
+    r = _git(probe, wt["path"], *GIT_STATUS)
     if r is None or r[0] != 0:
         return "person", f"worktree of {name}: its status did not answer"
     if r[1].strip():
@@ -560,7 +572,7 @@ def _worktree_kind(probe, repo, wt):
 
 
 def _worktrees(probe, repo, faults):
-    r = probe.run(["git", "-C", repo, "worktree", "list", "--porcelain"])
+    r = _git(probe, repo, "worktree", "list", "--porcelain")
     if r is None or r[0] != 0:
         faults.append(f"consumer {repo}: git worktree list did not answer")
         return []
